@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Avances de proyecto - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Seguimiento operativo</div>
+        <h1>Avances de proyecto</h1>
+        <p>Registro interno de avances físicos y evidencias.</p>
+    </div>
+    {% if perms.operations.add_projectupdate %}
+        <a class="btn btn-primary" href="{% url create_url_name %}">Nuevo avance</a>
+    {% endif %}
+</div>
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Proyecto</th>
+                    <th>Título</th>
+                    <th>Estado</th>
+                    <th>Creado</th>
+                    <th>Evidencia</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for update in objects %}
+                    <tr>
+                        <td>{{ update.project }}</td>
+                        <td><a class="fw-semibold text-decoration-none" href="{% url detail_url_name update.pk %}">{{ update.title }}</a></td>
+                        <td><span class="badge ops-status-badge">{{ update.get_status_display }}</span></td>
+                        <td>{{ update.created_at }}</td>
+                        <td>
+                            {% if update.evidence %}
+                                <a href="{{ update.evidence.url }}">Ver evidencia</a>
+                            {% else %}
+                                Sin evidencia
+                            {% endif %}
+                        </td>
+                        <td class="text-end ops-row-actions">
+                            {% if update.status == 'pending_review' and perms.operations.change_projectupdate %}
+                                <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_review' update.pk %}">Revisar</a>
+                            {% endif %}
+                            {% if perms.operations.change_projectupdate %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name update.pk %}">Editar</a>
+                            {% endif %}
+                            {% if perms.operations.delete_projectupdate %}
+                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name update.pk %}">Eliminar</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-muted">No hay avances registrados.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}SIGEDON Transparencia{% endblock %}</title>
+    <link href="{% static 'public_portal/css/public_portal.css' %}" rel="stylesheet">
+</head>
+<body>
+    <header class="public-header">
+        <div class="public-container public-nav">
+            <div class="public-brand-group">
+                <a class="public-brand" href="{% url 'public_portal:public_home' %}">SIGEDON Transparencia</a>
+                <span class="public-tagline">Seguimiento público de proyectos y avances</span>
+            </div>
+            <nav class="public-links" aria-label="Navegación pública">
+                <a href="{% url 'public_portal:public_home' %}">Inicio</a>
+                <a href="{% url 'public_portal:public_project_list' %}">Proyectos</a>
+                <a href="{% url 'public_portal:public_updates_feed' %}">Avances</a>
+                <a href="{% url 'public_portal:public_home' %}#metodologia">Metodología</a>
+                <a href="{% url 'public_portal:public_home' %}#datos-abiertos">Datos abiertos</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="public-main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="public-footer">
+        <div class="public-container">
+            <h2>SIGEDON Transparencia</h2>
+            <p>
+                Portal público con información agregada, avances aprobados y resúmenes financieros.
+                No publica datos personales ni contactos internos.
+            </p>
+        </div>
+    </footer>
+</body>
+</html>

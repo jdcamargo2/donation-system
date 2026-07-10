@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Institución - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Ficha institucional</div>
+        <h1>{{ object.name }}</h1>
+        <p>{{ object.get_role_display }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+    </div>
+    <div class="ops-header-actions">
+        <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+        {% if perms.operations.change_institution %}
+            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card border-0 h-100 ops-detail-card">
+            <div class="card-body">
+                <h2 class="h5 mb-3">Datos de la institución</h2>
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Tipo</dt>
+                    <dd class="col-sm-8">{{ object.get_institution_type_display }}</dd>
+                    <dt class="col-sm-4">Rol</dt>
+                    <dd class="col-sm-8">{{ object.get_role_display }}</dd>
+                    <dt class="col-sm-4">País</dt>
+                    <dd class="col-sm-8">{{ object.country.name|default:"-" }}</dd>
+                    <dt class="col-sm-4">Correo de contacto</dt>
+                    <dd class="col-sm-8">{{ object.contact_email|default:"-" }}</dd>
+                    <dt class="col-sm-4">Teléfono de contacto</dt>
+                    <dd class="col-sm-8">{{ object.contact_phone|default:"-" }}</dd>
+                    <dt class="col-sm-4">Responsable institucional</dt>
+                    <dd class="col-sm-8">{{ object.responsible_person|default:"-" }}</dd>
+                    <dt class="col-sm-4">Documento legal</dt>
+                    <dd class="col-sm-8">
+                        {% if object.legal_document %}
+                            <a href="{{ object.legal_document.url }}">Ver documento</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <h2 class="h5">Donaciones asociadas</h2>
+        <div class="list-group">
+            {% for donation in object.donations.all %}
+                <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
+                    <div class="fw-semibold">{{ donation.code }}</div>
+                    <div class="small text-muted">{{ donation.amount }} {{ donation.currency }} · {{ donation.get_status_display }}</div>
+                </a>
+            {% empty %}
+                <div class="list-group-item text-muted">Esta institución todavía no tiene donaciones asociadas.</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

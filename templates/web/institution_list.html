@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Instituciones - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Directorio operativo</div>
+        <h1>Instituciones</h1>
+        <p>Organizaciones donantes, ejecutoras, aliadas o supervisoras.</p>
+    </div>
+    {% if perms.operations.add_institution %}
+        <a class="btn btn-primary" href="{% url create_url_name %}">Nueva institución</a>
+    {% endif %}
+</div>
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>Tipo</th>
+                    <th>País</th>
+                    <th>Estado</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for institution in objects %}
+                    <tr>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url detail_url_name institution.pk %}">
+                                {{ institution.name }}
+                            </a>
+                            <div class="small text-muted">{{ institution.get_role_display }}</div>
+                        </td>
+                        <td>{{ institution.get_institution_type_display }}</td>
+                        <td>{{ institution.country.name|default:"-" }}</td>
+                        <td><span class="badge ops-status-badge">{{ institution.get_status_display }}</span></td>
+                        <td class="text-end ops-row-actions">
+                            {% if perms.operations.change_institution %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name institution.pk %}">Editar</a>
+                            {% endif %}
+                            {% if perms.operations.delete_institution %}
+                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name institution.pk %}">Eliminar</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-muted">No hay instituciones registradas.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Gasto - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Detalle de ejecución</div>
+        <h1>{{ object.reason }}</h1>
+        <p>{{ object.amount }} {{ object.currency }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+    </div>
+    <div class="ops-header-actions">
+        <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+        {% if perms.operations.change_expense %}
+            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card border-0 ops-detail-card">
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Asignación</dt>
+                    <dd class="col-sm-8">{{ object.allocation }}</dd>
+                    <dt class="col-sm-4">Fecha</dt>
+                    <dd class="col-sm-8">{{ object.expense_date }}</dd>
+                    <dt class="col-sm-4">Monto</dt>
+                    <dd class="col-sm-8">{{ object.amount }} {{ object.currency }}</dd>
+                    <dt class="col-sm-4">Proveedor o destinatario</dt>
+                    <dd class="col-sm-8">{{ object.provider_or_recipient }}</dd>
+                    <dt class="col-sm-4">Estado</dt>
+                    <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+                    <dt class="col-sm-4">Motivo</dt>
+                    <dd class="col-sm-8">{{ object.reason }}</dd>
+                    <dt class="col-sm-4">Descripción</dt>
+                    <dd class="col-sm-8">{{ object.description|default:"-" }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h5 mb-0">Documentos soporte</h2>
+            {% if perms.operations.add_supportingdocument %}
+                <a class="btn btn-sm btn-primary" href="{% url 'supporting_document_create_for_expense' object.pk %}">
+                    Adjuntar soporte
+                </a>
+            {% endif %}
+        </div>
+        <div class="list-group">
+            {% for document in object.supporting_documents.all %}
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-start gap-3">
+                        <div>
+                            <a class="fw-semibold text-decoration-none" href="{{ document.document.url }}">
+                                {{ document.title }}
+                            </a>
+                            <div class="small text-muted">{{ document.uploaded_at }}</div>
+                            {% if document.notes %}
+                                <div class="small mt-1">{{ document.notes }}</div>
+                            {% endif %}
+                        </div>
+                        {% if perms.operations.delete_supportingdocument %}
+                            <a class="btn btn-sm btn-outline-danger" href="{% url 'supporting_document_delete' document.pk %}">
+                                Eliminar
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+            {% empty %}
+                <div class="list-group-item text-muted">Este gasto todavía no tiene documentos soporte.</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Gastos - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Ejecución financiera</div>
+        <h1>Gastos</h1>
+        <p>Ejecución real de fondos contra asignaciones aprobadas.</p>
+    </div>
+    {% if perms.operations.add_expense %}
+        <a class="btn btn-primary" href="{% url create_url_name %}">Nuevo gasto</a>
+    {% endif %}
+</div>
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Asignación</th>
+                    <th>Proyecto</th>
+                    <th>Monto</th>
+                    <th>Categoría</th>
+                    <th>Estado</th>
+                    <th>Soporte</th>
+                    <th>Fecha</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for expense in objects %}
+                    <tr>
+                        <td><a class="fw-semibold text-decoration-none" href="{% url 'allocation_detail' expense.allocation.pk %}">{{ expense.allocation.donation.code }}</a></td>
+                        <td>{{ expense.allocation.project }}</td>
+                        <td class="ops-money">{{ expense.amount }} {{ expense.currency }}</td>
+                        <td>{{ expense.get_category_display }}</td>
+                        <td><span class="badge ops-status-badge">{{ expense.get_status_display }}</span></td>
+                        <td>
+                            {% if expense.supporting_documents.exists %}
+                                Con soporte
+                            {% else %}
+                                Sin soporte
+                            {% endif %}
+                        </td>
+                        <td>{{ expense.expense_date }}</td>
+                        <td class="text-end ops-row-actions">
+                            {% if perms.operations.change_expense %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name expense.pk %}">Editar</a>
+                            {% endif %}
+                            {% if perms.operations.delete_expense %}
+                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name expense.pk %}">Eliminar</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-muted">No hay gastos registrados.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Revisar avance - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h1 class="h3 mb-1">Revisar avance</h1>
+        <div class="text-muted">{{ object.project.code }} - {{ object.project.name }}</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Cancelar</a>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card border-0">
+            <div class="card-body">
+                <h2 class="h5 mb-3">{{ object.title }}</h2>
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Proyecto</dt>
+                    <dd class="col-sm-8">{{ object.project }}</dd>
+                    <dt class="col-sm-4">Descripción</dt>
+                    <dd class="col-sm-8">{{ object.description }}</dd>
+                    <dt class="col-sm-4">Estado actual</dt>
+                    <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+                    <dt class="col-sm-4">Evidencia</dt>
+                    <dd class="col-sm-8">
+                        {% if object.evidence %}
+                            <a href="{{ object.evidence.url }}">Ver evidencia</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card border-0">
+            <div class="card-body">
+                <form method="post" novalidate>
+                    {% csrf_token %}
+                    {{ form.non_field_errors }}
+                    {% for field in form %}
+                        <div class="mb-3">
+                            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% for error in field.errors %}
+                                <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
+                    <button type="submit" class="btn btn-primary">Guardar revisión</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

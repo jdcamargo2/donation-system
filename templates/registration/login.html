@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Iniciar sesión - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-5 col-lg-4">
+        <div class="card">
+            <div class="card-body">
+                <h1 class="h4 mb-3">Iniciar sesión</h1>
+                <form method="post">
+                    {% csrf_token %}
+                    {{ form.non_field_errors }}
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.username.id_for_label }}">Usuario</label>
+                        <input type="text" name="{{ form.username.html_name }}" class="form-control" id="{{ form.username.id_for_label }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.password.id_for_label }}">Contraseña</label>
+                        <input type="password" name="{{ form.password.html_name }}" class="form-control" id="{{ form.password.id_for_label }}" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Iniciar sesión</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

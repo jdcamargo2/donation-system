@@ -1,0 +1,56 @@
+{% extends "public_portal/public_base.html" %}
+
+{% block title %}Avances aprobados - SIGEDON{% endblock %}
+
+{% block content %}
+<section class="public-hero">
+    <p class="public-eyebrow">Avances</p>
+    <h1 class="public-page-title">Avances aprobados para consulta pública</h1>
+    <p class="public-lead">
+        Registro de avances revisados y publicados para acompañar la ejecución de los proyectos.
+    </p>
+</section>
+
+<section class="public-list public-feed">
+    {% for update in updates %}
+        <article class="public-list-item update-card">
+            <div class="public-section-header">
+                <div>
+                    <h2>{{ update.title }}</h2>
+                    <div class="public-meta update-meta">
+                        <a href="{% url 'public_portal:public_project_detail' update.project.pk %}">{{ update.project.name }}</a>
+                        · {{ update.created_at }}
+                    </div>
+                </div>
+                <span class="public-badge">{{ update.get_status_display }}</span>
+            </div>
+            <p>{{ update.description|truncatewords:34 }}</p>
+            <div class="public-card-actions">
+                <a class="public-link-arrow public-action-primary" href="{% url 'public_portal:public_project_detail' update.project.pk %}">
+                    Ver proyecto <span aria-hidden="true">→</span>
+                </a>
+                {% if update.evidence %}
+                    <span class="public-action-separator" aria-hidden="true">|</span>
+                    <a class="public-action-secondary evidence-link" href="{{ update.evidence.url }}">
+                        <span aria-hidden="true">▣</span> Ver evidencia
+                    </a>
+                {% endif %}
+            </div>
+        </article>
+    {% empty %}
+        <div class="public-list-item public-meta">Todavía no hay avances aprobados.</div>
+    {% endfor %}
+</section>
+
+{% if is_paginated %}
+    <nav class="public-pagination" aria-label="Paginación">
+        {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}">Anterior</a>
+        {% endif %}
+        <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}">Siguiente</a>
+        {% endif %}
+    </nav>
+{% endif %}
+{% endblock %}

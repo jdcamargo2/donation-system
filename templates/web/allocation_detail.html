@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Asignación - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Asignación presupuestaria</div>
+        <h1>Asignación de fondos</h1>
+        <p>{{ object.donation.code }} → {{ object.project.code }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+    </div>
+    <div class="ops-header-actions">
+        <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+        {% if perms.operations.change_fundallocation %}
+            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
+            <div class="ops-metric-label">Monto asignado</div>
+            <div class="ops-metric-value">{{ object.amount }}</div>
+        </div></div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
+            <div class="ops-metric-label">Ejecutado</div>
+            <div class="ops-metric-value">{{ object.executed_amount }}</div>
+        </div></div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body">
+            <div class="ops-metric-label">Disponible</div>
+            <div class="ops-metric-value">{{ object.available_balance }}</div>
+        </div></div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card border-0 h-100 ops-detail-card">
+            <div class="card-body">
+                <h2 class="h5 mb-3">Detalle de la asignación</h2>
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Donación origen</dt>
+                    <dd class="col-sm-8"><a href="{% url 'donation_detail' object.donation.pk %}">{{ object.donation }}</a></dd>
+                    <dt class="col-sm-4">Proyecto destino</dt>
+                    <dd class="col-sm-8"><a href="{% url 'project_detail' object.project.pk %}">{{ object.project }}</a></dd>
+                    <dt class="col-sm-4">Categoría presupuestaria</dt>
+                    <dd class="col-sm-8">{{ object.get_budget_category_display }}</dd>
+                    <dt class="col-sm-4">Responsable</dt>
+                    <dd class="col-sm-8">{{ object.responsible_person|default:"-" }}</dd>
+                    <dt class="col-sm-4">Fecha de asignación</dt>
+                    <dd class="col-sm-8">{{ object.allocation_date }}</dd>
+                    <dt class="col-sm-4">Estado</dt>
+                    <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+                    <dt class="col-sm-4">Notas</dt>
+                    <dd class="col-sm-8">{{ object.notes|default:"-" }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <h2 class="h5">Gastos asociados</h2>
+        <div class="list-group">
+            {% for expense in object.expenses.all %}
+                <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
+                    <div class="fw-semibold">{{ expense.reason }}</div>
+                    <div class="small text-muted">{{ expense.amount }} {{ expense.currency }} · {{ expense.get_status_display }} · {{ expense.expense_date }}</div>
+                </a>
+            {% empty %}
+                <div class="list-group-item text-muted">Esta asignación todavía no tiene gastos asociados.</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

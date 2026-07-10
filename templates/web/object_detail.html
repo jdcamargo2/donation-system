@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">{{ object }}</h1>
+    <div>
+        <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+        {% if update_url_name == 'project_update' and perms.operations.change_project %}
+            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% elif update_url_name == 'project_update_update' and perms.operations.change_projectupdate %}
+            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card border-0">
+    <div class="card-body">
+        <p class="fs-5 mb-3">{{ object }}</p>
+        <dl class="row mb-0">
+            {% for label, value in metrics %}
+                <dt class="col-sm-4">{{ label }}</dt>
+                <dd class="col-sm-8">{{ value }}</dd>
+            {% endfor %}
+        </dl>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">{{ title }}</h1>
+    {% if create_url_name == 'project_create' and perms.operations.add_project %}
+        <a class="btn btn-primary" href="{% url create_url_name %}">Nuevo</a>
+    {% elif create_url_name == 'project_update_create' and perms.operations.add_projectupdate %}
+        <a class="btn btn-primary" href="{% url create_url_name %}">Nuevo</a>
+    {% endif %}
+</div>
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Registro</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for object in objects %}
+                    <tr>
+                        <td>
+                            <a href="{% url detail_url_name object.pk %}" class="fw-semibold text-decoration-none">{{ object }}</a>
+                        </td>
+                        <td class="text-end">
+                            {% if update_url_name == 'project_update' and perms.operations.change_project %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name object.pk %}">Editar</a>
+                            {% elif update_url_name == 'project_update_update' and perms.operations.change_projectupdate %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name object.pk %}">Editar</a>
+                            {% endif %}
+                            {% if delete_url_name == 'project_delete' and perms.operations.delete_project %}
+                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
+                            {% elif delete_url_name == 'project_update_delete' and perms.operations.delete_projectupdate %}
+                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="2" class="text-muted">No se encontraron registros.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

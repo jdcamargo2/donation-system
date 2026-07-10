@@ -1,0 +1,209 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}SIGEDON{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{% static 'web/css/sigedon.css' %}" rel="stylesheet">
+    <script>
+        (() => {
+            try {
+                if (localStorage.getItem('sigedonSidebarCollapsed') === 'true') {
+                    document.documentElement.classList.add('sidebar-collapsed');
+                }
+            } catch (error) {
+                document.documentElement.classList.remove('sidebar-collapsed');
+            }
+        })();
+    </script>
+</head>
+<body class="ops-private-panel">
+    <div class="sigedon-app-shell ops-shell">
+    {% with current_url=request.resolver_match.url_name %}
+    {% if user.is_authenticated %}
+        <aside class="sigedon-sidebar" id="sigedonSidebar" aria-label="Navegación principal">
+            <div class="sigedon-sidebar-header">
+                <a class="sigedon-brand text-decoration-none" href="{% url 'dashboard' %}" title="SIGEDON">
+                    <span class="sigedon-brand-mark">S</span>
+                    <span class="sigedon-nav-label">SIGEDON</span>
+                </a>
+                <button class="sigedon-collapse-button" type="button" aria-label="Colapsar navegación" title="Colapsar navegación" data-sidebar-toggle>
+                    <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                </button>
+            </div>
+
+            <nav class="sigedon-sidebar-nav" aria-label="Navegación principal">
+                <a class="sigedon-nav-link {% if current_url == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}" title="Panel financiero" {% if current_url == 'dashboard' %}aria-current="page"{% endif %}>
+                    <i class="bi bi-speedometer2 sigedon-nav-icon" aria-hidden="true"></i>
+                    <span class="sigedon-nav-label">Panel financiero</span>
+                </a>
+                {% if perms.operations.view_project %}
+                    <a class="sigedon-nav-link {% if 'project_' in current_url %}active{% endif %}" href="{% url 'project_list' %}" title="Proyectos" {% if 'project_' in current_url %}aria-current="page"{% endif %}>
+                        <i class="bi bi-folder2-open sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Proyectos</span>
+                    </a>
+                {% endif %}
+                {% if perms.operations.view_institution %}
+                    <a class="sigedon-nav-link {% if 'institution_' in current_url %}active{% endif %}" href="{% url 'institution_list' %}" title="Instituciones" {% if 'institution_' in current_url %}aria-current="page"{% endif %}>
+                        <i class="bi bi-building sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Instituciones</span>
+                    </a>
+                {% endif %}
+                {% if perms.operations.view_donation %}
+                    <a class="sigedon-nav-link {% if 'donation_' in current_url %}active{% endif %}" href="{% url 'donation_list' %}" title="Donaciones" {% if 'donation_' in current_url %}aria-current="page"{% endif %}>
+                        <i class="bi bi-box-seam sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Donaciones</span>
+                    </a>
+                {% endif %}
+                {% if perms.operations.view_fundallocation %}
+                    <a class="sigedon-nav-link {% if 'allocation_' in current_url %}active{% endif %}" href="{% url 'allocation_list' %}" title="Asignaciones" {% if 'allocation_' in current_url %}aria-current="page"{% endif %}>
+                        <i class="bi bi-diagram-3 sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Asignaciones</span>
+                    </a>
+                {% endif %}
+                {% if perms.operations.view_expense %}
+                    <a class="sigedon-nav-link {% if 'expense_' in current_url %}active{% endif %}" href="{% url 'expense_list' %}" title="Gastos" {% if 'expense_' in current_url %}aria-current="page"{% endif %}>
+                        <i class="bi bi-receipt sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Gastos</span>
+                    </a>
+                {% endif %}
+                {% if perms.operations.view_auditlog %}
+                    <a class="sigedon-nav-link {% if current_url == 'audit_log_list' %}active{% endif %}" href="{% url 'audit_log_list' %}" title="Auditoría" {% if current_url == 'audit_log_list' %}aria-current="page"{% endif %}>
+                        <i class="bi bi-clipboard-check sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Auditoría</span>
+                    </a>
+                {% endif %}
+            </nav>
+
+            <div class="sigedon-sidebar-footer">
+                <div class="ops-user-chip" title="{{ user.get_username }}">
+                    <i class="bi bi-person-circle sigedon-nav-icon" aria-hidden="true"></i>
+                    <span class="sigedon-nav-label">{{ user.get_username }}</span>
+                </div>
+                <form method="post" action="{% url 'logout' %}">
+                    {% csrf_token %}
+                    <button class="sigedon-nav-link sigedon-logout-button" type="submit" title="Cerrar sesión">
+                        <i class="bi bi-box-arrow-right sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Cerrar sesión</span>
+                    </button>
+                </form>
+            </div>
+        </aside>
+    {% endif %}
+    {% endwith %}
+
+        <div class="sigedon-main-wrapper">
+            <main class="sigedon-content">
+                {% if user.is_authenticated %}
+                    <div class="ops-topbar">
+                        <div>
+                            <div class="ops-kicker">Panel operativo interno</div>
+                            <div class="ops-topbar-title">SIGEDON</div>
+                        </div>
+                        <div class="ops-topbar-user">
+                            <span>{{ user.get_username }}</span>
+                            <i class="bi bi-shield-check" aria-hidden="true"></i>
+                        </div>
+                    </div>
+                {% endif %}
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+
+    <script type="application/json" id="django-messages">
+        [
+            {% for message in messages %}
+                {"text": "{{ message|escapejs }}", "tags": "{{ message.tags|default:'info'|escapejs }}"}{% if not forloop.last %},{% endif %}
+            {% endfor %}
+        ]
+    </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <script>
+        // MÓDULO 1: Gestión de la Sidebar y Persistencia del Layout
+        (() => {
+            const root = document.documentElement;
+            const body = document.body;
+            const sidebar = document.getElementById('sigedonSidebar');
+            const collapseButton = document.querySelector('[data-sidebar-toggle]');
+            const storageKey = 'sigedonSidebarCollapsed';
+            const isMobile = () => window.matchMedia('(max-width: 991.98px)').matches;
+
+            const setCollapsed = (isCollapsed, persist = true) => {
+                root.classList.toggle('sidebar-collapsed', isCollapsed);
+                body.classList.toggle('sidebar-collapsed', isCollapsed);
+                
+                if (collapseButton) {
+                    collapseButton.setAttribute('aria-label', isCollapsed ? 'Expandir navegación' : 'Colapsar navegación');
+                    collapseButton.setAttribute('title', isCollapsed ? 'Expandir navegación' : 'Colapsar navegación');
+                }
+                
+                if (persist) {
+                    try {
+                        localStorage.setItem(storageKey, isCollapsed ? 'true' : 'false');
+                    } catch (error) {
+                        // Silenciar errores de almacenamiento aislado
+                    }
+                }
+            };
+
+            // Inicialización de estado post-carga
+            if (sidebar) {
+                try {
+                    const storedState = localStorage.getItem(storageKey);
+                    const shouldCollapse = storedState === 'true' || (storedState === null && isMobile());
+                    setCollapsed(root.classList.contains('sidebar-collapsed') || shouldCollapse, false);
+                } catch (error) {
+                    setCollapsed(isMobile(), false);
+                }
+            }
+
+            // Event Listener exclusivo del botón de toggle
+            collapseButton?.addEventListener('click', () => {
+                setCollapsed(!body.classList.contains('sidebar-collapsed'));
+            });
+        })();
+    </script>
+
+    <script>
+        // MÓDULO 2: Sistema de Notificaciones del Servidor (Django Messages + SweetAlert2)
+        (() => {
+            const messagesElement = document.getElementById('django-messages');
+            if (!messagesElement) return; // Si no hay mensajes, muere ESTE módulo, no la sidebar
+
+            const iconByTag = {
+                success: 'success',
+                error: 'error',
+                danger: 'error',
+                warning: 'warning',
+                info: 'info',
+                debug: 'info'
+            };
+
+            let messages = [];
+            try {
+                messages = JSON.parse(messagesElement.textContent);
+            } catch (error) {
+                messages = [];
+            }
+
+            messages.forEach((message) => {
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: iconByTag[message.tags] || 'info',
+                    title: message.text,
+                    showConfirmButton: false,
+                    timer: 3200,
+                    timerProgressBar: true
+                });
+            });
+        })();
+    </script>
+</body>
+</html>

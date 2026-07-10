@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="card border-danger">
+    <div class="card-body">
+        <h1 class="h4">Eliminar registro</h1>
+        <p>¿Está seguro de que desea eliminar <strong>{{ object }}</strong>?</p>
+        <form method="post">
+            {% csrf_token %}
+            <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Cancelar</a>
+            <button type="submit" class="btn btn-danger">Eliminar</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

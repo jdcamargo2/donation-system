@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}Panel financiero - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header">
+    <div>
+        <div class="ops-kicker">Resumen operativo</div>
+        <h1>Panel financiero</h1>
+        <p>Trazabilidad básica de donaciones, asignaciones y gastos.</p>
+    </div>
+</div>
+
+<div class="card border-0 mb-4 ops-action-panel">
+    <div class="card-body">
+        <h2 class="h5 mb-3">Accesos rápidos</h2>
+        <div class="d-flex flex-wrap gap-2">
+            {% if perms.operations.view_project %}
+                <a class="btn btn-outline-primary" href="{% url 'project_list' %}">Ver proyectos</a>
+            {% endif %}
+            {% if perms.operations.add_project %}
+                <a class="btn btn-primary" href="{% url 'project_create' %}">Crear proyecto</a>
+            {% endif %}
+            {% if perms.operations.add_institution %}
+                <a class="btn btn-outline-primary" href="{% url 'institution_create' %}">Crear institución</a>
+            {% endif %}
+            {% if perms.operations.add_donation %}
+                <a class="btn btn-outline-primary" href="{% url 'donation_create' %}">Crear donación</a>
+            {% endif %}
+            {% if perms.operations.add_fundallocation %}
+                <a class="btn btn-outline-primary" href="{% url 'allocation_create' %}">Crear asignación</a>
+            {% endif %}
+            {% if perms.operations.add_expense %}
+                <a class="btn btn-outline-primary" href="{% url 'expense_create' %}">Crear gasto</a>
+            {% endif %}
+            {% if perms.operations.add_projectupdate %}
+                <a class="btn btn-outline-primary" href="{% url 'project_update_list' %}">Registrar avances</a>
+            {% endif %}
+            {% if perms.operations.view_auditlog %}
+                <a class="btn btn-outline-secondary" href="{% url 'audit_log_list' %}">Ver auditoría</a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4 ops-metric-grid">
+    <div class="col-md-3">
+        <div class="card h-100 border-0 ops-metric-card">
+            <div class="card-body">
+                <div class="ops-metric-label">Donaciones recibidas</div>
+                <div class="ops-metric-value">{{ total_donations }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 border-0 ops-metric-card">
+            <div class="card-body">
+                <div class="ops-metric-label">Asignado</div>
+                <div class="ops-metric-value">{{ total_assigned }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 border-0 ops-metric-card">
+            <div class="card-body">
+                <div class="ops-metric-label">Ejecutado</div>
+                <div class="ops-metric-value">{{ total_executed }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 border-0 ops-metric-card ops-metric-card-available">
+            <div class="card-body">
+                <div class="ops-metric-label">Disponible</div>
+                <div class="ops-metric-value">{{ available_balance }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <h2 class="h5 ops-section-title">Ingresos</h2>
+        <div class="list-group ops-activity-list">
+            {% if perms.operations.view_donation %}
+                {% for donation in recent_donations %}
+                    <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
+                        <div class="fw-semibold">{{ donation.code }}</div>
+                        <div class="small text-muted">{{ donation.donor }} - {{ donation.amount }} {{ donation.currency }}</div>
+                    </a>
+                {% empty %}
+                    <div class="list-group-item text-muted">Todavía no hay donaciones.</div>
+                {% endfor %}
+            {% else %}
+                <div class="list-group-item text-muted">Sin permisos para consultar donaciones.</div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <h2 class="h5 ops-section-title">Gastos recientes</h2>
+        <div class="list-group ops-activity-list">
+            {% if perms.operations.view_expense %}
+                {% for expense in recent_expenses %}
+                    <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
+                        <div class="fw-semibold">{{ expense.reason }}</div>
+                        <div class="small text-muted">{{ expense.allocation.project }} - {{ expense.amount }} {{ expense.currency }}</div>
+                    </a>
+                {% empty %}
+                    <div class="list-group-item text-muted">Todavía no hay gastos.</div>
+                {% endfor %}
+            {% else %}
+                <div class="list-group-item text-muted">Sin permisos para consultar gastos.</div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <h2 class="h5 ops-section-title">Acciones recientes de auditoría</h2>
+        <div class="list-group ops-activity-list">
+            {% if perms.operations.view_auditlog %}
+                {% for log in recent_audit_logs %}
+                    <a class="list-group-item list-group-item-action" href="{% url 'audit_log_list' %}">
+                        <div class="fw-semibold">{{ log.get_action_display }} {{ log.display_model_name }}</div>
+                        <div class="small text-muted">{{ log.entity_label }} - {{ log.created_at }}</div>
+                    </a>
+                {% empty %}
+                    <div class="list-group-item text-muted">Todavía no hay registros de auditoría.</div>
+                {% endfor %}
+            {% else %}
+                <div class="list-group-item text-muted">Sin permisos para consultar auditoría.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

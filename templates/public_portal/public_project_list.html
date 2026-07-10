@@ -1,0 +1,46 @@
+{% extends "public_portal/public_base.html" %}
+
+{% block title %}Proyectos públicos - SIGEDON{% endblock %}
+
+{% block content %}
+<section class="public-hero">
+    <p class="public-eyebrow">Proyectos</p>
+    <h1 class="public-page-title">Proyectos en seguimiento público</h1>
+    <p class="public-lead">
+        Explora los proyectos incluidos en la trazabilidad pública, con estado, descripción y resumen disponible.
+    </p>
+</section>
+
+<section class="public-list project-card-grid">
+    {% for project in projects %}
+        <article class="public-list-item project-card">
+            <div class="public-section-header">
+                <div>
+                    <h2>{{ project.name }}</h2>
+                    <div class="public-meta">
+                        <span class="public-badge">{{ project.code }}</span>
+                        <span class="public-badge muted">{{ project.get_status_display }}</span>
+                    </div>
+                </div>
+                <a class="public-button secondary" href="{% url 'public_portal:public_project_detail' project.pk %}">Ver detalle</a>
+            </div>
+            <p>{{ project.description|default:"Sin descripción pública."|truncatewords:30 }}</p>
+            <div class="public-meta">La información financiera detallada está disponible en la ficha del proyecto.</div>
+        </article>
+    {% empty %}
+        <div class="public-list-item public-meta">No hay proyectos disponibles.</div>
+    {% endfor %}
+</section>
+
+{% if is_paginated %}
+    <nav class="public-pagination" aria-label="Paginación">
+        {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}">Anterior</a>
+        {% endif %}
+        <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}">Siguiente</a>
+        {% endif %}
+    </nav>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Avance de proyecto - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">{{ object.title }}</h1>
+    <div>
+        <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Volver al proyecto</a>
+        {% if object.status == 'pending_review' and perms.operations.change_projectupdate %}
+            <a class="btn btn-outline-primary" href="{% url 'project_update_review' object.pk %}">Revisar avance</a>
+        {% endif %}
+        {% if perms.operations.change_projectupdate %}
+            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card border-0">
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-4">Proyecto</dt>
+            <dd class="col-sm-8">{{ object.project }}</dd>
+            <dt class="col-sm-4">Título</dt>
+            <dd class="col-sm-8">{{ object.title }}</dd>
+            <dt class="col-sm-4">Descripción</dt>
+            <dd class="col-sm-8">{{ object.description }}</dd>
+            <dt class="col-sm-4">Estado</dt>
+            <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+            <dt class="col-sm-4">Fecha de creación</dt>
+            <dd class="col-sm-8">{{ object.created_at }}</dd>
+            <dt class="col-sm-4">Creado por</dt>
+            <dd class="col-sm-8">{{ object.created_by|default:"-" }}</dd>
+            <dt class="col-sm-4">Revisado por</dt>
+            <dd class="col-sm-8">{{ object.reviewed_by|default:"-" }}</dd>
+            <dt class="col-sm-4">Fecha de revisión</dt>
+            <dd class="col-sm-8">{{ object.reviewed_at|default:"-" }}</dd>
+            <dt class="col-sm-4">Notas de revisión</dt>
+            <dd class="col-sm-8">{{ object.review_notes|default:"-" }}</dd>
+            <dt class="col-sm-4">Evidencia</dt>
+            <dd class="col-sm-8">
+                {% if object.evidence %}
+                    <a href="{{ object.evidence.url }}">Ver evidencia</a>
+                {% else %}
+                    -
+                {% endif %}
+            </dd>
+        </dl>
+    </div>
+</div>
+{% endblock %}

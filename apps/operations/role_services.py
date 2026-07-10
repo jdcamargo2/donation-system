@@ -1,0 +1,30 @@
+from django.contrib.auth.models import Group, Permission
+
+from .roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_PERMISSION_CODENAMES, ROLE_SIGEDON_ADMIN
+
+
+# PRE: Django auth permissions for apps.operations have been created by migrations.
+# POST: creates or updates all SIGEDON operational groups with the configured permission matrix.
+def sync_operation_roles():
+    operations_permissions = Permission.objects.filter(content_type__app_label='operations')
+    permissions_by_codename = {permission.codename: permission for permission in operations_permissions}
+    synced_groups = {}
+
+    admin_group, _ = Group.objects.get_or_create(name=ROLE_SIGEDON_ADMIN)
+    admin_group.permissions.set(operations_permissions)
+    synced_groups[ROLE_SIGEDON_ADMIN] = admin_group
+
+    for role_name, codenames in ROLE_PERMISSION_CODENAMES.items():
+        missing_codenames = sorted(codenames - permissions_by_codename.keys())
+        if missing_codenames:
+            missing = ', '.join(missing_codenames)
+            raise ValueError(f'Permisos operativos no encontrados: {missing}')
+        group, _ = Group.objects.get_or_create(name=role_name)
+        group.permissions.set([permissions_by_codename[codename] for codename in sorted(codenames)])
+        synced_groups[role_name] = group
+
+    return synced_groups
+
+
+def operation_role_names():
+    return [ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR]

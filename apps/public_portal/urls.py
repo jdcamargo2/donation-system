@@ -1,0 +1,12 @@
+from django.urls import path
+from django.views.decorators.cache import cache_page
+
+from . import views
+
+app_name = 'public_portal'
+urlpatterns = [
+    path('', cache_page(60)(views.PublicHomeView.as_view()), name='public_home'),
+    path('projects/', cache_page(120)(views.PublicProjectListView.as_view()), name='public_project_list'),
+    path('projects/<int:pk>/', cache_page(120)(views.PublicProjectDetailView.as_view()), name='public_project_detail'),
+    path('updates/', cache_page(60)(views.PublicUpdatesFeedView.as_view()), name='public_updates_feed'),
+]

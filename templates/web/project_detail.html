@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Proyecto - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Proyecto operativo</div>
+        <h1>{{ object.name }}</h1>
+        <p>{{ object.code }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+    </div>
+    <div class="ops-header-actions">
+        <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+        {% if perms.operations.change_project %}
+            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card border-0 h-100 ops-detail-card">
+            <div class="card-body">
+                <h2 class="h5 mb-3">Información del proyecto</h2>
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Nombre</dt>
+                    <dd class="col-sm-8">{{ object.name }}</dd>
+                    <dt class="col-sm-4">Código</dt>
+                    <dd class="col-sm-8">{{ object.code }}</dd>
+                    <dt class="col-sm-4">Estado</dt>
+                    <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+                    <dt class="col-sm-4">Descripción</dt>
+                    <dd class="col-sm-8">{{ object.description|default:"-" }}</dd>
+                    <dt class="col-sm-4">Fecha de inicio</dt>
+                    <dd class="col-sm-8">{{ object.start_date|default:"-" }}</dd>
+                    <dt class="col-sm-4">Fecha de cierre</dt>
+                    <dd class="col-sm-8">{{ object.end_date|default:"-" }}</dd>
+                    {% for label, value in metrics %}
+                        <dt class="col-sm-4">{{ label }}</dt>
+                        <dd class="col-sm-8">{{ value }}</dd>
+                    {% endfor %}
+                </dl>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h5 mb-0">Avances del proyecto</h2>
+            {% if perms.operations.add_projectupdate %}
+                <a class="btn btn-sm btn-primary" href="{% url 'project_update_create_for_project' object.pk %}">Registrar avance</a>
+            {% endif %}
+        </div>
+        <div class="list-group">
+            {% for update in project_updates %}
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-start gap-3">
+                        <div>
+                            <a class="fw-semibold text-decoration-none" href="{% url 'project_update_detail' update.pk %}">
+                                {{ update.title }}
+                            </a>
+                            <div class="small text-muted">
+                                {{ update.created_at }}{% if update.created_by %} - {{ update.created_by }}{% endif %}
+                            </div>
+                        </div>
+                        <span class="badge ops-status-badge">{{ update.get_status_display }}</span>
+                    </div>
+                    <p class="mb-2 mt-2">{{ update.description|truncatewords:24 }}</p>
+                    <div class="d-flex gap-2">
+                        {% if update.evidence %}
+                            <a class="btn btn-sm btn-outline-secondary" href="{{ update.evidence.url }}">Ver evidencia</a>
+                        {% endif %}
+                        {% if update.status == 'pending_review' and perms.operations.change_projectupdate %}
+                            <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_review' update.pk %}">Revisar</a>
+                        {% endif %}
+                        {% if perms.operations.change_projectupdate %}
+                            <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_update' update.pk %}">Editar</a>
+                        {% endif %}
+                    </div>
+                </div>
+            {% empty %}
+                <div class="list-group-item text-muted">Este proyecto todavía no tiene avances registrados.</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

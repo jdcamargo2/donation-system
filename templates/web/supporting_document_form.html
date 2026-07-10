@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Adjuntar soporte - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h1 class="h3 mb-1">Adjuntar soporte</h1>
+        <div class="text-muted">{{ expense.reason }} · {{ expense.amount }} {{ expense.currency }}</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'expense_detail' expense.pk %}">Cancelar</a>
+</div>
+
+<div class="card border-0">
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data" novalidate>
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            {% for field in form %}
+                <div class="mb-3">
+                    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <div class="form-text">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% for error in field.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+            <button type="submit" class="btn btn-primary">Guardar soporte</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

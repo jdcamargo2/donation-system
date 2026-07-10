@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Eliminar soporte - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="card border-danger">
+    <div class="card-body">
+        <h1 class="h4">Eliminar documento soporte</h1>
+        <p>¿Está seguro de que desea eliminar <strong>{{ object }}</strong>?</p>
+        {% if object.expense.status == 'validated' and object.expense.supporting_documents.count <= 1 %}
+            <div class="alert alert-warning">
+                Este es el último documento soporte de un gasto validado. No podrá eliminarse mientras el gasto siga validado.
+            </div>
+        {% endif %}
+        <form method="post">
+            {% csrf_token %}
+            <a class="btn btn-outline-secondary" href="{% url 'expense_detail' object.expense.pk %}">Cancelar</a>
+            <button type="submit" class="btn btn-danger">Eliminar</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

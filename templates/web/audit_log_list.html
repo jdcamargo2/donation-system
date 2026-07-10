@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Auditoría - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Control interno</div>
+        <h1>Registro de auditoría</h1>
+        <p>Trazabilidad de acciones críticas realizadas en el sistema.</p>
+    </div>
+</div>
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Acción</th>
+                    <th>Modelo</th>
+                    <th>Objeto</th>
+                    <th>Usuario</th>
+                    <th>Descripción</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                    <tr>
+                        <td>{{ log.created_at }}</td>
+                        <td>{{ log.get_action_display }}</td>
+                        <td>{{ log.display_model_name }}</td>
+                        <td>{{ log.entity_label }}</td>
+                        <td>{{ log.user|default:"Sistema" }}</td>
+                        <td>{{ log.display_summary }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-muted">Todavía no hay registros de auditoría.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

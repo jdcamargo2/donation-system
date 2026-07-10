@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Donación - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Ficha de donación</div>
+        <h1>{{ object.code }}</h1>
+        <p>{{ object.donor }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+    </div>
+    <div class="ops-header-actions">
+        <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+        {% if perms.operations.change_donation %}
+            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
+            <div class="ops-metric-label">Monto total</div>
+            <div class="ops-metric-value">{{ object.amount }} {{ object.currency }}</div>
+        </div></div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
+            <div class="ops-metric-label">Monto asignado</div>
+            <div class="ops-metric-value">{{ object.total_assigned }} {{ object.currency }}</div>
+        </div></div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body">
+            <div class="ops-metric-label">Monto disponible</div>
+            <div class="ops-metric-value">{{ object.available_balance }} {{ object.currency }}</div>
+        </div></div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card border-0 h-100 ops-detail-card">
+            <div class="card-body">
+                <h2 class="h5 mb-3">Detalle de la donación</h2>
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Tipo</dt>
+                    <dd class="col-sm-8">{{ object.get_donation_type_display }}</dd>
+                    <dt class="col-sm-4">Objetivo</dt>
+                    <dd class="col-sm-8">{{ object.objective|default:"-" }}</dd>
+                    <dt class="col-sm-4">Restricciones</dt>
+                    <dd class="col-sm-8">{{ object.restrictions|default:"-" }}</dd>
+                    <dt class="col-sm-4">Fecha de compromiso</dt>
+                    <dd class="col-sm-8">{{ object.commitment_date|default:"-" }}</dd>
+                    <dt class="col-sm-4">Fecha de recepción</dt>
+                    <dd class="col-sm-8">{{ object.received_date|default:"-" }}</dd>
+                    <dt class="col-sm-4">Referencia de soporte</dt>
+                    <dd class="col-sm-8">{{ object.support_reference|default:"-" }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <h2 class="h5">Asignaciones vinculadas</h2>
+        <div class="list-group">
+            {% for allocation in object.allocations.all %}
+                <a class="list-group-item list-group-item-action" href="{% url 'allocation_detail' allocation.pk %}">
+                    <div class="fw-semibold">{{ allocation.project }}</div>
+                    <div class="small text-muted">{{ allocation.amount }} · {{ allocation.get_budget_category_display }} · Disponible {{ allocation.available_balance }}</div>
+                </a>
+            {% empty %}
+                <div class="list-group-item text-muted">Esta donación todavía no tiene asignaciones vinculadas.</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
