@@ -67,14 +67,17 @@
                     </div>
                     <p class="mb-2 mt-2">{{ update.description|truncatewords:24 }}</p>
                     <div class="d-flex gap-2">
-                        {% if update.evidence %}
-                            <a class="btn btn-sm btn-outline-secondary" href="{{ update.evidence.url }}">Ver evidencia</a>
-                        {% endif %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_detail' update.pk %}">Ver detalle</a>
                         {% if update.status == 'pending_review' and perms.operations.change_projectupdate %}
                             <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_review' update.pk %}">Revisar</a>
                         {% endif %}
-                        {% if perms.operations.change_projectupdate %}
-                            <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_update' update.pk %}">Editar</a>
+                        {% if update.status == 'draft' %}
+                            {% if perms.operations.change_projectupdate %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_update' update.pk %}">Editar</a>
+                            {% endif %}
+                            {% if perms.operations.delete_projectupdate %}
+                                <a class="btn btn-sm btn-outline-danger" href="{% url 'project_update_delete' update.pk %}">Eliminar</a>
+                            {% endif %}
                         {% endif %}
                     </div>
                 </div>

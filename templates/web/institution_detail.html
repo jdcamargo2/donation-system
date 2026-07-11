@@ -38,7 +38,7 @@
                     <dt class="col-sm-4">Documento legal</dt>
                     <dd class="col-sm-8">
                         {% if object.legal_document %}
-                            <a href="{{ object.legal_document.url }}">Ver documento</a>
+                            <a href="{% url 'institution_legal_document_download' object.pk %}">Ver documento</a>
                         {% else %}
                             -
                         {% endif %}

@@ -9,7 +9,7 @@
         <h1>{{ title }}</h1>
         <p>Complete los datos requeridos. Los campos marcados con asterisco son obligatorios.</p>
     </div>
-    <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Cancelar</a>
+    <a class="btn btn-outline-secondary" href="{% if cancel_object_pk %}{% url list_url_name cancel_object_pk %}{% else %}{% url list_url_name %}{% endif %}">Cancelar</a>
 </div>
 
 <div class="card border-0 ops-form-card">
@@ -45,8 +45,8 @@
                 </div>
             </div>
             <div class="ops-form-actions">
-                <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Cancelar</a>
-                <button type="submit" class="btn btn-primary">Guardar</button>
+                <a class="btn btn-outline-secondary" href="{% if cancel_object_pk %}{% url list_url_name cancel_object_pk %}{% else %}{% url list_url_name %}{% endif %}">Cancelar</a>
+                <button type="submit" class="btn btn-primary">{{ submit_label|default:"Guardar" }}</button>
             </div>
         </form>
     </div>

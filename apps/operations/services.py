@@ -18,8 +18,71 @@ from .models import (
 )
 
 
-# PRE: instance is a saved domain object or a still-readable object about to be deleted.
-# POST: creates one AuditLog row with the supplied action and human-readable summary.
+class ExpenseFinalizedError(ValidationError):
+    """Raised when ordinary mutation targets a validated or cancelled expense."""
+
+
+EXPENSE_FINAL_STATUSES = frozenset(
+    {Expense.Status.VALIDATED, Expense.Status.CANCELLED}
+)
+PROJECT_UPDATE_FINAL_STATUSES = frozenset(
+    {ProjectUpdate.Status.APPROVED, ProjectUpdate.Status.REJECTED}
+)
+
+
+class ProjectUpdateImmutableError(ValidationError):
+    """Raised when ordinary mutation targets a non-draft project update."""
+
+
+def ensure_project_update_is_editable(project_update: ProjectUpdate) -> None:
+    """
+    PRE: project_update is a persisted advance targeted by ordinary editing.
+    POST: returns only for DRAFT; review and final states fail without mutation.
+    """
+    if project_update.status != ProjectUpdate.Status.DRAFT:
+        raise ProjectUpdateImmutableError(
+            {'status': _('Solo los avances en borrador pueden editarse.')}
+        )
+
+
+def ensure_project_update_is_deletable(project_update: ProjectUpdate) -> None:
+    """
+    PRE: project_update is a persisted advance targeted by physical deletion.
+    POST: returns unless it is final; final states fail without mutation.
+    """
+    if project_update.status in PROJECT_UPDATE_FINAL_STATUSES:
+        raise ProjectUpdateImmutableError(
+            {'status': _('Los avances aprobados o rechazados no se pueden eliminar.')}
+        )
+
+
+def ensure_expense_is_editable(expense: Expense) -> None:
+    """
+    PRE: expense is a persisted operational expense.
+    POST: returns only for ordinary editable states; finalized states raise a
+    domain-specific error without modifying data.
+    """
+    if expense.status in EXPENSE_FINAL_STATUSES:
+        raise ExpenseFinalizedError(
+            _('Los gastos validados o anulados no admiten modificaciones ordinarias.')
+        )
+
+
+def ensure_expense_is_deletable(expense: Expense) -> None:
+    """
+    PRE: expense is a persisted candidate for ordinary physical deletion.
+    POST: returns unless it is validated/cancelled; finalized states raise
+    ExpenseFinalizedError without modifying data.
+    """
+    if expense.status in EXPENSE_FINAL_STATUSES:
+        raise ExpenseFinalizedError(
+            _('Los gastos validados o anulados no se pueden eliminar.')
+        )
+
+
+# PRE: instance is saved or still readable before deletion; summary is a concise,
+# non-secret description rather than a serialized payload.
+# POST: creates and returns one append-only AuditLog event through the authorized helper.
 def log_action(user, action: str, instance, summary: str, entity_label: str | None = None):
     return AuditLog.objects.create(
         user=user if getattr(user, 'is_authenticated', False) else None,
@@ -46,8 +109,6 @@ def log_delete(user, instance, summary: str | None = None):
 def log_review(user, project_update: ProjectUpdate, notes: str = ''):
     action = AuditLog.Action.VALIDATED if project_update.status == ProjectUpdate.Status.APPROVED else AuditLog.Action.REJECTED
     summary = _('Avance de proyecto aprobado.') if action == AuditLog.Action.VALIDATED else _('Avance de proyecto rechazado.')
-    if notes:
-        summary = f'{summary} {notes}'
     return log_action(user, action, project_update, summary)
 
 
@@ -76,7 +137,9 @@ def _validate_allocation_balance(donation, amount, exclude_pk=None):
 def _validate_expense_balance(allocation, amount, exclude_pk=None):
     if amount <= ZERO_MONEY:
         raise ValidationError({'amount': _('El monto del gasto debe ser positivo.')})
-    expenses = allocation.expenses.exclude(status=Expense.Status.ANNULLED)
+    expenses = allocation.expenses.exclude(
+        status__in=Expense.non_executing_statuses()
+    )
     if exclude_pk is not None:
         expenses = expenses.exclude(pk=exclude_pk)
     executed_amount = expenses.aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
@@ -87,7 +150,9 @@ def _validate_expense_balance(allocation, amount, exclude_pk=None):
 # PRE: allocation is locked for update and amount is its complete proposed amount.
 # POST: raises ValidationError if existing non-annulled expenses would leave the allocation with a negative balance.
 def _validate_allocation_execution(allocation, amount):
-    executed_amount = allocation.expenses.exclude(status=Expense.Status.ANNULLED).aggregate(
+    executed_amount = allocation.expenses.exclude(
+        status__in=Expense.non_executing_statuses()
+    ).aggregate(
         total=Sum('amount')
     )['total'] or ZERO_MONEY
     if amount < executed_amount:
@@ -99,10 +164,11 @@ def _validate_allocation_execution(allocation, amount):
 def validate_expense(expense_id: int, user=None) -> Expense:
     with transaction.atomic():
         expense = Expense.objects.select_for_update().get(pk=expense_id)
-        if not expense.supporting_documents.exists():
-            raise ValidationError(_('Un gasto validado debe tener al menos un documento soporte.'))
         if expense.status == Expense.Status.VALIDATED:
             return expense
+        ensure_expense_is_editable(expense)
+        if not expense.supporting_documents.exists():
+            raise ValidationError(_('Un gasto validado debe tener al menos un documento soporte.'))
         expense.status = Expense.Status.VALIDATED
         expense.validated_by = user if getattr(user, 'is_authenticated', False) else None
         expense.validated_at = timezone.now()
@@ -202,6 +268,10 @@ def create_expense(
     support_file=None,
 ):
     with transaction.atomic():
+        if status == Expense.Status.CANCELLED:
+            raise ExpenseFinalizedError(
+                _('Un gasto solo puede anularse mediante la acción de anulación.')
+            )
         locked_allocation = FundAllocation.objects.select_for_update().get(pk=allocation.pk)
         _validate_operating_currency(currency)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
@@ -257,6 +327,7 @@ def update_expense(
 ):
     with transaction.atomic():
         locked_expense = Expense.objects.select_for_update().get(pk=expense.pk)
+        ensure_expense_is_editable(locked_expense)
         allocation_ids = {locked_expense.allocation_id, allocation.pk}
         locked_allocations = {
             item.pk: item
@@ -297,6 +368,47 @@ def update_expense(
         return locked_expense
 
 
+def cancel_expense(expense_id: int, *, actor, reason: str) -> Expense:
+    """
+    PRE: actor is authenticated, reason is non-empty, and expense_id identifies
+    a pending/editable or validated expense that has not been cancelled.
+    POST: atomically locks expense/allocation, marks only status as CANCELLED,
+    preserves validation metadata and writes one safe audit event.
+    """
+    if not getattr(actor, 'is_authenticated', False):
+        raise ValidationError({'actor': _('La anulación exige un usuario autenticado.')})
+    clean_reason = reason.strip() if isinstance(reason, str) else ''
+    if not clean_reason:
+        raise ValidationError({'reason': _('La razón de anulación es obligatoria.')})
+    with transaction.atomic():
+        expense = Expense.objects.select_for_update().get(pk=expense_id)
+        FundAllocation.objects.select_for_update().get(pk=expense.allocation_id)
+        if expense.status == Expense.Status.CANCELLED:
+            raise ExpenseFinalizedError(_('El gasto ya fue anulado.'))
+        if expense.status == Expense.Status.ANNULLED:
+            raise ExpenseFinalizedError(_('El gasto legado ya está anulado.'))
+        previous_status = expense.status
+        allowed_statuses = {
+            Expense.Status.REGISTERED,
+            Expense.Status.IN_REVIEW,
+            Expense.Status.REJECTED,
+            Expense.Status.VALIDATED,
+        }
+        if previous_status not in allowed_statuses:
+            raise ExpenseFinalizedError(_('El estado actual del gasto no admite anulación.'))
+        expense.status = Expense.Status.CANCELLED
+        expense.full_clean()
+        expense.save(update_fields=('status', 'updated_at'))
+        log_action(
+            actor,
+            AuditLog.Action.EXPENSE_CANCELLED,
+            expense,
+            _('Gasto anulado. Estado anterior: %(status)s. Razón registrada por separado.')
+            % {'status': previous_status},
+        )
+        return expense
+
+
 def sum_money(queryset, field_name: str):
     """
     PRE: queryset debe ser un QuerySet válido y field_name debe apuntar a un campo numérico agregable.
@@ -317,7 +429,7 @@ def get_dashboard_metrics() -> dict:
     expenses = Expense.objects.filter(
         currency=OPERATING_CURRENCY,
         allocation__donation__currency=OPERATING_CURRENCY,
-    ).exclude(status=Expense.Status.ANNULLED)
+    ).exclude(status__in=Expense.non_executing_statuses())
     total_donations = sum_money(donations, 'amount')
     total_assigned = sum_money(allocations, 'amount')
     total_executed = sum_money(expenses, 'amount')
@@ -390,21 +502,50 @@ def register_advance(project_id: int, title: str, description: str, evidence=Non
     return project_update
 
 
+def update_project_update(*, update_id: int, project, title: str, description: str, evidence=None) -> ProjectUpdate:
+    """
+    PRE: update_id identifies a DRAFT advance and submitted values are validated form data.
+    POST: atomically locks and updates only that draft's material fields, then returns it.
+    """
+    with transaction.atomic():
+        project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
+        ensure_project_update_is_editable(project_update)
+        project_update.project = project
+        project_update.title = title
+        project_update.description = description
+        project_update.evidence = evidence
+        project_update.full_clean()
+        project_update.save()
+        return project_update
+
+
 def review_project_update(update_id: int, reviewer, status: str, notes: str = '') -> ProjectUpdate:
     """
-    PRE: update_id debe corresponder a un ProjectUpdate existente y status debe ser approved o rejected.
-    POST: Actualiza el hito con estado final de revisión, reviewer, reviewed_at y notas.
+    PRE: update_id exists, reviewer is authenticated, status is APPROVED or
+    REJECTED, current state is PENDING_REVIEW, and rejection includes a reason.
+    POST: atomically locks and transitions the advance exactly once, records
+    reviewer/time and one audit event, preserves material evidence, and returns it.
     """
+    if not getattr(reviewer, 'is_authenticated', False):
+        raise ValidationError({'reviewer': _('La revisión exige un usuario autenticado.')})
     if status not in {ProjectUpdate.Status.APPROVED, ProjectUpdate.Status.REJECTED}:
         raise ValidationError({'status': _('El estado de revisión debe ser aprobado o rechazado.')})
-    project_update = ProjectUpdate.objects.get(pk=update_id)
-    if project_update.status in {ProjectUpdate.Status.APPROVED, ProjectUpdate.Status.REJECTED}:
-        raise ValidationError({'status': _('Un avance ya revisado no puede revisarse nuevamente.')})
-    project_update.status = status
-    project_update.reviewed_by = reviewer
-    project_update.reviewed_at = timezone.now()
-    project_update.review_notes = notes
-    project_update.full_clean()
-    project_update.save()
-    log_review(reviewer, project_update, notes)
-    return project_update
+    clean_notes = notes.strip() if isinstance(notes, str) else ''
+    if status == ProjectUpdate.Status.REJECTED and not clean_notes:
+        raise ValidationError({'review_notes': _('La razón del rechazo es obligatoria.')})
+    with transaction.atomic():
+        project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
+        if project_update.status != ProjectUpdate.Status.PENDING_REVIEW:
+            raise ValidationError(
+                {'status': _('Solo un avance pendiente de revisión puede revisarse.')}
+            )
+        project_update.status = status
+        project_update.reviewed_by = reviewer
+        project_update.reviewed_at = timezone.now()
+        project_update.review_notes = clean_notes
+        project_update.full_clean()
+        project_update.save(
+            update_fields=('status', 'reviewed_by', 'reviewed_at', 'review_notes', 'updated_at')
+        )
+        log_review(reviewer, project_update)
+        return project_update

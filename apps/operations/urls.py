@@ -7,6 +7,11 @@ urlpatterns = [
     path('institutions/', views.InstitutionListView.as_view(), name='institution_list'),
     path('institutions/new/', views.InstitutionCreateView.as_view(), name='institution_create'),
     path('institutions/<int:pk>/', views.InstitutionDetailView.as_view(), name='institution_detail'),
+    path(
+        'institutions/<int:pk>/legal-document/download/',
+        views.InstitutionLegalDocumentDownloadView.as_view(),
+        name='institution_legal_document_download',
+    ),
     path('institutions/<int:pk>/edit/', views.InstitutionUpdateView.as_view(), name='institution_update'),
     path('institutions/<int:pk>/delete/', views.InstitutionDeleteView.as_view(), name='institution_delete'),
     path('projects/', views.ProjectListView.as_view(), name='project_list'),
@@ -22,6 +27,11 @@ urlpatterns = [
     path('updates/', views.ProjectUpdateListView.as_view(), name='project_update_list'),
     path('updates/create/', views.ProjectUpdateCreateView.as_view(), name='project_update_create'),
     path('updates/<int:pk>/', views.ProjectUpdateDetailView.as_view(), name='project_update_detail'),
+    path(
+        'project-updates/<int:pk>/evidence/download/',
+        views.ProjectUpdateEvidenceDownloadView.as_view(),
+        name='project_update_evidence_download',
+    ),
     path('updates/<int:pk>/edit/', views.ProjectUpdateUpdateView.as_view(), name='project_update_update'),
     path('updates/<int:pk>/review/', views.ProjectUpdateReviewView.as_view(), name='project_update_review'),
     path('updates/<int:pk>/delete/', views.ProjectUpdateDeleteView.as_view(), name='project_update_delete'),
@@ -40,6 +50,7 @@ urlpatterns = [
     path('expenses/<int:pk>/', views.ExpenseDetailView.as_view(), name='expense_detail'),
     path('expenses/<int:pk>/edit/', views.ExpenseUpdateView.as_view(), name='expense_update'),
     path('expenses/<int:pk>/delete/', views.ExpenseDeleteView.as_view(), name='expense_delete'),
+    path('expenses/<int:pk>/cancel/', views.ExpenseCancellationView.as_view(), name='expense_cancel'),
     path(
         'expenses/<int:expense_pk>/documents/create/',
         views.SupportingDocumentCreateForExpenseView.as_view(),

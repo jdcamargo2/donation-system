@@ -79,8 +79,6 @@ class CriticalAuditTests(TestCase):
         project.status = Project.Status.ACTIVE
         project.save()
         update = register_advance(project_id=project.pk, title='Avance aprobado', description='Listo.')
-        AuditLog.objects.all().delete()
-
         response = self.client.post(
             reverse('project_update_review', args=[update.pk]),
             data={'status': ProjectUpdate.Status.APPROVED, 'review_notes': 'Aprobado.'},
@@ -101,8 +99,6 @@ class CriticalAuditTests(TestCase):
         project.status = Project.Status.ACTIVE
         project.save()
         update = register_advance(project_id=project.pk, title='Avance rechazado', description='Listo.')
-        AuditLog.objects.all().delete()
-
         response = self.client.post(
             reverse('project_update_review', args=[update.pk]),
             data={'status': ProjectUpdate.Status.REJECTED, 'review_notes': 'Falta evidencia.'},
@@ -164,8 +160,6 @@ class CriticalAuditTests(TestCase):
             title='Soporte para validar',
             document=self.uploaded_file('validate-audit.pdf'),
         )
-        AuditLog.objects.all().delete()
-
         response = self.client.post(
             reverse('expense_update', args=[expense.pk]),
             data={

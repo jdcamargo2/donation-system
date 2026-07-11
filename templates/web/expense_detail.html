@@ -11,8 +11,14 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_expense %}
+        {% if perms.operations.change_expense and object.status != 'validated' and object.status != 'cancelled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+        {% if perms.operations.delete_expense and object.status != 'validated' and object.status != 'cancelled' %}
+            <a class="btn btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
+        {% endif %}
+        {% if perms.operations.change_expense and object.status != 'cancelled' and object.status != 'annulled' %}
+            <a class="btn btn-warning" href="{% url 'expense_cancel' object.pk %}">Anular</a>
         {% endif %}
     </div>
 </div>

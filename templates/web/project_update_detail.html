@@ -10,8 +10,11 @@
         {% if object.status == 'pending_review' and perms.operations.change_projectupdate %}
             <a class="btn btn-outline-primary" href="{% url 'project_update_review' object.pk %}">Revisar avance</a>
         {% endif %}
-        {% if perms.operations.change_projectupdate %}
+        {% if object.status == 'draft' and perms.operations.change_projectupdate %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+        {% if object.status != 'approved' and object.status != 'rejected' and perms.operations.delete_projectupdate %}
+            <a class="btn btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
         {% endif %}
     </div>
 </div>
@@ -40,7 +43,7 @@
             <dt class="col-sm-4">Evidencia</dt>
             <dd class="col-sm-8">
                 {% if object.evidence %}
-                    <a href="{{ object.evidence.url }}">Ver evidencia</a>
+                    <a href="{% url 'project_update_evidence_download' object.pk %}">Ver evidencia</a>
                 {% else %}
                     -
                 {% endif %}

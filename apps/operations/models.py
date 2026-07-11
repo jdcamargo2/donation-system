@@ -89,6 +89,12 @@ class Project(models.Model):
         ordering = ['code']
         verbose_name = _('proyecto')
         verbose_name_plural = _('proyectos')
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(estimated_budget__gte=ZERO_MONEY),
+                name='operations_project_budget_gte_zero',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.code} - {self.name}'
@@ -207,6 +213,12 @@ class Donation(models.Model):
         ordering = ['-received_date', '-created_at']
         verbose_name = _('donación')
         verbose_name_plural = _('donaciones')
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=ZERO_MONEY),
+                name='operations_donation_amount_gt_zero',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.code} - {self.donor}'
@@ -256,6 +268,12 @@ class FundAllocation(models.Model):
         ordering = ['-allocation_date', '-created_at']
         verbose_name = _('asignación de fondos')
         verbose_name_plural = _('asignaciones de fondos')
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=ZERO_MONEY),
+                name='operations_allocation_amount_gt_zero',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.donation.code} -> {self.project.code}: {self.amount}'
@@ -279,7 +297,9 @@ class FundAllocation(models.Model):
 
     @property
     def executed_amount(self):
-        return self.expenses.exclude(status=Expense.Status.ANNULLED).aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
+        return self.expenses.exclude(
+            status__in=Expense.non_executing_statuses()
+        ).aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
 
     @property
     def available_balance(self):
@@ -294,6 +314,7 @@ class Expense(models.Model):
         VALIDATED = 'validated', _('Validado')
         REJECTED = 'rejected', _('Rechazado')
         ANNULLED = 'annulled', _('Anulado')
+        CANCELLED = 'cancelled', _('Anulado')
 
     allocation = models.ForeignKey(FundAllocation, on_delete=models.PROTECT, related_name='expenses')
     expense_date = models.DateField()
@@ -321,18 +342,52 @@ class Expense(models.Model):
         ordering = ['-expense_date', '-created_at']
         verbose_name = _('gasto')
         verbose_name_plural = _('gastos')
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=ZERO_MONEY),
+                name='operations_expense_amount_gt_zero',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.reason} - {self.amount}'
 
     def clean(self):
+        # PRE: amount, allocation, status and validation metadata describe the proposed expense state.
+        # POST: rejects invalid money or validation metadata combinations without persistence.
         errors = {}
         if self.amount <= ZERO_MONEY:
             errors['amount'] = _('El monto del gasto debe ser positivo.')
         if self.allocation_id and self.amount > self.allocation_available_before_this_expense():
             errors['amount'] = _('El monto del gasto excede el saldo disponible de la asignación.')
+        has_validator = self.validated_by_id is not None
+        has_validation_time = self.validated_at is not None
+        if self.status == self.Status.VALIDATED and not (
+            has_validator and has_validation_time
+        ):
+            errors['status'] = _('Un gasto validado exige actor y fecha de validación.')
+        if self.status not in {self.Status.VALIDATED, self.Status.CANCELLED} and (
+            has_validator or has_validation_time
+        ):
+            errors['status'] = _(
+                'Un gasto no finalizado no puede conservar metadatos de validación.'
+            )
+        if self.status == self.Status.CANCELLED and (
+            has_validator != has_validation_time
+        ):
+            errors['status'] = _(
+                'Un gasto anulado debe conservar ambos metadatos de validación o ninguno.'
+            )
         if errors:
             raise ValidationError(errors)
+
+    @classmethod
+    def non_executing_statuses(cls):
+        """
+        PRE: Expense status choices are loaded.
+        POST: returns terminal states excluded from execution totals as a tuple.
+        """
+        return (cls.Status.ANNULLED, cls.Status.CANCELLED)
 
     # PRE: self.allocation is set and self.amount contains the proposed expense amount.
     # POST: returns the allocation balance that can be executed by this expense, including its current amount on updates.
@@ -364,6 +419,44 @@ class SupportingDocument(models.Model):
         return self.title
 
 
+class AuditLogImmutableError(ValidationError):
+    """Raised when application code attempts to mutate audit history."""
+
+
+class AuditLogQuerySet(models.QuerySet):
+    """Append-only query operations for audit history."""
+
+    def update(self, **kwargs):
+        """
+        PRE: queryset targets persisted audit events.
+        POST: always rejects bulk modification without changing audit history.
+        """
+        raise AuditLogImmutableError(_('Los registros de auditoría no se pueden modificar.'))
+
+    def delete(self):
+        """
+        PRE: queryset targets persisted audit events.
+        POST: always rejects bulk deletion without changing audit history.
+        """
+        raise AuditLogImmutableError(_('Los registros de auditoría no se pueden eliminar.'))
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        """
+        PRE: objs contains existing audit events proposed for bulk modification.
+        POST: always rejects bulk modification without changing audit history.
+        """
+        raise AuditLogImmutableError(_('Los registros de auditoría no se pueden modificar en lote.'))
+
+    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False, update_conflicts=False, update_fields=None, unique_fields=None):
+        """
+        PRE: objs contains proposed audit events for a bulk insert.
+        POST: rejects bulk creation because it bypasses per-event creation guarantees.
+        """
+        raise AuditLogImmutableError(
+            _('La auditoría debe registrarse evento por evento mediante el servicio autorizado.')
+        )
+
+
 class AuditLog(models.Model):
     class Action(models.TextChoices):
         CREATED = 'created', _('Creada')
@@ -374,10 +467,11 @@ class AuditLog(models.Model):
         ASSIGNED = 'assigned', _('Asignada')
         EXECUTED = 'executed', _('Ejecutada')
         CLOSED = 'closed', _('Cerrada')
+        EXPENSE_CANCELLED = 'expense_cancelled', _('Gasto anulado')
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name='audit_logs',
@@ -388,6 +482,7 @@ class AuditLog(models.Model):
     entity_label = models.CharField(max_length=220)
     summary = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+    objects = AuditLogQuerySet.as_manager()
 
     class Meta:
         ordering = ['-created_at']
@@ -429,3 +524,20 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f'{self.get_action_display()} {self.display_model_name} {self.entity_label}'
+
+    def save(self, *args, **kwargs):
+        """
+        PRE: self represents a new audit event with all required fields populated.
+        POST: inserts the event once; existing rows cannot be modified.
+        """
+        row_already_exists = self.pk is not None and type(self).objects.filter(pk=self.pk).exists()
+        if not self._state.adding or row_already_exists or kwargs.get('force_update'):
+            raise AuditLogImmutableError(_('Los registros de auditoría existentes no se pueden modificar.'))
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """
+        PRE: self is an audit event targeted for instance deletion.
+        POST: always rejects deletion and preserves the event.
+        """
+        raise AuditLogImmutableError(_('Los registros de auditoría no se pueden eliminar.'))

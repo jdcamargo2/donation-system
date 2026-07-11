@@ -216,6 +216,19 @@ class ProjectUpdateReviewForm(BootstrapFormMixin, forms.Form):
         widget=forms.Textarea,
     )
 
+    def clean(self):
+        """
+        PRE: status and review_notes contain the submitted review decision.
+        POST: requires a non-blank reason for rejection and returns cleaned data.
+        """
+        cleaned_data = super().clean()
+        if (
+            cleaned_data.get('status') == ProjectUpdate.Status.REJECTED
+            and not (cleaned_data.get('review_notes') or '').strip()
+        ):
+            self.add_error('review_notes', _('La razón del rechazo es obligatoria.'))
+        return cleaned_data
+
 
 class DonationForm(BootstrapFormMixin, forms.ModelForm):
     amount = MoneyDecimalField(
@@ -356,8 +369,34 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
             raise ValidationError(_('Un gasto validado debe tener al menos un documento soporte.'))
         return cleaned_data
 
+    def _post_clean(self):
+        # PRE: clean() accepted a candidate expense state from the operational UI.
+        # POST: validates ordinary model fields without materializing VALIDATED
+        # before validate_expense() can atomically attach actor/date metadata.
+        requested_status = self.cleaned_data.get('status')
+        if requested_status != Expense.Status.VALIDATED:
+            return super()._post_clean()
+        persisted_status = Expense.Status.REGISTERED
+        if self.instance.pk:
+            persisted_status = Expense.objects.filter(pk=self.instance.pk).values_list(
+                'status', flat=True
+            ).first() or Expense.Status.REGISTERED
+        self.cleaned_data['status'] = persisted_status
+        try:
+            super()._post_clean()
+        finally:
+            self.cleaned_data['status'] = requested_status
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['status'].choices = [
+            choice
+            for choice in self.fields['status'].choices
+            if choice[0] not in {
+                Expense.Status.ANNULLED,
+                Expense.Status.CANCELLED,
+            }
+        ]
         self.fields['allocation'].queryset = FundAllocation.objects.filter(
             donation__currency=OPERATING_CURRENCY
         )
@@ -385,6 +424,10 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
             'support_title': self.cleaned_data.get('support_title', ''),
             'support_file': self.cleaned_data.get('support_file'),
         }
+        if service_data['status'] == Expense.Status.VALIDATED:
+            # ModelForm.save() has no authenticated actor. Browser views perform
+            # validation explicitly through create/update_expense with request.user.
+            service_data['status'] = Expense.Status.REGISTERED
         if expense.pk:
             expense = update_expense(expense=expense, **service_data)
         else:
@@ -392,6 +435,22 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
         self.instance = expense
         self.save_m2m()
         return expense
+
+
+class ExpenseCancellationForm(BootstrapFormMixin, forms.Form):
+    reason = forms.CharField(
+        label=_('Razón de anulación'),
+        widget=forms.Textarea(attrs={'rows': 4}),
+        strip=True,
+    )
+
+    def clean_reason(self):
+        # PRE: reason is the browser-supplied cancellation explanation.
+        # POST: returns non-empty trimmed text or raises a field validation error.
+        reason = self.cleaned_data['reason'].strip()
+        if not reason:
+            raise ValidationError(_('La razón de anulación es obligatoria.'))
+        return reason
 
 
 class SupportingDocumentForm(BootstrapFormMixin, forms.ModelForm):

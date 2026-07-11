@@ -3,15 +3,22 @@ from django.contrib.auth.models import Group, Permission
 from .roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_PERMISSION_CODENAMES, ROLE_SIGEDON_ADMIN
 
 
+AUDIT_MUTATION_PERMISSION_CODENAMES = frozenset(
+    {'add_auditlog', 'change_auditlog', 'delete_auditlog'}
+)
+
+
 # PRE: Django auth permissions for apps.operations have been created by migrations.
-# POST: creates or updates all SIGEDON operational groups with the configured permission matrix.
+# POST: creates or updates all SIGEDON groups, removing audit mutation permissions idempotently.
 def sync_operation_roles():
     operations_permissions = Permission.objects.filter(content_type__app_label='operations')
     permissions_by_codename = {permission.codename: permission for permission in operations_permissions}
     synced_groups = {}
 
     admin_group, _ = Group.objects.get_or_create(name=ROLE_SIGEDON_ADMIN)
-    admin_group.permissions.set(operations_permissions)
+    admin_group.permissions.set(
+        operations_permissions.exclude(codename__in=AUDIT_MUTATION_PERMISSION_CODENAMES)
+    )
     synced_groups[ROLE_SIGEDON_ADMIN] = admin_group
 
     for role_name, codenames in ROLE_PERMISSION_CODENAMES.items():

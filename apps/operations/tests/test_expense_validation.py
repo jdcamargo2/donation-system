@@ -96,22 +96,9 @@ class ExpenseValidationServiceTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn('Un gasto validado debe tener al menos un documento soporte.', form.non_field_errors())
 
-    def test_expense_admin_routes_valid_transition_through_domain_service(self):
+    def test_expense_admin_rejects_manual_validated_transition(self):
         self.create_support()
         form = ExpenseAdminForm(data=self.admin_form_data(), instance=self.expense)
-        self.assertTrue(form.is_valid(), form.errors)
-        request = RequestFactory().post('/admin/operations/expense/')
-        request.user = self.user
-        model_admin = ExpenseAdmin(Expense, admin.site)
 
-        model_admin.save_model(request, form.save(commit=False), form, change=True)
-
-        self.expense.refresh_from_db()
-        self.assertEqual(self.expense.status, Expense.Status.VALIDATED)
-        self.assertTrue(
-            AuditLog.objects.filter(
-                action=AuditLog.Action.VALIDATED,
-                entity_id=str(self.expense.pk),
-                user=self.user,
-            ).exists()
-        )
+        self.assertFalse(form.is_valid())
+        self.assertIn('actor y fecha de validación', form.errors['status'][0])

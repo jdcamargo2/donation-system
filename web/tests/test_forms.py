@@ -154,7 +154,9 @@ class FormTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         project = form.save()
         self.assertEqual(project.estimated_budget, Decimal('500.00'))
-        self.assertEqual(project.code, 'PRJ-000002')
+        self.assertRegex(project.code, r'^PRJ-\d{6}$')
+        self.assertNotEqual(project.code, self.project.code)
+        self.assertEqual(Project.objects.filter(code=project.code).count(), 1)
 
     def test_donation_form_saves_valid_data(self):
         form = DonationForm(
@@ -175,7 +177,9 @@ class FormTests(TestCase):
         donation = form.save()
         self.assertEqual(donation.amount, Decimal('250.00'))
         self.assertEqual(donation.currency, 'USD')
-        self.assertEqual(donation.code, 'DON-000002')
+        self.assertRegex(donation.code, r'^DON-\d{6}$')
+        self.assertNotEqual(donation.code, self.donation.code)
+        self.assertEqual(Donation.objects.filter(code=donation.code).count(), 1)
 
     def test_money_forms_accept_spanish_thousands_format(self):
         form = DonationForm(

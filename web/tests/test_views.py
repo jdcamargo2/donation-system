@@ -267,8 +267,16 @@ class CrudFlowTests(TestCase):
         self.assertRedirects(allocation_response, reverse('allocation_list'))
         self.assertRedirects(expense_response, reverse('expense_list'))
         self.assertTrue(Institution.objects.filter(name='New Donor').exists())
-        self.assertTrue(Project.objects.filter(code='PRJ-000002').exists())
-        self.assertTrue(Donation.objects.filter(code='DON-000002').exists())
+        created_project = Project.objects.get(name='New Project')
+        created_donation = Donation.objects.get(
+            objective='Apoyar atención de emergencia', amount=Decimal('200.00')
+        )
+        self.assertRegex(created_project.code, r'^PRJ-\d{6}$')
+        self.assertRegex(created_donation.code, r'^DON-\d{6}$')
+        self.assertNotEqual(created_project.code, self.project.code)
+        self.assertNotEqual(created_donation.code, self.donation.code)
+        self.assertEqual(Project.objects.filter(code=created_project.code).count(), 1)
+        self.assertEqual(Donation.objects.filter(code=created_donation.code).count(), 1)
         self.assertTrue(FundAllocation.objects.filter(budget_category='health_psychosocial').exists())
         self.assertTrue(Expense.objects.filter(reason='Purchase').exists())
 
