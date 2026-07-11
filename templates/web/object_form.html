@@ -3,29 +3,51 @@
 {% block title %}{{ title }} - SIGEDON{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0">{{ title }}</h1>
-    <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Formulario operativo</div>
+        <h1>{{ title }}</h1>
+        <p>Complete los datos requeridos. Los campos marcados con asterisco son obligatorios.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Cancelar</a>
 </div>
 
-<div class="card border-0">
+<div class="card border-0 ops-form-card">
     <div class="card-body">
         <form method="post" enctype="multipart/form-data" novalidate>
             {% csrf_token %}
-            {{ form.non_field_errors }}
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <div class="ops-form-section">
+                <div class="ops-form-grid">
             {% for field in form %}
-                <div class="mb-3">
-                    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {% if field.is_hidden %}
+                    {{ field }}
+                {% else %}
+                <div class="ops-form-field ops-field">
+                    <label class="form-label" for="{{ field.id_for_label }}">
+                        {{ field.label }}
+                        {% if field.field.required %}
+                            <span class="required-mark">*</span>
+                        {% endif %}
+                    </label>
                     {{ field }}
                     {% if field.help_text %}
                         <div class="form-text">{{ field.help_text }}</div>
                     {% endif %}
-                    {% for error in field.errors %}
-                        <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% if field.errors %}
+                        <div id="{{ field.id_for_label }}_error" class="text-danger small">{{ field.errors|striptags }}</div>
+                    {% endif %}
                 </div>
+                {% endif %}
             {% endfor %}
-            <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </div>
+            <div class="ops-form-actions">
+                <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Cancelar</a>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </div>
         </form>
     </div>
 </div>
