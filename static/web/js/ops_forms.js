@@ -18,6 +18,18 @@
         return window.AutoNumeric.isManagedByAutoNumeric(input);
     };
 
+    // PRE: value is empty, yyyy-mm-dd, or the visible dd/mm/yyyy operations date.
+    // POST: returns a local Date for valid input or undefined so Flatpickr can reject it.
+    const parseOperationalDate = (value) => {
+        if (!value) return undefined;
+
+        const spanishDate = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
+        const canonicalValue = spanishDate
+            ? `${spanishDate[3]}-${spanishDate[2]}-${spanishDate[1]}`
+            : value;
+        return window.flatpickr.parseDate(canonicalValue, 'Y-m-d');
+    };
+
     const initializeDatepickers = () => {
         const dateInputs = document.querySelectorAll('.datepicker');
         if (!window.flatpickr || !dateInputs.length) return;
@@ -32,6 +44,7 @@
                 locale: spanishLocale,
                 allowInput: true,
                 disableMobile: true,
+                parseDate: parseOperationalDate,
             });
             input.dataset.flatpickrInitialized = 'true';
         });

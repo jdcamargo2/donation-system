@@ -9,6 +9,7 @@ from .models import Donation, Expense, FundAllocation, Institution, Project, Pro
 SELECT_PLACEHOLDER = _('Seleccione una opción')
 MONEY_PLACEHOLDER = _('Ej. 1.500,00')
 DATE_PLACEHOLDER = _('dd/mm/aaaa')
+CANONICAL_DATE_FORMAT = '%Y-%m-%d'
 DATE_INPUT_FORMATS = ['%Y-%m-%d', '%d/%m/%Y']
 
 
@@ -27,18 +28,18 @@ def clean_money_value(value):
     return normalized
 
 
-class DatePickerInput(forms.TextInput):
-    input_type = 'text'
-
-    def __init__(self, attrs=None):
-        default_attrs = {
-            'autocomplete': 'off',
-            'placeholder': DATE_PLACEHOLDER,
-            'class': 'ops-input datepicker',
-        }
-        if attrs:
-            default_attrs.update(attrs)
-        super().__init__(default_attrs)
+# PRE: attrs contains only HTML attributes required by a known operations date field.
+# POST: returns a text date widget that renders its original named input in canonical ISO format.
+def build_date_widget(attrs=None):
+    default_attrs = {
+        'autocomplete': 'off',
+        'placeholder': DATE_PLACEHOLDER,
+        'class': 'ops-input datepicker',
+        'data-date-picker': 'operations',
+    }
+    if attrs:
+        default_attrs.update(attrs)
+    return forms.DateInput(format=CANONICAL_DATE_FORMAT, attrs=default_attrs)
 
 
 class MoneyInput(forms.TextInput):
@@ -135,7 +136,6 @@ class ProjectForm(BootstrapFormMixin, forms.ModelForm):
             'estimated_budget',
             'start_date',
             'end_date',
-            'status',
         ]
         labels = {
             'name': _('Nombre'),
@@ -146,19 +146,14 @@ class ProjectForm(BootstrapFormMixin, forms.ModelForm):
             'estimated_budget': _('Presupuesto estimado'),
             'start_date': _('Fecha de inicio'),
             'end_date': _('Fecha de cierre'),
-            'status': _('Estado'),
         }
         help_texts = {
             'start_date': _('Formato: dd/mm/aaaa.'),
             'end_date': _('Formato: dd/mm/aaaa.'),
-            'status': _(
-                'Use Activo para proyectos en ejecución pública. Planificado, Suspendido, Cerrado y Anulado '
-                'son estados internos.'
-            ),
         }
         widgets = {
-            'start_date': DatePickerInput(),
-            'end_date': DatePickerInput(),
+            'start_date': build_date_widget(),
+            'end_date': build_date_widget(),
         }
 
     def __init__(self, *args, **kwargs):
@@ -246,7 +241,6 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
             'restrictions',
             'commitment_date',
             'received_date',
-            'status',
             'support_reference',
         ]
         labels = {
@@ -257,7 +251,6 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
             'restrictions': _('Restricciones o condiciones'),
             'commitment_date': _('Fecha de compromiso'),
             'received_date': _('Fecha de recepción'),
-            'status': _('Estado'),
             'support_reference': _('Referencia de soporte'),
         }
         help_texts = {
@@ -265,8 +258,8 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
             'received_date': _('Formato: dd/mm/aaaa.'),
         }
         widgets = {
-            'commitment_date': DatePickerInput(),
-            'received_date': DatePickerInput(),
+            'commitment_date': build_date_widget(),
+            'received_date': build_date_widget(),
         }
 
     def save(self, commit=True):
@@ -293,7 +286,6 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
             'amount',
             'responsible_person',
             'allocation_date',
-            'status',
             'notes',
         ]
         labels = {
@@ -303,7 +295,6 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
             'amount': _('Monto'),
             'responsible_person': _('Responsable'),
             'allocation_date': _('Fecha de asignación'),
-            'status': _('Estado'),
             'notes': _('Notas'),
         }
         help_texts = {
@@ -311,7 +302,7 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
             'allocation_date': _('Formato: dd/mm/aaaa.'),
         }
         widgets = {
-            'allocation_date': DatePickerInput(),
+            'allocation_date': build_date_widget(),
         }
 
     def __init__(self, *args, **kwargs):
@@ -357,7 +348,7 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
             'expense_date': _('Formato: dd/mm/aaaa.'),
         }
         widgets = {
-            'expense_date': DatePickerInput(),
+            'expense_date': build_date_widget(),
         }
 
     def clean(self):
