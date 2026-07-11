@@ -60,6 +60,12 @@ class EndToEndMVPFlowTests(TestCase):
         self.assertRedirects(project_response, reverse('project_list'))
         project = Project.objects.get(name='Atención integral E2E')
         self.assertEqual(project.code, 'PRJ-000001')
+        self.assertRedirects(
+            self.client.post(
+                reverse('project_status_transition', args=[project.pk, Project.Status.ACTIVE])
+            ),
+            reverse('project_detail', args=[project.pk]),
+        )
 
         donation_response = self.client.post(
             reverse('donation_create'),
@@ -79,6 +85,12 @@ class EndToEndMVPFlowTests(TestCase):
         self.assertRedirects(donation_response, reverse('donation_list'))
         donation = Donation.objects.get(donor=institution)
         self.assertEqual(donation.code, 'DON-000001')
+        self.assertRedirects(
+            self.client.post(
+                reverse('donation_status_transition', args=[donation.pk, Donation.Status.RECEIVED])
+            ),
+            reverse('donation_detail', args=[donation.pk]),
+        )
 
         allocation_response = self.client.post(
             reverse('allocation_create'),
@@ -95,6 +107,12 @@ class EndToEndMVPFlowTests(TestCase):
         )
         self.assertRedirects(allocation_response, reverse('allocation_list'))
         allocation = FundAllocation.objects.get(donation=donation, project=project)
+        self.assertRedirects(
+            self.client.post(
+                reverse('allocation_status_transition', args=[allocation.pk, FundAllocation.Status.ACTIVE])
+            ),
+            reverse('allocation_detail', args=[allocation.pk]),
+        )
 
         expense_response = self.client.post(
             reverse('expense_create'),

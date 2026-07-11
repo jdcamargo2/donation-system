@@ -172,9 +172,15 @@ if DATABASE_ENGINE == 'sqlite':
     if not DEBUG:
         raise ImproperlyConfigured('SQLite solo está permitido cuando DEBUG=True.')
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": require_env("POSTGRES_DB"),
+            "USER": require_env("POSTGRES_USER"),
+            "PASSWORD": require_env("POSTGRES_PASSWORD"),
+            "HOST": require_env("POSTGRES_HOST"),
+            "PORT": os.getenv("POSTGRES_PORT", "5432"),
+            "CONN_MAX_AGE": int(os.getenv("DATABASE_CONN_MAX_AGE", "0")),
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 elif DATABASE_ENGINE == 'postgresql':
