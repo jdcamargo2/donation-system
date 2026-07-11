@@ -1,8 +1,48 @@
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404
 
+from apps.operations.choices import OPERATING_CURRENCY
 from apps.operations.models import Donation, Expense, FundAllocation, Project, ProjectUpdate, ZERO_MONEY
-from apps.operations.services import get_project_financial_summary
+
+
+# PRE: Operational models are available and project is either a saved Project or None.
+# POST: returns only non-annulled allocations backed by non-annulled donations for active projects.
+def _get_public_allocations(project=None):
+    allocations = FundAllocation.objects.filter(
+        project__status=Project.Status.ACTIVE,
+        donation__currency=OPERATING_CURRENCY,
+    ).exclude(
+        status=FundAllocation.Status.ANNULLED,
+    ).exclude(
+        donation__status=Donation.Status.ANNULLED,
+    )
+    if project is not None:
+        allocations = allocations.filter(project=project)
+    return allocations
+
+
+# PRE: allocations contains the allocation scope approved for public aggregation.
+# POST: returns only non-annulled expenses belonging to that exact public allocation scope.
+def _get_public_expenses(allocations):
+    return Expense.objects.filter(
+        allocation__in=allocations,
+        currency=OPERATING_CURRENCY,
+    ).exclude(status=Expense.Status.ANNULLED)
+
+
+# PRE: project is an active Project returned by get_public_projects().
+# POST: returns project financial metrics calculated only from its public allocation scope.
+def _get_public_project_financial_summary(project):
+    allocations = _get_public_allocations(project)
+    expenses = _get_public_expenses(allocations)
+    funded_amount = allocations.aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
+    executed_amount = expenses.aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
+    return {
+        'estimated_budget': project.estimated_budget,
+        'funded_amount': funded_amount,
+        'executed_amount': executed_amount,
+        'available_amount': max(funded_amount - executed_amount, ZERO_MONEY),
+    }
 
 
 def get_public_projects():
@@ -16,9 +56,12 @@ def get_public_projects():
 def get_approved_project_updates(project):
     """
     PRE: project es una instancia válida de Project.
-    POST: Retorna solo avances con estado approved.
+    POST: Retorna solo avances approved cuando el proyecto continua active.
     """
-    return project.updates.filter(status=ProjectUpdate.Status.APPROVED).order_by('-created_at')
+    return project.updates.filter(
+        status=ProjectUpdate.Status.APPROVED,
+        project__status=Project.Status.ACTIVE,
+    ).order_by('-created_at')
 
 
 def get_recent_project_updates(project, limit: int = 20):
@@ -32,9 +75,12 @@ def get_recent_project_updates(project, limit: int = 20):
 def get_recent_approved_updates(limit: int = 10):
     """
     PRE: limit debe ser un entero positivo.
-    POST: Retorna avances aprobados recientes, sin datos privados de usuarios.
+    POST: Retorna avances aprobados recientes de proyectos activos, sin datos privados de usuarios.
     """
-    return ProjectUpdate.objects.filter(status=ProjectUpdate.Status.APPROVED).select_related('project').order_by('-created_at')[:limit]
+    return ProjectUpdate.objects.filter(
+        status=ProjectUpdate.Status.APPROVED,
+        project__status=Project.Status.ACTIVE,
+    ).select_related('project').order_by('-created_at')[:limit]
 
 
 def get_public_project_detail(project_id: int):
@@ -45,7 +91,7 @@ def get_public_project_detail(project_id: int):
     project = get_object_or_404(get_public_projects(), pk=project_id)
     return {
         'project': project,
-        'financial_summary': get_project_financial_summary(project),
+        'financial_summary': _get_public_project_financial_summary(project),
         'approved_updates': get_recent_project_updates(project),
     }
 
@@ -55,9 +101,11 @@ def get_public_transparency_summary():
     PRE: Los modelos operativos están migrados.
     POST: Retorna métricas agregadas públicas sin datos privados.
     """
-    donations = Donation.objects.exclude(status=Donation.Status.ANNULLED)
-    allocations = FundAllocation.objects.exclude(status=FundAllocation.Status.ANNULLED)
-    expenses = Expense.objects.exclude(status=Expense.Status.ANNULLED)
+    allocations = _get_public_allocations()
+    expenses = _get_public_expenses(allocations)
+    donations = Donation.objects.filter(
+        pk__in=allocations.values('donation_id'),
+    ).exclude(status=Donation.Status.ANNULLED)
     total_received = donations.aggregate(total=Sum('amount', default=ZERO_MONEY))['total'] or ZERO_MONEY
     total_assigned = allocations.aggregate(total=Sum('amount', default=ZERO_MONEY))['total'] or ZERO_MONEY
     total_executed = expenses.aggregate(total=Sum('amount', default=ZERO_MONEY))['total'] or ZERO_MONEY
@@ -66,6 +114,9 @@ def get_public_transparency_summary():
         'total_received': total_received,
         'total_assigned': total_assigned,
         'total_executed': total_executed,
-        'available_balance': max(total_received - total_assigned, ZERO_MONEY),
-        'approved_update_count': ProjectUpdate.objects.filter(status=ProjectUpdate.Status.APPROVED).count(),
+        'available_balance': max(total_assigned - total_executed, ZERO_MONEY),
+        'approved_update_count': ProjectUpdate.objects.filter(
+            status=ProjectUpdate.Status.APPROVED,
+            project__status=Project.Status.ACTIVE,
+        ).count(),
     }
