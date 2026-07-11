@@ -640,7 +640,7 @@ class FundAllocationListView(OperationsPermissionRequiredMixin, RouteContextMixi
     page_title = _('Asignaciones de fondos')
 
     def get_queryset(self):
-        return FundAllocation.objects.select_related('donation', 'project')
+        return FundAllocation.objects.select_related('donation__donor', 'project')
 
 
 class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
@@ -741,7 +741,10 @@ class ExpenseListView(OperationsPermissionRequiredMixin, RouteContextMixin, List
     page_title = _('Gastos')
 
     def get_queryset(self):
-        return Expense.objects.select_related('allocation', 'allocation__project')
+        return Expense.objects.select_related(
+            'allocation__donation__donor',
+            'allocation__project',
+        )
 
 
 class ExpenseDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailView):

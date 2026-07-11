@@ -33,3 +33,6 @@ private_media/
 # Sistema
 .DS_Store
 Thumbs.db
+
+backups/db.sqlite3.pre-postgresql
+backups/*.sqlite3*

@@ -7,7 +7,12 @@
     <div>
         <div class="ops-kicker">Asignación presupuestaria</div>
         <h1>Asignación de fondos</h1>
-        <p>{{ object.donation.code }} → {{ object.project.code }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+        <p>
+            {{ object.donation.donor.name }} → {{ object.project.name }}
+            · <span class="badge text-bg-light">{{ object.donation.code }}</span>
+            <span class="badge text-bg-light">{{ object.project.code }}</span>
+            · <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+        </p>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
@@ -52,9 +57,15 @@
                 <h2 class="h5 mb-3">Detalle de la asignación</h2>
                 <dl class="row mb-0">
                     <dt class="col-sm-4">Donación origen</dt>
-                    <dd class="col-sm-8"><a href="{% url 'donation_detail' object.donation.pk %}">{{ object.donation }}</a></dd>
+                    <dd class="col-sm-8">
+                        <a href="{% url 'donation_detail' object.donation.pk %}">{{ object.donation.donor.name }}</a>
+                        <span class="small text-muted">{{ object.donation.code }}</span>
+                    </dd>
                     <dt class="col-sm-4">Proyecto destino</dt>
-                    <dd class="col-sm-8"><a href="{% url 'project_detail' object.project.pk %}">{{ object.project }}</a></dd>
+                    <dd class="col-sm-8">
+                        <a href="{% url 'project_detail' object.project.pk %}">{{ object.project.name }}</a>
+                        <span class="small text-muted">{{ object.project.code }}</span>
+                    </dd>
                     <dt class="col-sm-4">Categoría presupuestaria</dt>
                     <dd class="col-sm-8">{{ object.get_budget_category_display }}</dd>
                     <dt class="col-sm-4">Responsable</dt>

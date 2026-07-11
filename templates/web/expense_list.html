@@ -19,7 +19,7 @@
         <table class="table table-hover align-middle mb-0">
             <thead>
                 <tr>
-                    <th>Asignación</th>
+                    <th>Gasto</th>
                     <th>Proyecto</th>
                     <th>Monto</th>
                     <th>Categoría</th>
@@ -32,8 +32,16 @@
             <tbody>
                 {% for expense in objects %}
                     <tr>
-                        <td><a class="fw-semibold text-decoration-none" href="{% url 'allocation_detail' expense.allocation.pk %}">{{ expense.allocation.donation.code }}</a></td>
-                        <td>{{ expense.allocation.project }}</td>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url 'expense_detail' expense.pk %}">
+                                {{ expense.reason|default:expense.provider_or_recipient }}
+                            </a>
+                            <div class="small text-muted">{{ expense.provider_or_recipient }} · {{ expense.allocation.donation.code }}</div>
+                        </td>
+                        <td>
+                            {{ expense.allocation.project.name }}
+                            <div class="small text-muted">{{ expense.allocation.project.code }} · Asignación #{{ expense.allocation.pk }}</div>
+                        </td>
                         <td class="ops-money">{{ expense.amount }} {{ expense.currency }}</td>
                         <td>{{ expense.get_category_display }}</td>
                         <td><span class="badge ops-status-badge">{{ expense.get_status_display }}</span></td>

@@ -29,7 +29,21 @@
             <div class="card-body">
                 <dl class="row mb-0">
                     <dt class="col-sm-4">Asignación</dt>
-                    <dd class="col-sm-8">{{ object.allocation }}</dd>
+                    <dd class="col-sm-8">
+                        <a href="{% url 'allocation_detail' object.allocation.pk %}">
+                            {{ object.allocation.project.name }} · Asignación #{{ object.allocation.pk }}
+                        </a>
+                    </dd>
+                    <dt class="col-sm-4">Donación origen</dt>
+                    <dd class="col-sm-8">
+                        <a href="{% url 'donation_detail' object.allocation.donation.pk %}">{{ object.allocation.donation.donor.name }}</a>
+                        <span class="small text-muted">{{ object.allocation.donation.code }}</span>
+                    </dd>
+                    <dt class="col-sm-4">Proyecto</dt>
+                    <dd class="col-sm-8">
+                        <a href="{% url 'project_detail' object.allocation.project.pk %}">{{ object.allocation.project.name }}</a>
+                        <span class="small text-muted">{{ object.allocation.project.code }}</span>
+                    </dd>
                     <dt class="col-sm-4">Fecha</dt>
                     <dd class="col-sm-8">{{ object.expense_date }}</dd>
                     <dt class="col-sm-4">Monto</dt>

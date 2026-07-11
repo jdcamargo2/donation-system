@@ -31,8 +31,16 @@
             <tbody>
                 {% for allocation in objects %}
                     <tr>
-                        <td><a class="fw-semibold text-decoration-none" href="{% url 'donation_detail' allocation.donation.pk %}">{{ allocation.donation.code }}</a></td>
-                        <td>{{ allocation.project }}</td>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url 'allocation_detail' allocation.pk %}">
+                                {{ allocation.donation.donor.name }}
+                            </a>
+                            <div class="small text-muted">{{ allocation.donation.code }}</div>
+                        </td>
+                        <td>
+                            {{ allocation.project.name }}
+                            <div class="small text-muted">{{ allocation.project.code }}</div>
+                        </td>
                         <td class="ops-money">{{ allocation.amount }}</td>
                         <td class="ops-money">{{ allocation.executed_amount }}</td>
                         <td class="ops-money">{{ allocation.available_balance }}</td>
