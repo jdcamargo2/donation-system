@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.utils.text import capfirst
 
+from apps.operations.choices import OPERATING_CURRENCY
 from apps.operations.models import (
     AuditLog,
     Donation,
@@ -20,7 +21,7 @@ from apps.operations.models import (
 )
 from apps.operations.role_services import sync_operation_roles
 from apps.operations.roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_SIGEDON_ADMIN
-from apps.operations.services import log_action, review_project_update
+from apps.operations.services import log_action, review_project_update, validate_expense
 
 
 DEMO_DATE = date(2026, 7, 8)
@@ -39,8 +40,9 @@ class Command(BaseCommand):
         allocation = self.create_allocation(donation, project_active)
         expense = self.create_expense(allocation, user)
         self.create_supporting_document(expense)
+        expense = validate_expense(expense.pk, user)
         self.create_project_updates(project_active, project_planned, user)
-        self.create_demo_audit(user, donation, allocation, expense)
+        self.create_demo_audit(user, donation, allocation)
 
         self.stdout.write(self.style.SUCCESS('Datos demo de SIGEDON creados o actualizados correctamente.'))
         self.stdout.write(f'Usuario demo: {user.username}')
@@ -164,7 +166,7 @@ class Command(BaseCommand):
                 'donor': donor,
                 'donation_type': 'food',
                 'amount': Decimal('3000.00'),
-                'currency': 'USD',
+                'currency': OPERATING_CURRENCY,
                 'objective': 'Financiar atención alimentaria del proyecto demo.',
                 'commitment_date': DEMO_DATE,
                 'received_date': DEMO_DATE,
@@ -197,13 +199,11 @@ class Command(BaseCommand):
                 'expense_date': DEMO_DATE,
                 'category': 'food',
                 'amount': Decimal('450.00'),
-                'currency': 'USD',
+                'currency': OPERATING_CURRENCY,
                 'provider_or_recipient': 'Proveedor Demo',
                 'payment_method': 'bank_transfer',
                 'description': 'Gasto demo con documento soporte.',
-                'status': Expense.Status.VALIDATED,
-                'validated_by': user,
-                'validated_at': timezone.now(),
+                'status': Expense.Status.REGISTERED,
             },
         )
         if created:
@@ -254,11 +254,10 @@ class Command(BaseCommand):
                 'review_notes': 'Evidencia insuficiente para demo.',
             },
         )
-    def create_demo_audit(self, user, donation, allocation, expense):
+    def create_demo_audit(self, user, donation, allocation):
         events = [
             (AuditLog.Action.CREATED, donation, 'Donación demo creada.'),
             (AuditLog.Action.ASSIGNED, allocation, 'Asignación demo registrada.'),
-            (AuditLog.Action.VALIDATED, expense, 'Gasto demo validado.'),
         ]
         for action, instance, summary in events:
             AuditLog.objects.get_or_create(

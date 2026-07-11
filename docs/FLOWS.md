@@ -16,6 +16,9 @@ Reglas centrales:
 - Un gasto registra ejecucion real de fondos.
 - Un gasto pertenece a una asignacion.
 - Los saldos disponibles no deben ser negativos.
+- USD es la unica moneda operativa del MVP.
+- Formularios, servicios, dashboard y portal publico no mezclan monedas ni realizan conversiones.
+- Registros historicos no USD se excluyen de metricas hasta que exista una decision explicita de saneamiento de datos.
 
 ## Flujo de gasto
 

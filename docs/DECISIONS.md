@@ -33,3 +33,19 @@ Consequences:
 - Project keeps its location field.
 - City/country dependent dropdown is out of scope.
 - Future territorial tracking should be modeled through projects, offices, branches, or operational areas if needed.
+
+### 2026-07-10 — USD is the single operating currency
+
+Decision:
+Use USD as the only currency accepted by SIGEDON operational forms, services, admin workflows, dashboards, and public financial summaries.
+
+Reason:
+The MVP does not provide exchange rates, conversion dates, revaluation, or multi-currency accounting. Adding values from different currencies would produce misleading balances and reports.
+
+Consequences:
+- Donation and expense records created through supported workflows always store `USD`.
+- Fund allocations can only use donations recorded in USD.
+- Financial services reject any explicit currency other than USD.
+- Dashboard and public metrics exclude legacy non-USD records instead of converting them.
+- Historical model choices remain temporarily for schema compatibility, so this decision does not require a migration.
+- Currency conversion and multi-currency accounting remain out of scope.
