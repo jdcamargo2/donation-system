@@ -44,6 +44,14 @@ class MvpWorkflowRegressionTests(TestCase):
         self.assertEqual(project_form.status_code, 200)
         self.assertNotContains(project_form, 'name="code"')
         self.assertContains(project_form, 'name="estimated_budget"')
+        self.assertContains(project_form, 'required-mark')
+        self.assertContains(project_form, 'inputmode="decimal"')
+        self.assertContains(project_form, 'class="ops-input datepicker form-control"')
+        self.assertContains(project_form, 'placeholder="dd/mm/aaaa"')
+        self.assertNotContains(project_form, 'type="number"')
+        self.assertNotContains(project_form, 'type="date"')
+        self.assertNotContains(project_form, 'value="0.00"')
+        self.assertNotContains(project_form, '---------')
 
         project_response = self.client.post(
             reverse('project_create'),
@@ -69,15 +77,22 @@ class MvpWorkflowRegressionTests(TestCase):
         self.assertContains(donation_form, 'Nueva donación')
         self.assertContains(donation_form, 'Donante')
         self.assertContains(donation_form, 'Monto')
-        self.assertContains(donation_form, 'Moneda')
+        self.assertContains(donation_form, 'USD')
         self.assertContains(donation_form, 'Estado')
         self.assertContains(donation_form, 'Tipo de donación')
         self.assertContains(donation_form, 'name="donor"')
         self.assertContains(donation_form, 'Workflow Donor')
         self.assertContains(donation_form, 'name="amount"')
-        self.assertContains(donation_form, 'name="currency"')
+        self.assertContains(donation_form, 'class="ops-input money-input form-control"')
+        self.assertContains(donation_form, 'placeholder="Ej. 1.500,00"')
+        self.assertContains(donation_form, 'class="ops-input datepicker form-control"')
+        self.assertNotContains(donation_form, 'type="date"')
+        self.assertNotContains(donation_form, 'name="currency"')
         self.assertContains(donation_form, 'name="status"')
         self.assertContains(donation_form, 'name="donation_type"')
+        self.assertContains(donation_form, 'Dinero')
+        self.assertContains(donation_form, 'Seleccione una opción')
+        self.assertNotContains(donation_form, '---------')
 
         donation_amount = Decimal('1234.56')
         donation_response = self.client.post(
@@ -86,7 +101,6 @@ class MvpWorkflowRegressionTests(TestCase):
                 'donor': donor.pk,
                 'donation_type': 'goods',
                 'amount': str(donation_amount),
-                'currency': 'USD',
                 'objective': 'Workflow donation',
                 'restrictions': '',
                 'commitment_date': '',

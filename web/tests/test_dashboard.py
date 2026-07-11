@@ -111,6 +111,38 @@ class DashboardTests(TestCase):
         self.assertEqual(response.context['total_executed'], Decimal('15.00'))
         self.assertEqual(response.context['available_balance'], Decimal('40.00'))
 
+    def test_dashboard_excludes_legacy_non_usd_records(self):
+        usd_donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
+        usd_allocation = create_allocation(
+            donation=usd_donation,
+            project=self.project,
+            amount=Decimal('60.00'),
+        )
+        create_expense(allocation=usd_allocation, amount=Decimal('15.00'))
+        legacy_donation = create_donation(
+            code='DON-EUR-LEGACY',
+            donor=self.donor,
+            amount=Decimal('900.00'),
+        )
+        legacy_donation.currency = 'EUR'
+        legacy_donation.save(update_fields=['currency'])
+        legacy_allocation = create_allocation(
+            donation=legacy_donation,
+            project=self.project,
+            amount=Decimal('500.00'),
+        )
+        legacy_expense = create_expense(allocation=legacy_allocation, amount=Decimal('200.00'))
+        legacy_expense.currency = 'EUR'
+        legacy_expense.save(update_fields=['currency'])
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(response.context['total_donations'], Decimal('100.00'))
+        self.assertEqual(response.context['total_assigned'], Decimal('60.00'))
+        self.assertEqual(response.context['total_executed'], Decimal('15.00'))
+        self.assertEqual(response.context['available_balance'], Decimal('40.00'))
+
     def test_dashboard_renders_legacy_audit_model_names_in_spanish(self):
         AuditLog.objects.create(
             action=AuditLog.Action.UPDATED,
