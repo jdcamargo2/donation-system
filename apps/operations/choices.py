@@ -1,6 +1,9 @@
 from django.utils.translation import gettext_lazy as _
 
 
+OPERATING_CURRENCY = 'USD'
+
+
 INSTITUTION_TYPE_CHOICES = [
     ('archdiocese', _('Arquidiócesis')),
     ('parish', _('Parroquia')),
@@ -13,6 +16,7 @@ INSTITUTION_TYPE_CHOICES = [
 ]
 
 DONATION_TYPE_CHOICES = [
+    ('money', _('Dinero')),
     ('goods', _('Bienes')),
     ('kits', _('Kits')),
     ('food', _('Alimentos')),
@@ -23,8 +27,11 @@ DONATION_TYPE_CHOICES = [
     ('materials', _('Materiales')),
 ]
 
-CURRENCY_CHOICES = [
-    ('USD', _('Dólar estadounidense')),
+OPERATING_CURRENCY_CHOICES = [
+    (OPERATING_CURRENCY, _('Dólar estadounidense')),
+]
+
+CURRENCY_CHOICES = OPERATING_CURRENCY_CHOICES + [
     ('EUR', _('Euro')),
     ('VES', _('Bolívar venezolano')),
     ('COP', _('Peso colombiano')),
@@ -52,7 +59,6 @@ EXPENSE_CATEGORY_CHOICES = [
 PAYMENT_METHOD_CHOICES = [
     ('bank_transfer', _('Transferencia bancaria')),
     ('cash', _('Efectivo')),
-    ('mobile_payment', _('Pago móvil')),
     ('card', _('Tarjeta')),
     ('check', _('Cheque')),
     ('other', _('Otro')),

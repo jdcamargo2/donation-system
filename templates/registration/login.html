@@ -3,24 +3,52 @@
 {% block title %}Iniciar sesión - SIGEDON{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-5 col-lg-4">
-        <div class="card">
+<div class="login-screen ops-login-shell">
+    <div class="login-shell ops-login-card-wrap">
+        <section class="login-brand-panel" aria-label="Identidad SIGEDON">
+            <div class="login-brand">
+                <span class="login-badge sigedon-brand-mark">S</span>
+                <div>
+                    <div class="ops-kicker">Panel operativo interno</div>
+                    <h1>SIGEDON</h1>
+                </div>
+            </div>
+            <p>
+                Sistema Integral de Gestión, Seguimiento y Trazabilidad de Donaciones.
+            </p>
+            <div class="login-security-note">
+                <i class="bi bi-shield-lock" aria-hidden="true"></i>
+                <span>Acceso exclusivo para personal autorizado.</span>
+            </div>
+        </section>
+
+        <div class="card login-card ops-login-card">
             <div class="card-body">
-                <h1 class="h4 mb-3">Iniciar sesión</h1>
+                <div class="login-card-header">
+                    <span class="login-card-kicker">Ingreso seguro</span>
+                    <h2 class="login-title">Iniciar sesión</h2>
+                    <p class="login-subtitle">Acceda con sus credenciales para ingresar al panel privado.</p>
+                </div>
                 <form method="post">
                     {% csrf_token %}
-                    {{ form.non_field_errors }}
-                    <div class="mb-3">
-                        <label class="form-label" for="{{ form.username.id_for_label }}">Usuario</label>
-                        <input type="text" name="{{ form.username.html_name }}" class="form-control" id="{{ form.username.id_for_label }}" required>
+                    {% if form.non_field_errors %}
+                        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                    {% endif %}
+                    <div class="login-field mb-3">
+                        <label class="form-label" for="{{ form.username.id_for_label }}">
+                            Usuario <span class="required-mark">*</span>
+                        </label>
+                        <input type="text" name="{{ form.username.html_name }}" class="form-control" id="{{ form.username.id_for_label }}" autocomplete="username" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="{{ form.password.id_for_label }}">Contraseña</label>
-                        <input type="password" name="{{ form.password.html_name }}" class="form-control" id="{{ form.password.id_for_label }}" required>
+                    <div class="login-field mb-3">
+                        <label class="form-label" for="{{ form.password.id_for_label }}">
+                            Contraseña <span class="required-mark">*</span>
+                        </label>
+                        <input type="password" name="{{ form.password.html_name }}" class="form-control" id="{{ form.password.id_for_label }}" autocomplete="current-password" required>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100">Iniciar sesión</button>
+                    <button type="submit" class="btn btn-primary login-submit w-100">Iniciar sesión</button>
                 </form>
+                <p class="login-note">Si no puede acceder, contacte al administrador SIGEDON de su institución.</p>
             </div>
         </div>
     </div>

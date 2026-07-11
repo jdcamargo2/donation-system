@@ -14,31 +14,49 @@
 <div class="card border-0 mb-4 ops-action-panel">
     <div class="card-body">
         <h2 class="h5 mb-3">Accesos rápidos</h2>
-        <div class="d-flex flex-wrap gap-2">
-            {% if perms.operations.view_project %}
-                <a class="btn btn-outline-primary" href="{% url 'project_list' %}">Ver proyectos</a>
-            {% endif %}
-            {% if perms.operations.add_project %}
-                <a class="btn btn-primary" href="{% url 'project_create' %}">Crear proyecto</a>
-            {% endif %}
-            {% if perms.operations.add_institution %}
-                <a class="btn btn-outline-primary" href="{% url 'institution_create' %}">Crear institución</a>
-            {% endif %}
-            {% if perms.operations.add_donation %}
-                <a class="btn btn-outline-primary" href="{% url 'donation_create' %}">Crear donación</a>
-            {% endif %}
-            {% if perms.operations.add_fundallocation %}
-                <a class="btn btn-outline-primary" href="{% url 'allocation_create' %}">Crear asignación</a>
-            {% endif %}
-            {% if perms.operations.add_expense %}
-                <a class="btn btn-outline-primary" href="{% url 'expense_create' %}">Crear gasto</a>
-            {% endif %}
-            {% if perms.operations.add_projectupdate %}
-                <a class="btn btn-outline-primary" href="{% url 'project_update_list' %}">Registrar avances</a>
-            {% endif %}
-            {% if perms.operations.view_auditlog %}
-                <a class="btn btn-outline-secondary" href="{% url 'audit_log_list' %}">Ver auditoría</a>
-            {% endif %}
+        <div class="row g-3 ops-action-grid">
+            <div class="col-lg-4">
+                <div class="ops-action-group">
+                    <div class="ops-action-group-title">Consulta</div>
+                    {% if perms.operations.view_project %}
+                        <a class="btn btn-outline-primary" href="{% url 'project_list' %}">Ver proyectos</a>
+                    {% endif %}
+                    {% if perms.operations.view_donation %}
+                        <a class="btn btn-outline-primary" href="{% url 'donation_list' %}">Consultar donaciones</a>
+                    {% endif %}
+                    {% if perms.operations.view_expense %}
+                        <a class="btn btn-outline-primary" href="{% url 'expense_list' %}">Consultar gastos</a>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="ops-action-group">
+                    <div class="ops-action-group-title">Registro</div>
+                    {% if perms.operations.add_projectupdate %}
+                        <a class="btn btn-primary" href="{% url 'project_update_list' %}">Registrar avances</a>
+                    {% endif %}
+                    {% if perms.operations.add_project %}
+                        <a class="btn btn-outline-primary" href="{% url 'project_create' %}">Crear proyecto</a>
+                    {% endif %}
+                    {% if perms.operations.add_expense %}
+                        <a class="btn btn-outline-primary" href="{% url 'expense_create' %}">Crear gasto</a>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="ops-action-group">
+                    <div class="ops-action-group-title">Auditoría</div>
+                    {% if perms.operations.view_auditlog %}
+                        <a class="btn btn-outline-secondary" href="{% url 'audit_log_list' %}">Ver auditoría</a>
+                    {% endif %}
+                    {% if perms.operations.add_donation %}
+                        <a class="btn btn-outline-primary" href="{% url 'donation_create' %}">Crear donación</a>
+                    {% endif %}
+                    {% if perms.operations.add_fundallocation %}
+                        <a class="btn btn-outline-primary" href="{% url 'allocation_create' %}">Crear asignación</a>
+                    {% endif %}
+                </div>
+            </div>
         </div>
     </div>
 </div>

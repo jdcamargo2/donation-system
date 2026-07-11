@@ -1,4 +1,5 @@
 from decimal import Decimal
+from pathlib import Path
 
 from django.test import TestCase
 from django.urls import reverse
@@ -85,6 +86,96 @@ class AuthenticatedViewTests(TestCase):
                 response = self.client.get(url)
                 self.assertContains(response, 'ops-table-card')
                 self.assertContains(response, 'class="table-responsive"')
+
+    def test_login_uses_refined_internal_visual_system(self):
+        response = self.client.get(reverse('login'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'registration/login.html')
+        self.assertContains(response, 'login-screen')
+        self.assertContains(response, 'login-card')
+        self.assertContains(response, 'ops-login-shell')
+        self.assertContains(response, 'SIGEDON')
+        self.assertContains(response, 'Iniciar sesión')
+        self.assertContains(response, 'Panel operativo interno')
+        self.assertContains(response, 'Acceso exclusivo para personal autorizado.')
+        self.assertContains(response, 'required-mark')
+        self.assertNotContains(response, 'public_portal/css/public_portal.css')
+
+    def test_login_authentication_still_works(self):
+        response = self.client.post(
+            reverse('login'),
+            data={'username': self.user.username, 'password': 'pass-12345'},
+        )
+
+        self.assertRedirects(response, reverse('dashboard'))
+
+    def test_login_styles_are_defined_only_in_internal_stylesheet(self):
+        source = Path('static/web/css/sigedon.css').read_text()
+        public_source = Path('templates/public_portal/public_base.html').read_text()
+
+        self.assertIn('.login-screen', source)
+        self.assertIn('min-height: 100vh;', source)
+        self.assertIn('.login-card', source)
+        self.assertIn('.login-brand-panel', source)
+        self.assertNotIn('login-screen', public_source)
+        self.assertNotIn('login-card', public_source)
+
+    def test_internal_base_does_not_load_public_assets(self):
+        source = Path('templates/base.html').read_text()
+
+        self.assertIn("web/css/sigedon.css", source)
+        self.assertNotIn("public_portal/css/public_portal.css", source)
+
+    def test_internal_base_loads_local_form_assets(self):
+        source = Path('templates/base.html').read_text()
+
+        self.assertIn("vendor/flatpickr/flatpickr.min.css", source)
+        self.assertIn("vendor/flatpickr/flatpickr.min.js", source)
+        self.assertIn("vendor/flatpickr/l10n/es.js", source)
+        self.assertIn("vendor/autonumeric/autoNumeric.min.js", source)
+        self.assertIn("web/js/ops_forms.js", source)
+        self.assertLess(source.index("vendor/autonumeric/autoNumeric.min.js"), source.index("web/js/ops_forms.js"))
+        self.assertNotIn("cdn.jsdelivr.net/npm/flatpickr", source)
+        self.assertNotIn("cdn.jsdelivr.net/npm/autonumeric", source)
+        self.assertNotIn("cdn.jsdelivr.net/npm/autoNumeric", source)
+
+    def test_internal_form_javascript_initializes_datepicker_and_money_inputs(self):
+        source = Path('static/web/js/ops_forms.js').read_text()
+
+        self.assertIn("document.addEventListener('DOMContentLoaded'", source)
+        self.assertIn("document.querySelectorAll('.datepicker')", source)
+        self.assertIn("document.querySelectorAll('.money-input')", source)
+        self.assertIn("dateFormat: 'Y-m-d'", source)
+        self.assertIn("altFormat: 'd/m/Y'", source)
+        self.assertIn('new window.AutoNumeric(input, moneyOptions)', source)
+        self.assertIn('window.AutoNumeric.multiple([input], moneyOptions)', source)
+        self.assertIn('isManagedByAutoNumeric', source)
+        self.assertIn("input.dataset.autonumericInitialized", source)
+        self.assertIn("digitGroupSeparator: '.'", source)
+        self.assertIn("decimalCharacter: ','", source)
+        self.assertIn("unformatOnSubmit: true", source)
+        self.assertIn("emptyInputBehavior: 'null'", source)
+
+    def test_internal_css_compacts_forms_and_hides_number_spinners(self):
+        source = Path('static/web/css/sigedon.css').read_text()
+
+        self.assertIn('.ops-form-grid', source)
+        self.assertIn('align-items: start;', source)
+        self.assertIn('gap: 0.95rem 1.15rem;', source)
+        self.assertIn('.ops-form-card textarea', source)
+        self.assertIn('min-height: 130px;', source)
+        self.assertIn('max-height: 240px;', source)
+        self.assertIn('.ops-field:has(.ops-textarea)', source)
+        self.assertIn('grid-column: 1 / -1;', source)
+        self.assertIn('input[type="number"]::-webkit-inner-spin-button', source)
+        self.assertIn('-moz-appearance: textfield;', source)
+
+    def test_generic_form_template_marks_fields_for_compact_grid_layout(self):
+        source = Path('templates/web/object_form.html').read_text()
+
+        self.assertIn('ops-form-grid', source)
+        self.assertIn('ops-form-field ops-field', source)
 
 
 class CrudFlowTests(TestCase):

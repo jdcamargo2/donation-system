@@ -26,6 +26,25 @@ SECRET_KEY = SECRET_KEY = os.environ.get(
     'django-insecure-dev-fallback-key-nunca-usar-esto-en-produccion'
 )
 
+KOBO_BASE_URL = os.getenv("KOBO_BASE_URL", "")
+KOBO_API_TOKEN = os.getenv("KOBO_API_TOKEN", "")
+KOBO_WEBHOOK_SECRET = os.getenv("KOBO_WEBHOOK_SECRET", "")
+KOBO_FICHA_01_ASSET_UID = os.getenv("KOBO_FICHA_01_ASSET_UID", "")
+KOBO_ENABLED = os.getenv("KOBO_ENABLED", "False").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+KOBO_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv("KOBO_REQUEST_TIMEOUT_SECONDS", "15")
+)
+
+KOBO_MAX_ATTACHMENT_BYTES = int(
+    os.getenv("KOBO_MAX_ATTACHMENT_BYTES", "10485760")
+)
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
@@ -126,6 +145,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 
 MEDIA_URL = 'media/'

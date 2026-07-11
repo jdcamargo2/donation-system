@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Proyectos - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Cartera operativa</div>
+        <h1>Proyectos</h1>
+        <p>Seguimiento interno de proyectos, estado presupuestario y ejecución.</p>
+    </div>
+    {% if perms.operations.add_project %}
+        <a class="btn btn-primary" href="{% url create_url_name %}">Nuevo proyecto</a>
+    {% endif %}
+</div>
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Código</th>
+                    <th>Nombre</th>
+                    <th>Estado</th>
+                    <th>Presupuesto</th>
+                    <th>Inicio</th>
+                    <th>Cierre</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for project in objects %}
+                    <tr>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url detail_url_name project.pk %}">
+                                {{ project.code }}
+                            </a>
+                        </td>
+                        <td>
+                            <div class="fw-semibold">{{ project.name }}</div>
+                            <div class="small text-muted">{{ project.location|default:"Sin ubicación" }}</div>
+                        </td>
+                        <td><span class="badge ops-status-badge">{{ project.get_status_display }}</span></td>
+                        <td class="ops-money">{{ project.estimated_budget }} USD</td>
+                        <td>{{ project.start_date|default:"-" }}</td>
+                        <td>{{ project.end_date|default:"-" }}</td>
+                        <td class="text-end ops-row-actions">
+                            {% if perms.operations.change_project %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name project.pk %}">Editar</a>
+                            {% endif %}
+                            {% if perms.operations.delete_project %}
+                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name project.pk %}">Eliminar</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-muted">No hay proyectos registrados.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -2,12 +2,14 @@ import shutil
 import tempfile
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group, Permission
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from apps.operations.models import Expense, SupportingDocument
+from apps.operations.role_services import sync_operation_roles
+from apps.operations.roles import ROLE_EXTERNAL_AUDITOR
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_expense
 
 
@@ -75,7 +77,7 @@ class SupportingDocumentWorkflowTests(TestCase):
         self.assertRedirects(response, reverse('expense_detail', args=[self.expense.pk]))
 
     def test_expense_detail_shows_supporting_documents(self):
-        SupportingDocument.objects.create(
+        document = SupportingDocument.objects.create(
             expense=self.expense,
             title='Recibo visible',
             document=self.uploaded_file('receipt.pdf'),
@@ -90,6 +92,51 @@ class SupportingDocumentWorkflowTests(TestCase):
         self.assertContains(response, 'Recibo visible')
         self.assertContains(response, 'Nota visible del soporte.')
         self.assertContains(response, 'Eliminar')
+        self.assertContains(response, reverse('supporting_document_download', args=[document.pk]))
+        self.assertNotContains(response, document.document.url)
+
+    def test_anonymous_user_cannot_download_supporting_document(self):
+        document = SupportingDocument.objects.create(
+            expense=self.expense,
+            title='Soporte privado',
+            document=self.uploaded_file('private.pdf'),
+        )
+
+        response = self.client.get(reverse('supporting_document_download', args=[document.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_user_without_permission_cannot_download_supporting_document(self):
+        document = SupportingDocument.objects.create(
+            expense=self.expense,
+            title='Soporte restringido',
+            document=self.uploaded_file('restricted.pdf'),
+        )
+        limited_user = get_user_model().objects.create_user(username='no-download-support', password='pass-12345')
+        self.client.force_login(limited_user)
+
+        response = self.client.get(reverse('supporting_document_download', args=[document.pk]))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_external_auditor_can_download_supporting_document(self):
+        document = SupportingDocument.objects.create(
+            expense=self.expense,
+            title='Soporte auditable',
+            document=self.uploaded_file('auditable.pdf', b'audit-content'),
+        )
+        sync_operation_roles()
+        auditor = get_user_model().objects.create_user(username='support-auditor', password='pass-12345')
+        auditor.groups.add(Group.objects.get(name=ROLE_EXTERNAL_AUDITOR))
+        self.client.force_login(auditor)
+
+        response = self.client.get(reverse('supporting_document_download', args=[document.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b''.join(response.streaming_content), b'audit-content')
+        self.assertIn('attachment;', response['Content-Disposition'])
+        self.assertIn('auditable.pdf', response['Content-Disposition'])
 
     def test_more_than_one_supporting_document_can_be_attached_to_same_expense(self):
         self.client.force_login(self.user)

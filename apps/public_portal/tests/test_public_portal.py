@@ -1,4 +1,5 @@
 from pathlib import Path
+from decimal import Decimal
 
 from django.core.cache import cache
 from django.test import TestCase
@@ -21,9 +22,9 @@ class PublicPortalTests(TestCase):
         self.project.status = Project.Status.ACTIVE
         self.project.description = 'Descripción pública del proyecto.'
         self.project.save()
-        donation = create_donation(donor=self.institution)
-        allocation = create_allocation(donation=donation, project=self.project)
-        create_expense(allocation=allocation)
+        self.donation = create_donation(donor=self.institution)
+        self.allocation = create_allocation(donation=self.donation, project=self.project)
+        self.expense = create_expense(allocation=self.allocation)
         self.approved_update = register_advance(
             project_id=self.project.pk,
             title='Avance aprobado',
@@ -55,6 +56,25 @@ class PublicPortalTests(TestCase):
             description='No debe mostrarse.',
             status=ProjectUpdate.Status.DRAFT,
         )
+
+    def create_approved_update_for_project_status(self, code, project_status):
+        project = create_project(code=code, name=f'Proyecto {project_status}')
+        project.status = Project.Status.ACTIVE
+        project.save(update_fields=['status'])
+        update = register_advance(
+            project_id=project.pk,
+            title=f'Avance aprobado {project_status}',
+            description='Avance que no debe permanecer publicado.',
+            created_by=self.user,
+        )
+        review_project_update(
+            update_id=update.pk,
+            reviewer=self.user,
+            status=ProjectUpdate.Status.APPROVED,
+        )
+        project.status = project_status
+        project.save(update_fields=['status'])
+        return project, update
 
     def assert_public_response_is_sanitized(self, response):
         self.assertNotContains(response, 'project_update_create')
@@ -155,6 +175,120 @@ class PublicPortalTests(TestCase):
         self.assertNotContains(response, self.rejected_update.title)
         self.assertNotContains(response, self.draft_update.title)
 
+    def test_public_project_detail_shows_evidence_for_approved_update_of_active_project(self):
+        self.approved_update.evidence = 'project_updates/public-approved.pdf'
+        self.approved_update.save(update_fields=['evidence'])
+
+        response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
+
+        self.assertContains(response, self.approved_update.evidence.url)
+
+    def test_public_portal_does_not_show_evidence_from_unapproved_update(self):
+        self.pending_update.evidence = 'project_updates/private-pending.pdf'
+        self.pending_update.save(update_fields=['evidence'])
+
+        detail_response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
+        feed_response = self.client.get(reverse('public_portal:public_updates_feed'))
+
+        self.assertNotContains(detail_response, self.pending_update.evidence.url)
+        self.assertNotContains(feed_response, self.pending_update.evidence.url)
+
+    def test_public_portal_does_not_show_approved_evidence_from_non_active_project(self):
+        private_project = create_project(code='PRJ-NO-PUBLIC', name='Proyecto suspendido con evidencia')
+        private_project.status = Project.Status.ACTIVE
+        private_project.save()
+        private_update = register_advance(
+            project_id=private_project.pk,
+            title='Avance aprobado que dejo de ser público',
+            description='No debe aparecer cuando el proyecto deja de estar activo.',
+            evidence='project_updates/private-inactive.pdf',
+            created_by=self.user,
+        )
+        review_project_update(
+            update_id=private_update.pk,
+            reviewer=self.user,
+            status=ProjectUpdate.Status.APPROVED,
+        )
+        private_project.status = Project.Status.SUSPENDED
+        private_project.save(update_fields=['status'])
+
+        feed_response = self.client.get(reverse('public_portal:public_updates_feed'))
+        home_response = self.client.get(reverse('public_portal:public_home'))
+
+        self.assertNotContains(feed_response, private_update.title)
+        self.assertNotContains(feed_response, private_update.evidence.url)
+        self.assertEqual(home_response.context['summary']['approved_update_count'], 1)
+
+    def test_approved_update_from_closed_project_is_not_public(self):
+        closed_project, closed_update = self.create_approved_update_for_project_status(
+            'PRJ-CLOSED-UPD',
+            Project.Status.CLOSED,
+        )
+
+        feed_response = self.client.get(reverse('public_portal:public_updates_feed'))
+        detail_response = self.client.get(
+            reverse('public_portal:public_project_detail', args=[closed_project.pk])
+        )
+
+        self.assertNotContains(feed_response, closed_update.title)
+        self.assertEqual(detail_response.status_code, 404)
+
+    def test_approved_update_count_excludes_suspended_and_closed_projects(self):
+        self.create_approved_update_for_project_status('PRJ-SUSP-COUNT', Project.Status.SUSPENDED)
+        self.create_approved_update_for_project_status('PRJ-CLOSED-COUNT', Project.Status.CLOSED)
+
+        response = self.client.get(reverse('public_portal:public_home'))
+
+        self.assertEqual(response.context['summary']['approved_update_count'], 1)
+
+    def test_every_update_in_public_feed_links_to_an_available_public_detail(self):
+        suspended_project, suspended_update = self.create_approved_update_for_project_status(
+            'PRJ-SUSP-LINK',
+            Project.Status.SUSPENDED,
+        )
+        closed_project, closed_update = self.create_approved_update_for_project_status(
+            'PRJ-CLOSED-LINK',
+            Project.Status.CLOSED,
+        )
+
+        response = self.client.get(reverse('public_portal:public_updates_feed'))
+
+        self.assertNotContains(response, reverse('public_portal:public_project_detail', args=[suspended_project.pk]))
+        self.assertNotContains(response, reverse('public_portal:public_project_detail', args=[closed_project.pk]))
+        self.assertNotContains(response, suspended_update.title)
+        self.assertNotContains(response, closed_update.title)
+        for update in response.context['updates']:
+            detail_url = reverse('public_portal:public_project_detail', args=[update.project_id])
+            self.assertEqual(self.client.get(detail_url).status_code, 200)
+
+    def test_public_metrics_only_include_finances_linked_to_active_projects(self):
+        private_project = create_project(code='PRJ-CLOSED-FIN', name='Proyecto financiero cerrado')
+        private_project.status = Project.Status.CLOSED
+        private_project.save(update_fields=['status'])
+        private_donation = create_donation(
+            code='DON-PRIVATE-FIN',
+            donor=self.institution,
+            amount=Decimal('500.00'),
+        )
+        private_allocation = create_allocation(
+            donation=private_donation,
+            project=private_project,
+            amount=Decimal('300.00'),
+        )
+        create_expense(
+            allocation=private_allocation,
+            amount=Decimal('100.00'),
+            reason='Gasto no público',
+        )
+
+        response = self.client.get(reverse('public_portal:public_home'))
+        summary = response.context['summary']
+
+        self.assertEqual(summary['total_received'], self.donation.amount)
+        self.assertEqual(summary['total_assigned'], self.allocation.amount)
+        self.assertEqual(summary['total_executed'], self.expense.amount)
+        self.assertEqual(summary['available_balance'], self.allocation.amount - self.expense.amount)
+
     def test_public_portal_views_do_not_import_operations_views_or_forms(self):
         views_source = Path('apps/public_portal/views.py').read_text()
 
@@ -186,6 +320,9 @@ class PublicPortalTests(TestCase):
         self.assertIn('public-header', source)
         self.assertIn("public_portal/css/public_portal.css", source)
         self.assertNotIn("web/css/sigedon.css", source)
+        self.assertNotIn("web/js/ops_forms.js", source)
+        self.assertNotIn("vendor/flatpickr", source)
+        self.assertNotIn("vendor/autonumeric", source)
 
     def test_public_stylesheet_defines_public_visual_system(self):
         source = Path('static/public_portal/css/public_portal.css').read_text()

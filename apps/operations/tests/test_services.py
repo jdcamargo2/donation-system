@@ -1,15 +1,20 @@
 from datetime import date
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ZERO_MONEY
 from apps.operations.services import (
+    create_expense as create_expense_service,
+    create_fund_allocation,
     get_allocation_financial_summary,
     get_dashboard_metrics,
     get_donation_financial_summary,
     get_project_financial_summary,
     sum_money,
+    update_expense as update_expense_service,
+    update_fund_allocation,
 )
 
 
@@ -60,6 +65,32 @@ class OperationServiceTests(TestCase):
             payment_method='bank_transfer',
             status=Expense.Status.REGISTERED,
         )
+
+    def allocation_service_data(self, donation, project, amount):
+        return {
+            'donation': donation,
+            'project': project,
+            'budget_category': 'health_psychosocial',
+            'amount': amount,
+            'responsible_person': '',
+            'allocation_date': TEST_DATE,
+            'status': FundAllocation.Status.ACTIVE,
+            'notes': '',
+        }
+
+    def expense_service_data(self, allocation, amount):
+        return {
+            'allocation': allocation,
+            'expense_date': TEST_DATE,
+            'category': 'food',
+            'amount': amount,
+            'reason': 'Compra mediante servicio',
+            'provider_or_recipient': 'Proveedor A',
+            'payment_method': 'bank_transfer',
+            'description': '',
+            'observations': '',
+            'status': Expense.Status.REGISTERED,
+        }
 
     def test_sum_money_returns_zero_for_empty_queryset(self):
         self.assertEqual(sum_money(Donation.objects.none(), 'amount'), ZERO_MONEY)
@@ -112,3 +143,133 @@ class OperationServiceTests(TestCase):
         self.assertIn('recent_donations', metrics)
         self.assertIn('recent_expenses', metrics)
         self.assertIn('recent_audit_logs', metrics)
+
+    def test_create_fund_allocation_rejects_over_allocation(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        project = self.create_project()
+        self.create_allocation(donation=donation, project=project, amount=Decimal('80.00'))
+
+        with self.assertRaisesMessage(ValidationError, 'excede el saldo disponible'):
+            create_fund_allocation(**self.allocation_service_data(donation, project, Decimal('20.01')))
+
+        self.assertEqual(donation.allocations.count(), 1)
+
+    def test_create_fund_allocation_rejects_non_usd_donation(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        donation.currency = 'EUR'
+        donation.save(update_fields=['currency'])
+        project = self.create_project()
+
+        with self.assertRaisesMessage(ValidationError, 'solo permite operaciones financieras en USD'):
+            create_fund_allocation(**self.allocation_service_data(donation, project, Decimal('20.00')))
+
+        self.assertFalse(donation.allocations.exists())
+
+    def test_update_fund_allocation_excludes_its_previous_amount(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        project = self.create_project()
+        allocation = self.create_allocation(donation=donation, project=project, amount=Decimal('60.00'))
+
+        updated = update_fund_allocation(
+            allocation=allocation,
+            **self.allocation_service_data(donation, project, Decimal('100.00')),
+        )
+
+        self.assertEqual(updated.amount, Decimal('100.00'))
+        self.assertEqual(donation.available_balance, ZERO_MONEY)
+
+    def test_update_fund_allocation_rechecks_balance_when_donation_changes(self):
+        original_donation = self.create_donation(code='DON-ORIGINAL', amount=Decimal('100.00'))
+        target_donation = self.create_donation(code='DON-TARGET', amount=Decimal('50.00'))
+        project = self.create_project()
+        allocation = self.create_allocation(donation=original_donation, project=project, amount=Decimal('60.00'))
+        self.create_allocation(donation=target_donation, project=project, amount=Decimal('40.00'))
+
+        with self.assertRaisesMessage(ValidationError, 'excede el saldo disponible'):
+            update_fund_allocation(
+                allocation=allocation,
+                **self.allocation_service_data(target_donation, project, Decimal('20.00')),
+            )
+
+        allocation.refresh_from_db()
+        self.assertEqual(allocation.donation, original_donation)
+        self.assertEqual(allocation.amount, Decimal('60.00'))
+
+    def test_update_fund_allocation_cannot_drop_below_executed_amount(self):
+        allocation = self.create_allocation(amount=Decimal('60.00'))
+        self.create_expense(allocation=allocation, amount=Decimal('40.00'))
+
+        with self.assertRaisesMessage(ValidationError, 'no puede ser menor al monto ya ejecutado'):
+            update_fund_allocation(
+                allocation=allocation,
+                **self.allocation_service_data(allocation.donation, allocation.project, Decimal('39.99')),
+            )
+
+        allocation.refresh_from_db()
+        self.assertEqual(allocation.amount, Decimal('60.00'))
+
+    def test_create_expense_rejects_over_execution(self):
+        allocation = self.create_allocation(amount=Decimal('60.00'))
+        self.create_expense(allocation=allocation, amount=Decimal('20.00'))
+
+        with self.assertRaisesMessage(ValidationError, 'excede el saldo disponible'):
+            create_expense_service(**self.expense_service_data(allocation, Decimal('40.01')))
+
+        self.assertEqual(allocation.expenses.count(), 1)
+
+    def test_create_expense_service_rejects_non_usd_currency(self):
+        allocation = self.create_allocation(amount=Decimal('60.00'))
+        service_data = self.expense_service_data(allocation, Decimal('20.00'))
+        service_data['currency'] = 'EUR'
+
+        with self.assertRaisesMessage(ValidationError, 'solo permite operaciones financieras en USD'):
+            create_expense_service(**service_data)
+
+        self.assertFalse(allocation.expenses.exists())
+
+    def test_update_expense_excludes_its_previous_amount(self):
+        allocation = self.create_allocation(amount=Decimal('60.00'))
+        expense = self.create_expense(allocation=allocation, amount=Decimal('20.00'))
+
+        updated = update_expense_service(
+            expense=expense,
+            **self.expense_service_data(allocation, Decimal('60.00')),
+        )
+
+        self.assertEqual(updated.amount, Decimal('60.00'))
+        self.assertEqual(allocation.available_balance, ZERO_MONEY)
+
+    def test_update_expense_service_rejects_non_usd_currency(self):
+        allocation = self.create_allocation(amount=Decimal('60.00'))
+        expense = self.create_expense(allocation=allocation, amount=Decimal('20.00'))
+        service_data = self.expense_service_data(allocation, Decimal('25.00'))
+        service_data['currency'] = 'EUR'
+
+        with self.assertRaisesMessage(ValidationError, 'solo permite operaciones financieras en USD'):
+            update_expense_service(expense=expense, **service_data)
+
+        expense.refresh_from_db()
+        self.assertEqual(expense.amount, Decimal('20.00'))
+        self.assertEqual(expense.currency, 'USD')
+
+    def test_update_expense_rechecks_balance_when_allocation_changes(self):
+        original_allocation = self.create_allocation(amount=Decimal('70.00'))
+        original_expense = self.create_expense(allocation=original_allocation, amount=Decimal('30.00'))
+        target_donation = self.create_donation(code='DON-TARGET-EXP', amount=Decimal('100.00'))
+        target_project = self.create_project(code='PRJ-TARGET-EXP')
+        target_allocation = self.create_allocation(
+            donation=target_donation,
+            project=target_project,
+            amount=Decimal('50.00'),
+        )
+        self.create_expense(allocation=target_allocation, amount=Decimal('45.00'))
+
+        with self.assertRaisesMessage(ValidationError, 'excede el saldo disponible'):
+            update_expense_service(
+                expense=original_expense,
+                **self.expense_service_data(target_allocation, Decimal('10.00')),
+            )
+
+        original_expense.refresh_from_db()
+        self.assertEqual(original_expense.allocation, original_allocation)
+        self.assertEqual(original_expense.amount, Decimal('30.00'))

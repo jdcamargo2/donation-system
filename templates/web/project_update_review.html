@@ -3,17 +3,18 @@
 {% block title %}Revisar avance - SIGEDON{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="ops-page-header ops-page-header-row">
     <div>
-        <h1 class="h3 mb-1">Revisar avance</h1>
-        <div class="text-muted">{{ object.project.code }} - {{ object.project.name }}</div>
+        <div class="ops-kicker">Revisión interna</div>
+        <h1>Revisar avance</h1>
+        <p>{{ object.project.code }} - {{ object.project.name }}</p>
     </div>
     <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Cancelar</a>
 </div>
 
 <div class="row g-4">
     <div class="col-lg-7">
-        <div class="card border-0">
+        <div class="card border-0 ops-detail-card">
             <div class="card-body">
                 <h2 class="h5 mb-3">{{ object.title }}</h2>
                 <dl class="row mb-0">
@@ -36,18 +37,23 @@
         </div>
     </div>
     <div class="col-lg-5">
-        <div class="card border-0">
+        <div class="card border-0 ops-form-card">
             <div class="card-body">
                 <form method="post" novalidate>
                     {% csrf_token %}
-                    {{ form.non_field_errors }}
+                    {% if form.non_field_errors %}
+                        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                    {% endif %}
                     {% for field in form %}
                         <div class="mb-3">
-                            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            <label class="form-label" for="{{ field.id_for_label }}">
+                                {{ field.label }}
+                                {% if field.field.required %}<span class="required-mark">*</span>{% endif %}
+                            </label>
                             {{ field }}
-                            {% for error in field.errors %}
-                                <div class="text-danger small">{{ error }}</div>
-                            {% endfor %}
+                            {% if field.errors %}
+                                <div id="{{ field.id_for_label }}_error" class="text-danger small">{{ field.errors|striptags }}</div>
+                            {% endif %}
                         </div>
                     {% endfor %}
                     <button type="submit" class="btn btn-primary">Guardar revisión</button>

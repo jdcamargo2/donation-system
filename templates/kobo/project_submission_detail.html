@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Levantamiento Kobo | SIGEDON{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <a href="{% url 'project_detail' submission.project.pk %}" class="text-decoration-none">← Volver al proyecto</a>
+    <div class="my-3"><div class="text-uppercase text-muted small">Levantamiento de campo importado</div><h1 class="h3">{{ submission.form_definition.title }}</h1></div>
+
+    <section class="card card-body mb-3"><h2 class="h5">Proyecto y territorio</h2><dl class="row mb-0">
+        <dt class="col-sm-4">Proyecto</dt><dd class="col-sm-8">{{ submission.project }}</dd>
+        <dt class="col-sm-4">Formulario</dt><dd class="col-sm-8">{{ submission.form_definition.form_id }}</dd>
+        <dt class="col-sm-4">Fecha</dt><dd class="col-sm-8">{{ submission.assessment_date|default:"—" }}</dd>
+        <dt class="col-sm-4">Zona pastoral</dt><dd class="col-sm-8">{{ submission.pastoral_zone|default:"—" }}</dd>
+        <dt class="col-sm-4">Parroquia</dt><dd class="col-sm-8">{{ submission.parish|default:"—" }}</dd>
+        <dt class="col-sm-4">Comunidad</dt><dd class="col-sm-8">{{ submission.primary_community|default:"—" }}</dd>
+        <dt class="col-sm-4">Parroquia oficial</dt><dd class="col-sm-8">{{ normalized_payload.official_parish_name|default:"—" }}</dd>
+        <dt class="col-sm-4">Advocación</dt><dd class="col-sm-8">{{ normalized_payload.church_advocation|default:"—" }}</dd>
+        <dt class="col-sm-4">Población estimada</dt><dd class="col-sm-8">{{ normalized_payload.estimated_population|default_if_none:"—" }}</dd>
+        <dt class="col-sm-4">Hogares estimados</dt><dd class="col-sm-8">{{ normalized_payload.estimated_households|default_if_none:"—" }}</dd>
+        <dt class="col-sm-4">Accesibilidad</dt><dd class="col-sm-8">{{ normalized_payload.main_accessibility|default:"—" }}</dd>
+        <dt class="col-sm-4">Tipo de territorio</dt><dd class="col-sm-8">{{ normalized_payload.territory_type|default:"—" }}</dd>
+        <dt class="col-sm-4">Ubicación</dt><dd class="col-sm-8">{{ normalized_payload.location|default:"—" }}</dd>
+        <dt class="col-sm-4">Recibido</dt><dd class="col-sm-8">{{ submission.received_at }}</dd>
+        <dt class="col-sm-4">Importado</dt><dd class="col-sm-8">{{ submission.imported_at|default:"—" }}</dd>
+    </dl></section>
+
+    {% if can_view_sensitive %}<section class="card card-body border-warning mb-3"><h2 class="h5">Datos internos sensibles</h2><dl class="row mb-0">{% for key, value in sensitive_data.items %}<dt class="col-sm-4">{{ key }}</dt><dd class="col-sm-8">{{ value|default_if_none:"—" }}</dd>{% endfor %}</dl></section>{% endif %}
+
+    <section class="card card-body"><h2 class="h5">Evidencias descargadas</h2><div class="list-group list-group-flush">
+        {% for evidence in evidences %}<div class="list-group-item px-0 d-flex justify-content-between align-items-center"><div><strong>{{ evidence.file.name|default:"Evidencia" }}</strong><div class="small text-muted">{{ evidence.content_type }} · {{ evidence.size_bytes|default_if_none:"—" }} bytes · {{ evidence.get_privacy_level_display }}</div></div><a class="btn btn-sm btn-outline-primary" href="{% url 'kobo:project_submission_evidence' submission.pk evidence.pk %}">Ver evidencia</a></div>{% empty %}<div class="text-muted">No hay evidencias descargadas disponibles.</div>{% endfor %}
+    </div></section>
+</div>
+{% endblock %}

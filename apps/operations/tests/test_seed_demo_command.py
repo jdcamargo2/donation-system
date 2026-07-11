@@ -8,7 +8,7 @@ from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 
-from apps.operations.models import Donation, Project, ProjectUpdate
+from apps.operations.models import Donation, Expense, Project, ProjectUpdate
 from apps.operations.roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_SIGEDON_ADMIN
 
 
@@ -39,6 +39,8 @@ class SeedSigedonDemoCommandTests(TestCase):
         self.assertTrue(Project.objects.filter(code='PRJ-DEMO-001').exists())
         self.assertTrue(Donation.objects.filter(code='DON-DEMO-001').exists())
         self.assertTrue(ProjectUpdate.objects.filter(status=ProjectUpdate.Status.APPROVED).exists())
+        self.assertFalse(Donation.objects.exclude(currency='USD').exists())
+        self.assertFalse(Expense.objects.exclude(currency='USD').exists())
 
     def test_seed_command_creates_role_demo_users(self):
         self.run_seed()
