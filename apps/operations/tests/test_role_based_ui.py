@@ -87,6 +87,18 @@ class RoleBasedUITests(TestCase):
         self.assertContains(response, 'Auditoría')
         self.assertContains(response, reverse('audit_log_list'))
 
+    def test_field_operator_dashboard_focuses_on_projects_and_updates(self):
+        self.client.force_login(self.create_user_for_role('ui-field-dashboard', ROLE_FIELD_OPERATOR))
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertContains(response, 'Ver proyectos')
+        self.assertContains(response, 'Registrar avances')
+        self.assertNotContains(response, 'Crear donación')
+        self.assertNotContains(response, 'Crear asignación')
+        self.assertNotContains(response, 'Crear gasto')
+        self.assertNotContains(response, 'Ver auditoría')
+
     def test_internal_templates_do_not_import_public_portal_stylesheet(self):
         internal_sources = [Path('templates/base.html').read_text()]
         internal_sources.extend(path.read_text() for path in Path('templates/web').glob('*.html'))

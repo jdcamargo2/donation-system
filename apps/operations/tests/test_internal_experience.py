@@ -28,6 +28,11 @@ class InternalExperienceTemplateTests(TestCase):
     def test_central_list_views_use_specific_templates_and_columns(self):
         cases = [
             (
+                reverse('project_list'),
+                'web/project_list.html',
+                ['Código', 'Nombre', 'Estado', 'Presupuesto', 'Inicio', 'Cierre', 'Proyecto operativo'],
+            ),
+            (
                 reverse('institution_list'),
                 'web/institution_list.html',
                 ['Nombre', 'Tipo', 'País', 'Estado', 'Acciones', 'Fundación Operativa'],

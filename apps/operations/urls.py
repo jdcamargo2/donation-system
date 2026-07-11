@@ -46,6 +46,11 @@ urlpatterns = [
         name='supporting_document_create_for_expense',
     ),
     path(
+        'documents/<int:pk>/download/',
+        views.SupportingDocumentDownloadView.as_view(),
+        name='supporting_document_download',
+    ),
+    path(
         'documents/<int:pk>/delete/',
         views.SupportingDocumentDeleteView.as_view(),
         name='supporting_document_delete',

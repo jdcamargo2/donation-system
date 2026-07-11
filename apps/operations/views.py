@@ -1,11 +1,12 @@
 from django.contrib import messages
+from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.contrib.auth.views import redirect_to_login
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.shortcuts import get_object_or_404
-from django.http import HttpResponseRedirect
+from django.http import FileResponse, Http404, HttpResponseRedirect
 from django.urls import reverse, reverse_lazy
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.generic import CreateView, DeleteView, DetailView, FormView, ListView, TemplateView, UpdateView
 
@@ -22,6 +23,8 @@ from .forms import (
 )
 from .models import AuditLog, Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate, SupportingDocument
 from .services import (
+    create_expense,
+    create_fund_allocation,
     get_allocation_financial_summary,
     get_dashboard_metrics,
     get_donation_financial_summary,
@@ -30,6 +33,8 @@ from .services import (
     log_delete,
     register_advance,
     review_project_update,
+    update_expense,
+    update_fund_allocation,
 )
 
 
@@ -49,6 +54,19 @@ class OperationsPermissionRequiredMixin(LoginRequiredMixin, PermissionRequiredMi
         if self.request.user.is_authenticated:
             raise PermissionDenied(self.get_permission_denied_message())
         return redirect_to_login(self.request.get_full_path(), self.get_login_url(), self.get_redirect_field_name())
+
+
+# PRE: form is bound and error is a domain ValidationError raised after initial form validation.
+# POST: adds every domain error to its matching form field, or as a non-field error when no field matches.
+def add_service_errors_to_form(form, error):
+    if hasattr(error, 'error_dict'):
+        for field_name, field_errors in error.message_dict.items():
+            target_field = field_name if field_name in form.fields else None
+            for message in field_errors:
+                form.add_error(target_field, message)
+        return
+    for message in error.messages:
+        form.add_error(None, message)
 
 
 class RouteContextMixin:
@@ -188,7 +206,7 @@ class InstitutionDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin,
 class ProjectListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
     permission_required = 'operations.view_project'
     model = Project
-    template_name = 'web/object_list.html'
+    template_name = 'web/project_list.html'
     context_object_name = 'objects'
     route_prefix = 'project'
     page_title = _('Proyectos')
@@ -204,7 +222,25 @@ class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['project_updates'] = self.object.updates.all().order_by('-created_at')
+        context['kobo_enabled'] = settings.KOBO_ENABLED
+        if settings.KOBO_ENABLED:
+            from apps.integrations.kobo.models import KoboAsset
+            from apps.integrations.kobo.services import get_project_imported_submissions
+
+            context['kobo_submissions'] = get_project_imported_submissions(
+                self.object,
+                form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE,
+            )
+        else:
+            context['kobo_submissions'] = ()
         return context
+
+    def get_template_names(self):
+        # PRE: project detail routing and settings are available.
+        # POST: uses Kobo-aware UI only while enabled, preserving legacy UI otherwise.
+        if settings.KOBO_ENABLED:
+            return ['operations/project_detail.html']
+        return super().get_template_names()
 
 
 class ProjectCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, CreateView):
@@ -446,6 +482,25 @@ class FundAllocationCreateView(OperationsPermissionRequiredMixin, AuditMixin, Ro
     audit_action = AuditLog.Action.ASSIGNED
     audit_summary = _('Asignación de fondos registrada.')
 
+    def form_valid(self, form):
+        try:
+            self.object = create_fund_allocation(
+                donation=form.cleaned_data['donation'],
+                project=form.cleaned_data['project'],
+                budget_category=form.cleaned_data['budget_category'],
+                amount=form.cleaned_data['amount'],
+                responsible_person=form.cleaned_data.get('responsible_person', ''),
+                allocation_date=form.cleaned_data['allocation_date'],
+                status=form.cleaned_data['status'],
+                notes=form.cleaned_data.get('notes', ''),
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        self.write_audit_log()
+        messages.success(self.request, self.audit_summary)
+        return HttpResponseRedirect(self.get_success_url())
+
 
 class FundAllocationUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, UpdateView):
     permission_required = 'operations.change_fundallocation'
@@ -457,6 +512,26 @@ class FundAllocationUpdateView(OperationsPermissionRequiredMixin, AuditMixin, Ro
     page_title = _('Editar asignación de fondos')
     audit_action = AuditLog.Action.ASSIGNED
     audit_summary = _('Asignación de fondos actualizada.')
+
+    def form_valid(self, form):
+        try:
+            self.object = update_fund_allocation(
+                allocation=self.object,
+                donation=form.cleaned_data['donation'],
+                project=form.cleaned_data['project'],
+                budget_category=form.cleaned_data['budget_category'],
+                amount=form.cleaned_data['amount'],
+                responsible_person=form.cleaned_data.get('responsible_person', ''),
+                allocation_date=form.cleaned_data['allocation_date'],
+                status=form.cleaned_data['status'],
+                notes=form.cleaned_data.get('notes', ''),
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        self.write_audit_log()
+        messages.success(self.request, self.audit_summary)
+        return HttpResponseRedirect(self.get_success_url())
 
 
 class FundAllocationDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, RouteContextMixin, DeleteView):
@@ -501,13 +576,28 @@ class ExpenseCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCont
     audit_summary = _('Gasto registrado.')
 
     def form_valid(self, form):
-        if form.instance.status == Expense.Status.VALIDATED:
-            form.instance.validated_by = self.request.user
-            form.instance.validated_at = timezone.now()
-        response = super().form_valid(form)
-        if self.object.status == Expense.Status.VALIDATED:
-            log_action(self.request.user, AuditLog.Action.VALIDATED, self.object, _('Gasto validado.'))
-        return response
+        try:
+            self.object = create_expense(
+                allocation=form.cleaned_data['allocation'],
+                expense_date=form.cleaned_data['expense_date'],
+                category=form.cleaned_data['category'],
+                amount=form.cleaned_data['amount'],
+                reason=form.cleaned_data['reason'],
+                provider_or_recipient=form.cleaned_data['provider_or_recipient'],
+                payment_method=form.cleaned_data['payment_method'],
+                description=form.cleaned_data.get('description', ''),
+                observations=form.cleaned_data.get('observations', ''),
+                status=form.cleaned_data['status'],
+                user=self.request.user,
+                support_title=form.cleaned_data.get('support_title', ''),
+                support_file=form.cleaned_data.get('support_file'),
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        self.write_audit_log()
+        messages.success(self.request, self.audit_summary)
+        return HttpResponseRedirect(self.get_success_url())
 
 
 class ExpenseUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, UpdateView):
@@ -522,16 +612,29 @@ class ExpenseUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCont
     audit_summary = _('Gasto actualizado.')
 
     def form_valid(self, form):
-        previous_status = None
-        if self.object:
-            previous_status = Expense.objects.filter(pk=self.object.pk).values_list('status', flat=True).first()
-        if form.instance.status == Expense.Status.VALIDATED and not form.instance.validated_at:
-            form.instance.validated_by = self.request.user
-            form.instance.validated_at = timezone.now()
-        response = super().form_valid(form)
-        if previous_status != Expense.Status.VALIDATED and self.object.status == Expense.Status.VALIDATED:
-            log_action(self.request.user, AuditLog.Action.VALIDATED, self.object, _('Gasto validado.'))
-        return response
+        try:
+            self.object = update_expense(
+                expense=self.object,
+                allocation=form.cleaned_data['allocation'],
+                expense_date=form.cleaned_data['expense_date'],
+                category=form.cleaned_data['category'],
+                amount=form.cleaned_data['amount'],
+                reason=form.cleaned_data['reason'],
+                provider_or_recipient=form.cleaned_data['provider_or_recipient'],
+                payment_method=form.cleaned_data['payment_method'],
+                description=form.cleaned_data.get('description', ''),
+                observations=form.cleaned_data.get('observations', ''),
+                status=form.cleaned_data['status'],
+                user=self.request.user,
+                support_title=form.cleaned_data.get('support_title', ''),
+                support_file=form.cleaned_data.get('support_file'),
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        self.write_audit_log()
+        messages.success(self.request, self.audit_summary)
+        return HttpResponseRedirect(self.get_success_url())
 
 
 class ExpenseDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, RouteContextMixin, DeleteView):
@@ -578,6 +681,27 @@ class SupportingDocumentCreateForExpenseView(OperationsPermissionRequiredMixin, 
         return reverse('expense_detail', args=[self.expense.pk])
 
 
+class SupportingDocumentDownloadView(OperationsPermissionRequiredMixin, DetailView):
+    permission_required = 'operations.view_supportingdocument'
+    model = SupportingDocument
+
+    # PRE: the requester is authenticated and has permission to view supporting documents.
+    # POST: streams the requested document as an attachment without exposing its storage path.
+    def get(self, request, *args, **kwargs):
+        document = self.get_object()
+        if not document.document.name:
+            raise Http404(_('El documento soporte no tiene un archivo asociado.'))
+        try:
+            file_handle = document.document.open('rb')
+        except (FileNotFoundError, OSError) as exc:
+            raise Http404(_('El archivo del documento soporte no está disponible.')) from exc
+        return FileResponse(
+            file_handle,
+            as_attachment=True,
+            filename=document.document.name.rsplit('/', 1)[-1],
+        )
+
+
 class SupportingDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView):
     permission_required = 'operations.delete_supportingdocument'
     model = SupportingDocument
@@ -586,17 +710,22 @@ class SupportingDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView
     def get_success_url(self):
         return reverse('expense_detail', args=[self.object.expense_id])
 
+    # PRE: self.object identifies a support document the user is allowed to delete.
+    # POST: deletes it atomically unless it is the last support of a validated expense.
     def form_valid(self, form):
-        expense = self.object.expense
-        if expense.status == Expense.Status.VALIDATED and expense.supporting_documents.count() <= 1:
-            messages.error(
-                self.request,
-                _('No se puede eliminar el último documento soporte de un gasto validado.'),
-            )
-            return HttpResponseRedirect(reverse('expense_detail', args=[expense.pk]))
-        messages.success(self.request, _('Documento soporte eliminado.'))
-        log_delete(self.request.user, self.object, _('Documento soporte eliminado.'))
-        return super().form_valid(form)
+        with transaction.atomic():
+            expense = Expense.objects.select_for_update().get(pk=self.object.expense_id)
+            document = SupportingDocument.objects.select_for_update().get(pk=self.object.pk)
+            if expense.status == Expense.Status.VALIDATED and expense.supporting_documents.count() <= 1:
+                messages.error(
+                    self.request,
+                    _('No se puede eliminar el último documento soporte de un gasto validado.'),
+                )
+                return HttpResponseRedirect(reverse('expense_detail', args=[expense.pk]))
+            messages.success(self.request, _('Documento soporte eliminado.'))
+            log_delete(self.request.user, document, _('Documento soporte eliminado.'))
+            document.delete()
+        return HttpResponseRedirect(reverse('expense_detail', args=[expense.pk]))
 
 
 class AuditLogListView(OperationsPermissionRequiredMixin, ListView):
