@@ -251,35 +251,35 @@ class Command(BaseCommand):
         definitions = [
             (
                 "catia_la_mar",
-                "PRJ-000002",
+                "PRJ-DEMO-001",
                 "Núcleo Vital Catia la Mar",
                 "Zona Pastoral Catia la Mar",
                 Decimal("50000.00"),
             ),
             (
                 "centro",
-                "PRJ-000003",
+                "PRJ-DEMO-002",
                 "Núcleo Vital Centro",
                 "Zona Pastoral Centro",
                 Decimal("45000.00"),
             ),
             (
                 "este",
-                "PRJ-000004",
+                "PRJ-DEMO-003",
                 "Núcleo Vital Este",
                 "Zona Pastoral Este",
                 Decimal("40000.00"),
             ),
             (
                 "montana",
-                "PRJ-000005",
+                "PRJ-DEMO-004",
                 "Núcleo Vital La Montaña",
                 "Zona Pastoral La Montaña",
                 Decimal("35000.00"),
             ),
             (
                 "insular",
-                "PRJ-000006",
+                "PRJ-DEMO-005",
                 "Núcleo Vital Insular",
                 "Zona Pastoral Insular",
                 Decimal("30000.00"),
@@ -326,7 +326,7 @@ class Command(BaseCommand):
         )
 
         donation, _ = Donation.objects.update_or_create(
-            code="DON-000001",
+            code="DON-DEMO-001",
             defaults={
                 "donor": donor,
                 "donation_type": donation_type,

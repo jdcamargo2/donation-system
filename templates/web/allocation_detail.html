@@ -6,7 +6,7 @@
 <div class="ops-page-header ops-page-header-row">
     <div>
         <div class="ops-kicker">Asignación presupuestaria</div>
-        <h1>Asignación de fondos</h1>
+        <h1>{{ object.code }}</h1>
         <p>
             {{ object.donation.donor.name }} → {{ object.project.name }}
             · <span class="badge text-bg-light">{{ object.donation.code }}</span>
@@ -85,7 +85,8 @@
         <div class="list-group">
             {% for expense in object.expenses.all %}
                 <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
-                    <div class="fw-semibold">{{ expense.reason }}</div>
+                    <div class="fw-semibold">{{ expense.code }}</div>
+                    <div>{{ expense.reason }}</div>
                     <div class="small text-muted">{{ expense.amount }} {{ expense.currency }} · {{ expense.get_status_display }} · {{ expense.expense_date }}</div>
                 </a>
             {% empty %}

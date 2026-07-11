@@ -33,9 +33,9 @@
                     <tr>
                         <td>
                             <a class="fw-semibold text-decoration-none" href="{% url 'allocation_detail' allocation.pk %}">
-                                {{ allocation.donation.donor.name }}
+                                {{ allocation.code }}
                             </a>
-                            <div class="small text-muted">{{ allocation.donation.code }}</div>
+                            <div class="small text-muted">{{ allocation.donation.donor.name }} · {{ allocation.donation.code }}</div>
                         </td>
                         <td>
                             {{ allocation.project.name }}

@@ -72,7 +72,8 @@
         <div class="list-group">
             {% for allocation in object.allocations.all %}
                 <a class="list-group-item list-group-item-action" href="{% url 'allocation_detail' allocation.pk %}">
-                    <div class="fw-semibold">{{ allocation.project.name }}</div>
+                    <div class="fw-semibold">{{ allocation.code }}</div>
+                    <div>{{ allocation.project.name }}</div>
                     <div class="small text-muted">{{ allocation.project.code }} · {{ allocation.amount }} · {{ allocation.get_budget_category_display }} · Disponible {{ allocation.available_balance }}</div>
                 </a>
             {% empty %}

@@ -14,6 +14,7 @@ from apps.operations.models import (
     Donation,
     Expense,
     FundAllocation,
+    OperationalCodeSequence,
     Project,
     ProjectUpdate,
     SupportingDocument,
@@ -47,6 +48,7 @@ BARRIER_TIMEOUT_SECONDS = 10
 @skipUnless(connection.vendor == 'postgresql', POSTGRESQL_LOCKING_REQUIRED)
 class PostgreSQLConcurrencyTests(TransactionTestCase):
     reset_sequences = True
+    serialized_rollback = True
 
     def run_concurrently(self, operations):
         """
@@ -131,6 +133,39 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(allocations.count(), 1)
         self.assertLessEqual(allocations.aggregate(total=Sum('amount'))['total'], donation_amount)
 
+    def test_concurrent_allocation_creations_reserve_distinct_codes(self):
+        donation = create_donation(amount=Decimal('100.00'))
+        project_ids = (
+            create_project(code='PRJ-CODE-ALLOC-A').pk,
+            create_project(code='PRJ-CODE-ALLOC-B').pk,
+        )
+        before = OperationalCodeSequence.objects.get(namespace='fund_allocation').next_value
+
+        def allocate(project_id):
+            created = create_fund_allocation(
+                donation=Donation.objects.get(pk=donation.pk),
+                project=Project.objects.get(pk=project_id),
+                budget_category='health_psychosocial',
+                amount=Decimal('20.00'),
+                responsible_person='',
+                allocation_date=TEST_DATE,
+                status=FundAllocation.Status.CREATED,
+                notes='',
+            )
+            return created.code
+
+        results = self.run_concurrently(
+            [lambda: allocate(project_ids[0]), lambda: allocate(project_ids[1])]
+        )
+
+        self.assertEqual([outcome for outcome, _value in results].count('success'), 2)
+        self.assertEqual(len({value for _outcome, value in results}), 2)
+        self.assertEqual(FundAllocation.objects.count(), 2)
+        self.assertEqual(
+            OperationalCodeSequence.objects.get(namespace='fund_allocation').next_value,
+            before + 2,
+        )
+
     def test_concurrent_expenses_preserve_allocation_balance(self):
         allocation = create_allocation(amount=Decimal('100.00'))
         allocation_id = allocation.pk
@@ -170,6 +205,35 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(operational.count(), 1)
         self.assertLessEqual(operational.aggregate(total=Sum('amount'))['total'], allocation_amount)
         self.assertEqual(SupportingDocument.objects.count(), 0)
+
+    def test_concurrent_expense_creations_reserve_distinct_codes(self):
+        allocation = create_allocation(amount=Decimal('100.00'))
+        before = OperationalCodeSequence.objects.get(namespace='expense').next_value
+
+        def spend(label):
+            created = create_expense(
+                allocation=FundAllocation.objects.get(pk=allocation.pk),
+                expense_date=TEST_DATE,
+                category='food',
+                amount=Decimal('20.00'),
+                reason=f'Gasto de código {label}',
+                provider_or_recipient='Proveedor',
+                payment_method='bank_transfer',
+                description='',
+                observations='',
+                status=Expense.Status.REGISTERED,
+            )
+            return created.code
+
+        results = self.run_concurrently([lambda: spend('A'), lambda: spend('B')])
+
+        self.assertEqual([outcome for outcome, _value in results].count('success'), 2)
+        self.assertEqual(len({value for _outcome, value in results}), 2)
+        self.assertEqual(Expense.objects.count(), 2)
+        self.assertEqual(
+            OperationalCodeSequence.objects.get(namespace='expense').next_value,
+            before + 2,
+        )
 
     def test_concurrent_allocation_updates_preserve_donation_balance(self):
         donation = create_donation(amount=Decimal('100.00'))

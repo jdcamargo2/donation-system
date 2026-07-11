@@ -57,6 +57,8 @@ class FinancialDetailLinkTests(TestCase):
 
         self.assertContains(response, reverse('allocation_detail', args=[self.first_allocation.pk]))
         self.assertContains(response, reverse('allocation_detail', args=[self.second_allocation.pk]))
+        self.assertContains(response, self.first_allocation.code)
+        self.assertContains(response, self.second_allocation.code)
         self.assertContains(response, self.project.name)
         self.assertContains(response, self.donation.code)
 
@@ -71,6 +73,8 @@ class FinancialDetailLinkTests(TestCase):
 
         self.assertContains(response, reverse('expense_detail', args=[self.first_expense.pk]))
         self.assertContains(response, reverse('expense_detail', args=[self.second_expense.pk]))
+        self.assertContains(response, self.first_expense.code)
+        self.assertContains(response, self.second_expense.code)
         self.assertContains(response, self.first_expense.reason)
         self.assertContains(response, self.first_expense.provider_or_recipient)
         self.assertContains(response, self.project.name)

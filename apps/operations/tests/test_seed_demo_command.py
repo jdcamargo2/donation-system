@@ -46,9 +46,9 @@ class SeedSigedonDemoCommandTests(TestCase):
         self.run_seed()
 
         expected_users = {
-            'admin_sigedon': ROLE_SIGEDON_ADMIN,
-            'campo_sigedon': ROLE_FIELD_OPERATOR,
-            'auditor_sigedon': ROLE_EXTERNAL_AUDITOR,
+            'admin_demo': ROLE_SIGEDON_ADMIN,
+            'operador_demo': ROLE_FIELD_OPERATOR,
+            'auditor_demo': ROLE_EXTERNAL_AUDITOR,
         }
         for username, role_name in expected_users.items():
             with self.subTest(username=username):
@@ -63,4 +63,4 @@ class SeedSigedonDemoCommandTests(TestCase):
         self.assertEqual(Project.objects.filter(code='PRJ-DEMO-001').count(), 1)
         self.assertEqual(Project.objects.filter(code='PRJ-DEMO-002').count(), 1)
         self.assertEqual(Donation.objects.filter(code='DON-DEMO-001').count(), 1)
-        self.assertEqual(ProjectUpdate.objects.filter(title='Entrega alimentaria aprobada Demo').count(), 1)
+        self.assertEqual(ProjectUpdate.objects.filter(title='Levantamiento territorial inicial').count(), 1)

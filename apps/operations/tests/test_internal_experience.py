@@ -50,7 +50,7 @@ class InternalExperienceTemplateTests(TestCase):
             (
                 reverse('expense_list'),
                 'web/expense_list.html',
-                ['Asignación', 'Proyecto', 'Monto', 'Categoría', 'Estado', 'Soporte', 'Fecha'],
+                ['Gasto', 'Proyecto', 'Monto', 'Categoría', 'Estado', 'Soporte', 'Fecha'],
             ),
             (
                 reverse('project_update_list'),

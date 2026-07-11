@@ -68,7 +68,7 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ('code', 'name', 'status', 'estimated_budget')
     search_fields = ('code', 'name')
     list_filter = ('status',)
-    readonly_fields = ('status',)
+    readonly_fields = ('code', 'status')
 
     def save_model(self, request, obj, form, change):
         """
@@ -147,7 +147,7 @@ class DonationAdmin(admin.ModelAdmin):
     list_display = ('code', 'donor', 'amount', 'currency', 'status', 'received_date')
     search_fields = ('code', 'donor__name')
     list_filter = ('status', 'currency')
-    readonly_fields = ('currency', 'status')
+    readonly_fields = ('code', 'currency', 'status')
 
     def save_model(self, request, obj, form, change):
         """
@@ -161,10 +161,10 @@ class DonationAdmin(admin.ModelAdmin):
 @admin.register(FundAllocation)
 class FundAllocationAdmin(admin.ModelAdmin):
     form = FundAllocationAdminForm
-    list_display = ('donation', 'project', 'budget_category', 'amount', 'status', 'allocation_date')
-    search_fields = ('donation__code', 'project__code', 'project__name', 'budget_category')
+    list_display = ('code', 'donation', 'project', 'budget_category', 'amount', 'status', 'allocation_date')
+    search_fields = ('code', 'donation__code', 'project__code', 'project__name', 'budget_category')
     list_filter = ('status', 'allocation_date')
-    readonly_fields = ('status',)
+    readonly_fields = ('code', 'status')
 
     def save_model(self, request, obj, form, change):
         """
@@ -190,10 +190,10 @@ class SupportingDocumentInline(admin.TabularInline):
 @admin.register(Expense)
 class ExpenseAdmin(admin.ModelAdmin):
     form = ExpenseAdminForm
-    list_display = ('reason', 'allocation', 'amount', 'currency', 'status', 'expense_date')
-    search_fields = ('reason', 'provider_or_recipient', 'allocation__project__name')
+    list_display = ('code', 'reason', 'allocation', 'amount', 'currency', 'status', 'expense_date')
+    search_fields = ('code', 'reason', 'provider_or_recipient', 'allocation__project__name')
     list_filter = ('status', 'currency', 'expense_date')
-    readonly_fields = ('currency', 'status', 'validated_by', 'validated_at')
+    readonly_fields = ('code', 'currency', 'status', 'validated_by', 'validated_at')
     inlines = [SupportingDocumentInline]
 
     def get_readonly_fields(self, request, obj=None):

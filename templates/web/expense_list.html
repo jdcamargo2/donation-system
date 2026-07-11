@@ -34,13 +34,14 @@
                     <tr>
                         <td>
                             <a class="fw-semibold text-decoration-none" href="{% url 'expense_detail' expense.pk %}">
-                                {{ expense.reason|default:expense.provider_or_recipient }}
+                                {{ expense.code }}
                             </a>
+                            <div>{{ expense.reason|default:expense.provider_or_recipient }}</div>
                             <div class="small text-muted">{{ expense.provider_or_recipient }} · {{ expense.allocation.donation.code }}</div>
                         </td>
                         <td>
                             {{ expense.allocation.project.name }}
-                            <div class="small text-muted">{{ expense.allocation.project.code }} · Asignación #{{ expense.allocation.pk }}</div>
+                            <div class="small text-muted">{{ expense.allocation.project.code }} · {{ expense.allocation.code }}</div>
                         </td>
                         <td class="ops-money">{{ expense.amount }} {{ expense.currency }}</td>
                         <td>{{ expense.get_category_display }}</td>

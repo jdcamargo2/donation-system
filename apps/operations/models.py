@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Sum
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
@@ -18,17 +18,60 @@ from .choices import (
 
 
 ZERO_MONEY = Decimal('0.00')
+OPERATIONAL_CODE_WIDTH = 6
+OPERATIONAL_CODE_PREFIXES = {
+    'project': 'PRJ',
+    'donation': 'DON',
+    'fund_allocation': 'ASG',
+    'expense': 'GAS',
+}
 
 
-# PRE: model_class stores sequential user-facing codes with the provided prefix.
-# POST: returns the first unused code in the format PREFIX-000001.
-def _next_sequential_code(model_class, prefix):
-    next_number = (model_class.objects.order_by('-id').values_list('id', flat=True).first() or 0) + 1
-    while True:
-        code = f'{prefix}-{next_number:06d}'
-        if not model_class.objects.filter(code=code).exists():
-            return code
-        next_number += 1
+class OperationalCodeSequence(models.Model):
+    namespace = models.CharField(max_length=32, primary_key=True)
+    prefix = models.CharField(max_length=3, unique=True)
+    next_value = models.PositiveBigIntegerField(default=1)
+
+    class Meta:
+        verbose_name = _('secuencia de código operativo')
+        verbose_name_plural = _('secuencias de códigos operativos')
+
+    def __str__(self):
+        return f'{self.prefix}: {self.next_value}'
+
+
+# PRE: namespace is supported, prefix matches it, and the caller has opened transaction.atomic().
+# POST: locks one sequence row, advances it once, and returns the reserved six-digit code.
+def reserve_operational_code(*, namespace, prefix):
+    expected_prefix = OPERATIONAL_CODE_PREFIXES.get(namespace)
+    if expected_prefix is None:
+        raise ValidationError({'namespace': _('El namespace de código operativo no está soportado.')})
+    if prefix != expected_prefix:
+        raise ValidationError({'prefix': _('El prefijo no corresponde al namespace operativo.')})
+    if not transaction.get_connection().in_atomic_block:
+        raise RuntimeError('La reserva de códigos operativos exige transaction.atomic().')
+
+    try:
+        sequence = OperationalCodeSequence.objects.select_for_update().get(namespace=namespace)
+    except OperationalCodeSequence.DoesNotExist as exc:
+        raise RuntimeError(f'Falta inicializar la secuencia operativa {namespace!r}.') from exc
+    if sequence.prefix != prefix or sequence.next_value < 1:
+        raise RuntimeError(f'La secuencia operativa {namespace!r} es inconsistente.')
+
+    reserved_value = sequence.next_value
+    sequence.next_value = reserved_value + 1
+    sequence.save(update_fields=('next_value',))
+    return f'{prefix}-{reserved_value:0{OPERATIONAL_CODE_WIDTH}d}'
+
+
+# PRE: instance is persisted and proposed_code is the code submitted for its update.
+# POST: raises ValidationError if the persisted human identifier would change.
+def ensure_operational_code_is_immutable(instance, proposed_code):
+    if not instance.pk:
+        return
+    persisted_code = type(instance).objects.only('code').get(pk=instance.pk).code
+    if proposed_code != persisted_code:
+        raise ValidationError({'code': _('El código operativo no puede modificarse.')})
 
 
 class Institution(models.Model):
@@ -100,9 +143,14 @@ class Project(models.Model):
         return f'{self.code} - {self.name}'
 
     def save(self, *args, **kwargs):
-        if not self.code:
-            self.code = _next_sequential_code(Project, 'PRJ')
-        super().save(*args, **kwargs)
+        # PRE: explicit codes are supplied only by trusted fixtures, migrations, or seed data.
+        # POST: creates with one reserved PRJ code or preserves the existing code on update.
+        ensure_operational_code_is_immutable(self, self.code)
+        if self.code:
+            return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.code = reserve_operational_code(namespace='project', prefix='PRJ')
+            return super().save(*args, **kwargs)
 
     def clean(self):
         errors = {}
@@ -224,9 +272,14 @@ class Donation(models.Model):
         return f'{self.code} - {self.donor}'
 
     def save(self, *args, **kwargs):
-        if not self.code:
-            self.code = _next_sequential_code(Donation, 'DON')
-        super().save(*args, **kwargs)
+        # PRE: explicit codes are supplied only by trusted fixtures, migrations, or seed data.
+        # POST: creates with one reserved DON code or preserves the existing code on update.
+        ensure_operational_code_is_immutable(self, self.code)
+        if self.code:
+            return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.code = reserve_operational_code(namespace='donation', prefix='DON')
+            return super().save(*args, **kwargs)
 
     def clean(self):
         if self.amount <= ZERO_MONEY:
@@ -253,6 +306,7 @@ class FundAllocation(models.Model):
         CLOSED = 'closed', _('Cerrada')
         ANNULLED = 'annulled', _('Anulada')
 
+    code = models.CharField(max_length=40, unique=True, editable=False)
     donation = models.ForeignKey(Donation, on_delete=models.PROTECT, related_name='allocations')
     project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name='allocations')
     budget_category = models.CharField(max_length=40, choices=BUDGET_CATEGORY_CHOICES)
@@ -276,7 +330,17 @@ class FundAllocation(models.Model):
         ]
 
     def __str__(self):
-        return f'{self.donation.code} -> {self.project.code}: {self.amount}'
+        return f'{self.code} - {self.project.name}: {self.amount}'
+
+    def save(self, *args, **kwargs):
+        # PRE: explicit codes are supplied only by trusted fixtures, migrations, or seed data.
+        # POST: creates with one reserved ASG code or preserves the existing code on update.
+        ensure_operational_code_is_immutable(self, self.code)
+        if self.code:
+            return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.code = reserve_operational_code(namespace='fund_allocation', prefix='ASG')
+            return super().save(*args, **kwargs)
 
     def clean(self):
         errors = {}
@@ -316,6 +380,7 @@ class Expense(models.Model):
         ANNULLED = 'annulled', _('Anulado')
         CANCELLED = 'cancelled', _('Anulado')
 
+    code = models.CharField(max_length=40, unique=True, editable=False)
     allocation = models.ForeignKey(FundAllocation, on_delete=models.PROTECT, related_name='expenses')
     expense_date = models.DateField()
     category = models.CharField(max_length=40, choices=EXPENSE_CATEGORY_CHOICES)
@@ -351,6 +416,16 @@ class Expense(models.Model):
 
     def __str__(self):
         return f'{self.reason} - {self.amount}'
+
+    def save(self, *args, **kwargs):
+        # PRE: explicit codes are supplied only by trusted fixtures, migrations, or seed data.
+        # POST: creates with one reserved GAS code or preserves the existing code on update.
+        ensure_operational_code_is_immutable(self, self.code)
+        if self.code:
+            return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.code = reserve_operational_code(namespace='expense', prefix='GAS')
+            return super().save(*args, **kwargs)
 
     def clean(self):
         # PRE: amount, allocation, status and validation metadata describe the proposed expense state.
