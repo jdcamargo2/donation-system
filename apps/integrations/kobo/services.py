@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
@@ -10,7 +11,7 @@ from apps.integrations.kobo.errors import (
     KoboConfigurationError,
     KoboPayloadError,
 )
-from apps.integrations.kobo.form_registry import list_registered_forms
+from apps.integrations.kobo.form_registry import get_registered_form, list_registered_forms
 from apps.integrations.kobo.models import (
     KoboAttachment,
     KoboAsset,
@@ -84,6 +85,15 @@ class AssetDiscoveryResult:
     unchanged_count: int
     unavailable_count: int
     failed_count: int
+
+
+@dataclass(frozen=True)
+class AssetReadiness:
+    ready: bool
+    code: str
+    message: str
+    routing_type: str | None
+    active_binding_count: int
 
 
 def sync_registered_forms() -> int:
@@ -395,15 +405,10 @@ def resolve_routing_field(
     POST: returns a non-empty textual whitelisted/model or normalized payload
     value without raw payload access, arbitrary getattr, paths, indices, or calls.
     """
-    if not isinstance(source_field, str) or "." not in source_field:
-        raise KoboPayloadError("Routing source field prefix is invalid.")
-    prefix, field_name = source_field.split(".", 1)
-    if (
-        not field_name
-        or field_name.startswith("_")
-        or any(marker in field_name for marker in (".", "/", "[", "]", "(", ")"))
-    ):
-        raise KoboPayloadError("Routing source field is not allowed.")
+    try:
+        prefix, field_name = validate_routing_source_field(source_field)
+    except ValidationError as exc:
+        raise KoboPayloadError(str(exc.message)) from exc
 
     if prefix == "submission":
         submission_values = {
@@ -427,6 +432,31 @@ def resolve_routing_field(
     if not isinstance(value, str) or not value.strip():
         raise KoboPayloadError("Routing source value must be non-empty text.")
     return value
+
+
+def validate_routing_source_field(source_field: str) -> tuple[str, str]:
+    """
+    PRE: source_field is candidate direct model or normalized-payload routing data.
+    POST: returns its safe prefix/key or raises ValidationError without data access.
+    """
+    if not isinstance(source_field, str) or "." not in source_field:
+        raise ValidationError("Routing source field prefix is invalid.")
+    if any(marker in source_field for marker in ("/", "[", "]", "(", ")", " ")):
+        raise ValidationError("Routing source field is not allowed.")
+    prefix, field_name = source_field.split(".", 1)
+    if not field_name or field_name.startswith("_") or "." in field_name:
+        raise ValidationError("Routing source field is not allowed.")
+    allowed_submission_fields = {
+        "pastoral_zone",
+        "parish",
+        "primary_community",
+        "external_id",
+    }
+    if prefix == "submission" and field_name not in allowed_submission_fields:
+        raise ValidationError("Routing submission field is not allowed.")
+    if prefix not in {"submission", "payload"}:
+        raise ValidationError("Routing source field prefix is invalid.")
+    return prefix, field_name
 
 
 def _routing_resolution(binding: KoboProjectBinding) -> RoutingResolution:
@@ -740,3 +770,191 @@ def discover_assets(
         unavailable_count=0 if dry_run else unavailable_count,
         failed_count=0,
     )
+
+
+def _require_authenticated_actor(actor, *, action: str) -> None:
+    # PRE: actor is the caller supplied for an auditable configuration action.
+    # POST: returns only for an authenticated user; otherwise raises safely.
+    if actor is None or not getattr(actor, "is_authenticated", False):
+        raise ValidationError(f"An authenticated user is required to {action}.")
+
+
+def _require_registered_active_definition(
+    form_definition: KoboFormDefinition,
+) -> None:
+    # PRE: form_definition is a persisted candidate configuration definition.
+    # POST: accepts only an active exact entry in the local supported-form registry.
+    if form_definition is None or form_definition.pk is None:
+        raise ValidationError("Form definition must exist.")
+    if not form_definition.is_active:
+        raise ValidationError("Form definition must be active.")
+    try:
+        get_registered_form(form_definition.form_id, form_definition.version)
+    except KoboPayloadError as exc:
+        raise ValidationError("Form definition is not registered locally.") from exc
+
+
+def configure_discovered_asset(
+    discovered_asset: KoboDiscoveredAsset,
+    *,
+    name: str,
+    form_definition: KoboFormDefinition,
+    form_role: str,
+    configured_by,
+) -> KoboAsset:
+    """
+    PRE: discovered asset is available and unconfigured; definition, role and
+    authenticated actor are valid.
+    POST: creates one inactive KoboAsset only, using the exact discovered UID.
+    """
+    _require_authenticated_actor(configured_by, action="configure a Kobo asset")
+    if discovered_asset is None or discovered_asset.pk is None:
+        raise ValidationError("Discovered asset must exist.")
+    if not discovered_asset.is_available:
+        raise ValidationError("Unavailable discovered assets cannot be configured.")
+    _require_registered_active_definition(form_definition)
+    valid_roles = {value for value, _label in KoboAsset.FormRole.choices}
+    if form_role not in valid_roles:
+        raise ValidationError("Kobo asset form role is invalid.")
+    clean_name = name.strip() if isinstance(name, str) else ""
+    if not clean_name:
+        raise ValidationError("Kobo asset name is required.")
+
+    with transaction.atomic():
+        if KoboAsset.objects.filter(asset_uid=discovered_asset.asset_uid).exists():
+            raise ValidationError("This discovered asset is already configured.")
+        asset = KoboAsset(
+            asset_uid=discovered_asset.asset_uid,
+            name=clean_name,
+            form_definition=form_definition,
+            form_role=form_role,
+            is_active=False,
+        )
+        asset.full_clean()
+        asset.save()
+    return asset
+
+
+def create_project_binding(
+    asset: KoboAsset,
+    *,
+    routing_type: str,
+    project,
+    source_field: str,
+    source_value: str,
+    is_active: bool,
+    configured_by,
+) -> KoboProjectBinding:
+    """
+    PRE: asset/project exist, actor is authenticated, and routing is coherent.
+    POST: creates one valid binding without activating the asset or other effects.
+    """
+    _require_authenticated_actor(configured_by, action="create a Kobo binding")
+    if asset is None or asset.pk is None:
+        raise ValidationError("Kobo asset must exist.")
+    if project is None or project.pk is None:
+        raise ValidationError("Project must exist.")
+    if routing_type not in KoboProjectBinding.RoutingType.values:
+        raise ValidationError("Kobo binding routing type is invalid.")
+    source_field = source_field.strip() if isinstance(source_field, str) else ""
+    source_value = source_value.strip() if isinstance(source_value, str) else ""
+    if routing_type == KoboProjectBinding.RoutingType.DIRECT:
+        if source_field or source_value:
+            raise ValidationError("Direct routing requires empty source fields.")
+    else:
+        if not source_field or not source_value:
+            raise ValidationError("Field-value routing requires field and value.")
+        validate_routing_source_field(source_field)
+
+    if is_active:
+        active_routes = set(
+            asset.project_bindings.filter(is_active=True).values_list(
+                "routing_type", flat=True
+            )
+        )
+        if active_routes and routing_type not in active_routes:
+            raise ValidationError("Active Kobo routing strategies cannot be mixed.")
+
+    binding = KoboProjectBinding(
+        asset=asset,
+        project=project,
+        routing_type=routing_type,
+        source_field=source_field,
+        source_value=source_value,
+        is_active=bool(is_active),
+    )
+    binding.full_clean()
+    binding.save()
+    return binding
+
+
+def get_asset_readiness(asset: KoboAsset) -> AssetReadiness:
+    """
+    PRE: asset is a persisted KoboAsset.
+    POST: returns immutable readiness diagnostics without modifying any data.
+    """
+    if asset is None or asset.pk is None:
+        raise ValidationError("Kobo asset must exist.")
+    try:
+        _require_registered_active_definition(asset.form_definition)
+    except ValidationError:
+        return AssetReadiness(
+            False, "missing_form_definition", "Definición no disponible.", None, 0
+        )
+    routes = tuple(
+        asset.project_bindings.filter(is_active=True).values_list(
+            "routing_type", flat=True
+        )
+    )
+    route_types = set(routes)
+    if asset.is_active and routes and len(route_types) == 1:
+        return AssetReadiness(
+            True, "active", "Integración activa.", next(iter(route_types)), len(routes)
+        )
+    if not routes:
+        return AssetReadiness(False, "no_active_bindings", "Falta routing activo.", None, 0)
+    if len(route_types) != 1:
+        return AssetReadiness(False, "mixed_routing", "Routing activo mezclado.", None, len(routes))
+    routing_type = next(iter(route_types))
+    ready = (
+        routing_type == KoboProjectBinding.RoutingType.FIELD_VALUE
+        or len(routes) == 1
+    )
+    if not ready:
+        return AssetReadiness(False, "mixed_routing", "Routing directo inválido.", routing_type, len(routes))
+    return AssetReadiness(
+        True,
+        "ready_to_activate",
+        "Configuración lista para activar.",
+        routing_type,
+        len(routes),
+    )
+
+
+def activate_kobo_asset(asset: KoboAsset, *, activated_by) -> KoboAsset:
+    """
+    PRE: asset is inactive, actor authenticated, and readiness is valid.
+    POST: changes only is_active to True and returns the asset.
+    """
+    _require_authenticated_actor(activated_by, action="activate a Kobo asset")
+    if asset.is_active:
+        raise ValidationError("Kobo asset is already active.")
+    readiness = get_asset_readiness(asset)
+    if not readiness.ready:
+        raise ValidationError(f"Kobo asset is not ready: {readiness.code}.")
+    asset.is_active = True
+    asset.save(update_fields=("is_active",))
+    return asset
+
+
+def deactivate_kobo_asset(asset: KoboAsset, *, deactivated_by) -> KoboAsset:
+    """
+    PRE: asset exists and actor is authenticated.
+    POST: changes only is_active to False, preserving bindings and submissions.
+    """
+    _require_authenticated_actor(deactivated_by, action="deactivate a Kobo asset")
+    if asset is None or asset.pk is None:
+        raise ValidationError("Kobo asset must exist.")
+    asset.is_active = False
+    asset.save(update_fields=("is_active",))
+    return asset
