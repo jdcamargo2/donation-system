@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Activos Kobo descubiertos | SIGEDON{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h1 class="h3">Activos Kobo descubiertos</h1>
+  <div class="table-responsive"><table class="table table-hover align-middle">
+    <thead><tr><th>Nombre</th><th>UID</th><th>Tipo</th><th>Despliegue</th><th>Disponibilidad</th><th>Última detección</th><th>Estado local</th></tr></thead>
+    <tbody>{% for row in rows %}<tr>
+      <td><a href="{% url 'kobo:discovered_asset_detail' row.discovered.pk %}">{{ row.discovered.name }}</a></td>
+      <td>{{ row.short_uid }}{% if row.discovered.asset_uid|length > 12 %}…{% endif %}</td>
+      <td>{{ row.discovered.asset_type|default:"—" }}</td><td>{{ row.discovered.deployment_status|default:"—" }}</td>
+      <td>{% if row.discovered.is_available %}Disponible{% else %}No disponible{% endif %}</td>
+      <td>{{ row.discovered.last_seen_at }}</td><td>{{ row.local_state }}</td>
+    </tr>{% empty %}<tr><td colspan="7">No hay activos descubiertos.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

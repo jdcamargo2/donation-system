@@ -5,6 +5,41 @@ from apps.integrations.kobo import views
 app_name = "kobo"
 urlpatterns = [
     path(
+        "discovered-assets/",
+        views.discovered_asset_list,
+        name="discovered_asset_list",
+    ),
+    path(
+        "discovered-assets/<int:pk>/",
+        views.discovered_asset_detail,
+        name="discovered_asset_detail",
+    ),
+    path(
+        "discovered-assets/<int:pk>/configure/",
+        views.configure_discovered_asset_action,
+        name="configure_discovered_asset",
+    ),
+    path(
+        "assets/<int:pk>/configuration/",
+        views.asset_configuration_detail,
+        name="asset_configuration",
+    ),
+    path(
+        "assets/<int:pk>/bindings/",
+        views.create_project_binding_action,
+        name="create_project_binding",
+    ),
+    path(
+        "assets/<int:pk>/activate/",
+        views.activate_kobo_asset_action,
+        name="activate_asset",
+    ),
+    path(
+        "assets/<int:pk>/deactivate/",
+        views.deactivate_kobo_asset_action,
+        name="deactivate_asset",
+    ),
+    path(
         "project-submissions/<int:pk>/",
         views.project_submission_detail,
         name="project_submission_detail",

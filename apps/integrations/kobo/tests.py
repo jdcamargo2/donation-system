@@ -52,6 +52,7 @@ from apps.integrations.kobo.form_registry import (
     get_registered_form,
     list_registered_forms,
 )
+from apps.integrations.kobo.forms import KoboProjectBindingForm
 from apps.integrations.kobo.models import (
     KoboAttachment,
     KoboAsset,
@@ -64,8 +65,13 @@ from apps.integrations.kobo.models import (
 from apps.integrations.kobo.normalizers import normalize_submission
 from apps.integrations.kobo.processors import process_submission
 from apps.integrations.kobo.services import (
+    activate_kobo_asset,
     associate_submission_with_project,
+    configure_discovered_asset,
+    create_project_binding,
+    deactivate_kobo_asset,
     discover_assets,
+    get_asset_readiness,
     get_project_imported_submissions,
     process_pending_submissions,
     receive_api_submission,
@@ -73,6 +79,7 @@ from apps.integrations.kobo.services import (
     resolve_routing_field,
     sync_ficha_01_submissions,
     sync_registered_forms,
+    validate_routing_source_field,
 )
 from apps.operations.models import Project, ProjectUpdate
 
@@ -2917,3 +2924,218 @@ class KoboAssetDiscoveryTests(TestCase):
         self.assertIn("fetched=1 would_create=1 would_update=0", output.getvalue())
         self.assertNotIn("command-discovery-secret", output.getvalue())
         self.assertNotIn("https://", output.getvalue())
+
+
+@override_settings(KOBO_ENABLED=True)
+class KoboAssetManualConfigurationTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        # PRE: auth, Kobo and operations models are migrated.
+        # POST: creates reusable actors and one supported active definition.
+        user_model = get_user_model()
+        cls.viewer = user_model.objects.create_user("kobo-config-viewer")
+        cls.editor = user_model.objects.create_user("kobo-config-editor")
+        permissions = {
+            permission.codename: permission
+            for permission in Permission.objects.filter(
+                codename__in=("view_koboasset", "change_koboasset")
+            )
+        }
+        cls.viewer.user_permissions.add(permissions["view_koboasset"])
+        cls.editor.user_permissions.add(
+            permissions["view_koboasset"], permissions["change_koboasset"]
+        )
+        cls.definition = KoboFormDefinition.objects.create(
+            form_id="ficha_01_territorio",
+            title="Ficha 01",
+            version="20260710",
+        )
+
+    def setUp(self):
+        self.discovered = KoboDiscoveredAsset.objects.create(
+            asset_uid="manual-config-uid-sensitive-tail",
+            name="Activo descubierto",
+            asset_type="survey",
+            deployment_status="deployed",
+            metadata_snapshot={
+                "uid": "manual-config-uid-sensitive-tail",
+                "name": "Activo descubierto",
+            },
+            last_seen_at=django_timezone.now(),
+        )
+        self.project = Project.objects.create(code="PRJ-K13C", name="Proyecto K13C")
+
+    def configure(self):
+        # PRE: the default discovery is available and not configured.
+        # POST: returns its newly configured inactive local asset.
+        return configure_discovered_asset(
+            self.discovered,
+            name="Integración manual",
+            form_definition=self.definition,
+            form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE,
+            configured_by=self.editor,
+        )
+
+    def test_configuration_uses_remote_uid_and_stays_isolated_inactive(self):
+        project_count = Project.objects.count()
+        asset = self.configure()
+
+        self.assertEqual(asset.asset_uid, self.discovered.asset_uid)
+        self.assertFalse(asset.is_active)
+        self.assertFalse(KoboProjectBinding.objects.exists())
+        self.assertFalse(KoboSubmission.objects.exists())
+        self.assertEqual(Project.objects.count(), project_count)
+        self.assertFalse(ProjectUpdate.objects.exists())
+
+    def test_configuration_rejects_unavailable_duplicate_and_unsupported_definition(self):
+        self.discovered.is_available = False
+        self.discovered.save(update_fields=("is_available",))
+        with self.assertRaises(ValidationError):
+            self.configure()
+        self.discovered.is_available = True
+        self.discovered.save(update_fields=("is_available",))
+        self.configure()
+        with self.assertRaises(ValidationError):
+            self.configure()
+
+        other = KoboDiscoveredAsset.objects.create(
+            asset_uid="unsupported-definition-asset",
+            name="Unsupported",
+            last_seen_at=django_timezone.now(),
+        )
+        unsupported = KoboFormDefinition.objects.create(
+            form_id="not_registered", title="No registrada", version="1"
+        )
+        with self.assertRaises(ValidationError):
+            configure_discovered_asset(
+                other,
+                name="No permitida",
+                form_definition=unsupported,
+                form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE,
+                configured_by=self.editor,
+            )
+
+    def test_binding_validation_and_strategy_exclusion(self):
+        asset = self.configure()
+        direct = create_project_binding(
+            asset,
+            routing_type=KoboProjectBinding.RoutingType.DIRECT,
+            project=self.project,
+            source_field="",
+            source_value="",
+            is_active=True,
+            configured_by=self.editor,
+        )
+        self.assertTrue(direct.is_active)
+        self.assertFalse(asset.is_active)
+        with self.assertRaises(ValidationError):
+            create_project_binding(
+                asset,
+                routing_type=KoboProjectBinding.RoutingType.FIELD_VALUE,
+                project=self.project,
+                source_field="submission.parish",
+                source_value="parish-1",
+                is_active=True,
+                configured_by=self.editor,
+            )
+
+    def test_field_value_routes_and_unsafe_sources(self):
+        asset = self.configure()
+        for value in ("parish-1", "parish-2"):
+            create_project_binding(
+                asset,
+                routing_type=KoboProjectBinding.RoutingType.FIELD_VALUE,
+                project=self.project,
+                source_field="payload.parish_key",
+                source_value=value,
+                is_active=True,
+                configured_by=self.editor,
+            )
+        self.assertTrue(get_asset_readiness(asset).ready)
+        for source_field in (
+            "payload._private",
+            "raw_payload.secret",
+            "payload.path/value",
+            "payload.items[0]",
+            "payload.two..parts",
+            "payload.with space",
+        ):
+            with self.subTest(source_field=source_field):
+                with self.assertRaises(ValidationError):
+                    validate_routing_source_field(source_field)
+
+    def test_readiness_activation_and_deactivation_preserve_bindings(self):
+        asset = self.configure()
+        self.assertEqual(get_asset_readiness(asset).code, "no_active_bindings")
+        create_project_binding(
+            asset,
+            routing_type=KoboProjectBinding.RoutingType.DIRECT,
+            project=self.project,
+            source_field="",
+            source_value="",
+            is_active=True,
+            configured_by=self.editor,
+        )
+        self.assertEqual(get_asset_readiness(asset).code, "ready_to_activate")
+        activate_kobo_asset(asset, activated_by=self.editor)
+        self.assertTrue(asset.is_active)
+        deactivate_kobo_asset(asset, deactivated_by=self.editor)
+        self.assertFalse(asset.is_active)
+        self.assertEqual(asset.project_bindings.count(), 1)
+
+    def test_readiness_rejects_mixed_routing_and_inactive_definition(self):
+        asset = self.configure()
+        KoboProjectBinding.objects.create(
+            asset=asset,
+            project=self.project,
+            routing_type=KoboProjectBinding.RoutingType.DIRECT,
+            is_active=True,
+        )
+        KoboProjectBinding.objects.create(
+            asset=asset,
+            project=self.project,
+            routing_type=KoboProjectBinding.RoutingType.FIELD_VALUE,
+            source_field="submission.parish",
+            source_value="parish-1",
+            is_active=True,
+        )
+        self.assertEqual(get_asset_readiness(asset).code, "mixed_routing")
+        with self.assertRaises(ValidationError):
+            activate_kobo_asset(asset, activated_by=self.editor)
+
+        self.definition.is_active = False
+        self.definition.save(update_fields=("is_active",))
+        self.assertEqual(get_asset_readiness(asset).code, "missing_form_definition")
+
+    def test_browser_surfaces_require_login_permissions_and_do_not_mutate_on_get(self):
+        list_url = reverse("kobo:discovered_asset_list")
+        detail_url = reverse("kobo:discovered_asset_detail", args=(self.discovered.pk,))
+        self.assertEqual(self.client.get(list_url).status_code, 302)
+        self.client.force_login(self.editor)
+        before = (KoboAsset.objects.count(), KoboProjectBinding.objects.count())
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Activo descubierto, aún no configurado")
+        self.assertEqual(before, (KoboAsset.objects.count(), KoboProjectBinding.objects.count()))
+
+        self.client.force_login(get_user_model().objects.create_user("no-kobo-permission"))
+        self.assertEqual(self.client.get(list_url).status_code, 403)
+
+    @override_settings(KOBO_ENABLED=False)
+    def test_disabled_feature_hides_configuration_surfaces(self):
+        self.client.force_login(self.viewer)
+        response = self.client.get(reverse("kobo:discovered_asset_list"))
+        self.assertEqual(response.status_code, 404)
+
+    def test_binding_form_rejects_tampered_project_and_invalid_shapes(self):
+        form = KoboProjectBindingForm(
+            {
+                "routing_type": KoboProjectBinding.RoutingType.DIRECT,
+                "project": self.project.pk + 9999,
+                "source_field": "submission.parish",
+                "source_value": "x",
+                "is_active": "on",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("project", form.errors)
