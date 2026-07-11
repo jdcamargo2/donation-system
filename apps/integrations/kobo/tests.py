@@ -3121,6 +3121,80 @@ class KoboAssetManualConfigurationTests(TestCase):
         self.client.force_login(get_user_model().objects.create_user("no-kobo-permission"))
         self.assertEqual(self.client.get(list_url).status_code, 403)
 
+    def test_incompatible_discovery_hides_form_and_blocks_configuration_post(self):
+        self.client.force_login(self.editor)
+        detail_url = reverse(
+            "kobo:discovered_asset_detail", args=(self.discovered.pk,)
+        )
+        response = self.client.get(detail_url)
+
+        self.assertContains(
+            response,
+            "Este activo fue descubierto, pero todavía no tiene una definición "
+            "soportada en SIGEDON.",
+        )
+        self.assertNotContains(response, "Configurar activo")
+
+        response = self.client.post(
+            reverse("kobo:configure_discovered_asset", args=(self.discovered.pk,)),
+            {
+                "name": "Intento incompatible",
+                "form_definition": self.definition.pk,
+                "form_role": KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(KoboAsset.objects.exists())
+
+    def test_compatible_discovery_exposes_only_fixed_definition_and_role(self):
+        self.discovered.name = self.definition.title
+        self.discovered.save(update_fields=("name",))
+        other_definition = KoboFormDefinition.objects.create(
+            form_id="ficha_02_capacidad_parroquial",
+            title="Ficha 02 - Capacidad parroquial",
+            version="20260710",
+        )
+        self.client.force_login(self.editor)
+        detail_url = reverse(
+            "kobo:discovered_asset_detail", args=(self.discovered.pk,)
+        )
+        response = self.client.get(detail_url)
+
+        self.assertContains(response, "Configurar activo")
+        form = response.context["configuration_form"]
+        self.assertEqual(list(form.fields["form_definition"].queryset), [self.definition])
+        self.assertEqual(
+            tuple(value for value, _label in form.fields["form_role"].choices),
+            (KoboAsset.FormRole.TERRITORIAL_PROFILE,),
+        )
+
+        configure_url = reverse(
+            "kobo:configure_discovered_asset", args=(self.discovered.pk,)
+        )
+        tampered = self.client.post(
+            configure_url,
+            {
+                "name": "Manipulado",
+                "form_definition": other_definition.pk,
+                "form_role": KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+            },
+        )
+        self.assertEqual(tampered.status_code, 400)
+        self.assertFalse(KoboAsset.objects.exists())
+
+        valid = self.client.post(
+            configure_url,
+            {
+                "name": "Compatible",
+                "form_definition": self.definition.pk,
+                "form_role": KoboAsset.FormRole.TERRITORIAL_PROFILE,
+            },
+        )
+        self.assertEqual(valid.status_code, 302)
+        asset = KoboAsset.objects.get()
+        self.assertEqual(asset.form_definition, self.definition)
+        self.assertEqual(asset.form_role, KoboAsset.FormRole.TERRITORIAL_PROFILE)
+
     @override_settings(KOBO_ENABLED=False)
     def test_disabled_feature_hides_configuration_surfaces(self):
         self.client.force_login(self.viewer)

@@ -16,6 +16,7 @@ from apps.integrations.kobo.forms import (
     KoboAssetConfigurationForm,
     KoboProjectBindingForm,
     KoboReviewForm,
+    get_compatible_asset_configuration,
 )
 from apps.integrations.kobo.models import (
     KoboAsset,
@@ -369,6 +370,9 @@ def discovered_asset_detail(request, pk):
     asset = KoboAsset.objects.filter(asset_uid=discovered.asset_uid).select_related(
         "form_definition"
     ).first()
+    compatible_configuration = (
+        get_compatible_asset_configuration(discovered) if asset is None else None
+    )
     return render(
         request,
         "kobo/discovered_asset_detail.html",
@@ -381,7 +385,12 @@ def discovered_asset_detail(request, pk):
                 else ()
             ),
             "local_state": _local_asset_state(asset),
-            "configuration_form": KoboAssetConfigurationForm(),
+            "compatible_configuration": compatible_configuration,
+            "configuration_form": (
+                KoboAssetConfigurationForm(discovered_asset=discovered)
+                if compatible_configuration is not None
+                else None
+            ),
         },
     )
 
@@ -398,7 +407,22 @@ def configure_discovered_asset_action(request, pk):
     if existing is not None:
         messages.error(request, "El activo descubierto ya está configurado.")
         return redirect("kobo:asset_configuration", pk=existing.pk)
-    form = KoboAssetConfigurationForm(request.POST)
+    compatible_configuration = get_compatible_asset_configuration(discovered)
+    if compatible_configuration is None:
+        return render(
+            request,
+            "kobo/discovered_asset_detail.html",
+            {
+                "discovered": discovered,
+                "asset": None,
+                "bindings": (),
+                "local_state": "unconfigured",
+                "compatible_configuration": None,
+                "configuration_form": None,
+            },
+            status=400,
+        )
+    form = KoboAssetConfigurationForm(request.POST, discovered_asset=discovered)
     if form.is_valid():
         try:
             asset = configure_discovered_asset(
@@ -421,6 +445,7 @@ def configure_discovered_asset_action(request, pk):
             "asset": None,
             "bindings": (),
             "local_state": "unconfigured",
+            "compatible_configuration": compatible_configuration,
             "configuration_form": form,
         },
         status=400,

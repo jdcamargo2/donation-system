@@ -3,11 +3,49 @@ from django.core.exceptions import ValidationError
 
 from apps.integrations.kobo.models import (
     KoboAsset,
+    KoboDiscoveredAsset,
     KoboFormDefinition,
     KoboProjectBinding,
     KoboSubmission,
 )
+from apps.integrations.kobo.form_registry import list_registered_forms
 from apps.integrations.kobo.services import validate_routing_source_field
+
+
+SUPPORTED_FORM_ROLES = {
+    "ficha_01_territorio": KoboAsset.FormRole.TERRITORIAL_PROFILE,
+}
+
+
+def get_compatible_asset_configuration(
+    discovered_asset: KoboDiscoveredAsset,
+) -> tuple[KoboFormDefinition, str] | None:
+    """
+    PRE: discovered_asset is a persisted remote discovery projection.
+    POST: returns one exact active registered definition and its fixed supported
+    role, or None; never guesses from arbitrary UIDs, definitions, or roles.
+    """
+    registered_versions = {
+        (registered.form_id, registered.version)
+        for registered in list_registered_forms()
+        if registered.form_id in SUPPORTED_FORM_ROLES
+    }
+    remote_name = discovered_asset.name.strip().casefold()
+    if not remote_name:
+        return None
+    candidates = list(
+        KoboFormDefinition.objects.filter(is_active=True).order_by("pk")
+    )
+    matches = [
+        definition
+        for definition in candidates
+        if (definition.form_id, definition.version) in registered_versions
+        and definition.title.strip().casefold() == remote_name
+    ]
+    if len(matches) != 1:
+        return None
+    definition = matches[0]
+    return definition, SUPPORTED_FORM_ROLES[definition.form_id]
 
 
 class KoboAssetConfigurationForm(forms.Form):
@@ -17,13 +55,22 @@ class KoboAssetConfigurationForm(forms.Form):
     )
     form_role = forms.ChoiceField(choices=KoboAsset.FormRole.choices)
 
-    def __init__(self, *args, **kwargs):
-        # PRE: active form definitions may exist in the local registry mirror.
-        # POST: exposes only active persisted definitions as configuration choices.
+    def __init__(self, *args, discovered_asset: KoboDiscoveredAsset, **kwargs):
+        # PRE: discovered_asset identifies the exact candidate being configured.
+        # POST: exposes at most one compatible definition and its fixed local role.
         super().__init__(*args, **kwargs)
+        compatible = get_compatible_asset_configuration(discovered_asset)
+        if compatible is None:
+            self.fields["form_definition"].queryset = KoboFormDefinition.objects.none()
+            self.fields["form_role"].choices = ()
+            return
+        definition, form_role = compatible
         self.fields["form_definition"].queryset = KoboFormDefinition.objects.filter(
-            is_active=True
-        ).order_by("title", "version")
+            pk=definition.pk
+        )
+        self.fields["form_definition"].initial = definition
+        self.fields["form_role"].choices = ((form_role, dict(KoboAsset.FormRole.choices)[form_role]),)
+        self.fields["form_role"].initial = form_role
 
 
 class KoboProjectBindingForm(forms.Form):

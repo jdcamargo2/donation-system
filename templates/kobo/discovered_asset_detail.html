@@ -17,6 +17,8 @@
     <p><a class="btn btn-primary" href="{% url 'kobo:asset_configuration' asset.pk %}">Ver configuración</a></p>
     <p>Definición: {{ asset.form_definition }} · Rol: {{ asset.get_form_role_display }} · {% if asset.is_active %}Activo{% else %}Inactivo{% endif %}</p>
     <ul>{% for binding in bindings %}<li>{{ binding.routing_type }} — {{ binding.project }}</li>{% empty %}<li>Sin bindings.</li>{% endfor %}</ul>
+  {% elif discovered.is_available and not compatible_configuration %}
+    <div class="alert alert-warning">Este activo fue descubierto, pero todavía no tiene una definición soportada en SIGEDON.</div>
   {% elif discovered.is_available and perms.kobo.change_koboasset %}
     <form method="post" action="{% url 'kobo:configure_discovered_asset' discovered.pk %}" class="card card-body">{% csrf_token %}{{ configuration_form.as_p }}<button class="btn btn-primary" type="submit">Configurar activo</button></form>
   {% endif %}
