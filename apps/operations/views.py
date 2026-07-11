@@ -1,9 +1,12 @@
+from dataclasses import dataclass
+
 from django.contrib import messages
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404
 from django.http import FileResponse, Http404, HttpResponseRedirect
 from django.urls import reverse, reverse_lazy
@@ -53,6 +56,108 @@ from .services import (
     transition_fund_allocation_status,
     transition_project_status,
 )
+
+
+@dataclass(frozen=True)
+class ProtectedRelationInfo:
+    label: str
+    count: int
+    recommendation: str
+
+
+PROTECTED_RELATION_PRESENTATION = {
+    Donation: (_('donación asociada'), _('donaciones asociadas')),
+    FundAllocation: (_('asignación asociada'), _('asignaciones asociadas')),
+    Expense: (_('gasto asociado'), _('gastos asociados')),
+    AuditLog: (_('registro de auditoría asociado'), _('registros de auditoría asociados')),
+}
+
+
+# PRE: protected_error is a real Django ProtectedError containing persisted protected objects.
+# POST: returns related objects grouped by human model label, count, and realistic recommendation.
+def describe_protected_relations(protected_error):
+    grouped_objects = {}
+    for protected_object in protected_error.protected_objects:
+        grouped_objects.setdefault(type(protected_object), []).append(protected_object)
+
+    related_groups = []
+    for model_class, objects in grouped_objects.items():
+        singular, plural = PROTECTED_RELATION_PRESENTATION.get(
+            model_class,
+            (model_class._meta.verbose_name, model_class._meta.verbose_name_plural),
+        )
+        count = len(objects)
+        label = singular if count == 1 else plural
+        if model_class is Expense:
+            recommendation = _(
+                'Conserve la asignación como registro histórico o gestione primero los gastos relacionados.'
+            )
+        else:
+            recommendation = _(
+                'Conserve el registro como historial o gestione primero los registros relacionados.'
+            )
+        related_groups.append(
+            ProtectedRelationInfo(
+                label=str(label),
+                count=count,
+                recommendation=str(recommendation),
+            )
+        )
+    return sorted(related_groups, key=lambda group: group.label)
+
+
+# PRE: object_label is human-readable and related_groups contains at least one protected group.
+# POST: returns a non-technical message that never claims the object was deleted.
+def build_protected_delete_message(*, object_label, related_groups):
+    if not related_groups:
+        raise ValueError('Se requiere al menos una relación protegida.')
+    relation_summary = ' y '.join(
+        f'{group.count} {group.label}' for group in related_groups
+    )
+    recommendations = ' '.join(
+        dict.fromkeys(group.recommendation for group in related_groups)
+    )
+    return _(
+        'No se puede eliminar %(object)s porque tiene %(relations)s. %(recommendations)s'
+    ) % {
+        'object': object_label,
+        'relations': relation_summary,
+        'recommendations': recommendations,
+    }
+
+
+# PRE: instance is a persisted operations object shown in a delete flow.
+# POST: returns a human label without exposing internal model names or database identifiers.
+def get_delete_object_label(instance):
+    if isinstance(instance, Institution):
+        return _('la institución %(name)s') % {'name': instance.name}
+    if isinstance(instance, Project):
+        return _('el proyecto %(code)s - %(name)s') % {'code': instance.code, 'name': instance.name}
+    if isinstance(instance, Donation):
+        return _('la donación %(code)s') % {'code': instance.code}
+    if isinstance(instance, FundAllocation):
+        return _('la asignación %(code)s') % {'code': instance.code}
+    if isinstance(instance, Expense):
+        return _('el gasto %(code)s') % {'code': instance.code}
+    if isinstance(instance, ProjectUpdate):
+        return _('el avance %(title)s') % {'title': instance.title}
+    if isinstance(instance, SupportingDocument):
+        return _('el documento soporte %(title)s') % {'title': instance.title}
+    return str(instance)
+
+
+# PRE: instance is the persisted object displayed by an operational delete confirmation.
+# POST: returns only known CASCADE consequences with positive counts; it does not mark them protected.
+def describe_known_cascade_consequences(instance):
+    if isinstance(instance, Project):
+        count = instance.updates.count()
+        label = _('avance de proyecto') if count == 1 else _('avances de proyecto')
+    elif isinstance(instance, Expense):
+        count = instance.supporting_documents.count()
+        label = _('documento soporte') if count == 1 else _('documentos soporte')
+    else:
+        return []
+    return [{'count': count, 'label': label}] if count else []
 
 
 class DashboardView(LoginRequiredMixin, TemplateView):
@@ -203,12 +308,34 @@ class AuditMixin:
 class DeleteAuditMixin:
     audit_summary = _('Registro eliminado.')
 
-    # PRE: self.object exists and is about to be deleted through an operational DeleteView.
-    # POST: writes an audit record before the object is removed from the database.
+    def get_context_data(self, **kwargs):
+        # PRE: self.object is the persisted object shown by the delete confirmation.
+        # POST: adds a human label and known cascade consequences without deleting anything.
+        context = super().get_context_data(**kwargs)
+        context['delete_object_label'] = get_delete_object_label(self.object)
+        context['cascade_consequences'] = describe_known_cascade_consequences(self.object)
+        return context
+
+    # PRE: self.object exists and POST passed permission and confirmation handling.
+    # POST: deletes and audits atomically, or reports protected relations without success/audit mutation.
     def form_valid(self, form):
-        log_delete(self.request.user, self.object, self.audit_summary)
+        object_label = get_delete_object_label(self.object)
+        try:
+            with transaction.atomic():
+                log_delete(self.request.user, self.object, self.audit_summary)
+                response = super().form_valid(form)
+        except ProtectedError as error:
+            related_groups = describe_protected_relations(error)
+            messages.error(
+                self.request,
+                build_protected_delete_message(
+                    object_label=object_label,
+                    related_groups=related_groups,
+                ),
+            )
+            return HttpResponseRedirect(self.get_success_url())
         messages.success(self.request, self.audit_summary)
-        return super().form_valid(form)
+        return response
 
 
 class InstitutionListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
@@ -989,9 +1116,9 @@ class SupportingDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView
                     _('No se puede eliminar el último documento soporte de un gasto validado.'),
                 )
                 return HttpResponseRedirect(reverse('expense_detail', args=[expense.pk]))
-            messages.success(self.request, _('Documento soporte eliminado.'))
             log_delete(self.request.user, document, _('Documento soporte eliminado.'))
             document.delete()
+        messages.success(self.request, _('Documento soporte eliminado.'))
         return HttpResponseRedirect(reverse('expense_detail', args=[expense.pk]))
 
 

@@ -5,12 +5,23 @@
 {% block content %}
 <div class="card border-danger">
     <div class="card-body">
-        <h1 class="h4">Eliminar registro</h1>
-        <p>¿Está seguro de que desea eliminar <strong>{{ object }}</strong>?</p>
+        <h1 class="h4">{{ title|default:"Eliminar registro" }}</h1>
+        <p>Está a punto de eliminar permanentemente <strong>{{ delete_object_label|default:object }}</strong>.</p>
+        {% if cascade_consequences %}
+            <div class="alert alert-warning">
+                Esta eliminación también eliminará:
+                <ul class="mb-0">
+                    {% for consequence in cascade_consequences %}
+                        <li>{{ consequence.count }} {{ consequence.label }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+        <p class="text-muted">Esta acción no se puede deshacer.</p>
         <form method="post">
             {% csrf_token %}
             <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Cancelar</a>
-            <button type="submit" class="btn btn-danger">Eliminar</button>
+            <button type="submit" class="btn btn-danger">Eliminar definitivamente</button>
         </form>
     </div>
 </div>
