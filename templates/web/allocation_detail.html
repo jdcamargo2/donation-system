@@ -16,6 +16,13 @@
         {% endif %}
     </div>
 </div>
+{% if perms.operations.change_fundallocation and status_transitions %}
+<div class="d-flex gap-2 mb-4">
+    {% for transition in status_transitions %}
+    <form method="post" action="{% url transition_url_name object.pk transition.value %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Cambiar a {{ transition.label }}</button></form>
+    {% endfor %}
+</div>
+{% endif %}
 
 <div class="row g-3 mb-4">
     <div class="col-md-4">

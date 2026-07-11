@@ -68,6 +68,15 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ('code', 'name', 'status', 'estimated_budget')
     search_fields = ('code', 'name')
     list_filter = ('status',)
+    readonly_fields = ('status',)
+
+    def save_model(self, request, obj, form, change):
+        """
+        PRE: obj is new or an existing project submitted through admin.
+        POST: creates PLANNED and preserves persisted status on ordinary edits.
+        """
+        obj.status = Project.objects.get(pk=obj.pk).status if change else Project.Status.PLANNED
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(ProjectUpdate)
@@ -138,7 +147,15 @@ class DonationAdmin(admin.ModelAdmin):
     list_display = ('code', 'donor', 'amount', 'currency', 'status', 'received_date')
     search_fields = ('code', 'donor__name')
     list_filter = ('status', 'currency')
-    readonly_fields = ('currency',)
+    readonly_fields = ('currency', 'status')
+
+    def save_model(self, request, obj, form, change):
+        """
+        PRE: obj is new or an existing donation submitted through admin.
+        POST: creates REGISTERED and preserves persisted status on ordinary edits.
+        """
+        obj.status = Donation.objects.get(pk=obj.pk).status if change else Donation.Status.REGISTERED
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(FundAllocation)
@@ -147,6 +164,15 @@ class FundAllocationAdmin(admin.ModelAdmin):
     list_display = ('donation', 'project', 'budget_category', 'amount', 'status', 'allocation_date')
     search_fields = ('donation__code', 'project__code', 'project__name', 'budget_category')
     list_filter = ('status', 'allocation_date')
+    readonly_fields = ('status',)
+
+    def save_model(self, request, obj, form, change):
+        """
+        PRE: obj is new or an existing allocation submitted through admin.
+        POST: creates CREATED and preserves persisted status on ordinary edits.
+        """
+        obj.status = FundAllocation.objects.get(pk=obj.pk).status if change else FundAllocation.Status.CREATED
+        super().save_model(request, obj, form, change)
 
 
 class SupportingDocumentInline(admin.TabularInline):

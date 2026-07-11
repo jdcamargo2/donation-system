@@ -9,6 +9,7 @@ from django.http import FileResponse, Http404, HttpResponseRedirect
 from django.urls import reverse, reverse_lazy
 from django.utils.text import get_valid_filename
 from django.utils.translation import gettext_lazy as _
+from django.views import View
 from django.views.generic import CreateView, DeleteView, DetailView, FormView, ListView, TemplateView, UpdateView
 
 from .forms import (
@@ -45,6 +46,12 @@ from .services import (
     update_expense,
     update_fund_allocation,
     update_project_update,
+    DONATION_STATUS_TRANSITIONS,
+    FUND_ALLOCATION_STATUS_TRANSITIONS,
+    PROJECT_STATUS_TRANSITIONS,
+    transition_donation_status,
+    transition_fund_allocation_status,
+    transition_project_status,
 )
 
 
@@ -134,6 +141,47 @@ class DetailMetricsMixin:
             ]
         context['metrics'] = metrics
         return context
+
+
+class StateTransitionContextMixin:
+    transition_map = {}
+    transition_url_name = ''
+
+    def get_context_data(self, **kwargs):
+        """
+        PRE: self.object has model status choices and transition_map is explicit.
+        POST: exposes only allowed target states and their POST endpoint to the template.
+        """
+        context = super().get_context_data(**kwargs)
+        labels = dict(self.object.Status.choices)
+        context['status_transitions'] = [
+            {'value': target, 'label': labels[target]}
+            for target in self.transition_map.get(self.object.status, ())
+        ]
+        context['transition_url_name'] = self.transition_url_name
+        return context
+
+
+class StateTransitionView(OperationsPermissionRequiredMixin, View):
+    transition_service = None
+    detail_url_name = ''
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: user has the model change permission and target state comes from the URL.
+        POST: delegates one explicit transition to its locked service and redirects to detail.
+        """
+        object_id = kwargs['pk']
+        try:
+            self.transition_service(
+                object_id,
+                actor=request.user,
+                target_status=kwargs['target_status'],
+            )
+            messages.success(request, _('Estado actualizado.'))
+        except ValidationError as error:
+            messages.error(request, ' '.join(error.messages))
+        return HttpResponseRedirect(reverse(self.detail_url_name, args=[object_id]))
 
 
 class AuditMixin:
@@ -256,12 +304,14 @@ class ProjectListView(OperationsPermissionRequiredMixin, RouteContextMixin, List
     page_title = _('Proyectos')
 
 
-class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
+class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_project'
     model = Project
     template_name = 'web/project_detail.html'
     route_prefix = 'project'
     page_title = _('Proyecto')
+    transition_map = PROJECT_STATUS_TRANSITIONS
+    transition_url_name = 'project_status_transition'
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -318,6 +368,12 @@ class ProjectDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, Rou
     route_prefix = 'project'
     page_title = _('Eliminar proyecto')
     audit_summary = _('Proyecto eliminado.')
+
+
+class ProjectStatusTransitionView(StateTransitionView):
+    permission_required = 'operations.change_project'
+    transition_service = staticmethod(transition_project_status)
+    detail_url_name = 'project_detail'
 
 
 class ProjectUpdateListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
@@ -526,12 +582,14 @@ class DonationListView(OperationsPermissionRequiredMixin, RouteContextMixin, Lis
         return Donation.objects.select_related('donor')
 
 
-class DonationDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
+class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_donation'
     model = Donation
     template_name = 'web/donation_detail.html'
     route_prefix = 'donation'
     page_title = _('Donación')
+    transition_map = DONATION_STATUS_TRANSITIONS
+    transition_url_name = 'donation_status_transition'
 
 
 class DonationCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, CreateView):
@@ -567,6 +625,12 @@ class DonationDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, Ro
     audit_summary = _('Donación eliminada.')
 
 
+class DonationStatusTransitionView(StateTransitionView):
+    permission_required = 'operations.change_donation'
+    transition_service = staticmethod(transition_donation_status)
+    detail_url_name = 'donation_detail'
+
+
 class FundAllocationListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
     permission_required = 'operations.view_fundallocation'
     model = FundAllocation
@@ -579,12 +643,14 @@ class FundAllocationListView(OperationsPermissionRequiredMixin, RouteContextMixi
         return FundAllocation.objects.select_related('donation', 'project')
 
 
-class FundAllocationDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
+class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_fundallocation'
     model = FundAllocation
     template_name = 'web/allocation_detail.html'
     route_prefix = 'allocation'
     page_title = _('Asignación de fondos')
+    transition_map = FUND_ALLOCATION_STATUS_TRANSITIONS
+    transition_url_name = 'allocation_status_transition'
 
 
 class FundAllocationCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, CreateView):
@@ -607,7 +673,7 @@ class FundAllocationCreateView(OperationsPermissionRequiredMixin, AuditMixin, Ro
                 amount=form.cleaned_data['amount'],
                 responsible_person=form.cleaned_data.get('responsible_person', ''),
                 allocation_date=form.cleaned_data['allocation_date'],
-                status=form.cleaned_data['status'],
+                status=FundAllocation.Status.CREATED,
                 notes=form.cleaned_data.get('notes', ''),
             )
         except ValidationError as error:
@@ -639,7 +705,7 @@ class FundAllocationUpdateView(OperationsPermissionRequiredMixin, AuditMixin, Ro
                 amount=form.cleaned_data['amount'],
                 responsible_person=form.cleaned_data.get('responsible_person', ''),
                 allocation_date=form.cleaned_data['allocation_date'],
-                status=form.cleaned_data['status'],
+                status=self.object.status,
                 notes=form.cleaned_data.get('notes', ''),
             )
         except ValidationError as error:
@@ -658,6 +724,12 @@ class FundAllocationDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMix
     route_prefix = 'allocation'
     page_title = _('Eliminar asignación de fondos')
     audit_summary = _('Asignación de fondos eliminada.')
+
+
+class FundAllocationStatusTransitionView(StateTransitionView):
+    permission_required = 'operations.change_fundallocation'
+    transition_service = staticmethod(transition_fund_allocation_status)
+    detail_url_name = 'allocation_detail'
 
 
 class ExpenseListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):

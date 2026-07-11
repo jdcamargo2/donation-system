@@ -34,6 +34,135 @@ class ProjectUpdateImmutableError(ValidationError):
     """Raised when ordinary mutation targets a non-draft project update."""
 
 
+class InvalidStateTransitionError(ValidationError):
+    """Raised when an explicit domain state action is not allowed."""
+
+
+DONATION_STATUS_TRANSITIONS = {
+    Donation.Status.REGISTERED: frozenset({Donation.Status.COMMITTED, Donation.Status.RECEIVED, Donation.Status.ANNULLED}),
+    Donation.Status.COMMITTED: frozenset({Donation.Status.RECEIVED, Donation.Status.ANNULLED}),
+    Donation.Status.RECEIVED: frozenset({Donation.Status.PARTIALLY_ALLOCATED, Donation.Status.FULLY_ALLOCATED, Donation.Status.CLOSED, Donation.Status.ANNULLED}),
+    Donation.Status.PARTIALLY_ALLOCATED: frozenset({Donation.Status.FULLY_ALLOCATED, Donation.Status.CLOSED, Donation.Status.ANNULLED}),
+    Donation.Status.FULLY_ALLOCATED: frozenset({Donation.Status.CLOSED, Donation.Status.ANNULLED}),
+    Donation.Status.CLOSED: frozenset(),
+    Donation.Status.ANNULLED: frozenset(),
+}
+PROJECT_STATUS_TRANSITIONS = {
+    Project.Status.PLANNED: frozenset({Project.Status.ACTIVE, Project.Status.ANNULLED}),
+    Project.Status.ACTIVE: frozenset({Project.Status.SUSPENDED, Project.Status.CLOSED, Project.Status.ANNULLED}),
+    Project.Status.SUSPENDED: frozenset({Project.Status.ACTIVE, Project.Status.CLOSED, Project.Status.ANNULLED}),
+    Project.Status.CLOSED: frozenset(),
+    Project.Status.ANNULLED: frozenset(),
+}
+FUND_ALLOCATION_STATUS_TRANSITIONS = {
+    FundAllocation.Status.CREATED: frozenset({FundAllocation.Status.ACTIVE, FundAllocation.Status.ANNULLED}),
+    FundAllocation.Status.ACTIVE: frozenset({FundAllocation.Status.PARTIALLY_EXECUTED, FundAllocation.Status.FULLY_EXECUTED, FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED}),
+    FundAllocation.Status.PARTIALLY_EXECUTED: frozenset({FundAllocation.Status.FULLY_EXECUTED, FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED}),
+    FundAllocation.Status.FULLY_EXECUTED: frozenset({FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED}),
+    FundAllocation.Status.CLOSED: frozenset(),
+    FundAllocation.Status.ANNULLED: frozenset(),
+}
+
+
+def validate_state_transition(*, current_status, target_status, allowed_transitions):
+    """
+    PRE: current/target are proposed model states and allowed_transitions is explicit.
+    POST: returns None only for a valid non-idempotent transition; otherwise raises.
+    """
+    if current_status not in allowed_transitions:
+        raise InvalidStateTransitionError({'status': _('El estado actual no pertenece al flujo configurado.')})
+    if target_status == current_status:
+        raise InvalidStateTransitionError({'status': _('Repetir el estado actual no es una transición válida.')})
+    if target_status not in allowed_transitions[current_status]:
+        raise InvalidStateTransitionError({'status': _('La transición de estado solicitada no está permitida.')})
+
+
+def _require_transition_actor(actor):
+    """
+    PRE: actor is the user proposed for an explicit state transition.
+    POST: returns only for authenticated actors; otherwise raises safely.
+    """
+    if not getattr(actor, 'is_authenticated', False):
+        raise InvalidStateTransitionError({'actor': _('La transición exige un usuario autenticado.')})
+
+
+def _log_status_transition(actor, instance, previous_status, target_status):
+    """
+    PRE: instance is locked and already persisted in target_status.
+    POST: creates and returns one safe audit event naming old and new states.
+    """
+    return log_action(
+        actor,
+        AuditLog.Action.UPDATED,
+        instance,
+        _('Estado cambiado de %(previous)s a %(target)s.')
+        % {'previous': previous_status, 'target': target_status},
+    )
+
+
+def transition_donation_status(donation_id: int, *, actor, target_status: str) -> Donation:
+    """
+    PRE: donation_id exists, actor is authenticated, and target_status is requested explicitly.
+    POST: atomically locks, validates and audits exactly one permitted status transition.
+    """
+    _require_transition_actor(actor)
+    with transaction.atomic():
+        donation = Donation.objects.select_for_update().get(pk=donation_id)
+        previous_status = donation.status
+        validate_state_transition(current_status=previous_status, target_status=target_status, allowed_transitions=DONATION_STATUS_TRANSITIONS)
+        if donation.amount <= ZERO_MONEY:
+            raise InvalidStateTransitionError({'amount': _('Una donación operativa debe tener monto positivo.')})
+        if target_status == Donation.Status.RECEIVED and donation.received_date is None:
+            raise InvalidStateTransitionError({'received_date': _('La fecha de recepción es obligatoria para marcar la donación como recibida.')})
+        donation.status = target_status
+        donation.full_clean()
+        donation.save(update_fields=('status', 'updated_at'))
+        _log_status_transition(actor, donation, previous_status, target_status)
+        return donation
+
+
+def transition_project_status(project_id: int, *, actor, target_status: str) -> Project:
+    """
+    PRE: project_id exists, actor is authenticated, and target_status is requested explicitly.
+    POST: atomically locks, validates and audits exactly one permitted status transition.
+    """
+    _require_transition_actor(actor)
+    with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_id)
+        previous_status = project.status
+        validate_state_transition(current_status=previous_status, target_status=target_status, allowed_transitions=PROJECT_STATUS_TRANSITIONS)
+        if target_status == Project.Status.CLOSED and project.start_date and project.end_date and project.end_date < project.start_date:
+            raise InvalidStateTransitionError({'end_date': _('No se puede cerrar un proyecto con fechas incoherentes.')})
+        project.status = target_status
+        project.full_clean()
+        project.save(update_fields=('status', 'updated_at'))
+        _log_status_transition(actor, project, previous_status, target_status)
+        return project
+
+
+def transition_fund_allocation_status(allocation_id: int, *, actor, target_status: str) -> FundAllocation:
+    """
+    PRE: allocation_id exists, actor is authenticated, and target_status is requested explicitly.
+    POST: atomically locks, validates and audits exactly one permitted status transition.
+    """
+    _require_transition_actor(actor)
+    with transaction.atomic():
+        allocation = FundAllocation.objects.select_for_update().select_related('donation', 'project').get(pk=allocation_id)
+        previous_status = allocation.status
+        validate_state_transition(current_status=previous_status, target_status=target_status, allowed_transitions=FUND_ALLOCATION_STATUS_TRANSITIONS)
+        _validate_allocation_balance(
+            allocation.donation,
+            allocation.amount,
+            exclude_pk=allocation.pk,
+        )
+        allocation.full_clean()
+        allocation.status = target_status
+        allocation.full_clean()
+        allocation.save(update_fields=('status', 'updated_at'))
+        _log_status_transition(actor, allocation, previous_status, target_status)
+        return allocation
+
+
 def ensure_project_update_is_editable(project_update: ProjectUpdate) -> None:
     """
     PRE: project_update is a persisted advance targeted by ordinary editing.
