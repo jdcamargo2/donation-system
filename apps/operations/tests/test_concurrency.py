@@ -29,6 +29,7 @@ from apps.operations.services import (
     update_expense,
     update_fund_allocation,
     validate_expense,
+    annul_fund_allocation,
 )
 from apps.operations.tests.helpers import (
     TEST_DATE,
@@ -164,6 +165,39 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             OperationalCodeSequence.objects.get(namespace='fund_allocation').next_value,
             before + 2,
+        )
+
+    def test_concurrent_allocation_annulment_has_one_winner_and_one_audit(self):
+        donation = create_donation(amount=Decimal('100.00'))
+        allocation = create_allocation(donation=donation, amount=Decimal('60.00'))
+        actors = (create_user('annul-winner-a'), create_user('annul-winner-b'))
+
+        def annul(actor_id, reason):
+            actor = get_user_model().objects.get(pk=actor_id)
+            result = annul_fund_allocation(allocation.pk, actor=actor, reason=reason)
+            return result.terminal_by_id
+
+        results = self.run_concurrently(
+            [
+                lambda: annul(actors[0].pk, 'Anulación concurrente del actor A.'),
+                lambda: annul(actors[1].pk, 'Anulación concurrente del actor B.'),
+            ]
+        )
+
+        self.assert_one_success_one_domain_error(results)
+        allocation.refresh_from_db()
+        donation.refresh_from_db()
+        winner_id = next(value for outcome, value in results if outcome == 'success')
+        self.assertEqual(allocation.status, FundAllocation.Status.ANNULLED)
+        self.assertEqual(allocation.terminal_by_id, winner_id)
+        self.assertEqual(donation.available_balance, donation.amount)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                model_name='Asignación de fondos',
+                entity_id=str(allocation.pk),
+                action=AuditLog.Action.ANNULLED,
+            ).count(),
+            1,
         )
 
     def test_concurrent_expenses_preserve_allocation_balance(self):

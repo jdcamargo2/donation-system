@@ -11,6 +11,7 @@ from .services import (
     ensure_expense_is_deletable,
     ensure_project_update_is_deletable,
     ensure_project_update_is_editable,
+    ensure_operational_entity_is_editable,
 )
 
 
@@ -68,14 +69,27 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ('code', 'name', 'status', 'estimated_budget')
     search_fields = ('code', 'name')
     list_filter = ('status',)
-    readonly_fields = ('code', 'status')
+    readonly_fields = ('code', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
+
+    def get_readonly_fields(self, request, obj=None):
+        # PRE: obj is an optional project shown in admin.
+        # POST: terminal projects expose every persisted field as readonly.
+        readonly = set(super().get_readonly_fields(request, obj))
+        if obj and obj.status in {Project.Status.CLOSED, Project.Status.ANNULLED}:
+            readonly.update(field.name for field in self.model._meta.concrete_fields)
+        return tuple(readonly)
 
     def save_model(self, request, obj, form, change):
         """
         PRE: obj is new or an existing project submitted through admin.
         POST: creates PLANNED and preserves persisted status on ordinary edits.
         """
-        obj.status = Project.objects.get(pk=obj.pk).status if change else Project.Status.PLANNED
+        if change:
+            persisted = Project.objects.get(pk=obj.pk)
+            ensure_operational_entity_is_editable(persisted)
+            obj.status = persisted.status
+        else:
+            obj.status = Project.Status.PLANNED
         super().save_model(request, obj, form, change)
 
 
@@ -147,14 +161,27 @@ class DonationAdmin(admin.ModelAdmin):
     list_display = ('code', 'donor', 'amount', 'currency', 'status', 'received_date')
     search_fields = ('code', 'donor__name')
     list_filter = ('status', 'currency')
-    readonly_fields = ('code', 'currency', 'status')
+    readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
+
+    def get_readonly_fields(self, request, obj=None):
+        # PRE: obj is an optional donation shown in admin.
+        # POST: terminal donations expose every persisted field as readonly.
+        readonly = set(super().get_readonly_fields(request, obj))
+        if obj and obj.status in {Donation.Status.CLOSED, Donation.Status.ANNULLED}:
+            readonly.update(field.name for field in self.model._meta.concrete_fields)
+        return tuple(readonly)
 
     def save_model(self, request, obj, form, change):
         """
         PRE: obj is new or an existing donation submitted through admin.
         POST: creates REGISTERED and preserves persisted status on ordinary edits.
         """
-        obj.status = Donation.objects.get(pk=obj.pk).status if change else Donation.Status.REGISTERED
+        if change:
+            persisted = Donation.objects.get(pk=obj.pk)
+            ensure_operational_entity_is_editable(persisted)
+            obj.status = persisted.status
+        else:
+            obj.status = Donation.Status.REGISTERED
         super().save_model(request, obj, form, change)
 
 
@@ -164,14 +191,27 @@ class FundAllocationAdmin(admin.ModelAdmin):
     list_display = ('code', 'donation', 'project', 'budget_category', 'amount', 'status', 'allocation_date')
     search_fields = ('code', 'donation__code', 'project__code', 'project__name', 'budget_category')
     list_filter = ('status', 'allocation_date')
-    readonly_fields = ('code', 'status')
+    readonly_fields = ('code', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
+
+    def get_readonly_fields(self, request, obj=None):
+        # PRE: obj is an optional allocation shown in admin.
+        # POST: terminal allocations expose every persisted field as readonly.
+        readonly = set(super().get_readonly_fields(request, obj))
+        if obj and obj.status in {FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED}:
+            readonly.update(field.name for field in self.model._meta.concrete_fields)
+        return tuple(readonly)
 
     def save_model(self, request, obj, form, change):
         """
         PRE: obj is new or an existing allocation submitted through admin.
         POST: creates CREATED and preserves persisted status on ordinary edits.
         """
-        obj.status = FundAllocation.objects.get(pk=obj.pk).status if change else FundAllocation.Status.CREATED
+        if change:
+            persisted = FundAllocation.objects.get(pk=obj.pk)
+            ensure_operational_entity_is_editable(persisted)
+            obj.status = persisted.status
+        else:
+            obj.status = FundAllocation.Status.CREATED
         super().save_model(request, obj, form, change)
 
 

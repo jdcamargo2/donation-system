@@ -11,6 +11,8 @@ MONEY_PLACEHOLDER = _('Ej. 1.500,00')
 DATE_PLACEHOLDER = _('dd/mm/aaaa')
 CANONICAL_DATE_FORMAT = '%Y-%m-%d'
 DATE_INPUT_FORMATS = ['%Y-%m-%d', '%d/%m/%Y']
+TERMINAL_REASON_MIN_LENGTH = 10
+TERMINAL_REASON_MAX_LENGTH = 500
 
 
 # PRE: value is a submitted money value, possibly formatted for Venezuela or already normalized.
@@ -64,6 +66,30 @@ class MoneyDecimalField(forms.DecimalField):
     # POST: returns a Decimal-compatible value normalized for Django DecimalField validation.
     def to_python(self, value):
         return super().to_python(clean_money_value(value))
+
+
+class TerminalActionReasonForm(forms.Form):
+    reason = forms.CharField(
+        label=_('Motivo'),
+        min_length=TERMINAL_REASON_MIN_LENGTH,
+        max_length=TERMINAL_REASON_MAX_LENGTH,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 4, 'class': 'form-control'}),
+    )
+
+    def clean_reason(self):
+        """
+        PRE: reason contains submitted terminal-action justification text.
+        POST: returns a trimmed non-blank reason within the explicit length bounds.
+        """
+        reason = self.cleaned_data['reason'].strip()
+        if not reason:
+            raise ValidationError(_('El motivo de anulación es obligatorio.'))
+        return reason
+
+
+class TerminalActionConfirmationForm(forms.Form):
+    pass
 
 
 class BootstrapFormMixin:

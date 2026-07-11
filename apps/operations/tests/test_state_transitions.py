@@ -19,6 +19,7 @@ from apps.operations.services import (
     transition_fund_allocation_status,
     transition_project_status,
     validate_state_transition,
+    finish_project,
 )
 from apps.operations.tests.helpers import TEST_DATE, create_donation, create_institution, create_project, create_user
 
@@ -73,7 +74,11 @@ class StateTransitionServiceTests(TestCase):
             for target_status in statuses:
                 instance = factory(current_status)
                 audit_count = AuditLog.objects.count()
-                if target_status in transitions[current_status]:
+                is_generic_target = target_status not in {
+                    Project.Status.CLOSED,
+                    Project.Status.ANNULLED,
+                }
+                if target_status in transitions[current_status] and is_generic_target:
                     transitioned = service(instance.pk, actor=self.actor, target_status=target_status)
                     self.assertEqual(transitioned.status, target_status)
                     self.assertEqual(AuditLog.objects.count(), audit_count + 1)
@@ -150,9 +155,7 @@ class StateTransitionServiceTests(TestCase):
         )
 
         with self.assertRaises(InvalidStateTransitionError):
-            transition_project_status(
-                project.pk, actor=self.actor, target_status=Project.Status.CLOSED
-            )
+            finish_project(project.pk, actor=self.actor)
 
         project.refresh_from_db()
         self.assertEqual(project.status, Project.Status.ACTIVE)
@@ -253,9 +256,14 @@ class StateTransitionBoundaryTests(TestCase):
             response,
             reverse('project_status_transition', args=(self.project.pk, Project.Status.ACTIVE)),
         )
+        self.assertNotContains(response, reverse('project_annul', args=(self.project.pk,)))
+        unallocated_project = create_project(code='PRJ-NAMED-ANNUL')
+        unallocated_response = self.client.get(
+            reverse('project_detail', args=(unallocated_project.pk,))
+        )
         self.assertContains(
-            response,
-            reverse('project_status_transition', args=(self.project.pk, Project.Status.ANNULLED)),
+            unallocated_response,
+            reverse('project_annul', args=(unallocated_project.pk,)),
         )
         self.assertNotContains(
             response,

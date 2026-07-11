@@ -38,6 +38,17 @@ class InvalidStateTransitionError(ValidationError):
     """Raised when an explicit domain state action is not allowed."""
 
 
+class OperationalEntityFinalizedError(ValidationError):
+    """Raised when ordinary mutation targets a closed or annulled entity."""
+
+
+TERMINAL_REASON_MIN_LENGTH = 10
+TERMINAL_REASON_MAX_LENGTH = 500
+PROJECT_TERMINAL_STATUSES = frozenset({Project.Status.CLOSED, Project.Status.ANNULLED})
+DONATION_TERMINAL_STATUSES = frozenset({Donation.Status.CLOSED, Donation.Status.ANNULLED})
+ALLOCATION_TERMINAL_STATUSES = frozenset({FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED})
+
+
 DONATION_STATUS_TRANSITIONS = {
     Donation.Status.REGISTERED: frozenset({Donation.Status.COMMITTED, Donation.Status.RECEIVED, Donation.Status.ANNULLED}),
     Donation.Status.COMMITTED: frozenset({Donation.Status.RECEIVED, Donation.Status.ANNULLED}),
@@ -106,6 +117,10 @@ def transition_donation_status(donation_id: int, *, actor, target_status: str) -
     POST: atomically locks, validates and audits exactly one permitted status transition.
     """
     _require_transition_actor(actor)
+    if target_status in DONATION_TERMINAL_STATUSES:
+        raise InvalidStateTransitionError(
+            {'status': _('Las acciones terminales requieren su confirmación específica.')}
+        )
     with transaction.atomic():
         donation = Donation.objects.select_for_update().get(pk=donation_id)
         previous_status = donation.status
@@ -127,6 +142,10 @@ def transition_project_status(project_id: int, *, actor, target_status: str) -> 
     POST: atomically locks, validates and audits exactly one permitted status transition.
     """
     _require_transition_actor(actor)
+    if target_status in PROJECT_TERMINAL_STATUSES:
+        raise InvalidStateTransitionError(
+            {'status': _('Las acciones terminales requieren su confirmación específica.')}
+        )
     with transaction.atomic():
         project = Project.objects.select_for_update().get(pk=project_id)
         previous_status = project.status
@@ -146,6 +165,10 @@ def transition_fund_allocation_status(allocation_id: int, *, actor, target_statu
     POST: atomically locks, validates and audits exactly one permitted status transition.
     """
     _require_transition_actor(actor)
+    if target_status in ALLOCATION_TERMINAL_STATUSES:
+        raise InvalidStateTransitionError(
+            {'status': _('Las acciones terminales requieren su confirmación específica.')}
+        )
     with transaction.atomic():
         allocation = FundAllocation.objects.select_for_update().select_related('donation', 'project').get(pk=allocation_id)
         previous_status = allocation.status
@@ -161,6 +184,180 @@ def transition_fund_allocation_status(allocation_id: int, *, actor, target_statu
         allocation.save(update_fields=('status', 'updated_at'))
         _log_status_transition(actor, allocation, previous_status, target_status)
         return allocation
+
+
+# PRE: reason is the proposed historical justification for an annulment.
+# POST: returns trimmed valid text or raises an explicit domain validation error.
+def validate_terminal_reason(reason):
+    clean_reason = reason.strip() if isinstance(reason, str) else ''
+    if len(clean_reason) < TERMINAL_REASON_MIN_LENGTH:
+        raise InvalidStateTransitionError(
+            {'reason': _('El motivo debe contener al menos 10 caracteres.')}
+        )
+    if len(clean_reason) > TERMINAL_REASON_MAX_LENGTH:
+        raise InvalidStateTransitionError(
+            {'reason': _('El motivo no puede exceder 500 caracteres.')}
+        )
+    return clean_reason
+
+
+# PRE: entity is a persisted Project, Donation, or FundAllocation targeted by ordinary editing.
+# POST: returns only when its status is not closed or annulled.
+def ensure_operational_entity_is_editable(entity):
+    terminal_statuses = {
+        Project: PROJECT_TERMINAL_STATUSES,
+        Donation: DONATION_TERMINAL_STATUSES,
+        FundAllocation: ALLOCATION_TERMINAL_STATUSES,
+    }.get(type(entity))
+    if terminal_statuses is None:
+        raise TypeError('La guarda de edición recibió una entidad no soportada.')
+    if entity.status in terminal_statuses:
+        raise OperationalEntityFinalizedError(
+            {'status': _('Los registros cerrados o anulados no admiten edición ordinaria.')}
+        )
+
+
+# PRE: allocation is persisted and its related expense statuses are queryable.
+# POST: returns True exactly when at least one expense still consumes allocation balance.
+def allocation_has_effective_expenses(allocation):
+    return allocation.expenses.exclude(status__in=Expense.non_executing_statuses()).exists()
+
+
+# PRE: entity is locked, target status was validated, actor is authenticated, and reason is final.
+# POST: persists terminal status/metadata and writes exactly one audit event in the current transaction.
+def _finalize_operational_entity(*, entity, target_status, actor, reason, action, summary):
+    assert transaction.get_connection().in_atomic_block
+    entity.status = target_status
+    entity.terminal_reason = reason
+    entity.terminal_at = timezone.now()
+    entity.terminal_by = actor
+    entity.save(
+        update_fields=(
+            'status',
+            'terminal_reason',
+            'terminal_at',
+            'terminal_by',
+            'updated_at',
+        )
+    )
+    log_action(actor, action, entity, summary)
+    return entity
+
+
+def finish_project(project_id: int, *, actor) -> Project:
+    """
+    PRE: actor is authenticated and project_id identifies a project allowed to transition to CLOSED.
+    POST: atomically closes it, persists terminal metadata, and creates one audit event.
+    """
+    _require_transition_actor(actor)
+    with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_id)
+        validate_state_transition(
+            current_status=project.status,
+            target_status=Project.Status.CLOSED,
+            allowed_transitions=PROJECT_STATUS_TRANSITIONS,
+        )
+        if project.start_date and project.end_date and project.end_date < project.start_date:
+            raise InvalidStateTransitionError(
+                {'end_date': _('No se puede cerrar un proyecto con fechas incoherentes.')}
+            )
+        return _finalize_operational_entity(
+            entity=project,
+            target_status=Project.Status.CLOSED,
+            actor=actor,
+            reason=_('Proyecto terminado.'),
+            action=AuditLog.Action.CLOSED,
+            summary=_('Proyecto %(code)s terminado.') % {'code': project.code},
+        )
+
+
+def annul_project(project_id: int, *, actor, reason) -> Project:
+    """
+    PRE: actor is authenticated, reason is valid, and project can transition to ANNULLED.
+    POST: annuls only a project without non-annulled allocations and audits atomically.
+    """
+    _require_transition_actor(actor)
+    clean_reason = validate_terminal_reason(reason)
+    with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_id)
+        validate_state_transition(
+            current_status=project.status,
+            target_status=Project.Status.ANNULLED,
+            allowed_transitions=PROJECT_STATUS_TRANSITIONS,
+        )
+        if project.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists():
+            raise InvalidStateTransitionError(
+                {'allocations': _('El proyecto mantiene asignaciones no anuladas.')}
+            )
+        return _finalize_operational_entity(
+            entity=project,
+            target_status=Project.Status.ANNULLED,
+            actor=actor,
+            reason=clean_reason,
+            action=AuditLog.Action.ANNULLED,
+            summary=_('Proyecto %(code)s anulado. Motivo: %(reason)s')
+            % {'code': project.code, 'reason': clean_reason},
+        )
+
+
+def annul_donation(donation_id: int, *, actor, reason) -> Donation:
+    """
+    PRE: actor is authenticated, reason is valid, and donation can transition to ANNULLED.
+    POST: annuls only a donation without non-annulled allocations and audits atomically.
+    """
+    _require_transition_actor(actor)
+    clean_reason = validate_terminal_reason(reason)
+    with transaction.atomic():
+        donation = Donation.objects.select_for_update().get(pk=donation_id)
+        validate_state_transition(
+            current_status=donation.status,
+            target_status=Donation.Status.ANNULLED,
+            allowed_transitions=DONATION_STATUS_TRANSITIONS,
+        )
+        if donation.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists():
+            raise InvalidStateTransitionError(
+                {'allocations': _('La donación mantiene asignaciones no anuladas.')}
+            )
+        return _finalize_operational_entity(
+            entity=donation,
+            target_status=Donation.Status.ANNULLED,
+            actor=actor,
+            reason=clean_reason,
+            action=AuditLog.Action.ANNULLED,
+            summary=_('Donación %(code)s anulada. Motivo: %(reason)s')
+            % {'code': donation.code, 'reason': clean_reason},
+        )
+
+
+def annul_fund_allocation(allocation_id: int, *, actor, reason) -> FundAllocation:
+    """
+    PRE: actor is authenticated, reason is valid, and allocation can transition to ANNULLED.
+    POST: locks Donation then FundAllocation, rejects effective expenses, releases balance, and audits once.
+    """
+    _require_transition_actor(actor)
+    clean_reason = validate_terminal_reason(reason)
+    with transaction.atomic():
+        allocation_reference = FundAllocation.objects.only('donation_id').get(pk=allocation_id)
+        Donation.objects.select_for_update().get(pk=allocation_reference.donation_id)
+        allocation = FundAllocation.objects.select_for_update().get(pk=allocation_id)
+        validate_state_transition(
+            current_status=allocation.status,
+            target_status=FundAllocation.Status.ANNULLED,
+            allowed_transitions=FUND_ALLOCATION_STATUS_TRANSITIONS,
+        )
+        if allocation_has_effective_expenses(allocation):
+            raise InvalidStateTransitionError(
+                {'expenses': _('La asignación tiene gastos efectivos y no puede anularse.')}
+            )
+        return _finalize_operational_entity(
+            entity=allocation,
+            target_status=FundAllocation.Status.ANNULLED,
+            actor=actor,
+            reason=clean_reason,
+            action=AuditLog.Action.ANNULLED,
+            summary=_('Asignación %(code)s anulada. Motivo: %(reason)s')
+            % {'code': allocation.code, 'reason': clean_reason},
+        )
 
 
 def ensure_project_update_is_editable(project_update: ProjectUpdate) -> None:
@@ -355,6 +552,7 @@ def update_fund_allocation(
 ):
     with transaction.atomic():
         locked_allocation = FundAllocation.objects.select_for_update().get(pk=allocation.pk)
+        ensure_operational_entity_is_editable(locked_allocation)
         donation_ids = {locked_allocation.donation_id, donation.pk}
         locked_donations = {
             item.pk: item
@@ -402,6 +600,7 @@ def create_expense(
                 _('Un gasto solo puede anularse mediante la acción de anulación.')
             )
         locked_allocation = FundAllocation.objects.select_for_update().get(pk=allocation.pk)
+        ensure_operational_entity_is_editable(locked_allocation)
         _validate_operating_currency(currency)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
         _validate_expense_balance(locked_allocation, amount)

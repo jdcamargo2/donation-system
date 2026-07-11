@@ -26,6 +26,8 @@ from .forms import (
     ProjectUpdateForm,
     ProjectUpdateReviewForm,
     SupportingDocumentForm,
+    TerminalActionConfirmationForm,
+    TerminalActionReasonForm,
 )
 from .models import AuditLog, Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate, SupportingDocument
 from .services import (
@@ -42,6 +44,13 @@ from .services import (
     ensure_project_update_is_deletable,
     ensure_project_update_is_editable,
     ProjectUpdateImmutableError,
+    OperationalEntityFinalizedError,
+    allocation_has_effective_expenses,
+    annul_donation,
+    annul_fund_allocation,
+    annul_project,
+    ensure_operational_entity_is_editable,
+    finish_project,
     log_action,
     log_delete,
     register_advance,
@@ -262,6 +271,7 @@ class StateTransitionContextMixin:
         context['status_transitions'] = [
             {'value': target, 'label': labels[target]}
             for target in self.transition_map.get(self.object.status, ())
+            if target not in {self.object.Status.CLOSED, self.object.Status.ANNULLED}
         ]
         context['transition_url_name'] = self.transition_url_name
         return context
@@ -287,6 +297,111 @@ class StateTransitionView(OperationsPermissionRequiredMixin, View):
         except ValidationError as error:
             messages.error(request, ' '.join(error.messages))
         return HttpResponseRedirect(reverse(self.detail_url_name, args=[object_id]))
+
+
+class TerminalActionView(OperationsPermissionRequiredMixin, FormView):
+    template_name = 'web/terminal_action_confirm.html'
+    model = None
+    action_service = None
+    detail_url_name = ''
+    action_title = ''
+    consequence = ''
+    submit_label = ''
+    success_message = ''
+    is_destructive = True
+    requires_reason = True
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: route identifies a supported entity and permission handling remains authoritative.
+        # POST: loads the entity without mutation; only valid POST can execute the named service.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.object = get_object_or_404(self.model, pk=kwargs['pk'])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_class(self):
+        return TerminalActionReasonForm if self.requires_reason else TerminalActionConfirmationForm
+
+    def get_context_data(self, **kwargs):
+        # PRE: self.object was loaded and form context may include validation errors.
+        # POST: provides explicit irreversible-action confirmation data without changing state.
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                'object': self.object,
+                'action_title': self.action_title,
+                'consequence': self.consequence,
+                'submit_label': self.submit_label,
+                'is_destructive': self.is_destructive,
+                'detail_url_name': self.detail_url_name,
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        # PRE: POST confirmation is valid and the user has the model change permission.
+        # POST: executes one named terminal service or redisplays a human domain error without success.
+        service_kwargs = {'actor': self.request.user}
+        if self.requires_reason:
+            service_kwargs['reason'] = form.cleaned_data['reason']
+        try:
+            self.object = self.action_service(self.object.pk, **service_kwargs)
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        messages.success(self.request, self.success_message)
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse(self.detail_url_name, args=[self.object.pk])
+
+
+class ProjectFinishView(TerminalActionView):
+    permission_required = 'operations.change_project'
+    model = Project
+    action_service = staticmethod(finish_project)
+    detail_url_name = 'project_detail'
+    action_title = _('Terminar proyecto')
+    consequence = _('Al terminar el proyecto no podrá volver a editarlo ni reactivarlo.')
+    submit_label = _('Confirmar terminación')
+    success_message = _('Proyecto terminado.')
+    is_destructive = False
+    requires_reason = False
+
+
+class ProjectAnnulView(TerminalActionView):
+    permission_required = 'operations.change_project'
+    model = Project
+    action_service = staticmethod(annul_project)
+    detail_url_name = 'project_detail'
+    action_title = _('Anular proyecto')
+    consequence = _('Solo puede anularse si no mantiene asignaciones activas. Esta acción es irreversible.')
+    submit_label = _('Confirmar anulación')
+    success_message = _('Proyecto anulado.')
+
+
+class DonationAnnulView(TerminalActionView):
+    permission_required = 'operations.change_donation'
+    model = Donation
+    action_service = staticmethod(annul_donation)
+    detail_url_name = 'donation_detail'
+    action_title = _('Anular donación')
+    consequence = _('Solo puede anularse si no tiene fondos asignados. Esta acción es irreversible.')
+    submit_label = _('Confirmar anulación')
+    success_message = _('Donación anulada.')
+
+
+class FundAllocationAnnulView(TerminalActionView):
+    permission_required = 'operations.change_fundallocation'
+    model = FundAllocation
+    action_service = staticmethod(annul_fund_allocation)
+    detail_url_name = 'allocation_detail'
+    action_title = _('Anular asignación')
+    consequence = _(
+        'Al anular esta asignación, el monto volverá al saldo disponible de la donación. '
+        'No puede anularse si ya existen gastos efectivos.'
+    )
+    submit_label = _('Confirmar anulación')
+    success_message = _('Asignación anulada.')
 
 
 class AuditMixin:
@@ -442,6 +557,12 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        allowed_targets = PROJECT_STATUS_TRANSITIONS.get(self.object.status, ())
+        context['can_finish'] = Project.Status.CLOSED in allowed_targets
+        context['can_annul'] = (
+            Project.Status.ANNULLED in allowed_targets
+            and not self.object.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists()
+        )
         context['project_updates'] = self.object.updates.all().order_by('-created_at')
         context['kobo_enabled'] = settings.KOBO_ENABLED
         if settings.KOBO_ENABLED:
@@ -485,6 +606,17 @@ class ProjectUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCont
     route_prefix = 'project'
     page_title = _('Editar proyecto')
     audit_summary = _('Proyecto actualizado.')
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: request targets ordinary project editing and permission handling remains authoritative.
+        # POST: terminal projects return 403 without form mutation.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            project = get_object_or_404(Project, pk=kwargs['pk'])
+            try:
+                ensure_operational_entity_is_editable(project)
+            except OperationalEntityFinalizedError as exc:
+                raise PermissionDenied(exc.messages[0]) from exc
+        return super().dispatch(request, *args, **kwargs)
 
 
 class ProjectDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, RouteContextMixin, DeleteView):
@@ -718,6 +850,15 @@ class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequir
     transition_map = DONATION_STATUS_TRANSITIONS
     transition_url_name = 'donation_status_transition'
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        allowed_targets = DONATION_STATUS_TRANSITIONS.get(self.object.status, ())
+        context['can_annul'] = (
+            Donation.Status.ANNULLED in allowed_targets
+            and not self.object.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists()
+        )
+        return context
+
 
 class DonationCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, CreateView):
     permission_required = 'operations.add_donation'
@@ -740,6 +881,17 @@ class DonationUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCon
     route_prefix = 'donation'
     page_title = _('Editar donación')
     audit_summary = _('Donación actualizada.')
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: request targets ordinary donation editing and permission handling remains authoritative.
+        # POST: terminal donations return 403 without form mutation.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            donation = get_object_or_404(Donation, pk=kwargs['pk'])
+            try:
+                ensure_operational_entity_is_editable(donation)
+            except OperationalEntityFinalizedError as exc:
+                raise PermissionDenied(exc.messages[0]) from exc
+        return super().dispatch(request, *args, **kwargs)
 
 
 class DonationDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, RouteContextMixin, DeleteView):
@@ -778,6 +930,15 @@ class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermission
     page_title = _('Asignación de fondos')
     transition_map = FUND_ALLOCATION_STATUS_TRANSITIONS
     transition_url_name = 'allocation_status_transition'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        allowed_targets = FUND_ALLOCATION_STATUS_TRANSITIONS.get(self.object.status, ())
+        context['can_annul'] = (
+            FundAllocation.Status.ANNULLED in allowed_targets
+            and not allocation_has_effective_expenses(self.object)
+        )
+        return context
 
 
 class FundAllocationCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, CreateView):
@@ -821,6 +982,17 @@ class FundAllocationUpdateView(OperationsPermissionRequiredMixin, AuditMixin, Ro
     page_title = _('Editar asignación de fondos')
     audit_action = AuditLog.Action.ASSIGNED
     audit_summary = _('Asignación de fondos actualizada.')
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: request targets ordinary allocation editing and permission handling remains authoritative.
+        # POST: terminal allocations return 403 without form or service mutation.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            allocation = get_object_or_404(FundAllocation, pk=kwargs['pk'])
+            try:
+                ensure_operational_entity_is_editable(allocation)
+            except OperationalEntityFinalizedError as exc:
+                raise PermissionDenied(exc.messages[0]) from exc
+        return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
         try:

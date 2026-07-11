@@ -11,7 +11,7 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_donation %}
+        {% if perms.operations.change_donation and object.status != 'closed' and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
     </div>
@@ -21,6 +21,11 @@
     {% for transition in status_transitions %}
     <form method="post" action="{% url transition_url_name object.pk transition.value %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Cambiar a {{ transition.label }}</button></form>
     {% endfor %}
+</div>
+{% endif %}
+{% if perms.operations.change_donation and can_annul %}
+<div class="d-flex gap-2 mb-4">
+    <a class="btn btn-danger" href="{% url 'donation_annul' object.pk %}">Anular donación</a>
 </div>
 {% endif %}
 
@@ -63,6 +68,14 @@
                     <dd class="col-sm-8">{{ object.received_date|default:"-" }}</dd>
                     <dt class="col-sm-4">Referencia de soporte</dt>
                     <dd class="col-sm-8">{{ object.support_reference|default:"-" }}</dd>
+                    {% if object.terminal_at %}
+                        <dt class="col-sm-4">Motivo terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_reason|default:"-" }}</dd>
+                        <dt class="col-sm-4">Procesado por</dt>
+                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
+                        <dt class="col-sm-4">Fecha terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_at }}</dd>
+                    {% endif %}
                 </dl>
             </div>
         </div>

@@ -11,7 +11,7 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_project %}
+        {% if perms.operations.change_project and object.status != 'closed' and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
     </div>
@@ -21,6 +21,12 @@
     {% for transition in status_transitions %}
     <form method="post" action="{% url transition_url_name object.pk transition.value %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Cambiar a {{ transition.label }}</button></form>
     {% endfor %}
+</div>
+{% endif %}
+{% if perms.operations.change_project and can_finish or perms.operations.change_project and can_annul %}
+<div class="d-flex gap-2 mb-4">
+    {% if can_finish %}<a class="btn btn-warning" href="{% url 'project_finish' object.pk %}">Terminar proyecto</a>{% endif %}
+    {% if can_annul %}<a class="btn btn-danger" href="{% url 'project_annul' object.pk %}">Anular proyecto</a>{% endif %}
 </div>
 {% endif %}
 
@@ -36,6 +42,14 @@
                     <dd class="col-sm-8">{{ object.code }}</dd>
                     <dt class="col-sm-4">Estado</dt>
                     <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+                    {% if object.terminal_at %}
+                        <dt class="col-sm-4">Motivo terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_reason|default:"-" }}</dd>
+                        <dt class="col-sm-4">Procesado por</dt>
+                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
+                        <dt class="col-sm-4">Fecha terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_at }}</dd>
+                    {% endif %}
                     <dt class="col-sm-4">Descripción</dt>
                     <dd class="col-sm-8">{{ object.description|default:"-" }}</dd>
                     <dt class="col-sm-4">Fecha de inicio</dt>
