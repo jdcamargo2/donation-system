@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Submission Kobo {{ submission.pk }} | SIGEDON{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <a href="{% url 'kobo:submission_list' %}" class="text-decoration-none">← Volver a submissions</a>
+    <div class="d-flex justify-content-between align-items-start my-3">
+        <div><div class="text-uppercase text-muted small">Revisión interna Kobo</div><h1 class="h3">Submission #{{ submission.pk }}</h1></div>
+        <span class="badge text-bg-secondary">{{ submission.get_status_display }}</span>
+    </div>
+
+    {% if submission.project %}
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <a class="btn btn-outline-primary" href="{% url 'project_detail' submission.project.pk %}">Ver proyecto asociado</a>
+            {% if submission.status == "imported" %}
+                <a class="btn btn-primary" href="{% url 'kobo:project_submission_detail' submission.pk %}">Ver levantamiento dentro del proyecto</a>
+            {% endif %}
+        </div>
+    {% endif %}
+
+    <section class="card card-body mb-3">
+        <h2 class="h5">Metadatos y territorio</h2>
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Formulario</dt><dd class="col-sm-9">{{ submission.form_definition.form_id }} / {{ submission.form_definition.version }}</dd>
+            <dt class="col-sm-3">External ID</dt><dd class="col-sm-9">{{ submission.external_id }}</dd>
+            <dt class="col-sm-3">Zona pastoral</dt><dd class="col-sm-9">{{ submission.pastoral_zone|default:"—" }}</dd>
+            <dt class="col-sm-3">Parroquia</dt><dd class="col-sm-9">{{ submission.parish|default:"—" }}</dd>
+            <dt class="col-sm-3">Comunidad</dt><dd class="col-sm-9">{{ submission.primary_community|default:"—" }}</dd>
+            <dt class="col-sm-3">Fecha evaluación</dt><dd class="col-sm-9">{{ submission.assessment_date|default:"—" }}</dd>
+            <dt class="col-sm-3">Recibido</dt><dd class="col-sm-9">{{ submission.received_at }}</dd>
+            <dt class="col-sm-3">Normalizado</dt><dd class="col-sm-9">{{ submission.normalized_at|default:"—" }}</dd>
+            <dt class="col-sm-3">Activo Kobo asociado</dt><dd class="col-sm-9">{{ submission.asset|default:"—" }}</dd>
+            <dt class="col-sm-3">Proyecto asociado</dt><dd class="col-sm-9">{{ submission.project|default:"—" }}</dd>
+            <dt class="col-sm-3">Importado</dt><dd class="col-sm-9">{{ submission.imported_at|default:"—" }}</dd>
+        </dl>
+    </section>
+
+    <section class="card card-body mb-3">
+        <h2 class="h5">Datos normalizados</h2>
+        <dl class="row mb-0">{% for key, value in normalized_payload.items %}<dt class="col-sm-4">{{ key }}</dt><dd class="col-sm-8">{{ value|default_if_none:"—" }}</dd>{% empty %}<dd class="text-muted">Sin datos normalizados.</dd>{% endfor %}</dl>
+    </section>
+
+    <section class="card card-body border-warning mb-3">
+        <h2 class="h5">Datos internos sensibles</h2>
+        <dl class="row mb-0">{% for key, value in sensitive_data.items %}<dt class="col-sm-4">{{ key }}</dt><dd class="col-sm-8">{{ value|default_if_none:"—" }}</dd>{% endfor %}</dl>
+    </section>
+
+    <section class="card card-body mb-3">
+        <h2 class="h5">Adjuntos</h2>
+        <div class="table-responsive"><table class="table table-sm"><thead><tr><th>Nombre seguro</th><th>Tipo</th><th>Tamaño</th><th>Privacidad</th><th>Estado</th></tr></thead><tbody>
+        {% for attachment in attachments %}<tr><td>{{ attachment.file.name|default:"—" }}</td><td>{{ attachment.content_type|default:"—" }}</td><td>{{ attachment.size_bytes|default_if_none:"—" }}</td><td>{{ attachment.get_privacy_level_display }}</td><td>{{ attachment.get_status_display }}</td></tr>{% empty %}<tr><td colspan="5" class="text-muted">Sin adjuntos.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section>
+
+    <section class="card card-body mb-3">
+        <h2 class="h5">Eventos de procesamiento</h2>
+        <ul class="list-group list-group-flush">{% for event in processing_events %}<li class="list-group-item px-0"><strong>{{ event.stage }} / {{ event.code|default:"—" }}</strong> · {{ event.get_level_display }} · {{ event.created_at }}<br>{{ event.message }}</li>{% empty %}<li class="list-group-item px-0 text-muted">Sin eventos.</li>{% endfor %}</ul>
+    </section>
+
+    {% if submission.error_code or submission.error_message %}<section class="alert alert-danger"><h2 class="h5">Errores</h2><div>{{ submission.error_code }}</div><div>{{ submission.error_message }}</div></section>{% endif %}
+
+    {% if can_view_raw_payload %}<details class="card card-body mb-3"><summary class="fw-semibold">Raw payload (solo lectura)</summary><pre class="mt-3 mb-0 text-wrap">{{ raw_payload_json }}</pre></details>{% endif %}
+
+    {% if can_change_submission %}
+        <section class="card card-body mb-3">
+            <h2 class="h5">Acciones internas</h2>
+            {% if submission.status == "ready_for_review" %}<form method="post" action="{% url 'kobo:submission_review' submission.pk %}" class="mb-3">{% csrf_token %}{{ review_form.as_p }}<button type="submit" class="btn btn-primary">Registrar decisión</button></form>{% endif %}
+            <div class="d-flex gap-2">
+                {% if kobo_enabled and submission.status == "approved_for_import" %}<form method="post" action="{% url 'kobo:submission_associate_project' submission.pk %}">{% csrf_token %}<button type="submit" class="btn btn-success">Asociar al proyecto</button></form>{% endif %}
+                <form method="post" action="{% url 'kobo:submission_retry_normalization' submission.pk %}">{% csrf_token %}<button type="submit" class="btn btn-outline-secondary">Reintentar normalización</button></form>
+                <form method="post" action="{% url 'kobo:submission_retry_attachments' submission.pk %}">{% csrf_token %}<button type="submit" class="btn btn-outline-secondary">Reintentar adjuntos</button></form>
+            </div>
+        </section>
+    {% endif %}
+</div>
+{% endblock %}
