@@ -12,14 +12,14 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_expense and object.status != 'validated' and object.status != 'cancelled' %}
+        {% if perms.operations.change_expense and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
-        {% if perms.operations.delete_expense and object.status != 'validated' and object.status != 'cancelled' %}
+        {% if perms.operations.delete_expense and object.status != 'annulled' %}
             <a class="btn btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
         {% endif %}
-        {% if perms.operations.change_expense and object.status != 'cancelled' and object.status != 'annulled' %}
-            <a class="btn btn-warning" href="{% url 'expense_cancel' object.pk %}">Anular</a>
+        {% if perms.operations.change_expense and object.status == 'registered' %}
+            <a class="btn btn-warning" href="{% url 'expense_annul' object.pk %}">Anular</a>
         {% endif %}
     </div>
 </div>
@@ -57,6 +57,14 @@
                     <dd class="col-sm-8">{{ object.reason }}</dd>
                     <dt class="col-sm-4">Descripción</dt>
                     <dd class="col-sm-8">{{ object.description|default:"-" }}</dd>
+                    {% if object.status == 'annulled' %}
+                        <dt class="col-sm-4">Motivo de anulación</dt>
+                        <dd class="col-sm-8">{{ object.terminal_reason }}</dd>
+                        <dt class="col-sm-4">Anulado por</dt>
+                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
+                        <dt class="col-sm-4">Fecha de anulación</dt>
+                        <dd class="col-sm-8">{{ object.terminal_at|default:"-" }}</dd>
+                    {% endif %}
                 </dl>
             </div>
         </div>
@@ -64,7 +72,7 @@
     <div class="col-lg-5">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h2 class="h5 mb-0">Documentos soporte</h2>
-            {% if perms.operations.add_supportingdocument %}
+            {% if perms.operations.add_supportingdocument and object.status != 'annulled' %}
                 <a class="btn btn-sm btn-primary" href="{% url 'supporting_document_create_for_expense' object.pk %}">
                     Adjuntar soporte
                 </a>
@@ -83,7 +91,7 @@
                                 <div class="small mt-1">{{ document.notes }}</div>
                             {% endif %}
                         </div>
-                        {% if perms.operations.delete_supportingdocument %}
+                        {% if perms.operations.delete_supportingdocument and object.status != 'annulled' %}
                             <a class="btn btn-sm btn-outline-danger" href="{% url 'supporting_document_delete' document.pk %}">
                                 Eliminar
                             </a>

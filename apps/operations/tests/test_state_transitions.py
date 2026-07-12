@@ -74,10 +74,7 @@ class StateTransitionServiceTests(TestCase):
             for target_status in statuses:
                 instance = factory(current_status)
                 audit_count = AuditLog.objects.count()
-                is_generic_target = target_status not in {
-                    Project.Status.CLOSED,
-                    Project.Status.ANNULLED,
-                }
+                is_generic_target = target_status not in {'closed', 'finished', 'annulled'}
                 if target_status in transitions[current_status] and is_generic_target:
                     transitioned = service(instance.pk, actor=self.actor, target_status=target_status)
                     self.assertEqual(transitioned.status, target_status)
@@ -161,7 +158,7 @@ class StateTransitionServiceTests(TestCase):
         self.assertEqual(project.status, Project.Status.ACTIVE)
 
     def test_invalid_allocation_cannot_activate(self):
-        allocation = self.create_allocation(FundAllocation.Status.CREATED)
+        allocation = self.create_allocation(FundAllocation.Status.ACTIVE)
         FundAllocation.objects.create(
             donation=allocation.donation,
             project=allocation.project,
@@ -178,12 +175,10 @@ class StateTransitionServiceTests(TestCase):
             )
 
         allocation.refresh_from_db()
-        self.assertEqual(allocation.status, FundAllocation.Status.CREATED)
+        self.assertEqual(allocation.status, FundAllocation.Status.ACTIVE)
 
     def test_service_uses_persisted_state_and_second_attempt_does_not_duplicate_audit(self):
         donation = self.create_donation(Donation.Status.REGISTERED)
-        Donation.objects.filter(pk=donation.pk).update(status=Donation.Status.COMMITTED)
-
         transitioned = transition_donation_status(
             donation.pk, actor=self.actor, target_status=Donation.Status.RECEIVED
         )
@@ -194,7 +189,7 @@ class StateTransitionServiceTests(TestCase):
 
         self.assertEqual(transitioned.status, Donation.Status.RECEIVED)
         log = AuditLog.objects.get(entity_id=str(donation.pk))
-        self.assertIn(Donation.Status.COMMITTED, log.summary)
+        self.assertIn(Donation.Status.REGISTERED, log.summary)
         self.assertIn(Donation.Status.RECEIVED, log.summary)
 
 

@@ -243,14 +243,22 @@ class ProjectUpdate(models.Model):
             raise ValidationError(errors)
 
 
+class DonationAllocationProgress(models.TextChoices):
+    UNALLOCATED = 'unallocated', _('Sin asignar')
+    PARTIALLY_ALLOCATED = 'partially_allocated', _('Parcialmente asignada')
+    FULLY_ALLOCATED = 'fully_allocated', _('Totalmente asignada')
+
+
+class AllocationExecutionProgress(models.TextChoices):
+    UNEXECUTED = 'unexecuted', _('Sin ejecución')
+    PARTIALLY_EXECUTED = 'partially_executed', _('Parcialmente ejecutada')
+    FULLY_EXECUTED = 'fully_executed', _('Totalmente ejecutada')
+
+
 class Donation(models.Model):
     class Status(models.TextChoices):
         REGISTERED = 'registered', _('Registrada')
-        COMMITTED = 'committed', _('Comprometida')
         RECEIVED = 'received', _('Recibida')
-        PARTIALLY_ALLOCATED = 'partially_allocated', _('Asignada parcialmente')
-        FULLY_ALLOCATED = 'fully_allocated', _('Asignada totalmente')
-        CLOSED = 'closed', _('Cerrada')
         ANNULLED = 'annulled', _('Anulada')
 
     code = models.CharField(max_length=40, unique=True)
@@ -302,7 +310,9 @@ class Donation(models.Model):
             return super().save(*args, **kwargs)
 
     def clean(self):
-        if self.amount <= ZERO_MONEY:
+        # PRE: amount may be absent when field validation has already rejected submitted data.
+        # POST: rejects non-positive numeric amounts without masking field errors for missing or invalid values.
+        if self.amount is not None and self.amount <= ZERO_MONEY:
             raise ValidationError({'amount': _('El monto de la donación debe ser positivo.')})
 
     @property
@@ -316,14 +326,32 @@ class Donation(models.Model):
         balance = self.amount - self.total_assigned
         return max(balance, ZERO_MONEY)
 
+    @property
+    def allocation_progress(self):
+        """
+        PRE: this persisted donation has a valid positive Decimal amount.
+        POST: returns allocation progress derived from non-annulled allocations without mutation.
+        """
+        assigned = self.total_assigned
+        if assigned == ZERO_MONEY:
+            return DonationAllocationProgress.UNALLOCATED
+        if assigned < self.amount:
+            return DonationAllocationProgress.PARTIALLY_ALLOCATED
+        return DonationAllocationProgress.FULLY_ALLOCATED
+
+    @property
+    def allocation_progress_label(self):
+        """
+        PRE: allocation_progress returns a declared DonationAllocationProgress value.
+        POST: returns its localized display label without changing persisted state.
+        """
+        return DonationAllocationProgress(self.allocation_progress).label
+
 
 class FundAllocation(models.Model):
     class Status(models.TextChoices):
-        CREATED = 'created', _('Creada')
-        ACTIVE = 'active', _('En ejecución')
-        PARTIALLY_EXECUTED = 'partially_executed', _('Ejecutada parcialmente')
-        FULLY_EXECUTED = 'fully_executed', _('Ejecutada totalmente')
-        CLOSED = 'closed', _('Cerrada')
+        ACTIVE = 'active', _('Activa')
+        FINISHED = 'finished', _('Finalizada')
         ANNULLED = 'annulled', _('Anulada')
 
     code = models.CharField(max_length=40, unique=True, editable=False)
@@ -333,7 +361,7 @@ class FundAllocation(models.Model):
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     responsible_person = models.CharField(max_length=120, blank=True)
     allocation_date = models.DateField()
-    status = models.CharField(max_length=30, choices=Status.choices, default=Status.CREATED)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.ACTIVE)
     terminal_reason = models.TextField(blank=True, editable=False)
     terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
     terminal_by = models.ForeignKey(
@@ -373,10 +401,16 @@ class FundAllocation(models.Model):
             return super().save(*args, **kwargs)
 
     def clean(self):
+        # PRE: amount may be absent when field validation has already rejected submitted data.
+        # POST: validates only present numeric amounts and preserves prior field-level validation errors.
         errors = {}
-        if self.amount <= ZERO_MONEY:
+        if self.amount is not None and self.amount <= ZERO_MONEY:
             errors['amount'] = _('El monto de la asignación debe ser positivo.')
-        if self.donation_id and self.amount > self.donation_available_before_this_allocation():
+        if (
+            self.amount is not None
+            and self.donation_id
+            and self.amount > self.donation_available_before_this_allocation()
+        ):
             errors['amount'] = _('El monto de la asignación excede el saldo disponible de la donación.')
         if errors:
             raise ValidationError(errors)
@@ -400,15 +434,32 @@ class FundAllocation(models.Model):
         balance = self.amount - self.executed_amount
         return max(balance, ZERO_MONEY)
 
+    @property
+    def execution_progress(self):
+        """
+        PRE: this persisted allocation has a valid positive Decimal amount.
+        POST: returns execution progress derived from effective expenses without mutation.
+        """
+        executed = self.executed_amount
+        if executed == ZERO_MONEY:
+            return AllocationExecutionProgress.UNEXECUTED
+        if executed < self.amount:
+            return AllocationExecutionProgress.PARTIALLY_EXECUTED
+        return AllocationExecutionProgress.FULLY_EXECUTED
+
+    @property
+    def execution_progress_label(self):
+        """
+        PRE: execution_progress returns a declared AllocationExecutionProgress value.
+        POST: returns its localized display label without changing persisted state.
+        """
+        return AllocationExecutionProgress(self.execution_progress).label
+
 
 class Expense(models.Model):
     class Status(models.TextChoices):
         REGISTERED = 'registered', _('Registrado')
-        IN_REVIEW = 'in_review', _('En revisión')
-        VALIDATED = 'validated', _('Validado')
-        REJECTED = 'rejected', _('Rechazado')
         ANNULLED = 'annulled', _('Anulado')
-        CANCELLED = 'cancelled', _('Anulado')
 
     code = models.CharField(max_length=40, unique=True, editable=False)
     allocation = models.ForeignKey(FundAllocation, on_delete=models.PROTECT, related_name='expenses')
@@ -422,14 +473,16 @@ class Expense(models.Model):
     description = models.TextField(blank=True)
     observations = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.REGISTERED)
-    validated_by = models.ForeignKey(
+    terminal_reason = models.TextField(blank=True, editable=False)
+    terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
+    terminal_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='validated_expenses',
+        editable=False,
+        related_name='terminal_expenses',
     )
-    validated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -458,31 +511,17 @@ class Expense(models.Model):
             return super().save(*args, **kwargs)
 
     def clean(self):
-        # PRE: amount, allocation, status and validation metadata describe the proposed expense state.
-        # POST: rejects invalid money or validation metadata combinations without persistence.
+        # PRE: amount may be absent during partial validation and allocation may be selected.
+        # POST: rejects invalid present amounts without masking field errors or duplicating balance formulas.
         errors = {}
-        if self.amount <= ZERO_MONEY:
+        if self.amount is not None and self.amount <= ZERO_MONEY:
             errors['amount'] = _('El monto del gasto debe ser positivo.')
-        if self.allocation_id and self.amount > self.allocation_available_before_this_expense():
+        if (
+            self.amount is not None
+            and self.allocation_id
+            and self.amount > self.allocation_available_before_this_expense()
+        ):
             errors['amount'] = _('El monto del gasto excede el saldo disponible de la asignación.')
-        has_validator = self.validated_by_id is not None
-        has_validation_time = self.validated_at is not None
-        if self.status == self.Status.VALIDATED and not (
-            has_validator and has_validation_time
-        ):
-            errors['status'] = _('Un gasto validado exige actor y fecha de validación.')
-        if self.status not in {self.Status.VALIDATED, self.Status.CANCELLED} and (
-            has_validator or has_validation_time
-        ):
-            errors['status'] = _(
-                'Un gasto no finalizado no puede conservar metadatos de validación.'
-            )
-        if self.status == self.Status.CANCELLED and (
-            has_validator != has_validation_time
-        ):
-            errors['status'] = _(
-                'Un gasto anulado debe conservar ambos metadatos de validación o ninguno.'
-            )
         if errors:
             raise ValidationError(errors)
 
@@ -492,7 +531,7 @@ class Expense(models.Model):
         PRE: Expense status choices are loaded.
         POST: returns terminal states excluded from execution totals as a tuple.
         """
-        return (cls.Status.ANNULLED, cls.Status.CANCELLED)
+        return (cls.Status.ANNULLED,)
 
     # PRE: self.allocation is set and self.amount contains the proposed expense amount.
     # POST: returns the allocation balance that can be executed by this expense, including its current amount on updates.
@@ -503,9 +542,9 @@ class Expense(models.Model):
         return self.allocation.available_balance + existing_amount
 
     # PRE: the expense has been saved before checking existing related documents.
-    # POST: returns True only when a validated expense has at least one supporting document.
+    # POST: returns True only when at least one protected supporting document exists.
     def has_required_support(self):
-        return self.status != self.Status.VALIDATED or self.supporting_documents.exists()
+        return self.supporting_documents.exists()
 
 
 class SupportingDocument(models.Model):

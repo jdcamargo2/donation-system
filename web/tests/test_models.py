@@ -134,7 +134,7 @@ class ModelInvariantTests(TestCase):
 
     def test_validated_expense_support_state_is_reported(self):
         allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('50.00'))
-        expense = create_expense(allocation=allocation, amount=Decimal('10.00'), status=Expense.Status.VALIDATED)
+        expense = create_expense(allocation=allocation, amount=Decimal('10.00'), status=Expense.Status.REGISTERED)
 
         self.assertFalse(expense.has_required_support())
         SupportingDocument.objects.create(

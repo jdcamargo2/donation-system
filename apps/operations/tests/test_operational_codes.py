@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.contrib import admin
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase
@@ -38,7 +39,7 @@ class OperationalCodeTests(TestCase):
                 amount=Decimal('20.00'),
                 responsible_person='',
                 allocation_date=TEST_DATE,
-                status=FundAllocation.Status.CREATED,
+                status=FundAllocation.Status.ACTIVE,
                 notes='',
             )
             for index in range(2)
@@ -54,7 +55,7 @@ class OperationalCodeTests(TestCase):
                 payment_method='bank_transfer',
                 description='',
                 observations='',
-                status=Expense.Status.REGISTERED,
+                support_file=SimpleUploadedFile(f'gasto-{index}.pdf', b'%PDF soporte'),
             )
             for index in range(2)
         ]

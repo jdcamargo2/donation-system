@@ -106,6 +106,7 @@
                     <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
                         <div class="fw-semibold">{{ donation.code }}</div>
                         <div class="small text-muted">{{ donation.donor }} - {{ donation.amount|money_es }} {{ donation.currency }}</div>
+                        <div class="small">Ciclo: {{ donation.get_status_display }} · Asignación: {{ donation.allocation_progress_label }}</div>
                     </a>
                 {% empty %}
                     <div class="list-group-item text-muted">Todavía no hay donaciones.</div>

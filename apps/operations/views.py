@@ -17,7 +17,7 @@ from django.views.generic import CreateView, DeleteView, DetailView, FormView, L
 
 from .forms import (
     DonationForm,
-    ExpenseCancellationForm,
+    ExpenseAnnulmentForm,
     ExpenseForm,
     FundAllocationForm,
     InstitutionForm,
@@ -37,7 +37,7 @@ from .services import (
     get_dashboard_metrics,
     get_donation_financial_summary,
     get_project_financial_summary,
-    cancel_expense,
+    annul_expense,
     ensure_expense_is_deletable,
     ensure_expense_is_editable,
     ExpenseFinalizedError,
@@ -271,7 +271,11 @@ class StateTransitionContextMixin:
         context['status_transitions'] = [
             {'value': target, 'label': labels[target]}
             for target in self.transition_map.get(self.object.status, ())
-            if target not in {self.object.Status.CLOSED, self.object.Status.ANNULLED}
+            if target not in {
+                getattr(self.object.Status, 'CLOSED', None),
+                getattr(self.object.Status, 'FINISHED', None),
+                self.object.Status.ANNULLED,
+            }
         ]
         context['transition_url_name'] = self.transition_url_name
         return context
@@ -961,7 +965,7 @@ class FundAllocationCreateView(OperationsPermissionRequiredMixin, AuditMixin, Ro
                 amount=form.cleaned_data['amount'],
                 responsible_person=form.cleaned_data.get('responsible_person', ''),
                 allocation_date=form.cleaned_data['allocation_date'],
-                status=FundAllocation.Status.CREATED,
+                status=FundAllocation.Status.ACTIVE,
                 notes=form.cleaned_data.get('notes', ''),
             )
         except ValidationError as error:
@@ -1054,7 +1058,7 @@ class ExpenseDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
     page_title = _('Gasto')
 
 
-class ExpenseCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, CreateView):
+class ExpenseCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):
     permission_required = 'operations.add_expense'
     model = Expense
     form_class = ExpenseForm
@@ -1077,20 +1081,18 @@ class ExpenseCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCont
                 payment_method=form.cleaned_data['payment_method'],
                 description=form.cleaned_data.get('description', ''),
                 observations=form.cleaned_data.get('observations', ''),
-                status=form.cleaned_data['status'],
-                user=self.request.user,
+                actor=self.request.user,
                 support_title=form.cleaned_data.get('support_title', ''),
                 support_file=form.cleaned_data.get('support_file'),
             )
         except ValidationError as error:
             add_service_errors_to_form(form, error)
             return self.form_invalid(form)
-        self.write_audit_log()
         messages.success(self.request, self.audit_summary)
         return HttpResponseRedirect(self.get_success_url())
 
 
-class ExpenseUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, UpdateView):
+class ExpenseUpdateView(OperationsPermissionRequiredMixin, RouteContextMixin, UpdateView):
     permission_required = 'operations.change_expense'
     model = Expense
     form_class = ExpenseForm
@@ -1128,15 +1130,13 @@ class ExpenseUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCont
                 payment_method=form.cleaned_data['payment_method'],
                 description=form.cleaned_data.get('description', ''),
                 observations=form.cleaned_data.get('observations', ''),
-                status=form.cleaned_data['status'],
-                user=self.request.user,
+                actor=self.request.user,
                 support_title=form.cleaned_data.get('support_title', ''),
                 support_file=form.cleaned_data.get('support_file'),
             )
         except ValidationError as error:
             add_service_errors_to_form(form, error)
             return self.form_invalid(form)
-        self.write_audit_log()
         messages.success(self.request, self.audit_summary)
         return HttpResponseRedirect(self.get_success_url())
 
@@ -1165,9 +1165,9 @@ class ExpenseDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, Rou
         return super().dispatch(request, *args, **kwargs)
 
 
-class ExpenseCancellationView(OperationsPermissionRequiredMixin, FormView):
+class ExpenseAnnulView(OperationsPermissionRequiredMixin, FormView):
     permission_required = 'operations.change_expense'
-    form_class = ExpenseCancellationForm
+    form_class = ExpenseAnnulmentForm
     template_name = 'web/object_form.html'
 
     def dispatch(self, request, *args, **kwargs):
@@ -1199,7 +1199,7 @@ class ExpenseCancellationView(OperationsPermissionRequiredMixin, FormView):
         # PRE: POST reason is valid and request user has change_expense.
         # POST: cancels through the atomic domain service and redirects to detail.
         try:
-            cancel_expense(
+            annul_expense(
                 self.expense.pk,
                 actor=self.request.user,
                 reason=form.cleaned_data['reason'],
@@ -1277,15 +1277,15 @@ class SupportingDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView
         return reverse('expense_detail', args=[self.object.expense_id])
 
     # PRE: self.object identifies a support document the user is allowed to delete.
-    # POST: deletes it atomically unless it is the last support of a validated expense.
+    # POST: deletes it atomically unless the expense is annulled or it is the last required support.
     def form_valid(self, form):
         with transaction.atomic():
             expense = Expense.objects.select_for_update().get(pk=self.object.expense_id)
             document = SupportingDocument.objects.select_for_update().get(pk=self.object.pk)
-            if expense.status == Expense.Status.VALIDATED and expense.supporting_documents.count() <= 1:
+            if expense.status == Expense.Status.ANNULLED or expense.supporting_documents.count() <= 1:
                 messages.error(
                     self.request,
-                    _('No se puede eliminar el último documento soporte de un gasto validado.'),
+                    _('El gasto debe conservar su documento soporte.'),
                 )
                 return HttpResponseRedirect(reverse('expense_detail', args=[expense.pk]))
             log_delete(self.request.user, document, _('Documento soporte eliminado.'))

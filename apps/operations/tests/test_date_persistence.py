@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.messages import get_messages
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 
@@ -120,9 +121,8 @@ class DateFormContractTests(TestCase):
             'payment_method': 'bank_transfer',
             'description': '',
             'observations': '',
-            'status': Expense.Status.REGISTERED,
-            'support_title': '',
-            'support_file': '',
+            'support_title': 'Soporte de fecha',
+            'support_file': SimpleUploadedFile('fecha.pdf', b'%PDF soporte'),
         }
 
 
@@ -251,7 +251,6 @@ class DatePersistenceViewTests(TestCase):
             'payment_method': 'bank_transfer',
             'description': '',
             'observations': '',
-            'status': Expense.Status.REGISTERED,
-            'support_title': '',
-            'support_file': '',
+            'support_title': 'Soporte de fecha',
+            'support_file': SimpleUploadedFile('fecha.pdf', b'%PDF soporte'),
         }

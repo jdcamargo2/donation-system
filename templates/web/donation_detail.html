@@ -8,11 +8,15 @@
     <div>
         <div class="ops-kicker">Ficha de donación</div>
         <h1>{{ object.code }}</h1>
-        <p>{{ object.donor }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+        <p>
+            {{ object.donor }}
+            · Ciclo <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            · Asignación <span class="badge text-bg-light">{{ object.allocation_progress_label }}</span>
+        </p>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_donation and object.status != 'closed' and object.status != 'annulled' %}
+        {% if perms.operations.change_donation and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
     </div>
@@ -88,7 +92,7 @@
                 <a class="list-group-item list-group-item-action" href="{% url 'allocation_detail' allocation.pk %}">
                     <div class="fw-semibold">{{ allocation.code }}</div>
                     <div>{{ allocation.project.name }}</div>
-                    <div class="small text-muted">{{ allocation.project.code }} · {{ allocation.amount|money_es }} · {{ allocation.get_budget_category_display }} · Disponible {{ allocation.available_balance|money_es }}</div>
+                    <div class="small text-muted">{{ allocation.project.code }} · {{ allocation.amount|money_es }} · {{ allocation.get_budget_category_display }} · Ciclo {{ allocation.get_status_display }} · Ejecución {{ allocation.execution_progress_label }} · Disponible {{ allocation.available_balance|money_es }}</div>
                 </a>
             {% empty %}
                 <div class="list-group-item text-muted">Esta donación todavía no tiene asignaciones vinculadas.</div>

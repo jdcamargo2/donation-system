@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.test import SimpleTestCase, TestCase
 
 from apps.operations.forms import DonationForm, ExpenseForm, FundAllocationForm, ProjectForm
-from apps.operations.models import Project
+from apps.operations.models import Donation, Expense, FundAllocation, Project
+from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_institution, create_project
 from apps.operations.templatetags.operations_format import money_es
 
 
@@ -37,6 +38,60 @@ class LocalizedMoneyFormTests(TestCase):
                 self.assertEqual(field.clean('10.000.000,00'), Decimal('10000000.00'))
                 with self.assertRaisesMessage(Exception, 'monto válido'):
                     field.clean('10.00.000,00')
+
+        donor = create_institution()
+        project = create_project()
+        donation = create_donation(donor=donor)
+        allocation = create_allocation(donation=donation, project=project)
+        initial_counts = {
+            FundAllocation: FundAllocation.objects.count(),
+            Donation: Donation.objects.count(),
+            Expense: Expense.objects.count(),
+        }
+        allocation_data = {
+            'donation': donation.pk,
+            'project': project.pk,
+            'budget_category': 'health_psychosocial',
+            'responsible_person': '',
+            'allocation_date': TEST_DATE,
+            'notes': '',
+        }
+        for amount in ('0', '-1', 'not-a-number'):
+            with self.subTest(model=FundAllocation, amount=amount):
+                form = FundAllocationForm(data={**allocation_data, 'amount': amount})
+                self.assertFalse(form.is_valid())
+                self.assertIn('amount', form.errors)
+
+        invalid_forms = [
+            DonationForm(data={
+                'donor': donor.pk,
+                'donation_type': 'money',
+                'amount': 'not-a-number',
+                'objective': 'Aporte inválido',
+                'restrictions': '',
+                'commitment_date': '',
+                'received_date': '',
+                'support_reference': '',
+            }),
+            ExpenseForm(data={
+                'allocation': allocation.pk,
+                'expense_date': TEST_DATE,
+                'category': 'food',
+                'amount': 'not-a-number',
+                'reason': 'Monto inválido',
+                'provider_or_recipient': 'Proveedor',
+                'payment_method': 'bank_transfer',
+                'description': '',
+                'observations': '',
+                'status': Expense.Status.REGISTERED,
+            }),
+        ]
+        for form in invalid_forms:
+            with self.subTest(form=type(form).__name__):
+                self.assertFalse(form.is_valid())
+                self.assertIn('amount', form.errors)
+        for model, initial_count in initial_counts.items():
+            self.assertEqual(model.objects.count(), initial_count)
 
     def test_project_edit_displays_localized_value_and_repeated_saves_preserve_it(self):
         project = Project.objects.create(name='Monto grande', estimated_budget=Decimal('10000000.00'))

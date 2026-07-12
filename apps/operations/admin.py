@@ -51,9 +51,6 @@ class ExpenseAdminForm(forms.ModelForm):
         allocation = cleaned_data.get('allocation')
         if allocation and allocation.donation.currency != OPERATING_CURRENCY:
             raise ValidationError(_('La asignación seleccionada no corresponde a una donación en USD.'))
-        has_existing_support = self.instance.pk and self.instance.supporting_documents.exists()
-        if cleaned_data.get('status') == Expense.Status.VALIDATED and not has_existing_support:
-            raise ValidationError(_('Un gasto validado debe tener al menos un documento soporte.'))
         return cleaned_data
 
 
@@ -158,7 +155,7 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
 
 @admin.register(Donation)
 class DonationAdmin(admin.ModelAdmin):
-    list_display = ('code', 'donor', 'amount', 'currency', 'status', 'received_date')
+    list_display = ('code', 'donor', 'amount', 'currency', 'status', 'allocation_progress_display', 'received_date')
     search_fields = ('code', 'donor__name')
     list_filter = ('status', 'currency')
     readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
@@ -167,7 +164,7 @@ class DonationAdmin(admin.ModelAdmin):
         # PRE: obj is an optional donation shown in admin.
         # POST: terminal donations expose every persisted field as readonly.
         readonly = set(super().get_readonly_fields(request, obj))
-        if obj and obj.status in {Donation.Status.CLOSED, Donation.Status.ANNULLED}:
+        if obj and obj.status == Donation.Status.ANNULLED:
             readonly.update(field.name for field in self.model._meta.concrete_fields)
         return tuple(readonly)
 
@@ -184,11 +181,15 @@ class DonationAdmin(admin.ModelAdmin):
             obj.status = Donation.Status.REGISTERED
         super().save_model(request, obj, form, change)
 
+    @admin.display(description=_('Asignación'))
+    def allocation_progress_display(self, obj):
+        return obj.allocation_progress_label
+
 
 @admin.register(FundAllocation)
 class FundAllocationAdmin(admin.ModelAdmin):
     form = FundAllocationAdminForm
-    list_display = ('code', 'donation', 'project', 'budget_category', 'amount', 'status', 'allocation_date')
+    list_display = ('code', 'donation', 'project', 'budget_category', 'amount', 'status', 'execution_progress_display', 'allocation_date')
     search_fields = ('code', 'donation__code', 'project__code', 'project__name', 'budget_category')
     list_filter = ('status', 'allocation_date')
     readonly_fields = ('code', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
@@ -197,22 +198,26 @@ class FundAllocationAdmin(admin.ModelAdmin):
         # PRE: obj is an optional allocation shown in admin.
         # POST: terminal allocations expose every persisted field as readonly.
         readonly = set(super().get_readonly_fields(request, obj))
-        if obj and obj.status in {FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED}:
+        if obj and obj.status in {FundAllocation.Status.FINISHED, FundAllocation.Status.ANNULLED}:
             readonly.update(field.name for field in self.model._meta.concrete_fields)
         return tuple(readonly)
 
     def save_model(self, request, obj, form, change):
         """
         PRE: obj is new or an existing allocation submitted through admin.
-        POST: creates CREATED and preserves persisted status on ordinary edits.
+        POST: creates ACTIVE and preserves persisted status on ordinary edits.
         """
         if change:
             persisted = FundAllocation.objects.get(pk=obj.pk)
             ensure_operational_entity_is_editable(persisted)
             obj.status = persisted.status
         else:
-            obj.status = FundAllocation.Status.CREATED
+            obj.status = FundAllocation.Status.ACTIVE
         super().save_model(request, obj, form, change)
+
+    @admin.display(description=_('Ejecución'))
+    def execution_progress_display(self, obj):
+        return obj.execution_progress_label
 
 
 class SupportingDocumentInline(admin.TabularInline):
@@ -220,10 +225,7 @@ class SupportingDocumentInline(admin.TabularInline):
     extra = 0
 
     def has_delete_permission(self, request, obj=None):
-        if obj and obj.status in {
-            Expense.Status.VALIDATED,
-            Expense.Status.CANCELLED,
-        }:
+        if obj and obj.status == Expense.Status.ANNULLED:
             return False
         return super().has_delete_permission(request, obj)
 
@@ -233,7 +235,7 @@ class ExpenseAdmin(admin.ModelAdmin):
     list_display = ('code', 'reason', 'allocation', 'amount', 'currency', 'status', 'expense_date')
     search_fields = ('code', 'reason', 'provider_or_recipient', 'allocation__project__name')
     list_filter = ('status', 'currency', 'expense_date')
-    readonly_fields = ('code', 'currency', 'status', 'validated_by', 'validated_at')
+    readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
     inlines = [SupportingDocumentInline]
 
     def get_readonly_fields(self, request, obj=None):
@@ -241,10 +243,7 @@ class ExpenseAdmin(admin.ModelAdmin):
         # POST: status/validation metadata are always readonly; finalized expenses
         # expose every persisted field as readonly.
         base_readonly = set(super().get_readonly_fields(request, obj))
-        if obj and obj.status in {
-            Expense.Status.VALIDATED,
-            Expense.Status.CANCELLED,
-        }:
+        if obj and obj.status == Expense.Status.ANNULLED:
             base_readonly.update(
                 field.name for field in self.model._meta.concrete_fields
             )
@@ -279,21 +278,19 @@ class ExpenseAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         if change:
             persisted = Expense.objects.get(pk=obj.pk)
-            if persisted.status in {
-                Expense.Status.VALIDATED,
-                Expense.Status.CANCELLED,
-            }:
+            if persisted.status == Expense.Status.ANNULLED:
                 raise ExpenseFinalizedError(
                     _('Los gastos finalizados no admiten edición administrativa.')
                 )
             obj.status = persisted.status
-            obj.validated_by = None
-            obj.validated_at = None
         else:
             obj.status = Expense.Status.REGISTERED
-            obj.validated_by = None
-            obj.validated_at = None
         super().save_model(request, obj, form, change)
+
+    def has_add_permission(self, request):
+        # PRE: Django admin is evaluating direct Expense creation.
+        # POST: returns False because mandatory support is created atomically through the operational form.
+        return False
 
 
 @admin.register(SupportingDocument)
@@ -305,11 +302,10 @@ class SupportingDocumentAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         if (
             obj
-            and obj.expense.status in {
-                Expense.Status.VALIDATED,
-                Expense.Status.CANCELLED,
-            }
-            and obj.expense.supporting_documents.count() <= 1
+            and (
+                obj.expense.status == Expense.Status.ANNULLED
+                or obj.expense.supporting_documents.count() <= 1
+            )
         ):
             return False
         return super().has_delete_permission(request, obj)

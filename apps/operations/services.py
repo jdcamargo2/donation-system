@@ -19,12 +19,10 @@ from .models import (
 
 
 class ExpenseFinalizedError(ValidationError):
-    """Raised when ordinary mutation targets a validated or cancelled expense."""
+    """Raised when ordinary mutation targets an annulled expense."""
 
 
-EXPENSE_FINAL_STATUSES = frozenset(
-    {Expense.Status.VALIDATED, Expense.Status.CANCELLED}
-)
+EXPENSE_FINAL_STATUSES = frozenset({Expense.Status.ANNULLED})
 PROJECT_UPDATE_FINAL_STATUSES = frozenset(
     {ProjectUpdate.Status.APPROVED, ProjectUpdate.Status.REJECTED}
 )
@@ -45,17 +43,13 @@ class OperationalEntityFinalizedError(ValidationError):
 TERMINAL_REASON_MIN_LENGTH = 10
 TERMINAL_REASON_MAX_LENGTH = 500
 PROJECT_TERMINAL_STATUSES = frozenset({Project.Status.CLOSED, Project.Status.ANNULLED})
-DONATION_TERMINAL_STATUSES = frozenset({Donation.Status.CLOSED, Donation.Status.ANNULLED})
-ALLOCATION_TERMINAL_STATUSES = frozenset({FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED})
+DONATION_TERMINAL_STATUSES = frozenset({Donation.Status.ANNULLED})
+ALLOCATION_TERMINAL_STATUSES = frozenset({FundAllocation.Status.FINISHED, FundAllocation.Status.ANNULLED})
 
 
 DONATION_STATUS_TRANSITIONS = {
-    Donation.Status.REGISTERED: frozenset({Donation.Status.COMMITTED, Donation.Status.RECEIVED, Donation.Status.ANNULLED}),
-    Donation.Status.COMMITTED: frozenset({Donation.Status.RECEIVED, Donation.Status.ANNULLED}),
-    Donation.Status.RECEIVED: frozenset({Donation.Status.PARTIALLY_ALLOCATED, Donation.Status.FULLY_ALLOCATED, Donation.Status.CLOSED, Donation.Status.ANNULLED}),
-    Donation.Status.PARTIALLY_ALLOCATED: frozenset({Donation.Status.FULLY_ALLOCATED, Donation.Status.CLOSED, Donation.Status.ANNULLED}),
-    Donation.Status.FULLY_ALLOCATED: frozenset({Donation.Status.CLOSED, Donation.Status.ANNULLED}),
-    Donation.Status.CLOSED: frozenset(),
+    Donation.Status.REGISTERED: frozenset({Donation.Status.RECEIVED, Donation.Status.ANNULLED}),
+    Donation.Status.RECEIVED: frozenset({Donation.Status.ANNULLED}),
     Donation.Status.ANNULLED: frozenset(),
 }
 PROJECT_STATUS_TRANSITIONS = {
@@ -66,11 +60,8 @@ PROJECT_STATUS_TRANSITIONS = {
     Project.Status.ANNULLED: frozenset(),
 }
 FUND_ALLOCATION_STATUS_TRANSITIONS = {
-    FundAllocation.Status.CREATED: frozenset({FundAllocation.Status.ACTIVE, FundAllocation.Status.ANNULLED}),
-    FundAllocation.Status.ACTIVE: frozenset({FundAllocation.Status.PARTIALLY_EXECUTED, FundAllocation.Status.FULLY_EXECUTED, FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED}),
-    FundAllocation.Status.PARTIALLY_EXECUTED: frozenset({FundAllocation.Status.FULLY_EXECUTED, FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED}),
-    FundAllocation.Status.FULLY_EXECUTED: frozenset({FundAllocation.Status.CLOSED, FundAllocation.Status.ANNULLED}),
-    FundAllocation.Status.CLOSED: frozenset(),
+    FundAllocation.Status.ACTIVE: frozenset({FundAllocation.Status.FINISHED, FundAllocation.Status.ANNULLED}),
+    FundAllocation.Status.FINISHED: frozenset(),
     FundAllocation.Status.ANNULLED: frozenset(),
 }
 
@@ -485,25 +476,6 @@ def _validate_allocation_execution(allocation, amount):
         raise ValidationError({'amount': _('El monto de la asignación no puede ser menor al monto ya ejecutado.')})
 
 
-# PRE: expense_id identifies a saved expense and user is either authenticated or None.
-# POST: returns the locked expense in validated state, with validator metadata and one audit event for a new transition.
-def validate_expense(expense_id: int, user=None) -> Expense:
-    with transaction.atomic():
-        expense = Expense.objects.select_for_update().get(pk=expense_id)
-        if expense.status == Expense.Status.VALIDATED:
-            return expense
-        ensure_expense_is_editable(expense)
-        if not expense.supporting_documents.exists():
-            raise ValidationError(_('Un gasto validado debe tener al menos un documento soporte.'))
-        expense.status = Expense.Status.VALIDATED
-        expense.validated_by = user if getattr(user, 'is_authenticated', False) else None
-        expense.validated_at = timezone.now()
-        expense.full_clean()
-        expense.save(update_fields=['status', 'validated_by', 'validated_at', 'updated_at'])
-        log_action(user, AuditLog.Action.VALIDATED, expense, _('Gasto validado.'))
-        return expense
-
-
 # PRE: donation and project are saved instances and all values come from validated operational input.
 # POST: creates and returns one valid allocation after locking the donation and rechecking its balance.
 def create_fund_allocation(
@@ -575,8 +547,8 @@ def update_fund_allocation(
         return locked_allocation
 
 
-# PRE: allocation is saved, user may be None, and support_file is supplied when creating a validated expense.
-# POST: creates and returns one valid expense, plus its optional support, after locking the allocation balance.
+# PRE: allocation is active, actor is optional for non-request callers, and support_file is a real uploaded document.
+# POST: creates one REGISTERED expense with protected support after locking Donation then FundAllocation.
 def create_expense(
     *,
     allocation,
@@ -588,25 +560,21 @@ def create_expense(
     payment_method,
     description,
     observations,
-    status,
     currency=OPERATING_CURRENCY,
-    user=None,
+    actor=None,
     support_title='',
     support_file=None,
 ):
     with transaction.atomic():
-        if status == Expense.Status.CANCELLED:
-            raise ExpenseFinalizedError(
-                _('Un gasto solo puede anularse mediante la acción de anulación.')
-            )
+        allocation_reference = FundAllocation.objects.only('donation_id').get(pk=allocation.pk)
+        Donation.objects.select_for_update().get(pk=allocation_reference.donation_id)
         locked_allocation = FundAllocation.objects.select_for_update().get(pk=allocation.pk)
         ensure_operational_entity_is_editable(locked_allocation)
         _validate_operating_currency(currency)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
         _validate_expense_balance(locked_allocation, amount)
-        if status == Expense.Status.VALIDATED and not support_file:
-            raise ValidationError(_('Un gasto validado debe tener al menos un documento soporte.'))
-        requested_validation = status == Expense.Status.VALIDATED
+        if not support_file:
+            raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
         expense = Expense(
             allocation=locked_allocation,
             expense_date=expense_date,
@@ -618,23 +586,26 @@ def create_expense(
             payment_method=payment_method,
             description=description,
             observations=observations,
-            status=Expense.Status.REGISTERED if requested_validation else status,
+            status=Expense.Status.REGISTERED,
         )
         expense.full_clean()
         expense.save()
-        if support_file:
-            SupportingDocument.objects.create(
-                expense=expense,
-                title=support_title or support_file.name,
-                document=support_file,
+        SupportingDocument.objects.create(
+            expense=expense,
+            title=support_title or support_file.name,
+            document=support_file,
+        )
+        if getattr(actor, 'is_authenticated', False):
+            log_action(
+                actor, AuditLog.Action.EXECUTED, expense,
+                _('Gasto %(code)s registrado por %(amount)s %(currency)s.')
+                % {'code': expense.code, 'amount': expense.amount, 'currency': expense.currency},
             )
-        if requested_validation:
-            return validate_expense(expense.pk, user)
         return expense
 
 
-# PRE: expense is saved and the proposed values represent its complete replacement state.
-# POST: updates and returns the expense after locking it and every affected allocation balance.
+# PRE: expense is REGISTERED and proposed values plus support preserve a verifiable executed payment.
+# POST: updates after stable parent-first locks and audits monetary allocation before/after.
 def update_expense(
     *,
     expense,
@@ -647,31 +618,31 @@ def update_expense(
     payment_method,
     description,
     observations,
-    status,
     currency=OPERATING_CURRENCY,
-    user=None,
+    actor=None,
     support_title='',
     support_file=None,
 ):
     with transaction.atomic():
-        locked_expense = Expense.objects.select_for_update().get(pk=expense.pk)
-        ensure_expense_is_editable(locked_expense)
-        allocation_ids = {locked_expense.allocation_id, allocation.pk}
+        expense_reference = Expense.objects.only('allocation_id').get(pk=expense.pk)
+        allocation_ids = {expense_reference.allocation_id, allocation.pk}
+        donation_ids = FundAllocation.objects.filter(pk__in=allocation_ids).values_list('donation_id', flat=True)
+        list(Donation.objects.select_for_update().filter(pk__in=donation_ids).order_by('pk'))
         locked_allocations = {
             item.pk: item
             for item in FundAllocation.objects.select_for_update().filter(pk__in=allocation_ids).order_by('pk')
         }
+        locked_expense = Expense.objects.select_for_update().get(pk=expense.pk)
+        ensure_expense_is_editable(locked_expense)
         locked_allocation = locked_allocations[allocation.pk]
         _validate_operating_currency(currency)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
-        _validate_expense_balance(locked_allocation, amount, exclude_pk=locked_expense.pk)
+        exclude_pk = locked_expense.pk if locked_expense.allocation_id == locked_allocation.pk else None
+        _validate_expense_balance(locked_allocation, amount, exclude_pk=exclude_pk)
         has_support = locked_expense.supporting_documents.exists()
-        if status == Expense.Status.VALIDATED and not support_file and not has_support:
-            raise ValidationError(_('Un gasto validado debe tener al menos un documento soporte.'))
-        requested_validation = (
-            status == Expense.Status.VALIDATED
-            and locked_expense.status != Expense.Status.VALIDATED
-        )
+        if not support_file and not has_support:
+            raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
+        before = {'allocation': locked_expense.allocation_id, 'amount': str(locked_expense.amount)}
         locked_expense.allocation = locked_allocation
         locked_expense.expense_date = expense_date
         locked_expense.category = category
@@ -682,7 +653,7 @@ def update_expense(
         locked_expense.payment_method = payment_method
         locked_expense.description = description
         locked_expense.observations = observations
-        locked_expense.status = locked_expense.status if requested_validation else status
+        locked_expense.status = Expense.Status.REGISTERED
         locked_expense.full_clean()
         locked_expense.save()
         if support_file:
@@ -691,48 +662,43 @@ def update_expense(
                 title=support_title or support_file.name,
                 document=support_file,
             )
-        if requested_validation:
-            return validate_expense(locked_expense.pk, user)
+        if getattr(actor, 'is_authenticated', False):
+            after = {'allocation': locked_expense.allocation_id, 'amount': str(locked_expense.amount)}
+            log_action(
+                actor, AuditLog.Action.UPDATED, locked_expense,
+                _('Gasto %(code)s corregido. Antes: %(before)s. Después: %(after)s.')
+                % {'code': locked_expense.code, 'before': before, 'after': after},
+            )
         return locked_expense
 
 
-def cancel_expense(expense_id: int, *, actor, reason: str) -> Expense:
+def annul_expense(expense_id: int, *, actor, reason: str) -> Expense:
     """
-    PRE: actor is authenticated, reason is non-empty, and expense_id identifies
-    a pending/editable or validated expense that has not been cancelled.
-    POST: atomically locks expense/allocation, marks only status as CANCELLED,
-    preserves validation metadata and writes one safe audit event.
+    PRE: actor is authenticated, reason is valid, and expense_id identifies a REGISTERED expense.
+    POST: locks Donation, FundAllocation and Expense, sets terminal metadata once and audits exactly once.
     """
     if not getattr(actor, 'is_authenticated', False):
         raise ValidationError({'actor': _('La anulación exige un usuario autenticado.')})
-    clean_reason = reason.strip() if isinstance(reason, str) else ''
-    if not clean_reason:
-        raise ValidationError({'reason': _('La razón de anulación es obligatoria.')})
+    clean_reason = validate_terminal_reason(reason)
     with transaction.atomic():
+        reference = Expense.objects.select_related('allocation').only('allocation_id', 'allocation__donation_id').get(pk=expense_id)
+        Donation.objects.select_for_update().get(pk=reference.allocation.donation_id)
+        FundAllocation.objects.select_for_update().get(pk=reference.allocation_id)
         expense = Expense.objects.select_for_update().get(pk=expense_id)
-        FundAllocation.objects.select_for_update().get(pk=expense.allocation_id)
-        if expense.status == Expense.Status.CANCELLED:
-            raise ExpenseFinalizedError(_('El gasto ya fue anulado.'))
-        if expense.status == Expense.Status.ANNULLED:
-            raise ExpenseFinalizedError(_('El gasto legado ya está anulado.'))
-        previous_status = expense.status
-        allowed_statuses = {
-            Expense.Status.REGISTERED,
-            Expense.Status.IN_REVIEW,
-            Expense.Status.REJECTED,
-            Expense.Status.VALIDATED,
-        }
-        if previous_status not in allowed_statuses:
+        if expense.status != Expense.Status.REGISTERED:
             raise ExpenseFinalizedError(_('El estado actual del gasto no admite anulación.'))
-        expense.status = Expense.Status.CANCELLED
+        expense.status = Expense.Status.ANNULLED
+        expense.terminal_reason = clean_reason
+        expense.terminal_at = timezone.now()
+        expense.terminal_by = actor
         expense.full_clean()
-        expense.save(update_fields=('status', 'updated_at'))
+        expense.save(update_fields=('status', 'terminal_reason', 'terminal_at', 'terminal_by', 'updated_at'))
         log_action(
             actor,
             AuditLog.Action.EXPENSE_CANCELLED,
             expense,
-            _('Gasto anulado. Estado anterior: %(status)s. Razón registrada por separado.')
-            % {'status': previous_status},
+            _('Gasto %(code)s anulado; se liberaron %(amount)s %(currency)s. Motivo: %(reason)s')
+            % {'code': expense.code, 'amount': expense.amount, 'currency': expense.currency, 'reason': clean_reason},
         )
         return expense
 

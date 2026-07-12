@@ -341,7 +341,7 @@ class Command(BaseCommand):
                 ),
                 "commitment_date": today - timedelta(days=50),
                 "received_date": today - timedelta(days=40),
-                "status": Donation.Status.PARTIALLY_ALLOCATED,
+                "status": Donation.Status.RECEIVED,
                 "support_reference": "CONVENIO-DEMO-2026-001",
             },
         )
@@ -456,8 +456,6 @@ class Command(BaseCommand):
                     "description": "Registro demostrativo para pruebas operativas.",
                     "observations": "",
                     "status": Expense.Status.REGISTERED,
-                    "validated_by": None,
-                    "validated_at": None,
                 },
             )
 

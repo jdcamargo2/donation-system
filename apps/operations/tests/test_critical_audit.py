@@ -134,6 +134,11 @@ class CriticalAuditTests(TestCase):
 
     def test_deleting_support_generates_audit_log(self):
         expense = create_expense(reason='Gasto con soporte eliminable')
+        SupportingDocument.objects.create(
+            expense=expense,
+            title='Soporte conservado',
+            document=self.uploaded_file('keep-audit.pdf'),
+        )
         document = SupportingDocument.objects.create(
             expense=expense,
             title='Soporte eliminado auditado',
@@ -152,7 +157,7 @@ class CriticalAuditTests(TestCase):
             ).exists()
         )
 
-    def test_validating_expense_generates_audit_log(self):
+    def test_correcting_expense_generates_audit_log(self):
         allocation = create_allocation(amount='80.00')
         expense = create_expense(allocation=allocation, amount='20.00', reason='Gasto validable')
         SupportingDocument.objects.create(
@@ -173,7 +178,6 @@ class CriticalAuditTests(TestCase):
                 'payment_method': expense.payment_method,
                 'description': expense.description,
                 'observations': expense.observations,
-                'status': Expense.Status.VALIDATED,
                 'support_title': '',
             },
         )
@@ -181,10 +185,10 @@ class CriticalAuditTests(TestCase):
         self.assertRedirects(response, reverse('expense_list'))
         self.assertTrue(
             AuditLog.objects.filter(
-                action=AuditLog.Action.VALIDATED,
+                action=AuditLog.Action.UPDATED,
                 model_name='Gasto',
                 entity_label='Gasto validable - 20.00',
-                summary='Gasto validado.',
+                summary__contains='corregido',
             ).exists()
         )
 

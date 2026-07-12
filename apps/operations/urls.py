@@ -57,7 +57,7 @@ urlpatterns = [
     path('expenses/<int:pk>/', views.ExpenseDetailView.as_view(), name='expense_detail'),
     path('expenses/<int:pk>/edit/', views.ExpenseUpdateView.as_view(), name='expense_update'),
     path('expenses/<int:pk>/delete/', views.ExpenseDeleteView.as_view(), name='expense_delete'),
-    path('expenses/<int:pk>/cancel/', views.ExpenseCancellationView.as_view(), name='expense_cancel'),
+    path('expenses/<int:pk>/annul/', views.ExpenseAnnulView.as_view(), name='expense_annul'),
     path(
         'expenses/<int:expense_pk>/documents/create/',
         views.SupportingDocumentCreateForExpenseView.as_view(),

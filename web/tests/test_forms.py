@@ -66,6 +66,8 @@ class FormTests(TestCase):
         self.assertNotIn('currency', donation_form.fields)
         self.assertEqual(donation_form.fields['amount'].widget.input_type, 'text')
         self.assertIn('money-input', donation_form.fields['amount'].widget.attrs['class'])
+        self.assertIn('js-money-input', donation_form.fields['amount'].widget.attrs['class'])
+        self.assertIn('form-control', donation_form.fields['amount'].widget.attrs['class'])
         self.assertEqual(donation_form.fields['amount'].widget.attrs['inputmode'], 'decimal')
         self.assertEqual(donation_form.fields['amount'].widget.attrs['autocomplete'], 'off')
         self.assertEqual(donation_form.fields['amount'].widget.attrs['placeholder'], 'Ej. 1.500,00')
@@ -263,8 +265,8 @@ class FormTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': '',
                 'observations': '',
-                'status': Expense.Status.REGISTERED,
-            }
+            },
+            files={'support_file': SimpleUploadedFile('monto.pdf', b'%PDF soporte')},
         )
         self.assertTrue(expense_form.is_valid(), expense_form.errors)
         expense = expense_form.save()
@@ -357,7 +359,7 @@ class FormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn('amount', form.errors)
 
-    def test_validated_expense_requires_supporting_document(self):
+    def test_expense_requires_supporting_document(self):
         allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('40.00'))
         form = ExpenseForm(
             data={
@@ -370,14 +372,13 @@ class FormTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': '',
                 'observations': '',
-                'status': Expense.Status.VALIDATED,
             }
         )
 
         self.assertFalse(form.is_valid())
-        self.assertIn('documento soporte', form.errors['__all__'][0])
+        self.assertIn('documento soporte', form.errors['support_file'][0])
 
-    def test_validated_expense_form_creates_supporting_document(self):
+    def test_expense_form_creates_supporting_document(self):
         allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('40.00'))
         upload = SimpleUploadedFile('receipt.txt', b'receipt')
         form = ExpenseForm(
@@ -391,7 +392,6 @@ class FormTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': '',
                 'observations': '',
-                'status': Expense.Status.VALIDATED,
                 'support_title': 'Receipt',
             },
             files={'support_file': upload},

@@ -273,7 +273,7 @@ class ProjectUpdateReviewForm(BootstrapFormMixin, forms.Form):
 class DonationForm(BootstrapFormMixin, forms.ModelForm):
     amount = MoneyDecimalField(
         label=_('Monto'),
-        help_text=_('Ingrese el monto en USD. Ejemplo: 1.500,00'),
+        help_text=_('Ingrese el monto en USD. Ejemplo: 1.500,00. El nivel de asignación se calcula automáticamente según los fondos distribuidos.'),
     )
 
     class Meta:
@@ -319,7 +319,7 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
 class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
     amount = MoneyDecimalField(
         label=_('Monto'),
-        help_text=_('Ingrese el monto en USD. Ejemplo: 1.500,00'),
+        help_text=_('Ingrese el monto en USD. Ejemplo: 1.500,00. El nivel de ejecución se calcula automáticamente según los gastos registrados.'),
     )
 
     class Meta:
@@ -375,7 +375,6 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
             'payment_method',
             'description',
             'observations',
-            'status',
         ]
         labels = {
             'allocation': _('Asignación'),
@@ -387,7 +386,6 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
             'payment_method': _('Método de pago'),
             'description': _('Descripción'),
             'observations': _('Observaciones'),
-            'status': _('Estado'),
         }
         help_texts = {
             'expense_date': _('Formato: dd/mm/aaaa.'),
@@ -397,44 +395,24 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
         }
 
     def clean(self):
+        """
+        PRE: submitted expense data may create a record or edit an existing registered expense.
+        POST: requires protected support for every resulting expense and never exposes lifecycle state.
+        """
         cleaned_data = super().clean()
-        status = cleaned_data.get('status')
         support_file = cleaned_data.get('support_file')
         has_existing_support = self.instance.pk and self.instance.supporting_documents.exists()
-        if status == Expense.Status.VALIDATED and not support_file and not has_existing_support:
-            raise ValidationError(_('Un gasto validado debe tener al menos un documento soporte.'))
+        if not support_file and not has_existing_support:
+            self.add_error('support_file', _('Todo gasto debe tener un documento soporte.'))
         return cleaned_data
-
-    def _post_clean(self):
-        # PRE: clean() accepted a candidate expense state from the operational UI.
-        # POST: validates ordinary model fields without materializing VALIDATED
-        # before validate_expense() can atomically attach actor/date metadata.
-        requested_status = self.cleaned_data.get('status')
-        if requested_status != Expense.Status.VALIDATED:
-            return super()._post_clean()
-        persisted_status = Expense.Status.REGISTERED
-        if self.instance.pk:
-            persisted_status = Expense.objects.filter(pk=self.instance.pk).values_list(
-                'status', flat=True
-            ).first() or Expense.Status.REGISTERED
-        self.cleaned_data['status'] = persisted_status
-        try:
-            super()._post_clean()
-        finally:
-            self.cleaned_data['status'] = requested_status
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['status'].choices = [
-            choice
-            for choice in self.fields['status'].choices
-            if choice[0] not in {
-                Expense.Status.ANNULLED,
-                Expense.Status.CANCELLED,
-            }
-        ]
         self.fields['allocation'].queryset = FundAllocation.objects.filter(
             donation__currency=OPERATING_CURRENCY
+        )
+        self.fields['support_file'].help_text = _(
+            'Registre únicamente pagos ya autorizados y ejecutados. El soporte y la referencia deben permitir verificar la operación.'
         )
 
     # PRE: form.is_valid() has returned True and the expense can be saved.
@@ -456,14 +434,9 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
             'payment_method': self.cleaned_data['payment_method'],
             'description': self.cleaned_data.get('description', ''),
             'observations': self.cleaned_data.get('observations', ''),
-            'status': self.cleaned_data['status'],
             'support_title': self.cleaned_data.get('support_title', ''),
             'support_file': self.cleaned_data.get('support_file'),
         }
-        if service_data['status'] == Expense.Status.VALIDATED:
-            # ModelForm.save() has no authenticated actor. Browser views perform
-            # validation explicitly through create/update_expense with request.user.
-            service_data['status'] = Expense.Status.REGISTERED
         if expense.pk:
             expense = update_expense(expense=expense, **service_data)
         else:
@@ -473,7 +446,7 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
         return expense
 
 
-class ExpenseCancellationForm(BootstrapFormMixin, forms.Form):
+class ExpenseAnnulmentForm(BootstrapFormMixin, forms.Form):
     reason = forms.CharField(
         label=_('Razón de anulación'),
         widget=forms.Textarea(attrs={'rows': 4}),

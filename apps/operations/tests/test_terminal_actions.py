@@ -114,14 +114,12 @@ class TerminalActionServiceTests(TestCase):
     def test_only_effective_expenses_block_allocation_annulment(self):
         for index, (status, expected) in enumerate((
             (Expense.Status.REGISTERED, True),
-            (Expense.Status.VALIDATED, True),
-            (Expense.Status.CANCELLED, False),
             (Expense.Status.ANNULLED, False),
         )):
             with self.subTest(status=status):
                 allocation = create_allocation(
                     donation=create_donation(code=f'DON-EXP-{index}', amount=Decimal('100.00')),
-                    project=create_project(code=f'PRJ-{status}'),
+                    project=create_project(code=f'PRJ-EXP-{index}'),
                 )
                 create_expense(allocation=allocation, status=status)
                 self.assertEqual(allocation_has_effective_expenses(allocation), expected)

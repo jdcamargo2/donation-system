@@ -5,6 +5,7 @@ from unittest import skipUnless
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection, connections
 from django.db.models import Sum
 from django.test import TransactionTestCase
@@ -22,13 +23,12 @@ from apps.operations.models import (
 )
 from apps.operations.services import (
     ExpenseFinalizedError,
-    cancel_expense,
+    annul_expense,
     create_expense,
     create_fund_allocation,
     review_project_update,
     update_expense,
     update_fund_allocation,
-    validate_expense,
     annul_fund_allocation,
 )
 from apps.operations.tests.helpers import (
@@ -150,7 +150,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 amount=Decimal('20.00'),
                 responsible_person='',
                 allocation_date=TEST_DATE,
-                status=FundAllocation.Status.CREATED,
+                status=FundAllocation.Status.ACTIVE,
                 notes='',
             )
             return created.code
@@ -213,7 +213,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             reason='Gasto cancelado previo',
             provider_or_recipient='Proveedor',
             payment_method='bank_transfer',
-            status=Expense.Status.CANCELLED,
+            status=Expense.Status.ANNULLED,
         )
 
         def spend(label):
@@ -228,7 +228,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 payment_method='bank_transfer',
                 description='',
                 observations='',
-                status=Expense.Status.REGISTERED,
+                support_file=SimpleUploadedFile(f'{label}.pdf', b'%PDF soporte'),
             )
             return created.pk
 
@@ -238,7 +238,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         operational = Expense.objects.exclude(status__in=Expense.non_executing_statuses())
         self.assertEqual(operational.count(), 1)
         self.assertLessEqual(operational.aggregate(total=Sum('amount'))['total'], allocation_amount)
-        self.assertEqual(SupportingDocument.objects.count(), 0)
+        self.assertEqual(SupportingDocument.objects.count(), 1)
 
     def test_concurrent_expense_creations_reserve_distinct_codes(self):
         allocation = create_allocation(amount=Decimal('100.00'))
@@ -255,7 +255,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 payment_method='bank_transfer',
                 description='',
                 observations='',
-                status=Expense.Status.REGISTERED,
+                support_file=SimpleUploadedFile(f'{label}.pdf', b'%PDF soporte'),
             )
             return created.code
 
@@ -321,6 +321,12 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             create_expense_fixture(allocation=allocation, amount=Decimal('20.00'), reason='A').pk,
             create_expense_fixture(allocation=allocation, amount=Decimal('20.00'), reason='B').pk,
         )
+        for expense in Expense.objects.filter(pk__in=expense_ids):
+            SupportingDocument.objects.create(
+                expense=expense,
+                title='Soporte existente',
+                document=f'supporting_documents/{expense.pk}.pdf',
+            )
 
         def increase(expense_id):
             expense_local = Expense.objects.get(pk=expense_id)
@@ -336,7 +342,6 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 payment_method=expense_local.payment_method,
                 description=expense_local.description,
                 observations=expense_local.observations,
-                status=expense_local.status,
             )
             return updated.pk
 
@@ -397,7 +402,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             1,
         )
 
-    def test_concurrent_expense_cancellation_creates_one_event(self):
+    def test_concurrent_expense_annulment_creates_one_event(self):
         allocation = create_allocation(amount=Decimal('100.00'))
         expense = create_expense_fixture(allocation=allocation, amount=Decimal('80.00'))
         expense_id = expense.pk
@@ -407,31 +412,79 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             title='Soporte de validación',
             document='supporting_documents/concurrent-validation.pdf',
         )
-        validated = validate_expense(expense.pk, create_user(username='validator'))
-        original_validator_id = validated.validated_by_id
-        original_validated_at = validated.validated_at
-        actors = (create_user(username='canceller-a'), create_user(username='canceller-b'))
+        actors = (create_user(username='annuller-a'), create_user(username='annuller-b'))
         actor_ids = (actors[0].pk, actors[1].pk)
 
-        def cancel(actor_id):
+        def annul(actor_id):
             actor = get_user_model().objects.get(pk=actor_id)
-            cancelled = cancel_expense(expense_id, actor=actor, reason='Cancelación concurrente.')
-            return cancelled.pk
+            annulled = annul_expense(expense_id, actor=actor, reason='Anulación concurrente válida.')
+            return annulled.pk
 
         results = self.run_concurrently(
-            [lambda: cancel(actor_ids[0]), lambda: cancel(actor_ids[1])]
+            [lambda: annul(actor_ids[0]), lambda: annul(actor_ids[1])]
         )
 
         self.assert_one_success_one_domain_error(results)
         expense.refresh_from_db()
-        self.assertEqual(expense.status, Expense.Status.CANCELLED)
-        self.assertEqual(expense.validated_by_id, original_validator_id)
-        self.assertEqual(expense.validated_at, original_validated_at)
+        self.assertEqual(expense.status, Expense.Status.ANNULLED)
+        self.assertIsNotNone(expense.terminal_by_id)
+        self.assertIsNotNone(expense.terminal_at)
         self.assertEqual(allocation.executed_amount, ZERO_MONEY)
         self.assertEqual(allocation.available_balance, allocation_amount)
         self.assertEqual(
             AuditLog.objects.filter(
                 entity_id=str(expense.pk), action=AuditLog.Action.EXPENSE_CANCELLED
             ).count(),
+            1,
+        )
+
+    def test_concurrent_expense_update_and_annulment_keep_serializable_balance(self):
+        allocation = create_allocation(amount=Decimal('100.00'))
+        expense = create_expense_fixture(allocation=allocation, amount=Decimal('30.00'))
+        SupportingDocument.objects.create(
+            expense=expense,
+            title='Soporte concurrente',
+            document='supporting_documents/update-annul.pdf',
+        )
+        editor = create_user(username='expense-editor')
+        annuller = create_user(username='expense-annuller')
+
+        def update():
+            current = Expense.objects.get(pk=expense.pk)
+            return update_expense(
+                expense=current,
+                allocation=FundAllocation.objects.get(pk=allocation.pk),
+                expense_date=current.expense_date,
+                category=current.category,
+                amount=Decimal('40.00'),
+                reason=current.reason,
+                provider_or_recipient=current.provider_or_recipient,
+                payment_method=current.payment_method,
+                description=current.description,
+                observations=current.observations,
+                actor=get_user_model().objects.get(pk=editor.pk),
+            ).pk
+
+        def annul():
+            return annul_expense(
+                expense.pk,
+                actor=get_user_model().objects.get(pk=annuller.pk),
+                reason='Anulación concurrente autorizada.',
+            ).pk
+
+        results = self.run_concurrently([update, annul])
+        self.assertGreaterEqual(
+            [outcome for outcome, _value in results].count('success'),
+            1,
+        )
+        expense.refresh_from_db()
+        allocation.refresh_from_db()
+        if expense.status == Expense.Status.ANNULLED:
+            self.assertEqual(allocation.executed_amount, ZERO_MONEY)
+        else:
+            self.assertEqual(expense.status, Expense.Status.REGISTERED)
+            self.assertEqual(allocation.executed_amount, expense.amount)
+        self.assertGreaterEqual(
+            AuditLog.objects.filter(entity_id=str(expense.pk)).count(),
             1,
         )

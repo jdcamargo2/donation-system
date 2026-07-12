@@ -12,12 +12,13 @@
             {{ object.donation.donor.name }} → {{ object.project.name }}
             · <span class="badge text-bg-light">{{ object.donation.code }}</span>
             <span class="badge text-bg-light">{{ object.project.code }}</span>
-            · <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            · Ciclo <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            · Ejecución <span class="badge text-bg-light">{{ object.execution_progress_label }}</span>
         </p>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_fundallocation and object.status != 'closed' and object.status != 'annulled' %}
+        {% if perms.operations.change_fundallocation and object.status != 'finished' and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
     </div>
@@ -78,8 +79,10 @@
                     <dd class="col-sm-8">{{ object.responsible_person|default:"-" }}</dd>
                     <dt class="col-sm-4">Fecha de asignación</dt>
                     <dd class="col-sm-8">{{ object.allocation_date }}</dd>
-                    <dt class="col-sm-4">Estado</dt>
+                    <dt class="col-sm-4">Ciclo</dt>
                     <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+                    <dt class="col-sm-4">Ejecución</dt>
+                    <dd class="col-sm-8">{{ object.execution_progress_label }}</dd>
                     {% if object.terminal_at %}
                         <dt class="col-sm-4">Motivo terminal</dt>
                         <dd class="col-sm-8">{{ object.terminal_reason|default:"-" }}</dd>

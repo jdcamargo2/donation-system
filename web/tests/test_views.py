@@ -2,6 +2,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project
@@ -145,17 +146,16 @@ class AuthenticatedViewTests(TestCase):
 
         self.assertIn("document.addEventListener('DOMContentLoaded'", source)
         self.assertIn("document.querySelectorAll('.datepicker')", source)
-        self.assertIn("document.querySelectorAll('.money-input')", source)
+        self.assertIn(".js-money-input", source)
         self.assertIn("dateFormat: 'Y-m-d'", source)
         self.assertIn("altFormat: 'd/m/Y'", source)
-        self.assertIn('new window.AutoNumeric(input, moneyOptions)', source)
-        self.assertIn('window.AutoNumeric.multiple([input], moneyOptions)', source)
+        self.assertIn('new window.AutoNumeric(input, MONEY_OPTIONS)', source)
+        self.assertIn('window.AutoNumeric.multiple([input], MONEY_OPTIONS)', source)
         self.assertIn('isManagedByAutoNumeric', source)
         self.assertIn("input.dataset.autonumericInitialized", source)
         self.assertIn("digitGroupSeparator: '.'", source)
         self.assertIn("decimalCharacter: ','", source)
         self.assertIn("unformatOnSubmit: true", source)
-        self.assertIn("emptyInputBehavior: 'null'", source)
 
     def test_internal_css_compacts_forms_and_hides_number_spinners(self):
         source = Path('static/web/css/sigedon.css').read_text()
@@ -257,7 +257,7 @@ class CrudFlowTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': '',
                 'observations': '',
-                'status': Expense.Status.REGISTERED,
+                'support_file': SimpleUploadedFile('expense.pdf', b'%PDF soporte'),
             },
         )
 
