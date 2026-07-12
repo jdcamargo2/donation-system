@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Donación - SIGEDON{% endblock %}
 
@@ -7,33 +8,49 @@
     <div>
         <div class="ops-kicker">Ficha de donación</div>
         <h1>{{ object.code }}</h1>
-        <p>{{ object.donor }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+        <p>
+            {{ object.donor }}
+            · Ciclo <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            · Asignación <span class="badge text-bg-light">{{ object.allocation_progress_label }}</span>
+        </p>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_donation %}
+        {% if perms.operations.change_donation and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
     </div>
 </div>
+{% if perms.operations.change_donation and status_transitions %}
+<div class="d-flex gap-2 mb-4">
+    {% for transition in status_transitions %}
+    <form method="post" action="{% url transition_url_name object.pk transition.value %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Cambiar a {{ transition.label }}</button></form>
+    {% endfor %}
+</div>
+{% endif %}
+{% if perms.operations.change_donation and can_annul %}
+<div class="d-flex gap-2 mb-4">
+    <a class="btn btn-danger" href="{% url 'donation_annul' object.pk %}">Anular donación</a>
+</div>
+{% endif %}
 
 <div class="row g-3 mb-4">
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Monto total</div>
-            <div class="ops-metric-value">{{ object.amount }} {{ object.currency }}</div>
+            <div class="ops-metric-value">{{ object.amount|money_es }} {{ object.currency }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Monto asignado</div>
-            <div class="ops-metric-value">{{ object.total_assigned }} {{ object.currency }}</div>
+            <div class="ops-metric-value">{{ object.total_assigned|money_es }} {{ object.currency }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body">
             <div class="ops-metric-label">Monto disponible</div>
-            <div class="ops-metric-value">{{ object.available_balance }} {{ object.currency }}</div>
+            <div class="ops-metric-value">{{ object.available_balance|money_es }} {{ object.currency }}</div>
         </div></div>
     </div>
 </div>
@@ -56,6 +73,14 @@
                     <dd class="col-sm-8">{{ object.received_date|default:"-" }}</dd>
                     <dt class="col-sm-4">Referencia de soporte</dt>
                     <dd class="col-sm-8">{{ object.support_reference|default:"-" }}</dd>
+                    {% if object.terminal_at %}
+                        <dt class="col-sm-4">Motivo terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_reason|default:"-" }}</dd>
+                        <dt class="col-sm-4">Procesado por</dt>
+                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
+                        <dt class="col-sm-4">Fecha terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_at }}</dd>
+                    {% endif %}
                 </dl>
             </div>
         </div>
@@ -65,8 +90,9 @@
         <div class="list-group">
             {% for allocation in object.allocations.all %}
                 <a class="list-group-item list-group-item-action" href="{% url 'allocation_detail' allocation.pk %}">
-                    <div class="fw-semibold">{{ allocation.project }}</div>
-                    <div class="small text-muted">{{ allocation.amount }} · {{ allocation.get_budget_category_display }} · Disponible {{ allocation.available_balance }}</div>
+                    <div class="fw-semibold">{{ allocation.code }}</div>
+                    <div>{{ allocation.project.name }}</div>
+                    <div class="small text-muted">{{ allocation.project.code }} · {{ allocation.amount|money_es }} · {{ allocation.get_budget_category_display }} · Ciclo {{ allocation.get_status_display }} · Ejecución {{ allocation.execution_progress_label }} · Disponible {{ allocation.available_balance|money_es }}</div>
                 </a>
             {% empty %}
                 <div class="list-group-item text-muted">Esta donación todavía no tiene asignaciones vinculadas.</div>

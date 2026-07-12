@@ -60,6 +60,12 @@ class EndToEndMVPFlowTests(TestCase):
         self.assertRedirects(project_response, reverse('project_list'))
         project = Project.objects.get(name='Atención integral E2E')
         self.assertEqual(project.code, 'PRJ-000001')
+        self.assertRedirects(
+            self.client.post(
+                reverse('project_status_transition', args=[project.pk, Project.Status.ACTIVE])
+            ),
+            reverse('project_detail', args=[project.pk]),
+        )
 
         donation_response = self.client.post(
             reverse('donation_create'),
@@ -79,6 +85,12 @@ class EndToEndMVPFlowTests(TestCase):
         self.assertRedirects(donation_response, reverse('donation_list'))
         donation = Donation.objects.get(donor=institution)
         self.assertEqual(donation.code, 'DON-000001')
+        self.assertRedirects(
+            self.client.post(
+                reverse('donation_status_transition', args=[donation.pk, Donation.Status.RECEIVED])
+            ),
+            reverse('donation_detail', args=[donation.pk]),
+        )
 
         allocation_response = self.client.post(
             reverse('allocation_create'),
@@ -95,6 +107,12 @@ class EndToEndMVPFlowTests(TestCase):
         )
         self.assertRedirects(allocation_response, reverse('allocation_list'))
         allocation = FundAllocation.objects.get(donation=donation, project=project)
+        self.assertRedirects(
+            self.client.post(
+                reverse('allocation_status_transition', args=[allocation.pk, FundAllocation.Status.ACTIVE])
+            ),
+            reverse('allocation_detail', args=[allocation.pk]),
+        )
 
         expense_response = self.client.post(
             reverse('expense_create'),
@@ -109,21 +127,13 @@ class EndToEndMVPFlowTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': 'Compra operativa.',
                 'observations': '',
-                'status': Expense.Status.REGISTERED,
+                'support_title': 'Factura de alimentos',
+                'support_file': SimpleUploadedFile('factura.pdf', b'factura', content_type='application/pdf'),
             },
         )
         self.assertRedirects(expense_response, reverse('expense_list'))
         expense = Expense.objects.get(allocation=allocation)
 
-        support_response = self.client.post(
-            reverse('supporting_document_create_for_expense', args=[expense.pk]),
-            data={
-                'title': 'Factura de alimentos',
-                'document': SimpleUploadedFile('factura.pdf', b'factura', content_type='application/pdf'),
-                'notes': 'Soporte documental del gasto.',
-            },
-        )
-        self.assertRedirects(support_response, reverse('expense_detail', args=[expense.pk]))
         self.assertEqual(expense.supporting_documents.count(), 1)
 
         validate_response = self.client.post(
@@ -139,12 +149,11 @@ class EndToEndMVPFlowTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': 'Compra operativa.',
                 'observations': '',
-                'status': Expense.Status.VALIDATED,
             },
         )
         self.assertRedirects(validate_response, reverse('expense_list'))
         expense.refresh_from_db()
-        self.assertEqual(expense.status, Expense.Status.VALIDATED)
+        self.assertEqual(expense.status, Expense.Status.REGISTERED)
         self.assertTrue(expense.has_required_support())
 
         approved_update_response = self.client.post(
@@ -204,7 +213,5 @@ class EndToEndMVPFlowTests(TestCase):
         self.assertTrue(
             AuditLog.objects.filter(action=AuditLog.Action.ASSIGNED, summary='Asignación de fondos registrada.').exists()
         )
-        self.assertTrue(AuditLog.objects.filter(action=AuditLog.Action.EXECUTED, summary='Gasto registrado.').exists())
-        self.assertTrue(AuditLog.objects.filter(action=AuditLog.Action.CREATED, summary='Documento soporte adjuntado.').exists())
-        self.assertTrue(AuditLog.objects.filter(action=AuditLog.Action.VALIDATED, summary='Gasto validado.').exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLog.Action.EXECUTED, summary__contains='registrado').exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditLog.Action.VALIDATED, summary__contains='Avance de proyecto aprobado.').exists())

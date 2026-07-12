@@ -5,6 +5,7 @@ django-bootstrap5==26.2
 django-countries==9.0.0
 markdown-it-py==4.2.0
 mdurl==0.1.2
+psycopg==3.2.9
 Pygments==2.20.0
 python-dotenv==1.2.2
 PyYAML==6.0.3

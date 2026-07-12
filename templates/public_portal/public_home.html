@@ -1,4 +1,5 @@
 {% extends "public_portal/public_base.html" %}
+{% load operations_format %}
 
 {% block title %}Portal de transparencia - SIGEDON{% endblock %}
 
@@ -28,7 +29,7 @@
             <div class="data-points">
                 <span>{{ summary.project_count }}</span>
                 <span>{{ summary.approved_update_count }}</span>
-                <span>{{ summary.available_balance }}</span>
+                <span>{{ summary.available_balance|money_es }}</span>
             </div>
         </div>
     </div>
@@ -43,22 +44,22 @@
     <article class="public-card metric-card">
         <span class="metric-icon" aria-hidden="true">$</span>
         <div class="public-card-label">Total recibido</div>
-        <div class="public-card-value">{{ summary.total_received }}</div>
+        <div class="public-card-value">{{ summary.total_received|money_es }}</div>
     </article>
     <article class="public-card metric-card">
         <span class="metric-icon" aria-hidden="true">↗</span>
         <div class="public-card-label">Asignado</div>
-        <div class="public-card-value">{{ summary.total_assigned }}</div>
+        <div class="public-card-value">{{ summary.total_assigned|money_es }}</div>
     </article>
     <article class="public-card metric-card">
         <span class="metric-icon" aria-hidden="true">✓</span>
         <div class="public-card-label">Ejecutado</div>
-        <div class="public-card-value">{{ summary.total_executed }}</div>
+        <div class="public-card-value">{{ summary.total_executed|money_es }}</div>
     </article>
     <article class="public-card metric-card">
         <span class="metric-icon" aria-hidden="true">•</span>
         <div class="public-card-label">Disponible</div>
-        <div class="public-card-value">{{ summary.available_balance }}</div>
+        <div class="public-card-value">{{ summary.available_balance|money_es }}</div>
     </article>
     <article class="public-card metric-card">
         <span class="metric-icon" aria-hidden="true">✔</span>

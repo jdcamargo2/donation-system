@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Sum
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
@@ -18,17 +18,60 @@ from .choices import (
 
 
 ZERO_MONEY = Decimal('0.00')
+OPERATIONAL_CODE_WIDTH = 6
+OPERATIONAL_CODE_PREFIXES = {
+    'project': 'PRJ',
+    'donation': 'DON',
+    'fund_allocation': 'ASG',
+    'expense': 'GAS',
+}
 
 
-# PRE: model_class stores sequential user-facing codes with the provided prefix.
-# POST: returns the first unused code in the format PREFIX-000001.
-def _next_sequential_code(model_class, prefix):
-    next_number = (model_class.objects.order_by('-id').values_list('id', flat=True).first() or 0) + 1
-    while True:
-        code = f'{prefix}-{next_number:06d}'
-        if not model_class.objects.filter(code=code).exists():
-            return code
-        next_number += 1
+class OperationalCodeSequence(models.Model):
+    namespace = models.CharField(max_length=32, primary_key=True)
+    prefix = models.CharField(max_length=3, unique=True)
+    next_value = models.PositiveBigIntegerField(default=1)
+
+    class Meta:
+        verbose_name = _('secuencia de código operativo')
+        verbose_name_plural = _('secuencias de códigos operativos')
+
+    def __str__(self):
+        return f'{self.prefix}: {self.next_value}'
+
+
+# PRE: namespace is supported, prefix matches it, and the caller has opened transaction.atomic().
+# POST: locks one sequence row, advances it once, and returns the reserved six-digit code.
+def reserve_operational_code(*, namespace, prefix):
+    expected_prefix = OPERATIONAL_CODE_PREFIXES.get(namespace)
+    if expected_prefix is None:
+        raise ValidationError({'namespace': _('El namespace de código operativo no está soportado.')})
+    if prefix != expected_prefix:
+        raise ValidationError({'prefix': _('El prefijo no corresponde al namespace operativo.')})
+    if not transaction.get_connection().in_atomic_block:
+        raise RuntimeError('La reserva de códigos operativos exige transaction.atomic().')
+
+    try:
+        sequence = OperationalCodeSequence.objects.select_for_update().get(namespace=namespace)
+    except OperationalCodeSequence.DoesNotExist as exc:
+        raise RuntimeError(f'Falta inicializar la secuencia operativa {namespace!r}.') from exc
+    if sequence.prefix != prefix or sequence.next_value < 1:
+        raise RuntimeError(f'La secuencia operativa {namespace!r} es inconsistente.')
+
+    reserved_value = sequence.next_value
+    sequence.next_value = reserved_value + 1
+    sequence.save(update_fields=('next_value',))
+    return f'{prefix}-{reserved_value:0{OPERATIONAL_CODE_WIDTH}d}'
+
+
+# PRE: instance is persisted and proposed_code is the code submitted for its update.
+# POST: raises ValidationError if the persisted human identifier would change.
+def ensure_operational_code_is_immutable(instance, proposed_code):
+    if not instance.pk:
+        return
+    persisted_code = type(instance).objects.only('code').get(pk=instance.pk).code
+    if proposed_code != persisted_code:
+        raise ValidationError({'code': _('El código operativo no puede modificarse.')})
 
 
 class Institution(models.Model):
@@ -82,6 +125,16 @@ class Project(models.Model):
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PLANNED)
+    terminal_reason = models.TextField(blank=True, editable=False)
+    terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
+    terminal_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name='terminal_projects',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -89,14 +142,25 @@ class Project(models.Model):
         ordering = ['code']
         verbose_name = _('proyecto')
         verbose_name_plural = _('proyectos')
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(estimated_budget__gte=ZERO_MONEY),
+                name='operations_project_budget_gte_zero',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.code} - {self.name}'
 
     def save(self, *args, **kwargs):
-        if not self.code:
-            self.code = _next_sequential_code(Project, 'PRJ')
-        super().save(*args, **kwargs)
+        # PRE: explicit codes are supplied only by trusted fixtures, migrations, or seed data.
+        # POST: creates with one reserved PRJ code or preserves the existing code on update.
+        ensure_operational_code_is_immutable(self, self.code)
+        if self.code:
+            return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.code = reserve_operational_code(namespace='project', prefix='PRJ')
+            return super().save(*args, **kwargs)
 
     def clean(self):
         errors = {}
@@ -179,14 +243,22 @@ class ProjectUpdate(models.Model):
             raise ValidationError(errors)
 
 
+class DonationAllocationProgress(models.TextChoices):
+    UNALLOCATED = 'unallocated', _('Sin asignar')
+    PARTIALLY_ALLOCATED = 'partially_allocated', _('Parcialmente asignada')
+    FULLY_ALLOCATED = 'fully_allocated', _('Totalmente asignada')
+
+
+class AllocationExecutionProgress(models.TextChoices):
+    UNEXECUTED = 'unexecuted', _('Sin ejecución')
+    PARTIALLY_EXECUTED = 'partially_executed', _('Parcialmente ejecutada')
+    FULLY_EXECUTED = 'fully_executed', _('Totalmente ejecutada')
+
+
 class Donation(models.Model):
     class Status(models.TextChoices):
         REGISTERED = 'registered', _('Registrada')
-        COMMITTED = 'committed', _('Comprometida')
         RECEIVED = 'received', _('Recibida')
-        PARTIALLY_ALLOCATED = 'partially_allocated', _('Asignada parcialmente')
-        FULLY_ALLOCATED = 'fully_allocated', _('Asignada totalmente')
-        CLOSED = 'closed', _('Cerrada')
         ANNULLED = 'annulled', _('Anulada')
 
     code = models.CharField(max_length=40, unique=True)
@@ -199,6 +271,16 @@ class Donation(models.Model):
     commitment_date = models.DateField(null=True, blank=True)
     received_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.REGISTERED)
+    terminal_reason = models.TextField(blank=True, editable=False)
+    terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
+    terminal_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name='terminal_donations',
+    )
     support_reference = models.CharField(max_length=180, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -207,17 +289,30 @@ class Donation(models.Model):
         ordering = ['-received_date', '-created_at']
         verbose_name = _('donación')
         verbose_name_plural = _('donaciones')
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=ZERO_MONEY),
+                name='operations_donation_amount_gt_zero',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.code} - {self.donor}'
 
     def save(self, *args, **kwargs):
-        if not self.code:
-            self.code = _next_sequential_code(Donation, 'DON')
-        super().save(*args, **kwargs)
+        # PRE: explicit codes are supplied only by trusted fixtures, migrations, or seed data.
+        # POST: creates with one reserved DON code or preserves the existing code on update.
+        ensure_operational_code_is_immutable(self, self.code)
+        if self.code:
+            return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.code = reserve_operational_code(namespace='donation', prefix='DON')
+            return super().save(*args, **kwargs)
 
     def clean(self):
-        if self.amount <= ZERO_MONEY:
+        # PRE: amount may be absent when field validation has already rejected submitted data.
+        # POST: rejects non-positive numeric amounts without masking field errors for missing or invalid values.
+        if self.amount is not None and self.amount <= ZERO_MONEY:
             raise ValidationError({'amount': _('El monto de la donación debe ser positivo.')})
 
     @property
@@ -231,23 +326,52 @@ class Donation(models.Model):
         balance = self.amount - self.total_assigned
         return max(balance, ZERO_MONEY)
 
+    @property
+    def allocation_progress(self):
+        """
+        PRE: this persisted donation has a valid positive Decimal amount.
+        POST: returns allocation progress derived from non-annulled allocations without mutation.
+        """
+        assigned = self.total_assigned
+        if assigned == ZERO_MONEY:
+            return DonationAllocationProgress.UNALLOCATED
+        if assigned < self.amount:
+            return DonationAllocationProgress.PARTIALLY_ALLOCATED
+        return DonationAllocationProgress.FULLY_ALLOCATED
+
+    @property
+    def allocation_progress_label(self):
+        """
+        PRE: allocation_progress returns a declared DonationAllocationProgress value.
+        POST: returns its localized display label without changing persisted state.
+        """
+        return DonationAllocationProgress(self.allocation_progress).label
+
 
 class FundAllocation(models.Model):
     class Status(models.TextChoices):
-        CREATED = 'created', _('Creada')
-        ACTIVE = 'active', _('En ejecución')
-        PARTIALLY_EXECUTED = 'partially_executed', _('Ejecutada parcialmente')
-        FULLY_EXECUTED = 'fully_executed', _('Ejecutada totalmente')
-        CLOSED = 'closed', _('Cerrada')
+        ACTIVE = 'active', _('Activa')
+        FINISHED = 'finished', _('Finalizada')
         ANNULLED = 'annulled', _('Anulada')
 
+    code = models.CharField(max_length=40, unique=True, editable=False)
     donation = models.ForeignKey(Donation, on_delete=models.PROTECT, related_name='allocations')
     project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name='allocations')
     budget_category = models.CharField(max_length=40, choices=BUDGET_CATEGORY_CHOICES)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     responsible_person = models.CharField(max_length=120, blank=True)
     allocation_date = models.DateField()
-    status = models.CharField(max_length=30, choices=Status.choices, default=Status.CREATED)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.ACTIVE)
+    terminal_reason = models.TextField(blank=True, editable=False)
+    terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
+    terminal_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name='terminal_allocations',
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -256,15 +380,37 @@ class FundAllocation(models.Model):
         ordering = ['-allocation_date', '-created_at']
         verbose_name = _('asignación de fondos')
         verbose_name_plural = _('asignaciones de fondos')
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=ZERO_MONEY),
+                name='operations_allocation_amount_gt_zero',
+            ),
+        ]
 
     def __str__(self):
-        return f'{self.donation.code} -> {self.project.code}: {self.amount}'
+        return f'{self.code} - {self.project.name}: {self.amount}'
+
+    def save(self, *args, **kwargs):
+        # PRE: explicit codes are supplied only by trusted fixtures, migrations, or seed data.
+        # POST: creates with one reserved ASG code or preserves the existing code on update.
+        ensure_operational_code_is_immutable(self, self.code)
+        if self.code:
+            return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.code = reserve_operational_code(namespace='fund_allocation', prefix='ASG')
+            return super().save(*args, **kwargs)
 
     def clean(self):
+        # PRE: amount may be absent when field validation has already rejected submitted data.
+        # POST: validates only present numeric amounts and preserves prior field-level validation errors.
         errors = {}
-        if self.amount <= ZERO_MONEY:
+        if self.amount is not None and self.amount <= ZERO_MONEY:
             errors['amount'] = _('El monto de la asignación debe ser positivo.')
-        if self.donation_id and self.amount > self.donation_available_before_this_allocation():
+        if (
+            self.amount is not None
+            and self.donation_id
+            and self.amount > self.donation_available_before_this_allocation()
+        ):
             errors['amount'] = _('El monto de la asignación excede el saldo disponible de la donación.')
         if errors:
             raise ValidationError(errors)
@@ -279,22 +425,43 @@ class FundAllocation(models.Model):
 
     @property
     def executed_amount(self):
-        return self.expenses.exclude(status=Expense.Status.ANNULLED).aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
+        return self.expenses.exclude(
+            status__in=Expense.non_executing_statuses()
+        ).aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
 
     @property
     def available_balance(self):
         balance = self.amount - self.executed_amount
         return max(balance, ZERO_MONEY)
 
+    @property
+    def execution_progress(self):
+        """
+        PRE: this persisted allocation has a valid positive Decimal amount.
+        POST: returns execution progress derived from effective expenses without mutation.
+        """
+        executed = self.executed_amount
+        if executed == ZERO_MONEY:
+            return AllocationExecutionProgress.UNEXECUTED
+        if executed < self.amount:
+            return AllocationExecutionProgress.PARTIALLY_EXECUTED
+        return AllocationExecutionProgress.FULLY_EXECUTED
+
+    @property
+    def execution_progress_label(self):
+        """
+        PRE: execution_progress returns a declared AllocationExecutionProgress value.
+        POST: returns its localized display label without changing persisted state.
+        """
+        return AllocationExecutionProgress(self.execution_progress).label
+
 
 class Expense(models.Model):
     class Status(models.TextChoices):
         REGISTERED = 'registered', _('Registrado')
-        IN_REVIEW = 'in_review', _('En revisión')
-        VALIDATED = 'validated', _('Validado')
-        REJECTED = 'rejected', _('Rechazado')
         ANNULLED = 'annulled', _('Anulado')
 
+    code = models.CharField(max_length=40, unique=True, editable=False)
     allocation = models.ForeignKey(FundAllocation, on_delete=models.PROTECT, related_name='expenses')
     expense_date = models.DateField()
     category = models.CharField(max_length=40, choices=EXPENSE_CATEGORY_CHOICES)
@@ -306,14 +473,16 @@ class Expense(models.Model):
     description = models.TextField(blank=True)
     observations = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.REGISTERED)
-    validated_by = models.ForeignKey(
+    terminal_reason = models.TextField(blank=True, editable=False)
+    terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
+    terminal_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='validated_expenses',
+        editable=False,
+        related_name='terminal_expenses',
     )
-    validated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -321,18 +490,48 @@ class Expense(models.Model):
         ordering = ['-expense_date', '-created_at']
         verbose_name = _('gasto')
         verbose_name_plural = _('gastos')
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=ZERO_MONEY),
+                name='operations_expense_amount_gt_zero',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.reason} - {self.amount}'
 
+    def save(self, *args, **kwargs):
+        # PRE: explicit codes are supplied only by trusted fixtures, migrations, or seed data.
+        # POST: creates with one reserved GAS code or preserves the existing code on update.
+        ensure_operational_code_is_immutable(self, self.code)
+        if self.code:
+            return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.code = reserve_operational_code(namespace='expense', prefix='GAS')
+            return super().save(*args, **kwargs)
+
     def clean(self):
+        # PRE: amount may be absent during partial validation and allocation may be selected.
+        # POST: rejects invalid present amounts without masking field errors or duplicating balance formulas.
         errors = {}
-        if self.amount <= ZERO_MONEY:
+        if self.amount is not None and self.amount <= ZERO_MONEY:
             errors['amount'] = _('El monto del gasto debe ser positivo.')
-        if self.allocation_id and self.amount > self.allocation_available_before_this_expense():
+        if (
+            self.amount is not None
+            and self.allocation_id
+            and self.amount > self.allocation_available_before_this_expense()
+        ):
             errors['amount'] = _('El monto del gasto excede el saldo disponible de la asignación.')
         if errors:
             raise ValidationError(errors)
+
+    @classmethod
+    def non_executing_statuses(cls):
+        """
+        PRE: Expense status choices are loaded.
+        POST: returns terminal states excluded from execution totals as a tuple.
+        """
+        return (cls.Status.ANNULLED,)
 
     # PRE: self.allocation is set and self.amount contains the proposed expense amount.
     # POST: returns the allocation balance that can be executed by this expense, including its current amount on updates.
@@ -343,9 +542,9 @@ class Expense(models.Model):
         return self.allocation.available_balance + existing_amount
 
     # PRE: the expense has been saved before checking existing related documents.
-    # POST: returns True only when a validated expense has at least one supporting document.
+    # POST: returns True only when at least one protected supporting document exists.
     def has_required_support(self):
-        return self.status != self.Status.VALIDATED or self.supporting_documents.exists()
+        return self.supporting_documents.exists()
 
 
 class SupportingDocument(models.Model):
@@ -364,6 +563,44 @@ class SupportingDocument(models.Model):
         return self.title
 
 
+class AuditLogImmutableError(ValidationError):
+    """Raised when application code attempts to mutate audit history."""
+
+
+class AuditLogQuerySet(models.QuerySet):
+    """Append-only query operations for audit history."""
+
+    def update(self, **kwargs):
+        """
+        PRE: queryset targets persisted audit events.
+        POST: always rejects bulk modification without changing audit history.
+        """
+        raise AuditLogImmutableError(_('Los registros de auditoría no se pueden modificar.'))
+
+    def delete(self):
+        """
+        PRE: queryset targets persisted audit events.
+        POST: always rejects bulk deletion without changing audit history.
+        """
+        raise AuditLogImmutableError(_('Los registros de auditoría no se pueden eliminar.'))
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        """
+        PRE: objs contains existing audit events proposed for bulk modification.
+        POST: always rejects bulk modification without changing audit history.
+        """
+        raise AuditLogImmutableError(_('Los registros de auditoría no se pueden modificar en lote.'))
+
+    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False, update_conflicts=False, update_fields=None, unique_fields=None):
+        """
+        PRE: objs contains proposed audit events for a bulk insert.
+        POST: rejects bulk creation because it bypasses per-event creation guarantees.
+        """
+        raise AuditLogImmutableError(
+            _('La auditoría debe registrarse evento por evento mediante el servicio autorizado.')
+        )
+
+
 class AuditLog(models.Model):
     class Action(models.TextChoices):
         CREATED = 'created', _('Creada')
@@ -374,10 +611,11 @@ class AuditLog(models.Model):
         ASSIGNED = 'assigned', _('Asignada')
         EXECUTED = 'executed', _('Ejecutada')
         CLOSED = 'closed', _('Cerrada')
+        EXPENSE_CANCELLED = 'expense_cancelled', _('Gasto anulado')
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name='audit_logs',
@@ -388,6 +626,7 @@ class AuditLog(models.Model):
     entity_label = models.CharField(max_length=220)
     summary = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+    objects = AuditLogQuerySet.as_manager()
 
     class Meta:
         ordering = ['-created_at']
@@ -429,3 +668,20 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f'{self.get_action_display()} {self.display_model_name} {self.entity_label}'
+
+    def save(self, *args, **kwargs):
+        """
+        PRE: self represents a new audit event with all required fields populated.
+        POST: inserts the event once; existing rows cannot be modified.
+        """
+        row_already_exists = self.pk is not None and type(self).objects.filter(pk=self.pk).exists()
+        if not self._state.adding or row_already_exists or kwargs.get('force_update'):
+            raise AuditLogImmutableError(_('Los registros de auditoría existentes no se pueden modificar.'))
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """
+        PRE: self is an audit event targeted for instance deletion.
+        POST: always rejects deletion and preserves the event.
+        """
+        raise AuditLogImmutableError(_('Los registros de auditoría no se pueden eliminar.'))

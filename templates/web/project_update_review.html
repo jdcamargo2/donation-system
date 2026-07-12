@@ -27,7 +27,7 @@
                     <dt class="col-sm-4">Evidencia</dt>
                     <dd class="col-sm-8">
                         {% if object.evidence %}
-                            <a href="{{ object.evidence.url }}">Ver evidencia</a>
+                            <a href="{% url 'project_update_evidence_download' object.pk %}">Ver evidencia</a>
                         {% else %}
                             -
                         {% endif %}

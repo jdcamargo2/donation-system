@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Proyectos - SIGEDON{% endblock %}
 
@@ -41,7 +42,7 @@
                             <div class="small text-muted">{{ project.location|default:"Sin ubicación" }}</div>
                         </td>
                         <td><span class="badge ops-status-badge">{{ project.get_status_display }}</span></td>
-                        <td class="ops-money">{{ project.estimated_budget }} USD</td>
+                        <td class="ops-money">{{ project.estimated_budget|money_es }} USD</td>
                         <td>{{ project.start_date|default:"-" }}</td>
                         <td>{{ project.end_date|default:"-" }}</td>
                         <td class="text-end ops-row-actions">

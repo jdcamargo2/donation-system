@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Gastos - SIGEDON{% endblock %}
 
@@ -19,7 +20,7 @@
         <table class="table table-hover align-middle mb-0">
             <thead>
                 <tr>
-                    <th>Asignación</th>
+                    <th>Gasto</th>
                     <th>Proyecto</th>
                     <th>Monto</th>
                     <th>Categoría</th>
@@ -31,10 +32,19 @@
             </thead>
             <tbody>
                 {% for expense in objects %}
-                    <tr>
-                        <td><a class="fw-semibold text-decoration-none" href="{% url 'allocation_detail' expense.allocation.pk %}">{{ expense.allocation.donation.code }}</a></td>
-                        <td>{{ expense.allocation.project }}</td>
-                        <td class="ops-money">{{ expense.amount }} {{ expense.currency }}</td>
+                    <tr{% if expense.status == 'annulled' %} class="text-muted"{% endif %}>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url 'expense_detail' expense.pk %}">
+                                {{ expense.code }}
+                            </a>
+                            <div>{{ expense.reason|default:expense.provider_or_recipient }}</div>
+                            <div class="small text-muted">{{ expense.provider_or_recipient }} · {{ expense.allocation.donation.code }}</div>
+                        </td>
+                        <td>
+                            {{ expense.allocation.project.name }}
+                            <div class="small text-muted">{{ expense.allocation.project.code }} · {{ expense.allocation.code }}</div>
+                        </td>
+                        <td class="ops-money">{{ expense.amount|money_es }} {{ expense.currency }}</td>
                         <td>{{ expense.get_category_display }}</td>
                         <td><span class="badge ops-status-badge">{{ expense.get_status_display }}</span></td>
                         <td>
@@ -46,10 +56,10 @@
                         </td>
                         <td>{{ expense.expense_date }}</td>
                         <td class="text-end ops-row-actions">
-                            {% if perms.operations.change_expense %}
+                            {% if perms.operations.change_expense and expense.status != 'annulled' %}
                                 <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name expense.pk %}">Editar</a>
                             {% endif %}
-                            {% if perms.operations.delete_expense %}
+                            {% if perms.operations.delete_expense and expense.status != 'annulled' %}
                                 <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name expense.pk %}">Eliminar</a>
                             {% endif %}
                         </td>

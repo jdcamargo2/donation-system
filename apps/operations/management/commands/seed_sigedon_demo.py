@@ -1,272 +1,536 @@
+from __future__ import annotations
+
 import os
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 from django.contrib.auth import get_user_model
-from django.core.files.base import ContentFile
-from django.core.management.base import BaseCommand
+from django.contrib.auth.models import Group
+from django.core.management import BaseCommand, CommandError, call_command
+from django.db import transaction
 from django.utils import timezone
-from django.utils.text import capfirst
 
-from apps.operations.choices import OPERATING_CURRENCY
 from apps.operations.models import (
-    AuditLog,
     Donation,
     Expense,
     FundAllocation,
     Institution,
     Project,
     ProjectUpdate,
-    SupportingDocument,
 )
-from apps.operations.role_services import sync_operation_roles
-from apps.operations.roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_SIGEDON_ADMIN
-from apps.operations.services import log_action, review_project_update, validate_expense
 
 
-DEMO_DATE = date(2026, 7, 8)
+DEFAULT_DEMO_PASSWORD = "0214"
+
+
+def first_choice_value(choices: Any) -> str:
+    """
+    PRE: choices contiene al menos una opción Django válida.
+    POST: retorna el valor almacenado de la primera opción.
+    """
+    if not choices:
+        raise CommandError("Uno de los catálogos de opciones está vacío.")
+
+    choice = choices[0]
+    return str(choice[0])
+
+
+def save_validated(instance):
+    """
+    PRE: instance contiene un estado de dominio coherente.
+    POST: valida y persiste la instancia.
+    """
+    instance.full_clean()
+    instance.save()
+    return instance
 
 
 class Command(BaseCommand):
-    help = 'Crea datos demo idempotentes para probar SIGEDON localmente.'
+    help = (
+        "Puebla SIGEDON con usuarios, instituciones, proyectos, "
+        "donaciones, asignaciones, gastos y avances de demostración."
+    )
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--password",
+            default=os.getenv("SIGEDON_DEMO_PASSWORD", DEFAULT_DEMO_PASSWORD),
+            help="Contraseña para los usuarios demo.",
+        )
+        parser.add_argument(
+            "--skip-users",
+            action="store_true",
+            help="No crear ni actualizar usuarios de demostración.",
+        )
+
+    @transaction.atomic
     def handle(self, *args, **options):
-        groups = sync_operation_roles()
-        user = self.create_demo_user()
-        role_users = self.create_role_demo_users(groups)
-        donor, executor = self.create_institutions()
-        project_active, project_planned = self.create_projects()
-        donation = self.create_donation(donor)
-        allocation = self.create_allocation(donation, project_active)
-        expense = self.create_expense(allocation, user)
-        self.create_supporting_document(expense)
-        expense = validate_expense(expense.pk, user)
-        self.create_project_updates(project_active, project_planned, user)
-        self.create_demo_audit(user, donation, allocation)
+        """
+        PRE:
+        - las migraciones están aplicadas;
+        - PostgreSQL está disponible;
+        - los modelos operations están cargados.
 
-        self.stdout.write(self.style.SUCCESS('Datos demo de SIGEDON creados o actualizados correctamente.'))
-        self.stdout.write(f'Usuario demo: {user.username}')
-        for role_name, role_user in role_users.items():
-            self.stdout.write(f'{role_name}: {role_user.username}')
+        POST:
+        - existe un conjunto demo coherente e idempotente;
+        - no se exceden saldos;
+        - los cinco proyectos de Kobo conservan sus códigos;
+        - las ejecuciones posteriores actualizan sin duplicar.
+        """
+        password = options["password"]
+        skip_users = options["skip_users"]
 
-    def create_demo_user(self):
-        username = os.environ.get('SIGEDON_DEMO_USERNAME', 'sigedon_demo')
-        email = os.environ.get('SIGEDON_DEMO_EMAIL', 'demo@sigedon.local')
-        password = os.environ.get('SIGEDON_DEMO_PASSWORD', 'sigedon-demo-12345')
-        user, created = get_user_model().objects.get_or_create(
-            username=username,
-            defaults={
-                'email': email,
-                'is_staff': True,
-                'is_superuser': True,
-            },
+        self.stdout.write("Sincronizando roles de SIGEDON...")
+        call_command("sync_sigedon_roles", verbosity=0)
+
+        users = {}
+        if not skip_users:
+            users = self._create_users(password)
+
+        institutions = self._create_institutions()
+        projects = self._create_projects()
+        donation = self._create_donation(institutions["donor"])
+        allocations = self._create_allocations(donation, projects)
+        expenses = self._create_expenses(allocations)
+        updates = self._create_project_updates(
+            projects=projects,
+            operator=users.get("operator"),
+            reviewer=users.get("admin"),
         )
-        if created:
-            user.set_password(password)
-        user.email = email
-        user.is_staff = True
-        user.is_superuser = True
-        user.save()
-        return user
 
-    def create_role_demo_users(self, groups):
-        role_defaults = {
-            ROLE_SIGEDON_ADMIN: (
-                os.environ.get('SIGEDON_DEMO_ADMIN_USERNAME', 'admin_sigedon'),
-                os.environ.get('SIGEDON_DEMO_ADMIN_EMAIL', 'admin@sigedon.local'),
-                os.environ.get('SIGEDON_DEMO_ADMIN_PASSWORD', 'admin-sigedon-12345'),
-            ),
-            ROLE_FIELD_OPERATOR: (
-                os.environ.get('SIGEDON_DEMO_FIELD_USERNAME', 'campo_sigedon'),
-                os.environ.get('SIGEDON_DEMO_FIELD_EMAIL', 'campo@sigedon.local'),
-                os.environ.get('SIGEDON_DEMO_FIELD_PASSWORD', 'campo-sigedon-12345'),
-            ),
-            ROLE_EXTERNAL_AUDITOR: (
-                os.environ.get('SIGEDON_DEMO_AUDITOR_USERNAME', 'auditor_sigedon'),
-                os.environ.get('SIGEDON_DEMO_AUDITOR_EMAIL', 'auditor@sigedon.local'),
-                os.environ.get('SIGEDON_DEMO_AUDITOR_PASSWORD', 'auditor-sigedon-12345'),
-            ),
+        self.stdout.write("")
+        self.stdout.write(self.style.SUCCESS("Base demo preparada correctamente."))
+        self.stdout.write(f"Instituciones: {len(institutions)}")
+        self.stdout.write(f"Proyectos: {len(projects)}")
+        self.stdout.write("Donaciones: 1")
+        self.stdout.write(f"Asignaciones: {len(allocations)}")
+        self.stdout.write(f"Gastos: {len(expenses)}")
+        self.stdout.write(f"Avances: {len(updates)}")
+
+        if not skip_users:
+            self.stdout.write("")
+            self.stdout.write("Usuarios demo:")
+            self.stdout.write("  admin_demo")
+            self.stdout.write("  operador_demo")
+            self.stdout.write("  auditor_demo")
+            self.stdout.write(
+                self.style.WARNING(
+                    "Todos usan la contraseña indicada mediante "
+                    "--password o SIGEDON_DEMO_PASSWORD."
+                )
+            )
+
+    def _create_users(self, password: str) -> dict[str, Any]:
+        """
+        PRE: los grupos operativos ya fueron sincronizados.
+        POST: crea o actualiza tres usuarios demo y sus grupos.
+        """
+        User = get_user_model()
+
+        definitions = {
+            "admin": {
+                "username": "admin_demo",
+                "email": "admin.demo@sigedon.local",
+                "first_name": "Administrador",
+                "last_name": "SIGEDON",
+                "group": "Administrador SIGEDON",
+                "is_staff": True,
+            },
+            "operator": {
+                "username": "operador_demo",
+                "email": "operador.demo@sigedon.local",
+                "first_name": "Operador",
+                "last_name": "de campo",
+                "group": "Operador de campo",
+                "is_staff": False,
+            },
+            "auditor": {
+                "username": "auditor_demo",
+                "email": "auditor.demo@sigedon.local",
+                "first_name": "Auditor",
+                "last_name": "externo",
+                "group": "Auditor externo",
+                "is_staff": False,
+            },
         }
-        role_users = {}
-        for role_name, (username, email, password) in role_defaults.items():
-            user, created = get_user_model().objects.get_or_create(
-                username=username,
+
+        result = {}
+
+        for key, definition in definitions.items():
+            try:
+                group = Group.objects.get(name=definition["group"])
+            except Group.DoesNotExist as exc:
+                raise CommandError(
+                    f"No existe el grupo {definition['group']!r}."
+                ) from exc
+
+            user, _ = User.objects.update_or_create(
+                username=definition["username"],
                 defaults={
-                    'email': email,
-                    'is_staff': role_name == ROLE_SIGEDON_ADMIN,
+                    "email": definition["email"],
+                    "first_name": definition["first_name"],
+                    "last_name": definition["last_name"],
+                    "is_active": True,
+                    "is_staff": definition["is_staff"],
                 },
             )
-            if created:
-                user.set_password(password)
-            user.email = email
-            user.is_staff = role_name == ROLE_SIGEDON_ADMIN
-            user.is_superuser = False
-            user.save()
-            user.groups.add(groups[role_name])
-            role_users[role_name] = user
-        return role_users
 
-    def create_institutions(self):
-        donor, _ = Institution.objects.get_or_create(
-            name='Fundación Demo SIGEDON',
-            defaults={
-                'institution_type': 'foundation',
-                'role': Institution.Role.DONOR,
-                'country': 'VE',
-                'contact_email': 'donante.demo@sigedon.local',
-                'responsible_person': 'Coordinación Demo',
-                'status': Institution.Status.ACTIVE,
-            },
-        )
-        executor, _ = Institution.objects.get_or_create(
-            name='Parroquia Ejecutora Demo',
-            defaults={
-                'institution_type': 'parish',
-                'role': Institution.Role.EXECUTOR,
-                'country': 'VE',
-                'responsible_person': 'Equipo Operativo Demo',
-                'status': Institution.Status.ACTIVE,
-            },
-        )
-        return donor, executor
+            user.set_password(password)
+            user.save(update_fields=["password"])
+            user.groups.set([group])
 
-    def create_projects(self):
-        active, _ = Project.objects.get_or_create(
-            code='PRJ-DEMO-001',
-            defaults={
-                'name': 'Atención alimentaria y psicosocial Demo',
-                'description': 'Proyecto demo visible en el portal público.',
-                'objective': 'Apoyar familias con alimentos y acompañamiento psicosocial.',
-                'responsible_unit': 'Pastoral Social',
-                'location': 'Caracas',
-                'estimated_budget': Decimal('5000.00'),
-                'start_date': DEMO_DATE,
-                'status': Project.Status.ACTIVE,
-            },
-        )
-        planned, _ = Project.objects.get_or_create(
-            code='PRJ-DEMO-002',
-            defaults={
-                'name': 'Proyecto planificado no público Demo',
-                'description': 'Proyecto demo para mostrar estados internos.',
-                'objective': 'Preparar una nueva iniciativa operativa.',
-                'responsible_unit': 'Equipo SIGEDON',
-                'location': 'Vargas',
-                'estimated_budget': Decimal('2500.00'),
-                'start_date': DEMO_DATE,
-                'status': Project.Status.PLANNED,
-            },
-        )
-        return active, planned
+            result[key] = user
 
-    def create_donation(self, donor):
-        donation, _ = Donation.objects.get_or_create(
-            code='DON-DEMO-001',
-            defaults={
-                'donor': donor,
-                'donation_type': 'food',
-                'amount': Decimal('3000.00'),
-                'currency': OPERATING_CURRENCY,
-                'objective': 'Financiar atención alimentaria del proyecto demo.',
-                'commitment_date': DEMO_DATE,
-                'received_date': DEMO_DATE,
-                'status': Donation.Status.RECEIVED,
-                'support_reference': 'REF-DEMO-001',
-            },
-        )
-        return donation
+        return result
 
-    def create_allocation(self, donation, project):
-        allocation, _ = FundAllocation.objects.get_or_create(
-            donation=donation,
-            project=project,
-            budget_category='health_psychosocial',
-            defaults={
-                'amount': Decimal('1800.00'),
-                'responsible_person': 'Administración Demo',
-                'allocation_date': DEMO_DATE,
-                'status': FundAllocation.Status.ACTIVE,
-                'notes': 'Asignación demo para salud y apoyo psicosocial.',
-            },
+    def _create_institutions(self) -> dict[str, Institution]:
+        """
+        PRE: los choices de Institution están disponibles.
+        POST: retorna instituciones activas de demostración.
+        """
+        institution_type = first_choice_value(
+            Institution._meta.get_field("institution_type").choices
         )
-        return allocation
 
-    def create_expense(self, allocation, user):
-        expense, created = Expense.objects.get_or_create(
-            allocation=allocation,
-            reason='Compra demo de alimentos',
-            defaults={
-                'expense_date': DEMO_DATE,
-                'category': 'food',
-                'amount': Decimal('450.00'),
-                'currency': OPERATING_CURRENCY,
-                'provider_or_recipient': 'Proveedor Demo',
-                'payment_method': 'bank_transfer',
-                'description': 'Gasto demo con documento soporte.',
-                'status': Expense.Status.REGISTERED,
+        definitions = {
+            "donor": {
+                "name": "Fondo Humanitario Internacional",
+                "role": Institution.Role.DONOR,
+                "country": "ES",
+                "contact_email": "cooperacion@fondo-demo.org",
+                "contact_phone": "+34 000 000 000",
+                "responsible_person": "María González",
             },
-        )
-        if created:
-            log_action(user, AuditLog.Action.EXECUTED, expense, 'Gasto demo registrado.')
-        return expense
+            "receiver": {
+                "name": "Diócesis de La Guaira",
+                "role": Institution.Role.RECEIVER,
+                "country": "VE",
+                "contact_email": "proyectos@diocesis-demo.org",
+                "contact_phone": "+58 000 000 0000",
+                "responsible_person": "Coordinación de proyectos",
+            },
+            "executor": {
+                "name": "Equipo Territorial SIGEDON",
+                "role": Institution.Role.EXECUTOR,
+                "country": "VE",
+                "contact_email": "territorio@sigedon.local",
+                "contact_phone": "+58 000 000 0001",
+                "responsible_person": "Coordinación territorial",
+            },
+        }
 
-    def create_supporting_document(self, expense):
-        document, created = SupportingDocument.objects.get_or_create(
-            expense=expense,
-            title='Factura demo de alimentos',
-            defaults={'notes': 'Documento demo generado por seed_sigedon_demo.'},
-        )
-        if created:
-            document.document.save('factura-demo.txt', ContentFile(b'Soporte demo SIGEDON'), save=True)
-        return document
+        result = {}
 
-    def create_project_updates(self, project_active, _project_planned, user):
-        approved, _ = ProjectUpdate.objects.get_or_create(
-            project=project_active,
-            title='Entrega alimentaria aprobada Demo',
-            defaults={
-                'description': 'Se completo una entrega demo aprobada para consulta publica.',
-                'status': ProjectUpdate.Status.PENDING_REVIEW,
-                'created_by': user,
-            },
-        )
-        if approved.status == ProjectUpdate.Status.PENDING_REVIEW:
-            review_project_update(approved.pk, user, ProjectUpdate.Status.APPROVED, 'Aprobado para demo publica.')
+        for key, data in definitions.items():
+            institution, _ = Institution.objects.update_or_create(
+                name=data["name"],
+                defaults={
+                    "institution_type": institution_type,
+                    "role": data["role"],
+                    "country": data["country"],
+                    "contact_email": data["contact_email"],
+                    "contact_phone": data["contact_phone"],
+                    "responsible_person": data["responsible_person"],
+                    "status": Institution.Status.ACTIVE,
+                },
+            )
 
-        ProjectUpdate.objects.get_or_create(
-            project=project_active,
-            title='Compra pendiente de revisión Demo',
-            defaults={
-                'description': 'Avance demo pendiente de revisión interna.',
-                'status': ProjectUpdate.Status.PENDING_REVIEW,
-                'created_by': user,
-            },
-        )
-        ProjectUpdate.objects.get_or_create(
-            project=project_active,
-            title='Evidencia rechazada Demo',
-            defaults={
-                'description': 'Avance demo rechazado para mostrar estados internos.',
-                'status': ProjectUpdate.Status.REJECTED,
-                'created_by': user,
-                'reviewed_by': user,
-                'reviewed_at': timezone.now(),
-                'review_notes': 'Evidencia insuficiente para demo.',
-            },
-        )
-    def create_demo_audit(self, user, donation, allocation):
-        events = [
-            (AuditLog.Action.CREATED, donation, 'Donación demo creada.'),
-            (AuditLog.Action.ASSIGNED, allocation, 'Asignación demo registrada.'),
+            save_validated(institution)
+            result[key] = institution
+
+        return result
+
+    def _create_projects(self) -> dict[str, Project]:
+        """
+        PRE: no existe otro proyecto con los códigos reservados.
+        POST: crea los cinco proyectos territoriales activos de Kobo.
+        """
+        today = date.today()
+
+        definitions = [
+            (
+                "catia_la_mar",
+                "PRJ-DEMO-001",
+                "Núcleo Vital Catia la Mar",
+                "Zona Pastoral Catia la Mar",
+                Decimal("50000.00"),
+            ),
+            (
+                "centro",
+                "PRJ-DEMO-002",
+                "Núcleo Vital Centro",
+                "Zona Pastoral Centro",
+                Decimal("45000.00"),
+            ),
+            (
+                "este",
+                "PRJ-DEMO-003",
+                "Núcleo Vital Este",
+                "Zona Pastoral Este",
+                Decimal("40000.00"),
+            ),
+            (
+                "montana",
+                "PRJ-DEMO-004",
+                "Núcleo Vital La Montaña",
+                "Zona Pastoral La Montaña",
+                Decimal("35000.00"),
+            ),
+            (
+                "insular",
+                "PRJ-DEMO-005",
+                "Núcleo Vital Insular",
+                "Zona Pastoral Insular",
+                Decimal("30000.00"),
+            ),
         ]
-        for action, instance, summary in events:
-            AuditLog.objects.get_or_create(
-                action=action,
-                model_name=capfirst(instance._meta.verbose_name),
-                entity_id=str(instance.pk),
-                summary=summary,
+
+        projects = {}
+
+        for key, code, name, location, budget in definitions:
+            project, _ = Project.objects.update_or_create(
+                code=code,
                 defaults={
-                    'user': user,
-                    'entity_label': str(instance),
+                    "name": name,
+                    "description": (
+                        "Proyecto territorial para diagnóstico, priorización "
+                        "y seguimiento de acciones comunitarias."
+                    ),
+                    "objective": (
+                        "Fortalecer la respuesta comunitaria y la gestión "
+                        "transparente de recursos."
+                    ),
+                    "responsible_unit": "Coordinación territorial SIGEDON",
+                    "location": location,
+                    "estimated_budget": budget,
+                    "start_date": today - timedelta(days=30),
+                    "end_date": today + timedelta(days=335),
+                    "status": Project.Status.ACTIVE,
                 },
             )
+
+            save_validated(project)
+            projects[key] = project
+
+        return projects
+
+    def _create_donation(self, donor: Institution) -> Donation:
+        """
+        PRE: donor es una institución donante activa.
+        POST: crea una donación recibida con saldo suficiente.
+        """
+        today = date.today()
+        donation_type = first_choice_value(
+            Donation._meta.get_field("donation_type").choices
+        )
+
+        donation, _ = Donation.objects.update_or_create(
+            code="DON-DEMO-001",
+            defaults={
+                "donor": donor,
+                "donation_type": donation_type,
+                "amount": Decimal("200000.00"),
+                "currency": "USD",
+                "objective": (
+                    "Financiar actividades comunitarias de los cinco "
+                    "Núcleos Vitales de La Guaira."
+                ),
+                "restrictions": (
+                    "Uso exclusivo en actividades aprobadas y documentadas."
+                ),
+                "commitment_date": today - timedelta(days=50),
+                "received_date": today - timedelta(days=40),
+                "status": Donation.Status.RECEIVED,
+                "support_reference": "CONVENIO-DEMO-2026-001",
+            },
+        )
+
+        return save_validated(donation)
+
+    def _create_allocations(
+        self,
+        donation: Donation,
+        projects: dict[str, Project],
+    ) -> dict[str, FundAllocation]:
+        """
+        PRE: donation posee saldo suficiente para todas las asignaciones.
+        POST: crea cinco asignaciones cuya suma no excede la donación.
+        """
+        today = date.today()
+        budget_category = first_choice_value(
+            FundAllocation._meta.get_field("budget_category").choices
+        )
+
+        amounts = {
+            "catia_la_mar": Decimal("40000.00"),
+            "centro": Decimal("35000.00"),
+            "este": Decimal("30000.00"),
+            "montana": Decimal("25000.00"),
+            "insular": Decimal("20000.00"),
+        }
+
+        allocations = {}
+
+        for key, amount in amounts.items():
+            project = projects[key]
+
+            allocation, _ = FundAllocation.objects.update_or_create(
+                donation=donation,
+                project=project,
+                budget_category=budget_category,
+                defaults={
+                    "amount": amount,
+                    "responsible_person": "Coordinación financiera SIGEDON",
+                    "allocation_date": today - timedelta(days=25),
+                    "status": FundAllocation.Status.ACTIVE,
+                    "notes": "Asignación inicial del escenario demostrativo.",
+                },
+            )
+
+            allocations[key] = save_validated(allocation)
+
+        return allocations
+
+    def _create_expenses(
+        self,
+        allocations: dict[str, FundAllocation],
+    ) -> list[Expense]:
+        """
+        PRE: las asignaciones tienen saldo disponible.
+        POST: crea gastos operativos sin exceder ninguna asignación.
+        """
+        today = date.today()
+
+        category = first_choice_value(
+            Expense._meta.get_field("category").choices
+        )
+        payment_method = first_choice_value(
+            Expense._meta.get_field("payment_method").choices
+        )
+
+        definitions = [
+            (
+                allocations["catia_la_mar"],
+                "Compra de materiales comunitarios",
+                Decimal("3500.00"),
+                "Proveedor comunitario Catia la Mar",
+                15,
+            ),
+            (
+                allocations["centro"],
+                "Jornada de diagnóstico territorial",
+                Decimal("2200.00"),
+                "Equipo técnico territorial",
+                12,
+            ),
+            (
+                allocations["este"],
+                "Logística para asamblea comunitaria",
+                Decimal("1800.00"),
+                "Proveedor logístico local",
+                9,
+            ),
+            (
+                allocations["montana"],
+                "Traslado de equipo de campo",
+                Decimal("950.00"),
+                "Servicio de transporte",
+                6,
+            ),
+        ]
+
+        expenses = []
+
+        for allocation, reason, amount, recipient, days_ago in definitions:
+            expense, _ = Expense.objects.update_or_create(
+                allocation=allocation,
+                reason=reason,
+                defaults={
+                    "expense_date": today - timedelta(days=days_ago),
+                    "category": category,
+                    "amount": amount,
+                    "currency": "USD",
+                    "provider_or_recipient": recipient,
+                    "payment_method": payment_method,
+                    "description": "Registro demostrativo para pruebas operativas.",
+                    "observations": "",
+                    "status": Expense.Status.REGISTERED,
+                },
+            )
+
+            expenses.append(save_validated(expense))
+
+        return expenses
+
+    def _create_project_updates(
+        self,
+        *,
+        projects: dict[str, Project],
+        operator,
+        reviewer,
+    ) -> list[ProjectUpdate]:
+        """
+        PRE: los proyectos están activos.
+        POST: crea avances demo en estados coherentes.
+        """
+        definitions = [
+            {
+                "project": projects["catia_la_mar"],
+                "title": "Levantamiento territorial inicial",
+                "description": (
+                    "Se completó el primer recorrido territorial y la "
+                    "identificación preliminar de comunidades."
+                ),
+                "status": ProjectUpdate.Status.APPROVED if reviewer else ProjectUpdate.Status.PENDING_REVIEW,
+                "review_notes": "Avance validado para demostración." if reviewer else "",
+            },
+            {
+                "project": projects["centro"],
+                "title": "Organización de mesas comunitarias",
+                "description": (
+                    "Se iniciaron reuniones con actores comunitarios y "
+                    "representantes parroquiales."
+                ),
+                "status": ProjectUpdate.Status.PENDING_REVIEW,
+                "review_notes": "",
+            },
+            {
+                "project": projects["este"],
+                "title": "Planificación del diagnóstico",
+                "description": (
+                    "Se encuentra en preparación el cronograma de visitas "
+                    "y levantamiento de información."
+                ),
+                "status": ProjectUpdate.Status.DRAFT,
+                "review_notes": "",
+            },
+        ]
+
+        updates = []
+
+        for data in definitions:
+            update, _ = ProjectUpdate.objects.update_or_create(
+                project=data["project"],
+                title=data["title"],
+                defaults={
+                    "description": data["description"],
+                    "status": data["status"],
+                    "created_by": operator,
+                    "reviewed_by": (
+                        reviewer
+                        if data["status"] == ProjectUpdate.Status.APPROVED
+                        else None
+                    ),
+                    "reviewed_at": (
+                        timezone.now()
+                        if data["status"] == ProjectUpdate.Status.APPROVED
+                        else None
+                    ),
+                    "review_notes": data["review_notes"],
+                },
+            )
+
+            updates.append(save_validated(update))
+
+        return updates

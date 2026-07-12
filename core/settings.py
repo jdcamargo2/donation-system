@@ -11,6 +11,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,11 +22,77 @@ load_dotenv(BASE_DIR / '.env')
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = SECRET_KEY = os.environ.get(
-    'DJANGO_SECRET_KEY', 
-    'django-insecure-dev-fallback-key-nunca-usar-esto-en-produccion'
-)
+TRUE_VALUES = frozenset({'1', 'true', 'yes', 'on'})
+FALSE_VALUES = frozenset({'0', 'false', 'no', 'off'})
+
+
+def env_bool(name, default=False):
+    """
+    PRE: name identifies an optional boolean environment variable and default is boolean.
+    POST: returns a strict boolean or raises ImproperlyConfigured without exposing values.
+    """
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in TRUE_VALUES:
+        return True
+    if normalized in FALSE_VALUES:
+        return False
+    raise ImproperlyConfigured(f'{name} debe ser un valor booleano válido.')
+
+
+def env_int(name, default, *, minimum=0):
+    """
+    PRE: name identifies an optional integer variable and default/minimum are integers.
+    POST: returns an integer at least minimum or raises ImproperlyConfigured safely.
+    """
+    raw_value = os.getenv(name)
+    try:
+        value = default if raw_value is None or not raw_value.strip() else int(raw_value)
+    except ValueError as exc:
+        raise ImproperlyConfigured(f'{name} debe ser un entero válido.') from exc
+    if value < minimum:
+        raise ImproperlyConfigured(f'{name} debe ser mayor o igual a {minimum}.')
+    return value
+
+
+def env_list(name):
+    """
+    PRE: name identifies an optional comma-separated environment variable.
+    POST: returns its non-empty trimmed entries without logging the source value.
+    """
+    return [item.strip() for item in os.getenv(name, '').split(',') if item.strip()]
+
+
+def require_env(*names):
+    """
+    PRE: names contains environment variable names required by the active configuration.
+    POST: returns a name-to-value mapping or raises a secret-free configuration error.
+    """
+    missing = [name for name in names if not os.getenv(name, '').strip()]
+    if missing:
+        raise ImproperlyConfigured(
+            f'Faltan variables de entorno obligatorias: {", ".join(missing)}.'
+        )
+    return {name: os.environ[name].strip() for name in names}
+
+
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = env_bool('DJANGO_DEBUG', True)
+
+# Development keeps a non-secret fallback; production must provide its own key.
+if DEBUG:
+    SECRET_KEY = os.getenv(
+        'DJANGO_SECRET_KEY',
+        'django-insecure-dev-fallback-key-nunca-usar-esto-en-produccion',
+    ) or 'django-insecure-dev-fallback-key-nunca-usar-esto-en-produccion'
+else:
+    SECRET_KEY = require_env('DJANGO_SECRET_KEY')['DJANGO_SECRET_KEY']
+
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS')
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured('ALLOWED_HOSTS es obligatoria cuando DEBUG=False.')
 
 KOBO_BASE_URL = os.getenv("KOBO_BASE_URL", "")
 KOBO_API_TOKEN = os.getenv("KOBO_API_TOKEN", "")
@@ -44,12 +112,6 @@ KOBO_REQUEST_TIMEOUT_SECONDS = int(
 KOBO_MAX_ATTACHMENT_BYTES = int(
     os.getenv("KOBO_MAX_ATTACHMENT_BYTES", "10485760")
 )
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
-
-ALLOWED_HOSTS = []
-
 
 # Application definition
 
@@ -102,12 +164,61 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+DATABASE_ENGINE = os.getenv(
+    'DATABASE_ENGINE', 'sqlite' if DEBUG else 'postgresql'
+).strip().lower()
+
+if DATABASE_ENGINE == 'sqlite':
+    if not DEBUG:
+        raise ImproperlyConfigured('SQLite solo está permitido cuando DEBUG=True.')
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": require_env("POSTGRES_DB"),
+            "USER": require_env("POSTGRES_USER"),
+            "PASSWORD": require_env("POSTGRES_PASSWORD"),
+            "HOST": require_env("POSTGRES_HOST"),
+            "PORT": os.getenv("POSTGRES_PORT", "5432"),
+            "CONN_MAX_AGE": int(os.getenv("DATABASE_CONN_MAX_AGE", "0")),
+            "CONN_HEALTH_CHECKS": True,
+        }
     }
-}
+elif DATABASE_ENGINE == 'postgresql':
+    postgres = require_env(
+        'POSTGRES_DB',
+        'POSTGRES_USER',
+        'POSTGRES_PASSWORD',
+        'POSTGRES_HOST',
+    )
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': postgres['POSTGRES_DB'],
+            'USER': postgres['POSTGRES_USER'],
+            'PASSWORD': postgres['POSTGRES_PASSWORD'],
+            'HOST': postgres['POSTGRES_HOST'],
+            'PORT': str(env_int('POSTGRES_PORT', 5432, minimum=1)),
+            'CONN_MAX_AGE': env_int('DATABASE_CONN_MAX_AGE', 60),
+            'CONN_HEALTH_CHECKS': True,
+        }
+    }
+else:
+    raise ImproperlyConfigured(
+        'DATABASE_ENGINE debe ser sqlite o postgresql.'
+    )
+
+
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
+SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', not DEBUG)
+SECURE_HSTS_SECONDS = env_int('SECURE_HSTS_SECONDS', 3600 if not DEBUG else 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(
+    'SECURE_HSTS_INCLUDE_SUBDOMAINS', False
+)
+SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', False)
+if env_bool('SECURE_PROXY_SSL_HEADER_ENABLED', False):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
 # Password validation

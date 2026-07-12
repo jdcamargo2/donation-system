@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Panel financiero - SIGEDON{% endblock %}
 
@@ -66,7 +67,7 @@
         <div class="card h-100 border-0 ops-metric-card">
             <div class="card-body">
                 <div class="ops-metric-label">Donaciones recibidas</div>
-                <div class="ops-metric-value">{{ total_donations }}</div>
+                <div class="ops-metric-value">{{ total_donations|money_es }}</div>
             </div>
         </div>
     </div>
@@ -74,7 +75,7 @@
         <div class="card h-100 border-0 ops-metric-card">
             <div class="card-body">
                 <div class="ops-metric-label">Asignado</div>
-                <div class="ops-metric-value">{{ total_assigned }}</div>
+                <div class="ops-metric-value">{{ total_assigned|money_es }}</div>
             </div>
         </div>
     </div>
@@ -82,7 +83,7 @@
         <div class="card h-100 border-0 ops-metric-card">
             <div class="card-body">
                 <div class="ops-metric-label">Ejecutado</div>
-                <div class="ops-metric-value">{{ total_executed }}</div>
+                <div class="ops-metric-value">{{ total_executed|money_es }}</div>
             </div>
         </div>
     </div>
@@ -90,7 +91,7 @@
         <div class="card h-100 border-0 ops-metric-card ops-metric-card-available">
             <div class="card-body">
                 <div class="ops-metric-label">Disponible</div>
-                <div class="ops-metric-value">{{ available_balance }}</div>
+                <div class="ops-metric-value">{{ available_balance|money_es }}</div>
             </div>
         </div>
     </div>
@@ -104,7 +105,8 @@
                 {% for donation in recent_donations %}
                     <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
                         <div class="fw-semibold">{{ donation.code }}</div>
-                        <div class="small text-muted">{{ donation.donor }} - {{ donation.amount }} {{ donation.currency }}</div>
+                        <div class="small text-muted">{{ donation.donor }} - {{ donation.amount|money_es }} {{ donation.currency }}</div>
+                        <div class="small">Ciclo: {{ donation.get_status_display }} · Asignación: {{ donation.allocation_progress_label }}</div>
                     </a>
                 {% empty %}
                     <div class="list-group-item text-muted">Todavía no hay donaciones.</div>
@@ -121,7 +123,7 @@
                 {% for expense in recent_expenses %}
                     <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
                         <div class="fw-semibold">{{ expense.reason }}</div>
-                        <div class="small text-muted">{{ expense.allocation.project }} - {{ expense.amount }} {{ expense.currency }}</div>
+                        <div class="small text-muted">{{ expense.allocation.project }} - {{ expense.amount|money_es }} {{ expense.currency }}</div>
                     </a>
                 {% empty %}
                     <div class="list-group-item text-muted">Todavía no hay gastos.</div>

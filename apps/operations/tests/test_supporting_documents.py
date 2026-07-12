@@ -30,7 +30,7 @@ class SupportingDocumentWorkflowTests(TestCase):
     def uploaded_file(self, name='support.pdf', content=b'file-content'):
         return SimpleUploadedFile(name, content, content_type='application/pdf')
 
-    def expense_form_data(self, status):
+    def expense_form_data(self):
         return {
             'allocation': self.expense.allocation.pk,
             'expense_date': TEST_DATE,
@@ -42,7 +42,6 @@ class SupportingDocumentWorkflowTests(TestCase):
             'payment_method': self.expense.payment_method,
             'description': self.expense.description,
             'observations': self.expense.observations,
-            'status': status,
             'support_title': '',
         }
 
@@ -167,20 +166,20 @@ class SupportingDocumentWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse('login'), response['Location'])
 
-    def test_operational_flow_cannot_validate_expense_without_support(self):
+    def test_operational_flow_cannot_edit_expense_without_support(self):
         self.client.force_login(self.user)
 
         response = self.client.post(
             reverse('expense_update', args=[self.expense.pk]),
-            data=self.expense_form_data(Expense.Status.VALIDATED),
+            data=self.expense_form_data(),
         )
 
         self.expense.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.expense.status, Expense.Status.REGISTERED)
-        self.assertFormError(response.context['form'], None, 'Un gasto validado debe tener al menos un documento soporte.')
+        self.assertFormError(response.context['form'], 'support_file', 'Todo gasto debe tener un documento soporte.')
 
-    def test_operational_flow_can_validate_expense_with_existing_support(self):
+    def test_operational_flow_can_edit_expense_with_existing_support(self):
         SupportingDocument.objects.create(
             expense=self.expense,
             title='Factura para validar',
@@ -190,19 +189,22 @@ class SupportingDocumentWorkflowTests(TestCase):
 
         response = self.client.post(
             reverse('expense_update', args=[self.expense.pk]),
-            data=self.expense_form_data(Expense.Status.VALIDATED),
+            data=self.expense_form_data(),
         )
 
         self.expense.refresh_from_db()
-        self.assertEqual(self.expense.status, Expense.Status.VALIDATED)
-        self.assertIsNotNone(self.expense.validated_at)
-        self.assertEqual(self.expense.validated_by, self.user)
+        self.assertEqual(self.expense.status, Expense.Status.REGISTERED)
         self.assertRedirects(response, reverse('expense_list'))
 
-    def test_user_with_permission_can_delete_support_from_non_validated_expense(self):
+    def test_user_with_permission_can_delete_only_redundant_support(self):
+        SupportingDocument.objects.create(
+            expense=self.expense,
+            title='Soporte conservado',
+            document=self.uploaded_file('keep.pdf'),
+        )
         document = SupportingDocument.objects.create(
             expense=self.expense,
-            title='Soporte eliminable',
+            title='Soporte redundante',
             document=self.uploaded_file('delete.pdf'),
         )
         self.client.force_login(self.user)
@@ -212,14 +214,12 @@ class SupportingDocumentWorkflowTests(TestCase):
         self.assertRedirects(response, reverse('expense_detail', args=[self.expense.pk]))
         self.assertFalse(SupportingDocument.objects.filter(pk=document.pk).exists())
 
-    def test_last_support_of_validated_expense_cannot_be_deleted(self):
+    def test_last_support_of_expense_cannot_be_deleted(self):
         document = SupportingDocument.objects.create(
             expense=self.expense,
             title='Soporte requerido',
             document=self.uploaded_file('required.pdf'),
         )
-        self.expense.status = Expense.Status.VALIDATED
-        self.expense.save()
         self.client.force_login(self.user)
 
         response = self.client.post(reverse('supporting_document_delete', args=[document.pk]))

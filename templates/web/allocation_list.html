@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Asignaciones - SIGEDON{% endblock %}
 
@@ -24,6 +25,8 @@
                     <th>Monto asignado</th>
                     <th>Ejecutado</th>
                     <th>Disponible</th>
+                    <th>Ciclo</th>
+                    <th>Ejecución</th>
                     <th>Categoría</th>
                     <th class="text-end">Acciones</th>
                 </tr>
@@ -31,11 +34,21 @@
             <tbody>
                 {% for allocation in objects %}
                     <tr>
-                        <td><a class="fw-semibold text-decoration-none" href="{% url 'donation_detail' allocation.donation.pk %}">{{ allocation.donation.code }}</a></td>
-                        <td>{{ allocation.project }}</td>
-                        <td class="ops-money">{{ allocation.amount }}</td>
-                        <td class="ops-money">{{ allocation.executed_amount }}</td>
-                        <td class="ops-money">{{ allocation.available_balance }}</td>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url 'allocation_detail' allocation.pk %}">
+                                {{ allocation.code }}
+                            </a>
+                            <div class="small text-muted">{{ allocation.donation.donor.name }} · {{ allocation.donation.code }}</div>
+                        </td>
+                        <td>
+                            {{ allocation.project.name }}
+                            <div class="small text-muted">{{ allocation.project.code }}</div>
+                        </td>
+                        <td class="ops-money">{{ allocation.amount|money_es }}</td>
+                        <td class="ops-money">{{ allocation.executed_amount|money_es }}</td>
+                        <td class="ops-money">{{ allocation.available_balance|money_es }}</td>
+                        <td><span class="badge ops-status-badge">{{ allocation.get_status_display }}</span></td>
+                        <td><span class="badge text-bg-light">{{ allocation.execution_progress_label }}</span></td>
                         <td>{{ allocation.get_budget_category_display }}</td>
                         <td class="text-end ops-row-actions">
                             {% if perms.operations.change_fundallocation %}
@@ -48,7 +61,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="7" class="text-muted">No hay asignaciones registradas.</td>
+                        <td colspan="9" class="text-muted">No hay asignaciones registradas.</td>
                     </tr>
                 {% endfor %}
             </tbody>

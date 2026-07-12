@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Asignación - SIGEDON{% endblock %}
 
@@ -6,34 +7,52 @@
 <div class="ops-page-header ops-page-header-row">
     <div>
         <div class="ops-kicker">Asignación presupuestaria</div>
-        <h1>Asignación de fondos</h1>
-        <p>{{ object.donation.code }} → {{ object.project.code }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+        <h1>{{ object.code }}</h1>
+        <p>
+            {{ object.donation.donor.name }} → {{ object.project.name }}
+            · <span class="badge text-bg-light">{{ object.donation.code }}</span>
+            <span class="badge text-bg-light">{{ object.project.code }}</span>
+            · Ciclo <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            · Ejecución <span class="badge text-bg-light">{{ object.execution_progress_label }}</span>
+        </p>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_fundallocation %}
+        {% if perms.operations.change_fundallocation and object.status != 'finished' and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
     </div>
 </div>
+{% if perms.operations.change_fundallocation and status_transitions %}
+<div class="d-flex gap-2 mb-4">
+    {% for transition in status_transitions %}
+    <form method="post" action="{% url transition_url_name object.pk transition.value %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Cambiar a {{ transition.label }}</button></form>
+    {% endfor %}
+</div>
+{% endif %}
+{% if perms.operations.change_fundallocation and can_annul %}
+<div class="d-flex gap-2 mb-4">
+    <a class="btn btn-danger" href="{% url 'allocation_annul' object.pk %}">Anular asignación</a>
+</div>
+{% endif %}
 
 <div class="row g-3 mb-4">
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Monto asignado</div>
-            <div class="ops-metric-value">{{ object.amount }}</div>
+            <div class="ops-metric-value">{{ object.amount|money_es }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Ejecutado</div>
-            <div class="ops-metric-value">{{ object.executed_amount }}</div>
+            <div class="ops-metric-value">{{ object.executed_amount|money_es }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body">
             <div class="ops-metric-label">Disponible</div>
-            <div class="ops-metric-value">{{ object.available_balance }}</div>
+            <div class="ops-metric-value">{{ object.available_balance|money_es }}</div>
         </div></div>
     </div>
 </div>
@@ -45,17 +64,33 @@
                 <h2 class="h5 mb-3">Detalle de la asignación</h2>
                 <dl class="row mb-0">
                     <dt class="col-sm-4">Donación origen</dt>
-                    <dd class="col-sm-8"><a href="{% url 'donation_detail' object.donation.pk %}">{{ object.donation }}</a></dd>
+                    <dd class="col-sm-8">
+                        <a href="{% url 'donation_detail' object.donation.pk %}">{{ object.donation.donor.name }}</a>
+                        <span class="small text-muted">{{ object.donation.code }}</span>
+                    </dd>
                     <dt class="col-sm-4">Proyecto destino</dt>
-                    <dd class="col-sm-8"><a href="{% url 'project_detail' object.project.pk %}">{{ object.project }}</a></dd>
+                    <dd class="col-sm-8">
+                        <a href="{% url 'project_detail' object.project.pk %}">{{ object.project.name }}</a>
+                        <span class="small text-muted">{{ object.project.code }}</span>
+                    </dd>
                     <dt class="col-sm-4">Categoría presupuestaria</dt>
                     <dd class="col-sm-8">{{ object.get_budget_category_display }}</dd>
                     <dt class="col-sm-4">Responsable</dt>
                     <dd class="col-sm-8">{{ object.responsible_person|default:"-" }}</dd>
                     <dt class="col-sm-4">Fecha de asignación</dt>
                     <dd class="col-sm-8">{{ object.allocation_date }}</dd>
-                    <dt class="col-sm-4">Estado</dt>
+                    <dt class="col-sm-4">Ciclo</dt>
                     <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+                    <dt class="col-sm-4">Ejecución</dt>
+                    <dd class="col-sm-8">{{ object.execution_progress_label }}</dd>
+                    {% if object.terminal_at %}
+                        <dt class="col-sm-4">Motivo terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_reason|default:"-" }}</dd>
+                        <dt class="col-sm-4">Procesado por</dt>
+                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
+                        <dt class="col-sm-4">Fecha terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_at }}</dd>
+                    {% endif %}
                     <dt class="col-sm-4">Notas</dt>
                     <dd class="col-sm-8">{{ object.notes|default:"-" }}</dd>
                 </dl>
@@ -67,8 +102,9 @@
         <div class="list-group">
             {% for expense in object.expenses.all %}
                 <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
-                    <div class="fw-semibold">{{ expense.reason }}</div>
-                    <div class="small text-muted">{{ expense.amount }} {{ expense.currency }} · {{ expense.get_status_display }} · {{ expense.expense_date }}</div>
+                    <div class="fw-semibold">{{ expense.code }}</div>
+                    <div>{{ expense.reason }}</div>
+                    <div class="small text-muted">{{ expense.amount|money_es }} {{ expense.currency }} · {{ expense.get_status_display }} · {{ expense.expense_date }}</div>
                 </a>
             {% empty %}
                 <div class="list-group-item text-muted">Esta asignación todavía no tiene gastos asociados.</div>

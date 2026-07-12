@@ -50,13 +50,17 @@ class OperationRoleTests(TestCase):
             with self.subTest(role=role_name):
                 self.assertTrue(Group.objects.filter(name=role_name).exists())
 
-    def test_sigedon_admin_has_all_operations_permissions(self):
+    def test_sigedon_admin_has_all_operations_permissions_except_audit_mutation(self):
         user = self.create_user_for_role('admin-role', ROLE_SIGEDON_ADMIN)
         operations_permissions = Permission.objects.filter(content_type__app_label='operations')
 
         for permission in operations_permissions:
             with self.subTest(codename=permission.codename):
-                self.assert_has_perm(user, permission.codename)
+                if permission.codename in {'add_auditlog', 'change_auditlog', 'delete_auditlog'}:
+                    self.assert_lacks_perm(user, permission.codename)
+                else:
+                    self.assert_has_perm(user, permission.codename)
+        self.assert_has_perm(user, 'view_auditlog')
 
     def test_field_operator_permission_matrix(self):
         user = self.create_user_for_role('field-role', ROLE_FIELD_OPERATOR)
@@ -75,6 +79,29 @@ class OperationRoleTests(TestCase):
         self.assert_has_perm(user, 'view_expense')
         self.assert_lacks_perm(user, 'add_expense')
         self.assert_lacks_perm(user, 'change_projectupdate')
+        self.assert_lacks_perm(user, 'add_auditlog')
+        self.assert_lacks_perm(user, 'change_auditlog')
+        self.assert_lacks_perm(user, 'delete_auditlog')
+
+    def test_resync_removes_legacy_audit_mutation_permissions(self):
+        protected_codenames = {'add_auditlog', 'change_auditlog', 'delete_auditlog'}
+        legacy_permissions = Permission.objects.filter(
+            content_type__app_label='operations', codename__in=protected_codenames
+        )
+        for group in Group.objects.filter(
+            name__in=(ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR)
+        ):
+            group.permissions.add(*legacy_permissions)
+
+        sync_operation_roles()
+
+        for group in Group.objects.filter(
+            name__in=(ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR)
+        ):
+            self.assertFalse(
+                group.permissions.filter(codename__in=protected_codenames).exists(),
+                group.name,
+            )
 
     def test_field_operator_can_open_project_update_create_from_project(self):
         self.client.force_login(self.create_user_for_role('field-create-update', ROLE_FIELD_OPERATOR))

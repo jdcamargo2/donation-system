@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Proyecto - SIGEDON{% endblock %}
 
@@ -11,11 +12,24 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_project %}
+        {% if perms.operations.change_project and object.status != 'closed' and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
     </div>
 </div>
+{% if perms.operations.change_project and status_transitions %}
+<div class="d-flex gap-2 mb-4">
+    {% for transition in status_transitions %}
+    <form method="post" action="{% url transition_url_name object.pk transition.value %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Cambiar a {{ transition.label }}</button></form>
+    {% endfor %}
+</div>
+{% endif %}
+{% if perms.operations.change_project and can_finish or perms.operations.change_project and can_annul %}
+<div class="d-flex gap-2 mb-4">
+    {% if can_finish %}<a class="btn btn-warning" href="{% url 'project_finish' object.pk %}">Terminar proyecto</a>{% endif %}
+    {% if can_annul %}<a class="btn btn-danger" href="{% url 'project_annul' object.pk %}">Anular proyecto</a>{% endif %}
+</div>
+{% endif %}
 
 <div class="row g-4">
     <div class="col-lg-7">
@@ -29,6 +43,14 @@
                     <dd class="col-sm-8">{{ object.code }}</dd>
                     <dt class="col-sm-4">Estado</dt>
                     <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+                    {% if object.terminal_at %}
+                        <dt class="col-sm-4">Motivo terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_reason|default:"-" }}</dd>
+                        <dt class="col-sm-4">Procesado por</dt>
+                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
+                        <dt class="col-sm-4">Fecha terminal</dt>
+                        <dd class="col-sm-8">{{ object.terminal_at }}</dd>
+                    {% endif %}
                     <dt class="col-sm-4">Descripción</dt>
                     <dd class="col-sm-8">{{ object.description|default:"-" }}</dd>
                     <dt class="col-sm-4">Fecha de inicio</dt>
@@ -37,7 +59,7 @@
                     <dd class="col-sm-8">{{ object.end_date|default:"-" }}</dd>
                     {% for label, value in metrics %}
                         <dt class="col-sm-4">{{ label }}</dt>
-                        <dd class="col-sm-8">{{ value }}</dd>
+                        <dd class="col-sm-8">{% if label == "Estado" %}{{ value }}{% else %}{{ value|money_es }}{% endif %}</dd>
                     {% endfor %}
                 </dl>
             </div>
@@ -67,14 +89,17 @@
                     </div>
                     <p class="mb-2 mt-2">{{ update.description|truncatewords:24 }}</p>
                     <div class="d-flex gap-2">
-                        {% if update.evidence %}
-                            <a class="btn btn-sm btn-outline-secondary" href="{{ update.evidence.url }}">Ver evidencia</a>
-                        {% endif %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_detail' update.pk %}">Ver detalle</a>
                         {% if update.status == 'pending_review' and perms.operations.change_projectupdate %}
                             <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_review' update.pk %}">Revisar</a>
                         {% endif %}
-                        {% if perms.operations.change_projectupdate %}
-                            <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_update' update.pk %}">Editar</a>
+                        {% if update.status == 'draft' %}
+                            {% if perms.operations.change_projectupdate %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_update' update.pk %}">Editar</a>
+                            {% endif %}
+                            {% if perms.operations.delete_projectupdate %}
+                                <a class="btn btn-sm btn-outline-danger" href="{% url 'project_update_delete' update.pk %}">Eliminar</a>
+                            {% endif %}
                         {% endif %}
                     </div>
                 </div>

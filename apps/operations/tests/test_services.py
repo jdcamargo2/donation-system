@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ZERO_MONEY
@@ -89,7 +90,7 @@ class OperationServiceTests(TestCase):
             'payment_method': 'bank_transfer',
             'description': '',
             'observations': '',
-            'status': Expense.Status.REGISTERED,
+            'support_file': SimpleUploadedFile('servicio.pdf', b'%PDF soporte'),
         }
 
     def test_sum_money_returns_zero_for_empty_queryset(self):

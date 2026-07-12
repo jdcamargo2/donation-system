@@ -5,7 +5,14 @@ from django.utils.translation import gettext_lazy as _
 
 from .choices import OPERATING_CURRENCY, OPERATING_CURRENCY_CHOICES
 from .models import AuditLog, Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate, SupportingDocument
-from .services import validate_expense
+from .services import (
+    ExpenseFinalizedError,
+    ProjectUpdateImmutableError,
+    ensure_expense_is_deletable,
+    ensure_project_update_is_deletable,
+    ensure_project_update_is_editable,
+    ensure_operational_entity_is_editable,
+)
 
 
 class FundAllocationAdminForm(forms.ModelForm):
@@ -44,9 +51,6 @@ class ExpenseAdminForm(forms.ModelForm):
         allocation = cleaned_data.get('allocation')
         if allocation and allocation.donation.currency != OPERATING_CURRENCY:
             raise ValidationError(_('La asignación seleccionada no corresponde a una donación en USD.'))
-        has_existing_support = self.instance.pk and self.instance.supporting_documents.exists()
-        if cleaned_data.get('status') == Expense.Status.VALIDATED and not has_existing_support:
-            raise ValidationError(_('Un gasto validado debe tener al menos un documento soporte.'))
         return cleaned_data
 
 
@@ -62,6 +66,28 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ('code', 'name', 'status', 'estimated_budget')
     search_fields = ('code', 'name')
     list_filter = ('status',)
+    readonly_fields = ('code', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
+
+    def get_readonly_fields(self, request, obj=None):
+        # PRE: obj is an optional project shown in admin.
+        # POST: terminal projects expose every persisted field as readonly.
+        readonly = set(super().get_readonly_fields(request, obj))
+        if obj and obj.status in {Project.Status.CLOSED, Project.Status.ANNULLED}:
+            readonly.update(field.name for field in self.model._meta.concrete_fields)
+        return tuple(readonly)
+
+    def save_model(self, request, obj, form, change):
+        """
+        PRE: obj is new or an existing project submitted through admin.
+        POST: creates PLANNED and preserves persisted status on ordinary edits.
+        """
+        if change:
+            persisted = Project.objects.get(pk=obj.pk)
+            ensure_operational_entity_is_editable(persisted)
+            obj.status = persisted.status
+        else:
+            obj.status = Project.Status.PLANNED
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(ProjectUpdate)
@@ -69,23 +95,129 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
     list_display = ('project', 'title', 'status', 'created_at', 'created_by', 'reviewed_at')
     list_filter = ('status', 'created_at', 'reviewed_at')
     search_fields = ('title', 'description', 'project__name', 'project__code')
-    readonly_fields = ('created_at', 'updated_at', 'reviewed_at')
+    readonly_fields = ('status', 'created_at', 'updated_at', 'reviewed_by', 'reviewed_at', 'review_notes')
+
+    def get_readonly_fields(self, request, obj=None):
+        """
+        PRE: obj is the optional advance displayed by Django admin.
+        POST: review metadata/status are always readonly; pending/final material fields are readonly.
+        """
+        readonly = set(super().get_readonly_fields(request, obj))
+        if obj and obj.status != ProjectUpdate.Status.DRAFT:
+            readonly.update(('project', 'title', 'description', 'evidence'))
+        return tuple(readonly)
+
+    def has_delete_permission(self, request, obj=None):
+        """
+        PRE: obj is an optional advance targeted by an admin delete operation.
+        POST: final advances cannot be deleted through admin.
+        """
+        if obj is not None:
+            try:
+                ensure_project_update_is_deletable(obj)
+            except ProjectUpdateImmutableError:
+                return False
+        return super().has_delete_permission(request, obj)
+
+    def delete_model(self, request, obj):
+        """
+        PRE: obj is an advance selected for ordinary admin deletion.
+        POST: deletes only non-final advances; final states fail safely.
+        """
+        ensure_project_update_is_deletable(obj)
+        return super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        """
+        PRE: queryset contains advances selected by the admin bulk delete action.
+        POST: deletes the batch only when every advance is non-final.
+        """
+        for project_update in queryset:
+            ensure_project_update_is_deletable(project_update)
+        return super().delete_queryset(request, queryset)
+
+    def save_model(self, request, obj, form, change):
+        """
+        PRE: admin form is valid and obj is new or targets an existing advance.
+        POST: creates DRAFT only and saves material changes only on existing DRAFT advances.
+        """
+        if change:
+            persisted = ProjectUpdate.objects.get(pk=obj.pk)
+            ensure_project_update_is_editable(persisted)
+            obj.status = persisted.status
+        else:
+            obj.status = ProjectUpdate.Status.DRAFT
+            obj.reviewed_by = None
+            obj.reviewed_at = None
+            obj.review_notes = ''
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(Donation)
 class DonationAdmin(admin.ModelAdmin):
-    list_display = ('code', 'donor', 'amount', 'currency', 'status', 'received_date')
+    list_display = ('code', 'donor', 'amount', 'currency', 'status', 'allocation_progress_display', 'received_date')
     search_fields = ('code', 'donor__name')
     list_filter = ('status', 'currency')
-    readonly_fields = ('currency',)
+    readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
+
+    def get_readonly_fields(self, request, obj=None):
+        # PRE: obj is an optional donation shown in admin.
+        # POST: terminal donations expose every persisted field as readonly.
+        readonly = set(super().get_readonly_fields(request, obj))
+        if obj and obj.status == Donation.Status.ANNULLED:
+            readonly.update(field.name for field in self.model._meta.concrete_fields)
+        return tuple(readonly)
+
+    def save_model(self, request, obj, form, change):
+        """
+        PRE: obj is new or an existing donation submitted through admin.
+        POST: creates REGISTERED and preserves persisted status on ordinary edits.
+        """
+        if change:
+            persisted = Donation.objects.get(pk=obj.pk)
+            ensure_operational_entity_is_editable(persisted)
+            obj.status = persisted.status
+        else:
+            obj.status = Donation.Status.REGISTERED
+        super().save_model(request, obj, form, change)
+
+    @admin.display(description=_('Asignación'))
+    def allocation_progress_display(self, obj):
+        return obj.allocation_progress_label
 
 
 @admin.register(FundAllocation)
 class FundAllocationAdmin(admin.ModelAdmin):
     form = FundAllocationAdminForm
-    list_display = ('donation', 'project', 'budget_category', 'amount', 'status', 'allocation_date')
-    search_fields = ('donation__code', 'project__code', 'project__name', 'budget_category')
+    list_display = ('code', 'donation', 'project', 'budget_category', 'amount', 'status', 'execution_progress_display', 'allocation_date')
+    search_fields = ('code', 'donation__code', 'project__code', 'project__name', 'budget_category')
     list_filter = ('status', 'allocation_date')
+    readonly_fields = ('code', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
+
+    def get_readonly_fields(self, request, obj=None):
+        # PRE: obj is an optional allocation shown in admin.
+        # POST: terminal allocations expose every persisted field as readonly.
+        readonly = set(super().get_readonly_fields(request, obj))
+        if obj and obj.status in {FundAllocation.Status.FINISHED, FundAllocation.Status.ANNULLED}:
+            readonly.update(field.name for field in self.model._meta.concrete_fields)
+        return tuple(readonly)
+
+    def save_model(self, request, obj, form, change):
+        """
+        PRE: obj is new or an existing allocation submitted through admin.
+        POST: creates ACTIVE and preserves persisted status on ordinary edits.
+        """
+        if change:
+            persisted = FundAllocation.objects.get(pk=obj.pk)
+            ensure_operational_entity_is_editable(persisted)
+            obj.status = persisted.status
+        else:
+            obj.status = FundAllocation.Status.ACTIVE
+        super().save_model(request, obj, form, change)
+
+    @admin.display(description=_('Ejecución'))
+    def execution_progress_display(self, obj):
+        return obj.execution_progress_label
 
 
 class SupportingDocumentInline(admin.TabularInline):
@@ -93,38 +225,72 @@ class SupportingDocumentInline(admin.TabularInline):
     extra = 0
 
     def has_delete_permission(self, request, obj=None):
-        if obj and obj.status == Expense.Status.VALIDATED:
+        if obj and obj.status == Expense.Status.ANNULLED:
             return False
         return super().has_delete_permission(request, obj)
-
 
 @admin.register(Expense)
 class ExpenseAdmin(admin.ModelAdmin):
     form = ExpenseAdminForm
-    list_display = ('reason', 'allocation', 'amount', 'currency', 'status', 'expense_date')
-    search_fields = ('reason', 'provider_or_recipient', 'allocation__project__name')
+    list_display = ('code', 'reason', 'allocation', 'amount', 'currency', 'status', 'expense_date')
+    search_fields = ('code', 'reason', 'provider_or_recipient', 'allocation__project__name')
     list_filter = ('status', 'currency', 'expense_date')
-    readonly_fields = ('currency',)
+    readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
     inlines = [SupportingDocumentInline]
 
-    # PRE: form has passed ExpenseAdminForm validation and obj contains the requested admin state.
-    # POST: saves ordinary changes and routes every new validated transition through validate_expense().
+    def get_readonly_fields(self, request, obj=None):
+        # PRE: obj is the optional expense displayed by Django admin.
+        # POST: status/validation metadata are always readonly; finalized expenses
+        # expose every persisted field as readonly.
+        base_readonly = set(super().get_readonly_fields(request, obj))
+        if obj and obj.status == Expense.Status.ANNULLED:
+            base_readonly.update(
+                field.name for field in self.model._meta.concrete_fields
+            )
+        return tuple(base_readonly)
+
+    def has_delete_permission(self, request, obj=None):
+        # PRE: obj is an optional expense targeted by an admin delete operation.
+        # POST: finalized expenses cannot be deleted through ordinary admin paths.
+        if obj is not None:
+            try:
+                ensure_expense_is_deletable(obj)
+            except ExpenseFinalizedError:
+                return False
+        return super().has_delete_permission(request, obj)
+
+    def delete_model(self, request, obj):
+        # PRE: obj is an expense selected for ordinary admin deletion.
+        # POST: deletes only editable expenses; finalized expenses fail safely.
+        ensure_expense_is_deletable(obj)
+        return super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        # PRE: queryset contains expenses selected by the admin bulk delete action.
+        # POST: deletes the batch only when every expense is ordinarily deletable.
+        for expense in queryset:
+            ensure_expense_is_deletable(expense)
+        return super().delete_queryset(request, queryset)
+
+    # PRE: form has passed admin validation and obj contains an ordinary editable state.
+    # POST: creates registered expenses or saves editable expenses without allowing
+    # manual status/validation metadata transitions.
     def save_model(self, request, obj, form, change):
-        previous_status = None
         if change:
-            previous_status = Expense.objects.filter(pk=obj.pk).values_list('status', flat=True).first()
-        requested_validation = (
-            obj.status == Expense.Status.VALIDATED
-            and previous_status != Expense.Status.VALIDATED
-        )
-        if requested_validation:
-            obj.status = previous_status or Expense.Status.REGISTERED
+            persisted = Expense.objects.get(pk=obj.pk)
+            if persisted.status == Expense.Status.ANNULLED:
+                raise ExpenseFinalizedError(
+                    _('Los gastos finalizados no admiten edición administrativa.')
+                )
+            obj.status = persisted.status
+        else:
+            obj.status = Expense.Status.REGISTERED
         super().save_model(request, obj, form, change)
-        if requested_validation:
-            validated_expense = validate_expense(obj.pk, request.user)
-            obj.status = validated_expense.status
-            obj.validated_by = validated_expense.validated_by
-            obj.validated_at = validated_expense.validated_at
+
+    def has_add_permission(self, request):
+        # PRE: Django admin is evaluating direct Expense creation.
+        # POST: returns False because mandatory support is created atomically through the operational form.
+        return False
 
 
 @admin.register(SupportingDocument)
@@ -136,8 +302,10 @@ class SupportingDocumentAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         if (
             obj
-            and obj.expense.status == Expense.Status.VALIDATED
-            and obj.expense.supporting_documents.count() <= 1
+            and (
+                obj.expense.status == Expense.Status.ANNULLED
+                or obj.expense.supporting_documents.count() <= 1
+            )
         ):
             return False
         return super().has_delete_permission(request, obj)
@@ -145,7 +313,43 @@ class SupportingDocumentAdmin(admin.ModelAdmin):
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
+    actions = None
     list_display = ('created_at', 'action', 'model_name', 'entity_label', 'user')
     search_fields = ('model_name', 'entity_label', 'summary')
     list_filter = ('action', 'model_name', 'created_at')
-    readonly_fields = ('created_at',)
+    ordering = ('-created_at',)
+
+    def get_readonly_fields(self, request, obj=None):
+        """
+        PRE: request targets the read-only audit admin and obj is optional.
+        POST: returns every persisted audit field as readonly.
+        """
+        return tuple(field.name for field in self.model._meta.concrete_fields)
+
+    def has_add_permission(self, request):
+        """
+        PRE: request targets the AuditLog admin.
+        POST: always denies manual creation, including for superusers.
+        """
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional AuditLog admin object.
+        POST: always denies modification, including for superusers.
+        """
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional AuditLog admin object.
+        POST: always denies deletion, including for superusers.
+        """
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        """
+        PRE: request has an authenticated Django user.
+        POST: permits read-only admin access exactly with view_auditlog permission.
+        """
+        return request.user.has_perm('operations.view_auditlog')

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 
 from apps.operations.models import AuditLog, Donation, Expense, FundAllocation
@@ -99,7 +100,7 @@ class AuditTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': '',
                 'observations': '',
-                'status': Expense.Status.REGISTERED,
+                'support_file': SimpleUploadedFile('create.pdf', b'%PDF soporte'),
             },
         )
         self.client.post(
@@ -115,11 +116,12 @@ class AuditTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': '',
                 'observations': '',
-                'status': Expense.Status.REGISTERED,
+                'support_file': SimpleUploadedFile('update.pdf', b'%PDF soporte'),
             },
         )
 
-        self.assertEqual(AuditLog.objects.filter(action=AuditLog.Action.EXECUTED, model_name='Gasto').count(), 2)
+        self.assertEqual(AuditLog.objects.filter(action=AuditLog.Action.EXECUTED, model_name='Gasto').count(), 1)
+        self.assertEqual(AuditLog.objects.filter(action=AuditLog.Action.UPDATED, model_name='Gasto').count(), 1)
 
     def test_delete_audit_logging_is_not_implemented_yet(self):
         # TODO: Add delete audit assertions when delete views create AuditLog records.

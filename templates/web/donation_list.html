@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Donaciones - SIGEDON{% endblock %}
 
@@ -24,7 +25,8 @@
                     <th>Monto</th>
                     <th>Asignado</th>
                     <th>Disponible</th>
-                    <th>Estado</th>
+                    <th>Ciclo</th>
+                    <th>Asignación</th>
                     <th>Fecha</th>
                     <th class="text-end">Acciones</th>
                 </tr>
@@ -34,10 +36,11 @@
                     <tr>
                         <td><a class="fw-semibold text-decoration-none" href="{% url detail_url_name donation.pk %}">{{ donation.code }}</a></td>
                         <td>{{ donation.donor }}</td>
-                        <td class="ops-money">{{ donation.amount }} {{ donation.currency }}</td>
-                        <td class="ops-money">{{ donation.total_assigned }} {{ donation.currency }}</td>
-                        <td class="ops-money">{{ donation.available_balance }} {{ donation.currency }}</td>
+                        <td class="ops-money">{{ donation.amount|money_es }} {{ donation.currency }}</td>
+                        <td class="ops-money">{{ donation.total_assigned|money_es }} {{ donation.currency }}</td>
+                        <td class="ops-money">{{ donation.available_balance|money_es }} {{ donation.currency }}</td>
                         <td><span class="badge ops-status-badge">{{ donation.get_status_display }}</span></td>
+                        <td><span class="badge text-bg-light">{{ donation.allocation_progress_label }}</span></td>
                         <td>{{ donation.received_date|default:donation.commitment_date|default:"-" }}</td>
                         <td class="text-end ops-row-actions">
                             {% if perms.operations.change_donation %}
@@ -50,7 +53,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="8" class="text-muted">No hay donaciones registradas.</td>
+                        <td colspan="9" class="text-muted">No hay donaciones registradas.</td>
                     </tr>
                 {% endfor %}
             </tbody>
