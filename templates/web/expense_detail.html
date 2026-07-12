@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Gasto - SIGEDON{% endblock %}
 
@@ -7,7 +8,7 @@
     <div>
         <div class="ops-kicker">Detalle de ejecución</div>
         <h1>{{ object.code }}</h1>
-        <p>{{ object.reason }} · {{ object.amount }} {{ object.currency }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+        <p>{{ object.reason }} · {{ object.amount|money_es }} {{ object.currency }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
@@ -47,7 +48,7 @@
                     <dt class="col-sm-4">Fecha</dt>
                     <dd class="col-sm-8">{{ object.expense_date }}</dd>
                     <dt class="col-sm-4">Monto</dt>
-                    <dd class="col-sm-8">{{ object.amount }} {{ object.currency }}</dd>
+                    <dd class="col-sm-8 ops-money">{{ object.amount|money_es }} {{ object.currency }}</dd>
                     <dt class="col-sm-4">Proveedor o destinatario</dt>
                     <dd class="col-sm-8">{{ object.provider_or_recipient }}</dd>
                     <dt class="col-sm-4">Estado</dt>

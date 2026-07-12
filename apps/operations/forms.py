@@ -1,3 +1,6 @@
+import re
+from decimal import Decimal
+
 from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
@@ -15,19 +18,24 @@ TERMINAL_REASON_MIN_LENGTH = 10
 TERMINAL_REASON_MAX_LENGTH = 500
 
 
-# PRE: value is a submitted money value, possibly formatted for Venezuela or already normalized.
-# POST: returns a DecimalField-compatible string without thousands separators and with "." as decimal separator.
-def clean_money_value(value):
-    if not isinstance(value, str):
+CANONICAL_MONEY_RE = re.compile(r'^\d+(?:\.\d{1,2})?$')
+LOCALIZED_MONEY_RE = re.compile(r'^\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?$')
+LOCALIZED_DECIMAL_RE = re.compile(r'^\d+(?:,\d{1,2})?$')
+
+
+# PRE: value is a submitted monetary value or an empty value accepted by the field.
+# POST: returns canonical decimal text, preserves non-string/empty values, or raises ValidationError for invalid syntax.
+def normalize_localized_money(value):
+    if not isinstance(value, str) or value == '':
         return value
-    normalized = value.strip().replace(' ', '').replace('$', '').replace('USD', '')
-    if ',' in normalized and '.' in normalized:
-        if normalized.rfind(',') > normalized.rfind('.'):
-            return normalized.replace('.', '').replace(',', '.')
-        return normalized.replace(',', '')
-    if ',' in normalized:
+    normalized = value.strip()
+    if normalized == '':
+        return normalized
+    if CANONICAL_MONEY_RE.fullmatch(normalized):
+        return normalized
+    if LOCALIZED_MONEY_RE.fullmatch(normalized) or LOCALIZED_DECIMAL_RE.fullmatch(normalized):
         return normalized.replace('.', '').replace(',', '.')
-    return normalized
+    raise ValidationError(_('Ingrese un monto válido con máximo dos decimales.'))
 
 
 # PRE: attrs contains only HTML attributes required by a known operations date field.
@@ -52,7 +60,7 @@ class MoneyInput(forms.TextInput):
             'inputmode': 'decimal',
             'autocomplete': 'off',
             'placeholder': MONEY_PLACEHOLDER,
-            'class': 'ops-input money-input',
+            'class': 'ops-input money-input js-money-input',
         }
         if attrs:
             default_attrs.update(attrs)
@@ -65,7 +73,16 @@ class MoneyDecimalField(forms.DecimalField):
     # PRE: value may use either 1500.00 or Spanish-style 1.500,00 formatting.
     # POST: returns a Decimal-compatible value normalized for Django DecimalField validation.
     def to_python(self, value):
-        return super().to_python(clean_money_value(value))
+        return super().to_python(normalize_localized_money(value))
+
+    # PRE: value is an initial monetary value or submitted text being re-rendered.
+    # POST: formats numeric initial values for Spanish display and preserves submitted text exactly.
+    def prepare_value(self, value):
+        if isinstance(value, (Decimal, int)):
+            canonical = format(Decimal(value), '.2f')
+            integer, decimals = canonical.split('.')
+            return f'{int(integer):,}'.replace(',', '.') + f',{decimals}'
+        return value
 
 
 class TerminalActionReasonForm(forms.Form):
@@ -108,8 +125,10 @@ class BootstrapFormMixin:
             current_classes = field.widget.attrs.get('class', '').split()
             if css_class not in current_classes:
                 current_classes.append(css_class)
-            if isinstance(field, MoneyDecimalField) and 'money-input' not in current_classes:
-                current_classes.append('money-input')
+            if isinstance(field, MoneyDecimalField):
+                for money_class in ('money-input', 'js-money-input'):
+                    if money_class not in current_classes:
+                        current_classes.append(money_class)
             if isinstance(field.widget, forms.Textarea) and 'ops-textarea' not in current_classes:
                 current_classes.append('ops-textarea')
             field.widget.attrs['class'] = ' '.join(current_classes)

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Institución - SIGEDON{% endblock %}
 
@@ -53,7 +54,7 @@
             {% for donation in object.donations.all %}
                 <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
                     <div class="fw-semibold">{{ donation.code }}</div>
-                    <div class="small text-muted">{{ donation.amount }} {{ donation.currency }} · {{ donation.get_status_display }}</div>
+                    <div class="small text-muted">{{ donation.amount|money_es }} {{ donation.currency }} · {{ donation.get_status_display }}</div>
                 </a>
             {% empty %}
                 <div class="list-group-item text-muted">Esta institución todavía no tiene donaciones asociadas.</div>

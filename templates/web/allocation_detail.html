@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Asignación - SIGEDON{% endblock %}
 
@@ -38,19 +39,19 @@
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Monto asignado</div>
-            <div class="ops-metric-value">{{ object.amount }}</div>
+            <div class="ops-metric-value">{{ object.amount|money_es }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Ejecutado</div>
-            <div class="ops-metric-value">{{ object.executed_amount }}</div>
+            <div class="ops-metric-value">{{ object.executed_amount|money_es }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body">
             <div class="ops-metric-label">Disponible</div>
-            <div class="ops-metric-value">{{ object.available_balance }}</div>
+            <div class="ops-metric-value">{{ object.available_balance|money_es }}</div>
         </div></div>
     </div>
 </div>
@@ -100,7 +101,7 @@
                 <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
                     <div class="fw-semibold">{{ expense.code }}</div>
                     <div>{{ expense.reason }}</div>
-                    <div class="small text-muted">{{ expense.amount }} {{ expense.currency }} · {{ expense.get_status_display }} · {{ expense.expense_date }}</div>
+                    <div class="small text-muted">{{ expense.amount|money_es }} {{ expense.currency }} · {{ expense.get_status_display }} · {{ expense.expense_date }}</div>
                 </a>
             {% empty %}
                 <div class="list-group-item text-muted">Esta asignación todavía no tiene gastos asociados.</div>

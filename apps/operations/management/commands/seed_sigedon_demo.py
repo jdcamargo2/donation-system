@@ -21,7 +21,7 @@ from apps.operations.models import (
 )
 
 
-DEFAULT_DEMO_PASSWORD = "DemoSigedon2026!"
+DEFAULT_DEMO_PASSWORD = "0214"
 
 
 def first_choice_value(choices: Any) -> str:

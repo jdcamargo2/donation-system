@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Adjuntar soporte - SIGEDON{% endblock %}
 
@@ -7,7 +8,7 @@
     <div>
         <div class="ops-kicker">Documento soporte</div>
         <h1>Adjuntar soporte</h1>
-        <p>{{ expense.reason }} · {{ expense.amount }} {{ expense.currency }}</p>
+        <p>{{ expense.reason }} · {{ expense.amount|money_es }} {{ expense.currency }}</p>
     </div>
     <a class="btn btn-outline-secondary" href="{% url 'expense_detail' expense.pk %}">Cancelar</a>
 </div>

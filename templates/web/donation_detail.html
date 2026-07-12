@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Donación - SIGEDON{% endblock %}
 
@@ -33,19 +34,19 @@
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Monto total</div>
-            <div class="ops-metric-value">{{ object.amount }} {{ object.currency }}</div>
+            <div class="ops-metric-value">{{ object.amount|money_es }} {{ object.currency }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Monto asignado</div>
-            <div class="ops-metric-value">{{ object.total_assigned }} {{ object.currency }}</div>
+            <div class="ops-metric-value">{{ object.total_assigned|money_es }} {{ object.currency }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body">
             <div class="ops-metric-label">Monto disponible</div>
-            <div class="ops-metric-value">{{ object.available_balance }} {{ object.currency }}</div>
+            <div class="ops-metric-value">{{ object.available_balance|money_es }} {{ object.currency }}</div>
         </div></div>
     </div>
 </div>
@@ -87,7 +88,7 @@
                 <a class="list-group-item list-group-item-action" href="{% url 'allocation_detail' allocation.pk %}">
                     <div class="fw-semibold">{{ allocation.code }}</div>
                     <div>{{ allocation.project.name }}</div>
-                    <div class="small text-muted">{{ allocation.project.code }} · {{ allocation.amount }} · {{ allocation.get_budget_category_display }} · Disponible {{ allocation.available_balance }}</div>
+                    <div class="small text-muted">{{ allocation.project.code }} · {{ allocation.amount|money_es }} · {{ allocation.get_budget_category_display }} · Disponible {{ allocation.available_balance|money_es }}</div>
                 </a>
             {% empty %}
                 <div class="list-group-item text-muted">Esta donación todavía no tiene asignaciones vinculadas.</div>

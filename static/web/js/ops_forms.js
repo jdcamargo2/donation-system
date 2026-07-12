@@ -1,14 +1,15 @@
 (() => {
-    const moneyOptions = {
+    const MONEY_OPTIONS = {
         digitGroupSeparator: '.',
         decimalCharacter: ',',
         decimalCharacterAlternative: '.',
         decimalPlaces: 2,
-        allowDecimalPadding: 'always',
+        decimalPlacesShownOnFocus: 2,
+        decimalPlacesShownOnBlur: 2,
         minimumValue: '0',
         unformatOnSubmit: true,
         modifyValueOnWheel: false,
-        emptyInputBehavior: 'null',
+        showWarnings: true,
     };
 
     const isAutoNumericManaged = (input) => {
@@ -50,18 +51,23 @@
         });
     };
 
-    const initializeMoneyInputs = () => {
-        const moneyInputs = document.querySelectorAll('.money-input');
+    // PRE: root is a Document or Element containing optional monetary inputs.
+    // POST: initializes each money input at most once and leaves the page usable when AutoNumeric is unavailable.
+    const initializeMoneyInputs = (root = document) => {
+        const moneyInputs = root === document
+            ? document.querySelectorAll('.money-input')
+            : root.querySelectorAll('.js-money-input');
         if (!window.AutoNumeric || !moneyInputs.length) return;
 
         moneyInputs.forEach((input) => {
+            if (!input.matches('.js-money-input')) return;
             if (isAutoNumericManaged(input)) return;
             try {
-                new window.AutoNumeric(input, moneyOptions);
+                new window.AutoNumeric(input, MONEY_OPTIONS);
                 input.dataset.autonumericInitialized = 'true';
             } catch (error) {
                 try {
-                    window.AutoNumeric.multiple([input], moneyOptions);
+                    window.AutoNumeric.multiple([input], MONEY_OPTIONS);
                     input.dataset.autonumericInitialized = 'true';
                 } catch (fallbackError) {
                     input.dataset.autonumericInitialized = 'false';

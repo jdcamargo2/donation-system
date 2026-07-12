@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Asignaciones - SIGEDON{% endblock %}
 
@@ -41,9 +42,9 @@
                             {{ allocation.project.name }}
                             <div class="small text-muted">{{ allocation.project.code }}</div>
                         </td>
-                        <td class="ops-money">{{ allocation.amount }}</td>
-                        <td class="ops-money">{{ allocation.executed_amount }}</td>
-                        <td class="ops-money">{{ allocation.available_balance }}</td>
+                        <td class="ops-money">{{ allocation.amount|money_es }}</td>
+                        <td class="ops-money">{{ allocation.executed_amount|money_es }}</td>
+                        <td class="ops-money">{{ allocation.available_balance|money_es }}</td>
                         <td>{{ allocation.get_budget_category_display }}</td>
                         <td class="text-end ops-row-actions">
                             {% if perms.operations.change_fundallocation %}

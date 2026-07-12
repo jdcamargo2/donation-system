@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load operations_format %}
 
 {% block title %}Gastos - SIGEDON{% endblock %}
 
@@ -43,7 +44,7 @@
                             {{ expense.allocation.project.name }}
                             <div class="small text-muted">{{ expense.allocation.project.code }} · {{ expense.allocation.code }}</div>
                         </td>
-                        <td class="ops-money">{{ expense.amount }} {{ expense.currency }}</td>
+                        <td class="ops-money">{{ expense.amount|money_es }} {{ expense.currency }}</td>
                         <td>{{ expense.get_category_display }}</td>
                         <td><span class="badge ops-status-badge">{{ expense.get_status_display }}</span></td>
                         <td>
