@@ -11,7 +11,7 @@
         <p>
             {{ object.donor }}
             · Ciclo <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
-            · Asignación <span class="badge text-bg-light">{{ object.allocation_progress_label }}</span>
+            · Progreso de asignación <span class="badge text-bg-light">{{ object.allocation_progress_label }}</span>
         </p>
     </div>
     <div class="ops-header-actions">
@@ -38,22 +38,28 @@
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Monto total</div>
-            <div class="ops-metric-value">{{ object.amount|money_es }} {{ object.currency }}</div>
+            <div class="ops-metric-value">{{ donation_financial_summary.total_amount|money_es }} {{ object.currency }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
             <div class="ops-metric-label">Monto asignado</div>
-            <div class="ops-metric-value">{{ object.total_assigned|money_es }} {{ object.currency }}</div>
+            <div class="ops-metric-value">{{ donation_financial_summary.assigned_amount|money_es }} {{ object.currency }}</div>
         </div></div>
     </div>
     <div class="col-md-4">
         <div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body">
             <div class="ops-metric-label">Monto disponible</div>
-            <div class="ops-metric-value">{{ object.available_balance|money_es }} {{ object.currency }}</div>
+            <div class="ops-metric-value">{{ donation_financial_summary.available_amount|money_es }} {{ object.currency }}</div>
         </div></div>
     </div>
 </div>
+
+{% if object.restrictions %}
+<div class="alert alert-warning" role="note">
+    <strong>Restricciones de uso:</strong> {{ object.restrictions }}
+</div>
+{% endif %}
 
 <div class="row g-4">
     <div class="col-lg-6">
@@ -88,7 +94,7 @@
     <div class="col-lg-6">
         <h2 class="h5">Asignaciones vinculadas</h2>
         <div class="list-group">
-            {% for allocation in object.allocations.all %}
+            {% for allocation in related_allocations %}
                 <a class="list-group-item list-group-item-action" href="{% url 'allocation_detail' allocation.pk %}">
                     <div class="fw-semibold">{{ allocation.code }}</div>
                     <div>{{ allocation.project.name }}</div>

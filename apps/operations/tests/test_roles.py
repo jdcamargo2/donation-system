@@ -110,10 +110,10 @@ class OperationRoleTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_field_operator_cannot_open_project_update_review(self):
-        self.client.force_login(self.create_user_for_role('field-review-update', ROLE_FIELD_OPERATOR))
+    def test_field_operator_cannot_open_project_update_publish(self):
+        self.client.force_login(self.create_user_for_role('field-publish-update', ROLE_FIELD_OPERATOR))
 
-        response = self.client.get(reverse('project_update_review', args=[self.project_update.pk]))
+        response = self.client.post(reverse('project_update_publish', args=[self.project_update.pk]))
 
         self.assertEqual(response.status_code, 403)
 

@@ -26,7 +26,7 @@
 <section class="public-notice-inline">
     <p>
         Esta ficha muestra información pública del proyecto. Los datos personales, contactos internos,
-        notas de revisión y registros no aprobados no se publican.
+        datos internos y registros en borrador no se publican.
     </p>
 </section>
 
@@ -50,13 +50,13 @@
 
 <section class="public-section">
     <div class="public-section-header">
-        <h2>Avances aprobados</h2>
+        <h2>Avances publicados</h2>
         <a href="{% url 'public_portal:public_project_list' %}" class="public-back-link">
             <span aria-hidden="true">←</span> Volver a proyectos
         </a>
     </div>
     <div class="public-list public-timeline">
-        {% for update in approved_updates %}
+        {% for update in published_updates %}
             <article class="public-list-item update-card">
                 <div class="public-section-header">
                     <div>
@@ -66,16 +66,9 @@
                     <span class="public-badge">{{ update.get_status_display }}</span>
                 </div>
                 <p>{{ update.description }}</p>
-                {% if update.evidence %}
-                    <div class="public-card-actions">
-                        <a class="public-action-secondary evidence-link" href="{{ update.evidence.url }}">
-                            <span aria-hidden="true">▣</span> Ver evidencia
-                        </a>
-                    </div>
-                {% endif %}
             </article>
         {% empty %}
-            <div class="public-list-item public-meta">Este proyecto todavía no tiene avances aprobados.</div>
+            <div class="public-list-item public-meta">Este proyecto todavía no tiene avances publicados.</div>
         {% endfor %}
     </div>
 </section>

@@ -161,7 +161,8 @@ class EndToEndMVPFlowTests(TestCase):
             data={
                 'title': 'Entrega aprobada E2E',
                 'description': 'Se completó una entrega verificable.',
-                'evidence': '',
+                'update_date': '2026-07-12',
+                'progress_percentage': '60',
             },
         )
         self.assertRedirects(approved_update_response, reverse('project_detail', args=[project.pk]))
@@ -172,20 +173,18 @@ class EndToEndMVPFlowTests(TestCase):
             data={
                 'title': 'Entrega pendiente E2E',
                 'description': 'Aún no debe publicarse.',
-                'evidence': '',
+                'update_date': '2026-07-12',
+                'progress_percentage': '45',
             },
         )
         self.assertRedirects(pending_update_response, reverse('project_detail', args=[project.pk]))
         pending_update = ProjectUpdate.objects.get(title='Entrega pendiente E2E')
 
-        review_response = self.client.post(
-            reverse('project_update_review', args=[approved_update.pk]),
-            data={'status': ProjectUpdate.Status.APPROVED, 'review_notes': 'Aprobado para publicación.'},
-        )
-        self.assertRedirects(review_response, reverse('project_detail', args=[project.pk]))
+        review_response = self.client.post(reverse('project_update_publish', args=[approved_update.pk]))
+        self.assertRedirects(review_response, reverse('project_update_detail', args=[approved_update.pk]))
         approved_update.refresh_from_db()
-        self.assertEqual(approved_update.status, ProjectUpdate.Status.APPROVED)
-        self.assertEqual(pending_update.status, ProjectUpdate.Status.PENDING_REVIEW)
+        self.assertEqual(approved_update.status, ProjectUpdate.Status.PUBLISHED)
+        self.assertEqual(pending_update.status, ProjectUpdate.Status.DRAFT)
 
         donation.refresh_from_db()
         allocation.refresh_from_db()
@@ -214,4 +213,4 @@ class EndToEndMVPFlowTests(TestCase):
             AuditLog.objects.filter(action=AuditLog.Action.ASSIGNED, summary='Asignación de fondos registrada.').exists()
         )
         self.assertTrue(AuditLog.objects.filter(action=AuditLog.Action.EXECUTED, summary__contains='registrado').exists())
-        self.assertTrue(AuditLog.objects.filter(action=AuditLog.Action.VALIDATED, summary__contains='Avance de proyecto aprobado.').exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLog.Action.PUBLISHED, summary__contains='Avance de proyecto publicado.').exists())

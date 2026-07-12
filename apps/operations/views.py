@@ -1,4 +1,6 @@
+import csv
 from dataclasses import dataclass
+from decimal import Decimal
 
 from django.contrib import messages
 from django.conf import settings
@@ -6,11 +8,13 @@ from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMix
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Prefetch, Q
 from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404
-from django.http import FileResponse, Http404, HttpResponseRedirect
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseRedirect
 from django.urls import reverse, reverse_lazy
 from django.utils.text import get_valid_filename
+from django.utils.dateparse import parse_date
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 from django.views.generic import CreateView, DeleteView, DetailView, FormView, ListView, TemplateView, UpdateView
@@ -22,14 +26,18 @@ from .forms import (
     FundAllocationForm,
     InstitutionForm,
     ProjectForm,
+    ProjectDocumentForm,
     ProjectUpdateForProjectForm,
+    ProjectUpdateAttachmentForm,
     ProjectUpdateForm,
-    ProjectUpdateReviewForm,
     SupportingDocumentForm,
     TerminalActionConfirmationForm,
     TerminalActionReasonForm,
 )
-from .models import AuditLog, Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate, SupportingDocument
+from .models import (
+    AuditLog, Donation, Expense, FundAllocation, Institution, Project,
+    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, SupportingDocument,
+)
 from .services import (
     create_expense,
     create_fund_allocation,
@@ -46,15 +54,18 @@ from .services import (
     ProjectUpdateImmutableError,
     OperationalEntityFinalizedError,
     allocation_has_effective_expenses,
+    add_project_update_attachment,
     annul_donation,
     annul_fund_allocation,
     annul_project,
     ensure_operational_entity_is_editable,
     finish_project,
     log_action,
+    log_create,
     log_delete,
     register_advance,
-    review_project_update,
+    publish_project_update,
+    delete_project_update_attachment,
     update_expense,
     update_fund_allocation,
     update_project_update,
@@ -216,6 +227,62 @@ class RouteContextMixin:
                 'delete_url_name': f'{self.route_prefix}_delete',
             }
         )
+        return context
+
+
+def parse_optional_date(value):
+    # PRE: value proviene de un parámetro GET opcional y no es confiable.
+    # POST: retorna una fecha ISO válida o None sin propagar errores del navegador.
+    try:
+        return parse_date(value) if value else None
+    except ValueError:
+        return None
+
+
+def apply_list_filters(
+    queryset, params, *, text_fields, date_field, status_field='status',
+    institution_field=None, project_field=None,
+):
+    """
+    PRE: queryset pertenece a un listado interno y los nombres de campo son allowlists del servidor.
+    POST: retorna el queryset filtrado por los parámetros GET simples presentes, sin mutación.
+    """
+    search = (params.get('q') or '').strip()
+    if search:
+        text_query = Q()
+        for field in text_fields:
+            text_query |= Q(**{f'{field}__icontains': search})
+        queryset = queryset.filter(text_query)
+    if status_field and params.get('status'):
+        queryset = queryset.filter(**{status_field: params['status']})
+    date_from = parse_optional_date(params.get('date_from'))
+    date_to = parse_optional_date(params.get('date_to'))
+    if date_field and date_from:
+        queryset = queryset.filter(**{f'{date_field}__gte': date_from})
+    if date_field and date_to:
+        queryset = queryset.filter(**{f'{date_field}__lte': date_to})
+    if institution_field and (params.get('institution') or '').isdigit():
+        queryset = queryset.filter(**{institution_field: params['institution']})
+    if project_field and (params.get('project') or '').isdigit():
+        queryset = queryset.filter(**{project_field: params['project']})
+    return queryset.distinct()
+
+
+class FilteredListContextMixin:
+    status_choices = ()
+    institution_filter = False
+    project_filter = False
+    export_url_name = None
+
+    def get_context_data(self, **kwargs):
+        # PRE: la vista ya resolvió su queryset mediante parámetros GET.
+        # POST: expone opciones y querystring para un formulario simple y exportación equivalente.
+        context = super().get_context_data(**kwargs)
+        context['filter_status_choices'] = self.status_choices
+        context['filter_institutions'] = Institution.objects.order_by('name') if self.institution_filter else ()
+        context['filter_projects'] = Project.objects.order_by('code') if self.project_filter else ()
+        context['export_url_name'] = self.export_url_name
+        context['active_filter_query'] = self.request.GET.urlencode()
         return context
 
 
@@ -541,13 +608,21 @@ class InstitutionDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin,
     audit_summary = _('Institución eliminada.')
 
 
-class ProjectListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
+class ProjectListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, RouteContextMixin, ListView):
     permission_required = 'operations.view_project'
     model = Project
     template_name = 'web/project_list.html'
     context_object_name = 'objects'
     route_prefix = 'project'
     page_title = _('Proyectos')
+    status_choices = Project.Status.choices
+    export_url_name = 'project_export_csv'
+
+    def get_queryset(self):
+        return apply_list_filters(
+            Project.objects.all(), self.request.GET,
+            text_fields=('code', 'name'), date_field='start_date',
+        )
 
 
 class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
@@ -559,6 +634,21 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
     transition_map = PROJECT_STATUS_TRANSITIONS
     transition_url_name = 'project_status_transition'
 
+    def get_queryset(self):
+        # PRE: la vista consulta un proyecto autorizado por clave primaria.
+        # POST: carga metadata y relaciones visibles evitando consultas por cada fila renderizada.
+        return Project.objects.select_related('terminal_by').prefetch_related(
+            Prefetch(
+                'allocations',
+                queryset=FundAllocation.objects.prefetch_related('expenses'),
+            ),
+            Prefetch(
+                'documents',
+                queryset=ProjectDocument.objects.select_related('uploaded_by'),
+                to_attr='detail_documents',
+            ),
+        )
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         allowed_targets = PROJECT_STATUS_TRANSITIONS.get(self.object.status, ())
@@ -567,9 +657,22 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
             Project.Status.ANNULLED in allowed_targets
             and not self.object.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists()
         )
-        context['project_updates'] = self.object.updates.all().order_by('-created_at')
-        context['kobo_enabled'] = settings.KOBO_ENABLED
-        if settings.KOBO_ENABLED:
+        updates = self.object.updates.select_related('created_by').prefetch_related('attachments')
+        if not self.request.user.has_perm('operations.view_projectupdate'):
+            updates = updates.filter(status=ProjectUpdate.Status.PUBLISHED)
+        context['project_updates'] = updates.order_by('-update_date', '-created_at')
+        context['project_documents'] = self.object.detail_documents
+        summary = get_project_financial_summary(self.object)
+        context['project_financial_summary'] = summary
+        context['execution_percentage'] = (
+            (summary['executed_amount'] / summary['funded_amount']) * Decimal('100')
+            if summary['funded_amount'] > 0 else Decimal('0')
+        )
+        has_kobo_binding = settings.KOBO_ENABLED and self.object.kobo_bindings.filter(
+            is_active=True
+        ).exists()
+        context['show_kobo_section'] = has_kobo_binding
+        if has_kobo_binding:
             from apps.integrations.kobo.models import KoboAsset
             from apps.integrations.kobo.services import get_project_imported_submissions
 
@@ -648,7 +751,7 @@ class ProjectUpdateListView(OperationsPermissionRequiredMixin, RouteContextMixin
     page_title = _('Avances de proyecto')
 
     def get_queryset(self):
-        return ProjectUpdate.objects.select_related('project', 'created_by', 'reviewed_by')
+        return ProjectUpdate.objects.select_related('project', 'created_by')
 
 
 class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailView):
@@ -657,23 +760,6 @@ class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMix
     template_name = 'web/project_update_detail.html'
     route_prefix = 'project_update'
     page_title = _('Avance de proyecto')
-
-
-class ProjectUpdateEvidenceDownloadView(OperationsPermissionRequiredMixin, DetailView):
-    permission_required = 'operations.view_projectupdate'
-    model = ProjectUpdate
-
-    def get(self, request, *args, **kwargs):
-        """
-        PRE: user is authenticated with view_projectupdate and pk identifies an
-        update whose evidence exists in storage.
-        POST: returns an attachment response without mutation or storage paths.
-        """
-        project_update = self.get_object()
-        return _protected_file_response(
-            project_update.evidence,
-            missing_message=_('La evidencia del avance no está disponible.'),
-        )
 
 
 class ProjectUpdateCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):
@@ -690,7 +776,9 @@ class ProjectUpdateCreateView(OperationsPermissionRequiredMixin, RouteContextMix
             project_id=form.cleaned_data['project'].pk,
             title=form.cleaned_data['title'],
             description=form.cleaned_data['description'],
-            evidence=form.cleaned_data.get('evidence'),
+            update_date=form.cleaned_data['update_date'],
+            progress_percentage=form.cleaned_data['progress_percentage'],
+            attachments=form.cleaned_data.get('attachments', ()),
             created_by=self.request.user if self.request.user.is_authenticated else None,
         )
         messages.success(self.request, _('Avance de proyecto registrado.'))
@@ -720,7 +808,9 @@ class ProjectUpdateCreateForProjectView(OperationsPermissionRequiredMixin, Route
             project_id=self.project.pk,
             title=form.cleaned_data['title'],
             description=form.cleaned_data['description'],
-            evidence=form.cleaned_data.get('evidence'),
+            update_date=form.cleaned_data['update_date'],
+            progress_percentage=form.cleaned_data['progress_percentage'],
+            attachments=form.cleaned_data.get('attachments', ()),
             created_by=self.request.user if self.request.user.is_authenticated else None,
         )
         messages.success(self.request, _('Avance de proyecto registrado.'))
@@ -741,7 +831,7 @@ class ProjectUpdateUpdateView(OperationsPermissionRequiredMixin, RouteContextMix
 
     def dispatch(self, request, *args, **kwargs):
         # PRE: request targets ordinary editing and permission handling remains authoritative.
-        # POST: permits DRAFT advances only; pending/final advances return 403.
+        # POST: permits DRAFT advances only; published advances return 403.
         if request.user.is_authenticated and request.user.has_perm(self.permission_required):
             project_update = get_object_or_404(ProjectUpdate, pk=kwargs['pk'])
             try:
@@ -761,7 +851,10 @@ class ProjectUpdateUpdateView(OperationsPermissionRequiredMixin, RouteContextMix
                 project=form.cleaned_data['project'],
                 title=form.cleaned_data['title'],
                 description=form.cleaned_data['description'],
-                evidence=form.cleaned_data.get('evidence'),
+                update_date=form.cleaned_data['update_date'],
+                progress_percentage=form.cleaned_data['progress_percentage'],
+                actor=self.request.user,
+                attachments=form.cleaned_data.get('attachments', ()),
             )
         except ValidationError as error:
             add_service_errors_to_form(form, error)
@@ -791,58 +884,151 @@ class ProjectUpdateDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixi
         return super().dispatch(request, *args, **kwargs)
 
 
-class ProjectUpdateReviewView(OperationsPermissionRequiredMixin, FormView):
+class ProjectUpdatePublishView(OperationsPermissionRequiredMixin, View):
     permission_required = 'operations.change_projectupdate'
-    form_class = ProjectUpdateReviewForm
-    template_name = 'web/project_update_review.html'
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: el usuario tiene permiso de cambio y pk identifica un avance.
+        POST: publica mediante el servicio de dominio o responde 403 sin mutar.
+        """
+        try:
+            project_update = publish_project_update(kwargs['pk'], request.user)
+        except ValidationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        messages.success(request, _('Avance de proyecto publicado.'))
+        return HttpResponseRedirect(reverse('project_update_detail', args=[project_update.pk]))
+
+
+class ProjectDocumentCreateView(OperationsPermissionRequiredMixin, CreateView):
+    permission_required = 'operations.add_projectdocument'
+    model = ProjectDocument
+    form_class = ProjectDocumentForm
+    template_name = 'web/project_document_form.html'
 
     def dispatch(self, request, *args, **kwargs):
-        self.object = get_object_or_404(ProjectUpdate.objects.select_related('project', 'created_by'), pk=kwargs['pk'])
-        if (
-            request.user.is_authenticated
-            and request.user.has_perm(self.permission_required)
-            and self.object.status != ProjectUpdate.Status.PENDING_REVIEW
-        ):
-            raise PermissionDenied(_('Solo un avance pendiente de revisión puede revisarse.'))
+        self.project = get_object_or_404(Project, pk=kwargs['project_pk'])
         return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        # PRE: el formulario contiene metadatos y archivo válidos para self.project.
+        # POST: guarda el documento, atribuye al usuario y registra auditoría.
+        form.instance.project = self.project
+        form.instance.uploaded_by = self.request.user
+        response = super().form_valid(form)
+        log_create(self.request.user, self.object, _('Documento de proyecto agregado.'))
+        return response
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['object'] = self.object
+        context['project'] = self.project
         return context
 
-    def form_valid(self, form):
-        """
-        PRE: POST form is valid and user has change_projectupdate permission.
-        POST: reviews only through the atomic service or redisplays domain errors.
-        """
-        try:
-            review_project_update(
-                update_id=self.object.pk,
-                reviewer=self.request.user,
-                status=form.cleaned_data['status'],
-                notes=form.cleaned_data.get('review_notes', ''),
-            )
-        except ValidationError as error:
-            add_service_errors_to_form(form, error)
-            return self.form_invalid(form)
-        messages.success(self.request, _('Revisión de avance guardada.'))
-        return HttpResponseRedirect(self.get_success_url())
-
     def get_success_url(self):
-        return reverse('project_detail', args=[self.object.project.pk])
+        return reverse('project_detail', args=[self.project.pk])
 
 
-class DonationListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
+class ProjectDocumentDownloadView(OperationsPermissionRequiredMixin, DetailView):
+    permission_required = 'operations.view_projectdocument'
+    model = ProjectDocument
+
+    def get(self, request, *args, **kwargs):
+        # PRE: el usuario tiene permiso de lectura y pk identifica un documento.
+        # POST: descarga el archivo sin revelar su ruta de almacenamiento.
+        return _protected_file_response(
+            self.get_object().file,
+            missing_message=_('El documento de proyecto no está disponible.'),
+        )
+
+
+class ProjectDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView):
+    permission_required = 'operations.delete_projectdocument'
+    model = ProjectDocument
+    template_name = 'web/object_confirm_delete.html'
+
+    def form_valid(self, form):
+        # PRE: el usuario tiene permiso y self.object es el documento confirmado.
+        # POST: audita y elimina el registro; el proyecto permanece intacto.
+        project_id = self.object.project_id
+        log_delete(self.request.user, self.object, _('Documento de proyecto eliminado.'))
+        self.object.delete()
+        return HttpResponseRedirect(reverse('project_detail', args=[project_id]))
+
+
+class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, CreateView):
+    permission_required = 'operations.add_projectupdateattachment'
+    model = ProjectUpdateAttachment
+    form_class = ProjectUpdateAttachmentForm
+    template_name = 'web/project_update_attachment_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.project_update = get_object_or_404(ProjectUpdate, pk=kwargs['update_pk'])
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            try:
+                ensure_project_update_is_editable(self.project_update)
+            except ProjectUpdateImmutableError as exc:
+                raise PermissionDenied(exc.messages[0]) from exc
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        try:
+            add_project_update_attachment(
+                update_id=self.project_update.pk,
+                file=form.cleaned_data['file'],
+                title=form.cleaned_data.get('title', ''),
+                actor=self.request.user,
+            )
+        except ValidationError as exc:
+            add_service_errors_to_form(form, exc)
+            return self.form_invalid(form)
+        return HttpResponseRedirect(reverse('project_update_detail', args=[self.project_update.pk]))
+
+
+class ProjectUpdateAttachmentDownloadView(OperationsPermissionRequiredMixin, DetailView):
+    permission_required = 'operations.view_projectupdateattachment'
+    model = ProjectUpdateAttachment
+
+    def get(self, request, *args, **kwargs):
+        # PRE: el usuario tiene permiso de lectura y pk identifica un adjunto.
+        # POST: descarga el archivo sin revelar su ruta de almacenamiento.
+        return _protected_file_response(
+            self.get_object().file,
+            missing_message=_('El adjunto del avance no está disponible.'),
+        )
+
+
+class ProjectUpdateAttachmentDeleteView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.delete_projectupdateattachment'
+
+    def post(self, request, *args, **kwargs):
+        # PRE: el usuario tiene permiso y pk identifica un adjunto.
+        # POST: elimina mediante el servicio solo si el avance padre es DRAFT.
+        try:
+            update_id = delete_project_update_attachment(
+                attachment_id=kwargs['pk'], actor=request.user
+            )
+        except ValidationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        return HttpResponseRedirect(reverse('project_update_detail', args=[update_id]))
+
+
+class DonationListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, RouteContextMixin, ListView):
     permission_required = 'operations.view_donation'
     model = Donation
     template_name = 'web/donation_list.html'
     context_object_name = 'objects'
     route_prefix = 'donation'
     page_title = _('Donaciones')
+    status_choices = Donation.Status.choices
+    institution_filter = True
+    export_url_name = 'donation_export_csv'
 
     def get_queryset(self):
-        return Donation.objects.select_related('donor')
+        return apply_list_filters(
+            Donation.objects.select_related('donor'), self.request.GET,
+            text_fields=('code', 'donor__name'), date_field='received_date',
+            institution_field='donor_id',
+        )
 
 
 class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
@@ -854,6 +1040,17 @@ class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequir
     transition_map = DONATION_STATUS_TRANSITIONS
     transition_url_name = 'donation_status_transition'
 
+    def get_queryset(self):
+        # PRE: la vista consulta una donación autorizada por clave primaria.
+        # POST: carga donante, metadata terminal y asignaciones relacionadas con sus destinos.
+        return Donation.objects.select_related('donor', 'terminal_by').prefetch_related(
+            Prefetch(
+                'allocations',
+                queryset=FundAllocation.objects.select_related('project').prefetch_related('expenses'),
+                to_attr='detail_allocations',
+            )
+        )
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         allowed_targets = DONATION_STATUS_TRANSITIONS.get(self.object.status, ())
@@ -861,6 +1058,8 @@ class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequir
             Donation.Status.ANNULLED in allowed_targets
             and not self.object.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists()
         )
+        context['donation_financial_summary'] = get_donation_financial_summary(self.object)
+        context['related_allocations'] = self.object.detail_allocations
         return context
 
 
@@ -914,16 +1113,25 @@ class DonationStatusTransitionView(StateTransitionView):
     detail_url_name = 'donation_detail'
 
 
-class FundAllocationListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
+class FundAllocationListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, RouteContextMixin, ListView):
     permission_required = 'operations.view_fundallocation'
     model = FundAllocation
     template_name = 'web/allocation_list.html'
     context_object_name = 'objects'
     route_prefix = 'allocation'
     page_title = _('Asignaciones de fondos')
+    status_choices = FundAllocation.Status.choices
+    institution_filter = True
+    project_filter = True
+    export_url_name = 'allocation_export_csv'
 
     def get_queryset(self):
-        return FundAllocation.objects.select_related('donation__donor', 'project')
+        return apply_list_filters(
+            FundAllocation.objects.select_related('donation__donor', 'project'), self.request.GET,
+            text_fields=('code', 'donation__code', 'project__code', 'project__name'),
+            date_field='allocation_date', institution_field='donation__donor_id',
+            project_field='project_id',
+        )
 
 
 class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
@@ -935,6 +1143,13 @@ class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermission
     transition_map = FUND_ALLOCATION_STATUS_TRANSITIONS
     transition_url_name = 'allocation_status_transition'
 
+    def get_queryset(self):
+        # PRE: la vista consulta una asignación autorizada por clave primaria.
+        # POST: carga origen, destino, metadata terminal y gastos para render sin N+1.
+        return FundAllocation.objects.select_related(
+            'donation__donor', 'project', 'terminal_by'
+        ).prefetch_related('expenses')
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         allowed_targets = FUND_ALLOCATION_STATUS_TRANSITIONS.get(self.object.status, ())
@@ -942,6 +1157,14 @@ class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermission
             FundAllocation.Status.ANNULLED in allowed_targets
             and not allocation_has_effective_expenses(self.object)
         )
+        expenses = list(self.object.expenses.all())
+        context['allocation_financial_summary'] = get_allocation_financial_summary(self.object)
+        context['registered_expenses'] = [
+            expense for expense in expenses if expense.status != Expense.Status.ANNULLED
+        ]
+        context['annulled_expenses'] = [
+            expense for expense in expenses if expense.status == Expense.Status.ANNULLED
+        ]
         return context
 
 
@@ -1035,18 +1258,28 @@ class FundAllocationStatusTransitionView(StateTransitionView):
     detail_url_name = 'allocation_detail'
 
 
-class ExpenseListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
+class ExpenseListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, RouteContextMixin, ListView):
     permission_required = 'operations.view_expense'
     model = Expense
     template_name = 'web/expense_list.html'
     context_object_name = 'objects'
     route_prefix = 'expense'
     page_title = _('Gastos')
+    status_choices = Expense.Status.choices
+    institution_filter = True
+    project_filter = True
+    export_url_name = 'expense_export_csv'
 
     def get_queryset(self):
-        return Expense.objects.select_related(
+        queryset = Expense.objects.select_related(
             'allocation__donation__donor',
             'allocation__project',
+        )
+        return apply_list_filters(
+            queryset, self.request.GET,
+            text_fields=('code', 'reason', 'provider_or_recipient', 'allocation__project__code'),
+            date_field='expense_date', institution_field='allocation__donation__donor_id',
+            project_field='allocation__project_id',
         )
 
 
@@ -1294,8 +1527,83 @@ class SupportingDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView
         return HttpResponseRedirect(reverse('expense_detail', args=[expense.pk]))
 
 
-class AuditLogListView(OperationsPermissionRequiredMixin, ListView):
+class AuditLogListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, ListView):
     permission_required = 'operations.view_auditlog'
     model = AuditLog
     template_name = 'web/audit_log_list.html'
     context_object_name = 'logs'
+    status_choices = AuditLog.Action.choices
+
+    def get_queryset(self):
+        return apply_list_filters(
+            AuditLog.objects.select_related('user'), self.request.GET,
+            text_fields=('entity_id', 'entity_label', 'model_name', 'summary'),
+            date_field='created_at__date', status_field='action',
+        )
+
+
+class FilteredCsvExportView(OperationsPermissionRequiredMixin, View):
+    list_view_class = None
+    filename = 'export.csv'
+    headers = ()
+    row_builder = None
+
+    def get(self, request, *args, **kwargs):
+        """
+        PRE: el usuario tiene permiso de lectura y la configuración declara columnas seguras.
+        POST: descarga CSV con encabezados legibles y el mismo queryset filtrado del listado.
+        """
+        list_view = self.list_view_class()
+        list_view.request = request
+        queryset = list_view.get_queryset()
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="{self.filename}"'
+        writer = csv.writer(response)
+        writer.writerow(self.headers)
+        for item in queryset:
+            writer.writerow(self.row_builder(item))
+        return response
+
+
+class ProjectCsvExportView(FilteredCsvExportView):
+    permission_required = 'operations.view_project'
+    list_view_class = ProjectListView
+    filename = 'proyectos.csv'
+    headers = ('Código', 'Nombre', 'Estado', 'Presupuesto USD', 'Inicio', 'Cierre', 'Ubicación')
+    row_builder = staticmethod(lambda item: (
+        item.code, item.name, item.get_status_display(), str(item.estimated_budget),
+        item.start_date or '', item.end_date or '', item.location,
+    ))
+
+
+class DonationCsvExportView(FilteredCsvExportView):
+    permission_required = 'operations.view_donation'
+    list_view_class = DonationListView
+    filename = 'donaciones.csv'
+    headers = ('Código', 'Institución donante', 'Monto', 'Moneda', 'Estado', 'Compromiso', 'Recepción')
+    row_builder = staticmethod(lambda item: (
+        item.code, item.donor.name, str(item.amount), item.currency,
+        item.get_status_display(), item.commitment_date or '', item.received_date or '',
+    ))
+
+
+class FundAllocationCsvExportView(FilteredCsvExportView):
+    permission_required = 'operations.view_fundallocation'
+    list_view_class = FundAllocationListView
+    filename = 'asignaciones.csv'
+    headers = ('Código', 'Donación', 'Proyecto', 'Monto', 'Estado', 'Fecha', 'Categoría')
+    row_builder = staticmethod(lambda item: (
+        item.code, item.donation.code, item.project.code, str(item.amount),
+        item.get_status_display(), item.allocation_date, item.get_budget_category_display(),
+    ))
+
+
+class ExpenseCsvExportView(FilteredCsvExportView):
+    permission_required = 'operations.view_expense'
+    list_view_class = ExpenseListView
+    filename = 'gastos.csv'
+    headers = ('Código', 'Proyecto', 'Asignación', 'Motivo', 'Monto', 'Moneda', 'Estado', 'Fecha')
+    row_builder = staticmethod(lambda item: (
+        item.code, item.allocation.project.code, item.allocation.code, item.reason,
+        str(item.amount), item.currency, item.get_status_display(), item.expense_date,
+    ))

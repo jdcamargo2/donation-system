@@ -53,13 +53,13 @@ def get_public_projects():
     return Project.objects.filter(status=Project.Status.ACTIVE).order_by('code')
 
 
-def get_approved_project_updates(project):
+def get_published_project_updates(project):
     """
     PRE: project es una instancia válida de Project.
-    POST: Retorna solo avances approved cuando el proyecto continua active.
+    POST: Retorna solo avances publicados cuando el proyecto continúa activo.
     """
     return project.updates.filter(
-        status=ProjectUpdate.Status.APPROVED,
+        status=ProjectUpdate.Status.PUBLISHED,
         project__status=Project.Status.ACTIVE,
     ).order_by('-created_at')
 
@@ -67,18 +67,18 @@ def get_approved_project_updates(project):
 def get_recent_project_updates(project, limit: int = 20):
     """
     PRE: project es una instancia válida de Project y limit debe ser positivo.
-    POST: Retorna hasta limit avances aprobados del proyecto.
+    POST: Retorna hasta limit avances publicados del proyecto.
     """
-    return get_approved_project_updates(project)[:limit]
+    return get_published_project_updates(project)[:limit]
 
 
-def get_recent_approved_updates(limit: int = 10):
+def get_recent_published_updates(limit: int = 10):
     """
     PRE: limit debe ser un entero positivo.
-    POST: Retorna avances aprobados recientes de proyectos activos, sin datos privados de usuarios.
+    POST: Retorna avances publicados recientes de proyectos activos, sin datos privados de usuarios.
     """
     return ProjectUpdate.objects.filter(
-        status=ProjectUpdate.Status.APPROVED,
+        status=ProjectUpdate.Status.PUBLISHED,
         project__status=Project.Status.ACTIVE,
     ).select_related('project').order_by('-created_at')[:limit]
 
@@ -92,7 +92,7 @@ def get_public_project_detail(project_id: int):
     return {
         'project': project,
         'financial_summary': _get_public_project_financial_summary(project),
-        'approved_updates': get_recent_project_updates(project),
+        'published_updates': get_recent_project_updates(project),
     }
 
 
@@ -115,8 +115,8 @@ def get_public_transparency_summary():
         'total_assigned': total_assigned,
         'total_executed': total_executed,
         'available_balance': max(total_assigned - total_executed, ZERO_MONEY),
-        'approved_update_count': ProjectUpdate.objects.filter(
-            status=ProjectUpdate.Status.APPROVED,
+        'published_update_count': ProjectUpdate.objects.filter(
+            status=ProjectUpdate.Status.PUBLISHED,
             project__status=Project.Status.ACTIVE,
         ).count(),
     }

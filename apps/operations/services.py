@@ -13,6 +13,7 @@ from .models import (
     FundAllocation,
     Project,
     ProjectUpdate,
+    ProjectUpdateAttachment,
     SupportingDocument,
     ZERO_MONEY,
 )
@@ -23,9 +24,7 @@ class ExpenseFinalizedError(ValidationError):
 
 
 EXPENSE_FINAL_STATUSES = frozenset({Expense.Status.ANNULLED})
-PROJECT_UPDATE_FINAL_STATUSES = frozenset(
-    {ProjectUpdate.Status.APPROVED, ProjectUpdate.Status.REJECTED}
-)
+PROJECT_UPDATE_FINAL_STATUSES = frozenset({ProjectUpdate.Status.PUBLISHED})
 
 
 class ProjectUpdateImmutableError(ValidationError):
@@ -354,7 +353,7 @@ def annul_fund_allocation(allocation_id: int, *, actor, reason) -> FundAllocatio
 def ensure_project_update_is_editable(project_update: ProjectUpdate) -> None:
     """
     PRE: project_update is a persisted advance targeted by ordinary editing.
-    POST: returns only for DRAFT; review and final states fail without mutation.
+    POST: returns only for DRAFT; published advances fail without mutation.
     """
     if project_update.status != ProjectUpdate.Status.DRAFT:
         raise ProjectUpdateImmutableError(
@@ -369,7 +368,7 @@ def ensure_project_update_is_deletable(project_update: ProjectUpdate) -> None:
     """
     if project_update.status in PROJECT_UPDATE_FINAL_STATUSES:
         raise ProjectUpdateImmutableError(
-            {'status': _('Los avances aprobados o rechazados no se pueden eliminar.')}
+            {'status': _('Los avances publicados no se pueden eliminar.')}
         )
 
 
@@ -421,12 +420,6 @@ def log_update(user, instance, summary: str | None = None):
 
 def log_delete(user, instance, summary: str | None = None):
     return log_action(user, AuditLog.Action.ANNULLED, instance, summary or _('Registro eliminado.'), str(instance))
-
-
-def log_review(user, project_update: ProjectUpdate, notes: str = ''):
-    action = AuditLog.Action.VALIDATED if project_update.status == ProjectUpdate.Status.APPROVED else AuditLog.Action.REJECTED
-    summary = _('Avance de proyecto aprobado.') if action == AuditLog.Action.VALIDATED else _('Avance de proyecto rechazado.')
-    return log_action(user, action, project_update, summary)
 
 
 # PRE: currency is the ISO code proposed for an operational financial record.
@@ -777,26 +770,41 @@ def get_allocation_financial_summary(allocation: FundAllocation) -> dict:
     }
 
 
-def register_advance(project_id: int, title: str, description: str, evidence=None, created_by=None) -> ProjectUpdate:
+def register_advance(
+    project_id: int,
+    title: str,
+    description: str,
+    update_date=None,
+    progress_percentage: int = 0,
+    attachments=(),
+    created_by=None,
+) -> ProjectUpdate:
     """
     PRE: project_id debe corresponder a un Project existente y apto para recibir avances.
-    POST: Retorna una instancia ProjectUpdate guardada en BD con estado pending_review.
+    POST: crea un avance DRAFT validado y deja una auditoría de creación.
     """
     project = Project.objects.get(pk=project_id)
     project_update = ProjectUpdate(
         project=project,
         title=title,
         description=description,
-        evidence=evidence,
+        update_date=update_date or timezone.localdate(),
+        progress_percentage=progress_percentage,
         created_by=created_by,
-        status=ProjectUpdate.Status.PENDING_REVIEW,
+        status=ProjectUpdate.Status.DRAFT,
     )
-    project_update.full_clean()
-    project_update.save()
+    with transaction.atomic():
+        project_update.full_clean()
+        project_update.save()
+        _create_project_update_attachments(project_update, attachments, created_by)
+        log_create(created_by, project_update, _('Avance de proyecto creado como borrador.'))
     return project_update
 
 
-def update_project_update(*, update_id: int, project, title: str, description: str, evidence=None) -> ProjectUpdate:
+def update_project_update(
+    *, update_id: int, project, title: str, description: str, update_date,
+    progress_percentage: int, actor, attachments=()
+) -> ProjectUpdate:
     """
     PRE: update_id identifies a DRAFT advance and submitted values are validated form data.
     POST: atomically locks and updates only that draft's material fields, then returns it.
@@ -807,39 +815,84 @@ def update_project_update(*, update_id: int, project, title: str, description: s
         project_update.project = project
         project_update.title = title
         project_update.description = description
-        project_update.evidence = evidence
+        project_update.update_date = update_date
+        project_update.progress_percentage = progress_percentage
         project_update.full_clean()
         project_update.save()
+        _create_project_update_attachments(project_update, attachments, actor)
+        log_update(actor, project_update, _('Borrador de avance actualizado.'))
         return project_update
 
 
-def review_project_update(update_id: int, reviewer, status: str, notes: str = '') -> ProjectUpdate:
+def _create_project_update_attachments(project_update, files, actor) -> list[ProjectUpdateAttachment]:
     """
-    PRE: update_id exists, reviewer is authenticated, status is APPROVED or
-    REJECTED, current state is PENDING_REVIEW, and rejection includes a reason.
-    POST: atomically locks and transitions the advance exactly once, records
-    reviewer/time and one audit event, preserves material evidence, and returns it.
+    PRE: project_update está bloqueado o acaba de crearse como DRAFT; files ya superó validación de formulario.
+    POST: crea un adjunto por archivo y devuelve las filas persistidas.
     """
-    if not getattr(reviewer, 'is_authenticated', False):
-        raise ValidationError({'reviewer': _('La revisión exige un usuario autenticado.')})
-    if status not in {ProjectUpdate.Status.APPROVED, ProjectUpdate.Status.REJECTED}:
-        raise ValidationError({'status': _('El estado de revisión debe ser aprobado o rechazado.')})
-    clean_notes = notes.strip() if isinstance(notes, str) else ''
-    if status == ProjectUpdate.Status.REJECTED and not clean_notes:
-        raise ValidationError({'review_notes': _('La razón del rechazo es obligatoria.')})
+    assert project_update.status == ProjectUpdate.Status.DRAFT
+    return [
+        ProjectUpdateAttachment.objects.create(
+            project_update=project_update,
+            file=file,
+            uploaded_by=actor if getattr(actor, 'is_authenticated', False) else None,
+        )
+        for file in files
+    ]
+
+
+def add_project_update_attachment(*, update_id: int, file, title: str, actor) -> ProjectUpdateAttachment:
+    """
+    PRE: update_id identifica un avance y file es un archivo validado.
+    POST: crea atómicamente un adjunto solo si el avance continúa DRAFT.
+    """
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
-        if project_update.status != ProjectUpdate.Status.PENDING_REVIEW:
-            raise ValidationError(
-                {'status': _('Solo un avance pendiente de revisión puede revisarse.')}
-            )
-        project_update.status = status
-        project_update.reviewed_by = reviewer
-        project_update.reviewed_at = timezone.now()
-        project_update.review_notes = clean_notes
-        project_update.full_clean()
-        project_update.save(
-            update_fields=('status', 'reviewed_by', 'reviewed_at', 'review_notes', 'updated_at')
+        ensure_project_update_is_editable(project_update)
+        attachment = ProjectUpdateAttachment.objects.create(
+            project_update=project_update,
+            file=file,
+            title=(title or '').strip(),
+            uploaded_by=actor if getattr(actor, 'is_authenticated', False) else None,
         )
-        log_review(reviewer, project_update)
+        log_create(actor, attachment, _('Adjunto de avance agregado.'))
+        return attachment
+
+
+def delete_project_update_attachment(*, attachment_id: int, actor) -> int:
+    """
+    PRE: attachment_id identifica un adjunto existente.
+    POST: elimina y audita el adjunto solo si su avance continúa DRAFT; retorna el avance padre.
+    """
+    with transaction.atomic():
+        attachment = ProjectUpdateAttachment.objects.select_related('project_update').get(pk=attachment_id)
+        project_update = ProjectUpdate.objects.select_for_update().get(pk=attachment.project_update_id)
+        ensure_project_update_is_editable(project_update)
+        update_id = project_update.pk
+        log_delete(actor, attachment, _('Adjunto de avance eliminado.'))
+        attachment.delete()
+        return update_id
+
+
+def publish_project_update(update_id: int, actor) -> ProjectUpdate:
+    """
+    PRE: update_id identifica un avance DRAFT y actor es un usuario autenticado.
+    POST: cambia atómicamente el avance a PUBLISHED y registra una auditoría.
+    """
+    if not getattr(actor, 'is_authenticated', False):
+        raise ValidationError({'actor': _('La publicación exige un usuario autenticado.')})
+    with transaction.atomic():
+        project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
+        if project_update.status != ProjectUpdate.Status.DRAFT:
+            raise ValidationError(
+                {'status': _('Solo un avance en borrador puede publicarse.')}
+            )
+        project_update.status = ProjectUpdate.Status.PUBLISHED
+        project_update.full_clean()
+        project_update.save(update_fields=('status', 'updated_at'))
+        log_action(
+            actor,
+            AuditLog.Action.PUBLISHED,
+            project_update,
+            _('Avance de proyecto publicado.'),
+        )
         return project_update

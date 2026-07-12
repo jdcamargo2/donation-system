@@ -58,16 +58,16 @@ class RoleBasedUITests(TestCase):
         self.assertContains(response, 'Registrar avance')
         self.assertContains(response, reverse('project_update_create_for_project', args=[self.project.pk]))
 
-    def test_field_operator_does_not_see_review_update_action(self):
-        self.client.force_login(self.create_user_for_role('ui-field-review', ROLE_FIELD_OPERATOR))
+    def test_field_operator_does_not_see_publish_update_action(self):
+        self.client.force_login(self.create_user_for_role('ui-field-publish', ROLE_FIELD_OPERATOR))
 
         detail_response = self.client.get(reverse('project_detail', args=[self.project.pk]))
         update_response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
 
         self.assertNotContains(detail_response, 'Revisar')
-        self.assertNotContains(detail_response, reverse('project_update_review', args=[self.project_update.pk]))
-        self.assertNotContains(update_response, 'Revisar avance')
-        self.assertNotContains(update_response, reverse('project_update_review', args=[self.project_update.pk]))
+        self.assertNotContains(detail_response, reverse('project_update_publish', args=[self.project_update.pk]))
+        self.assertNotContains(update_response, 'Publicar avance')
+        self.assertNotContains(update_response, reverse('project_update_publish', args=[self.project_update.pk]))
 
     def test_external_auditor_does_not_see_create_expense_action(self):
         self.client.force_login(self.create_user_for_role('ui-auditor-expense', ROLE_EXTERNAL_AUDITOR))
@@ -135,8 +135,8 @@ class RoleBasedUITests(TestCase):
         self.client.force_login(field_user)
         field_response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
-        self.assertNotContains(field_response, reverse('project_update_review', args=[self.project_update.pk]))
-        self.assertEqual(self.client.get(reverse('project_update_review', args=[self.project_update.pk])).status_code, 403)
+        self.assertNotContains(field_response, reverse('project_update_publish', args=[self.project_update.pk]))
+        self.assertEqual(self.client.post(reverse('project_update_publish', args=[self.project_update.pk])).status_code, 403)
 
         auditor_user = self.create_user_for_role('ui-auditor-routes', ROLE_EXTERNAL_AUDITOR)
         self.client.force_login(auditor_user)

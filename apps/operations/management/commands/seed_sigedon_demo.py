@@ -9,7 +9,6 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.management import BaseCommand, CommandError, call_command
 from django.db import transaction
-from django.utils import timezone
 
 from apps.operations.models import (
     Donation,
@@ -482,8 +481,8 @@ class Command(BaseCommand):
                     "Se completó el primer recorrido territorial y la "
                     "identificación preliminar de comunidades."
                 ),
-                "status": ProjectUpdate.Status.APPROVED if reviewer else ProjectUpdate.Status.PENDING_REVIEW,
-                "review_notes": "Avance validado para demostración." if reviewer else "",
+                "status": ProjectUpdate.Status.PUBLISHED,
+                "progress_percentage": 35,
             },
             {
                 "project": projects["centro"],
@@ -492,8 +491,8 @@ class Command(BaseCommand):
                     "Se iniciaron reuniones con actores comunitarios y "
                     "representantes parroquiales."
                 ),
-                "status": ProjectUpdate.Status.PENDING_REVIEW,
-                "review_notes": "",
+                "status": ProjectUpdate.Status.DRAFT,
+                "progress_percentage": 20,
             },
             {
                 "project": projects["este"],
@@ -503,7 +502,7 @@ class Command(BaseCommand):
                     "y levantamiento de información."
                 ),
                 "status": ProjectUpdate.Status.DRAFT,
-                "review_notes": "",
+                "progress_percentage": 10,
             },
         ]
 
@@ -515,19 +514,10 @@ class Command(BaseCommand):
                 title=data["title"],
                 defaults={
                     "description": data["description"],
+                    "update_date": date.today(),
+                    "progress_percentage": data["progress_percentage"],
                     "status": data["status"],
                     "created_by": operator,
-                    "reviewed_by": (
-                        reviewer
-                        if data["status"] == ProjectUpdate.Status.APPROVED
-                        else None
-                    ),
-                    "reviewed_at": (
-                        timezone.now()
-                        if data["status"] == ProjectUpdate.Status.APPROVED
-                        else None
-                    ),
-                    "review_notes": data["review_notes"],
                 },
             )
 

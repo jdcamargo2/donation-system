@@ -22,8 +22,8 @@
                     <th>Proyecto</th>
                     <th>Título</th>
                     <th>Estado</th>
-                    <th>Creado</th>
-                    <th>Evidencia</th>
+                    <th>Creado / progreso</th>
+                    <th>Adjuntos</th>
                     <th class="text-end">Acciones</th>
                 </tr>
             </thead>
@@ -33,23 +33,22 @@
                         <td>{{ update.project }}</td>
                         <td><a class="fw-semibold text-decoration-none" href="{% url detail_url_name update.pk %}">{{ update.title }}</a></td>
                         <td><span class="badge ops-status-badge">{{ update.get_status_display }}</span></td>
-                        <td>{{ update.created_at }}</td>
+                        <td>{{ update.update_date }} / {{ update.progress_percentage }}%</td>
                         <td>
-                            {% if update.evidence %}
-                                <a href="{{ update.evidence.url }}">Ver evidencia</a>
-                            {% else %}
-                                Sin evidencia
-                            {% endif %}
+                            {{ update.attachments.count }}
                         </td>
                         <td class="text-end ops-row-actions">
-                            {% if update.status == 'pending_review' and perms.operations.change_projectupdate %}
-                                <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_review' update.pk %}">Revisar</a>
-                            {% endif %}
-                            {% if perms.operations.change_projectupdate %}
-                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name update.pk %}">Editar</a>
-                            {% endif %}
-                            {% if perms.operations.delete_projectupdate %}
-                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name update.pk %}">Eliminar</a>
+                            {% if update.status == 'draft' %}
+                                {% if perms.operations.change_projectupdate %}
+                                    <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name update.pk %}">Editar</a>
+                                    <form class="d-inline" method="post" action="{% url 'project_update_publish' update.pk %}">
+                                        {% csrf_token %}
+                                        <button class="btn btn-sm btn-outline-primary" type="submit">Publicar</button>
+                                    </form>
+                                {% endif %}
+                                {% if perms.operations.delete_projectupdate %}
+                                    <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name update.pk %}">Eliminar</a>
+                                {% endif %}
                             {% endif %}
                         </td>
                     </tr>

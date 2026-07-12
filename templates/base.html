@@ -86,7 +86,7 @@
                 </div>
                 <form method="post" action="{% url 'logout' %}">
                     {% csrf_token %}
-                    <button class="sigedon-nav-link sigedon-logout-button" type="submit" title="Cerrar sesión">
+                    <button class="sigedon-nav-link sigedon-logout-button" type="submit" title="Cerrar sesión" aria-label="Cerrar sesión">
                         <i class="bi bi-box-arrow-right sigedon-nav-icon" aria-hidden="true"></i>
                         <span class="sigedon-nav-label">Cerrar sesión</span>
                     </button>
@@ -161,7 +161,7 @@
             if (sidebar) {
                 try {
                     const storedState = localStorage.getItem(storageKey);
-                    const shouldCollapse = storedState === 'true' || (storedState === null && isMobile());
+                    const shouldCollapse = isMobile() || storedState === 'true';
                     setCollapsed(root.classList.contains('sidebar-collapsed') || shouldCollapse, false);
                 } catch (error) {
                     setCollapsed(isMobile(), false);

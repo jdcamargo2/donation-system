@@ -1,11 +1,15 @@
 from decimal import Decimal
 from pathlib import Path
 
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.test import TestCase
+from django.test import override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 
-from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project
+from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate
+from apps.operations.services import publish_project_update, register_advance
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_expense, create_institution, create_project, create_user
 
 
@@ -87,6 +91,83 @@ class AuthenticatedViewTests(TestCase):
                 response = self.client.get(url)
                 self.assertContains(response, 'ops-table-card')
                 self.assertContains(response, 'class="table-responsive"')
+
+
+class OperationalDetailViewTests(TestCase):
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.donor = create_institution()
+        self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.location = 'La Guaira'
+        self.project.save(update_fields=('status', 'location'))
+        self.donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
+        self.donation.restrictions = 'Uso exclusivo para alimentación.'
+        self.donation.save(update_fields=('restrictions',))
+        self.allocation = create_allocation(
+            donation=self.donation, project=self.project, amount=Decimal('60.00')
+        )
+
+    def test_project_detail_renders_financial_and_operational_context(self):
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+
+        self.assertContains(response, 'Presupuesto')
+        self.assertContains(response, 'Financiado')
+        self.assertContains(response, 'Ejecución')
+        self.assertContains(response, 'La Guaira')
+        self.assertContains(response, 'Sin información registrada en esta fase.')
+        self.assertContains(response, 'Este proyecto todavía no tiene documentos.')
+
+    def test_authorized_user_sees_published_and_draft_updates(self):
+        draft = register_advance(self.project.pk, 'Borrador interno', 'Detalle', created_by=self.user)
+        published = register_advance(self.project.pk, 'Publicado operativo', 'Detalle', created_by=self.user)
+        publish_project_update(published.pk, self.user)
+
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+
+        self.assertContains(response, draft.title)
+        self.assertContains(response, published.title)
+
+    def test_user_without_update_view_permission_sees_only_published_updates(self):
+        draft = register_advance(self.project.pk, 'Borrador privado', 'Detalle', created_by=self.user)
+        published = register_advance(self.project.pk, 'Publicado visible', 'Detalle', created_by=self.user)
+        publish_project_update(published.pk, self.user)
+        limited_user = get_user_model().objects.create_user('project-reader', password='pass-12345')
+        limited_user.user_permissions.add(Permission.objects.get(codename='view_project'))
+        self.client.force_login(limited_user)
+
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+
+        self.assertContains(response, published.title)
+        self.assertNotContains(response, draft.title)
+
+    def test_donation_detail_renders_restrictions_and_related_allocations(self):
+        response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
+
+        self.assertContains(response, 'Restricciones de uso')
+        self.assertContains(response, self.donation.restrictions)
+        self.assertContains(response, self.allocation.code)
+        self.assertContains(response, 'Progreso de asignación')
+
+    def test_allocation_detail_separates_registered_and_annulled_expenses(self):
+        registered = create_expense(allocation=self.allocation, amount=Decimal('10.00'), reason='Gasto vigente')
+        annulled = create_expense(allocation=self.allocation, amount=Decimal('5.00'), reason='Gasto anulado')
+        annulled.status = Expense.Status.ANNULLED
+        annulled.save(update_fields=('status',))
+
+        response = self.client.get(reverse('allocation_detail', args=[self.allocation.pk]))
+
+        self.assertContains(response, 'Gastos registrados')
+        self.assertContains(response, registered.reason)
+        self.assertContains(response, 'Gastos anulados')
+        self.assertContains(response, annulled.reason)
+
+    @override_settings(KOBO_ENABLED=True)
+    def test_project_without_binding_does_not_render_kobo_section(self):
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+
+        self.assertNotContains(response, 'Levantamientos de campo')
 
     def test_login_uses_refined_internal_visual_system(self):
         response = self.client.get(reverse('login'))

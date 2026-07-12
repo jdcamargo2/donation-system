@@ -80,17 +80,17 @@ class OperationsPermissionTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_user_with_change_projectupdate_permission_can_access_review(self):
+    def test_user_with_change_projectupdate_permission_can_publish(self):
         self.client.force_login(create_user_with_permissions('review-update', 'change_projectupdate'))
 
-        response = self.client.get(reverse('project_update_review', args=[self.project_update.pk]))
+        response = self.client.post(reverse('project_update_publish', args=[self.project_update.pk]))
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
 
-    def test_user_without_change_projectupdate_permission_gets_403_on_review(self):
+    def test_user_without_change_projectupdate_permission_gets_403_on_publish(self):
         self.client.force_login(create_user('no-review-update'))
 
-        response = self.client.get(reverse('project_update_review', args=[self.project_update.pk]))
+        response = self.client.post(reverse('project_update_publish', args=[self.project_update.pk]))
 
         self.assertEqual(response.status_code, 403)
 

@@ -1,13 +1,13 @@
 {% extends "public_portal/public_base.html" %}
 
-{% block title %}Avances aprobados - SIGEDON{% endblock %}
+{% block title %}Avances publicados - SIGEDON{% endblock %}
 
 {% block content %}
 <section class="public-hero">
     <p class="public-eyebrow">Avances</p>
-    <h1 class="public-page-title">Avances aprobados para consulta pública</h1>
+    <h1 class="public-page-title">Avances publicados para consulta pública</h1>
     <p class="public-lead">
-        Registro de avances revisados y publicados para acompañar la ejecución de los proyectos.
+        Registro de avances publicados para acompañar la ejecución de los proyectos.
     </p>
 </section>
 
@@ -29,16 +29,10 @@
                 <a class="public-link-arrow public-action-primary" href="{% url 'public_portal:public_project_detail' update.project.pk %}">
                     Ver proyecto <span aria-hidden="true">→</span>
                 </a>
-                {% if update.evidence %}
-                    <span class="public-action-separator" aria-hidden="true">|</span>
-                    <a class="public-action-secondary evidence-link" href="{{ update.evidence.url }}">
-                        <span aria-hidden="true">▣</span> Ver evidencia
-                    </a>
-                {% endif %}
             </div>
         </article>
     {% empty %}
-        <div class="public-list-item public-meta">Todavía no hay avances aprobados.</div>
+        <div class="public-list-item public-meta">Todavía no hay avances publicados.</div>
     {% endfor %}
 </section>
 

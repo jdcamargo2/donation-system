@@ -74,45 +74,23 @@ class CriticalAuditTests(TestCase):
             ).exists()
         )
 
-    def test_project_update_approved_review_generates_audit_log(self):
+    def test_project_update_publish_generates_audit_log(self):
         project = create_project(code='PRJ-REV-001', name='Proyecto revisión')
         project.status = Project.Status.ACTIVE
         project.save()
         update = register_advance(project_id=project.pk, title='Avance aprobado', description='Listo.')
-        response = self.client.post(
-            reverse('project_update_review', args=[update.pk]),
-            data={'status': ProjectUpdate.Status.APPROVED, 'review_notes': 'Aprobado.'},
-        )
+        response = self.client.post(reverse('project_update_publish', args=[update.pk]))
 
-        self.assertRedirects(response, reverse('project_detail', args=[project.pk]))
+        self.assertRedirects(response, reverse('project_update_detail', args=[update.pk]))
         self.assertTrue(
             AuditLog.objects.filter(
-                action=AuditLog.Action.VALIDATED,
+                action=AuditLog.Action.PUBLISHED,
                 model_name='Avance de proyecto',
                 entity_label='PRJ-REV-001 - Avance aprobado',
-                summary__contains='Avance de proyecto aprobado.',
+                summary__contains='Avance de proyecto publicado.',
             ).exists()
         )
 
-    def test_project_update_rejected_review_generates_audit_log(self):
-        project = create_project(code='PRJ-REJ-001', name='Proyecto rechazo')
-        project.status = Project.Status.ACTIVE
-        project.save()
-        update = register_advance(project_id=project.pk, title='Avance rechazado', description='Listo.')
-        response = self.client.post(
-            reverse('project_update_review', args=[update.pk]),
-            data={'status': ProjectUpdate.Status.REJECTED, 'review_notes': 'Falta evidencia.'},
-        )
-
-        self.assertRedirects(response, reverse('project_detail', args=[project.pk]))
-        self.assertTrue(
-            AuditLog.objects.filter(
-                action=AuditLog.Action.REJECTED,
-                model_name='Avance de proyecto',
-                entity_label='PRJ-REJ-001 - Avance rechazado',
-                summary__contains='Avance de proyecto rechazado.',
-            ).exists()
-        )
 
     def test_attaching_support_generates_audit_log(self):
         expense = create_expense(reason='Gasto con soporte auditado')

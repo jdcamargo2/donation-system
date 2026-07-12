@@ -1,0 +1,34 @@
+<form class="card border-0 mb-3" method="get">
+    <div class="card-body row g-2 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label" for="filter-q">Buscar</label>
+            <input class="form-control" id="filter-q" name="q" value="{{ request.GET.q }}" placeholder="Nombre o código">
+        </div>
+        {% if filter_status_choices %}
+        <div class="col-md-2">
+            <label class="form-label" for="filter-status">Estado</label>
+            <select class="form-select" id="filter-status" name="status">
+                <option value="">Todos</option>
+                {% for value, label in filter_status_choices %}<option value="{{ value }}"{% if request.GET.status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </div>
+        {% endif %}
+        {% if filter_institutions %}
+        <div class="col-md-2">
+            <label class="form-label" for="filter-institution">Institución</label>
+            <select class="form-select" id="filter-institution" name="institution"><option value="">Todas</option>{% for item in filter_institutions %}<option value="{{ item.pk }}"{% if request.GET.institution == item.pk|stringformat:"s" %} selected{% endif %}>{{ item.name }}</option>{% endfor %}</select>
+        </div>
+        {% endif %}
+        {% if filter_projects %}
+        <div class="col-md-2">
+            <label class="form-label" for="filter-project">Proyecto</label>
+            <select class="form-select" id="filter-project" name="project"><option value="">Todos</option>{% for item in filter_projects %}<option value="{{ item.pk }}"{% if request.GET.project == item.pk|stringformat:"s" %} selected{% endif %}>{{ item.code }} - {{ item.name }}</option>{% endfor %}</select>
+        </div>
+        {% endif %}
+        <div class="col-md-2"><label class="form-label" for="filter-from">Desde</label><input class="form-control" id="filter-from" type="date" name="date_from" value="{{ request.GET.date_from }}"></div>
+        <div class="col-md-2"><label class="form-label" for="filter-to">Hasta</label><input class="form-control" id="filter-to" type="date" name="date_to" value="{{ request.GET.date_to }}"></div>
+        <div class="col-auto"><button class="btn btn-primary" type="submit">Filtrar</button></div>
+        <div class="col-auto"><a class="btn btn-outline-secondary" href="{{ request.path }}">Limpiar</a></div>
+        {% if export_url_name %}<div class="col-auto"><a class="btn btn-outline-primary" href="{% url export_url_name %}{% if active_filter_query %}?{{ active_filter_query }}{% endif %}">Exportar CSV</a></div>{% endif %}
+    </div>
+</form>

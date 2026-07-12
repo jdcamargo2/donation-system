@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from apps.operations.models import Project, ProjectUpdate
-from apps.operations.services import register_advance, review_project_update
+from apps.operations.services import register_advance, publish_project_update
 from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project, create_user
 
 
@@ -31,12 +31,7 @@ class PublicPortalTests(TestCase):
             description='Descripción pública aprobada.',
             created_by=self.user,
         )
-        review_project_update(
-            update_id=self.approved_update.pk,
-            reviewer=self.user,
-            status=ProjectUpdate.Status.APPROVED,
-            notes='Nota interna de revisión.',
-        )
+        publish_project_update(self.approved_update.pk, self.user)
         self.pending_update = register_advance(
             project_id=self.project.pk,
             title='Avance pendiente privado',
@@ -47,8 +42,7 @@ class PublicPortalTests(TestCase):
             project=self.project,
             title='Avance rechazado privado',
             description='No debe mostrarse.',
-            status=ProjectUpdate.Status.REJECTED,
-            reviewed_at=self.approved_update.reviewed_at,
+            status=ProjectUpdate.Status.DRAFT,
         )
         self.draft_update = ProjectUpdate.objects.create(
             project=self.project,
@@ -67,11 +61,7 @@ class PublicPortalTests(TestCase):
             description='Avance que no debe permanecer publicado.',
             created_by=self.user,
         )
-        review_project_update(
-            update_id=update.pk,
-            reviewer=self.user,
-            status=ProjectUpdate.Status.APPROVED,
-        )
+        publish_project_update(update.pk, self.user)
         project.status = project_status
         project.save(update_fields=['status'])
         return project, update
@@ -79,7 +69,7 @@ class PublicPortalTests(TestCase):
     def assert_public_response_is_sanitized(self, response):
         self.assertNotContains(response, 'project_update_create')
         self.assertNotContains(response, 'project_update_create_for_project')
-        self.assertNotContains(response, 'project_update_review')
+        self.assertNotContains(response, 'project_update_publish')
         self.assertNotContains(response, 'project_update_update')
         self.assertNotContains(response, 'project_update_delete')
         self.assertNotContains(response, '/admin/')
@@ -154,7 +144,7 @@ class PublicPortalTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'public_portal/public_base.html')
-        self.assertContains(response, 'Avances aprobados')
+        self.assertContains(response, 'Avances publicados')
         self.assertContains(response, 'public-link-arrow')
         self.assertContains(response, 'public-card-actions')
         self.assert_public_response_is_sanitized(response)
@@ -175,23 +165,15 @@ class PublicPortalTests(TestCase):
         self.assertNotContains(response, self.rejected_update.title)
         self.assertNotContains(response, self.draft_update.title)
 
-    def test_public_project_detail_shows_evidence_for_approved_update_of_active_project(self):
-        self.approved_update.evidence = 'project_updates/public-approved.pdf'
-        self.approved_update.save(update_fields=['evidence'])
-
+    def test_public_project_detail_does_not_expose_operational_file_urls(self):
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
+        self.assertNotContains(response, '/media/')
 
-        self.assertContains(response, self.approved_update.evidence.url)
-
-    def test_public_portal_does_not_show_evidence_from_unapproved_update(self):
-        self.pending_update.evidence = 'project_updates/private-pending.pdf'
-        self.pending_update.save(update_fields=['evidence'])
-
+    def test_public_portal_does_not_show_draft_update(self):
         detail_response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
         feed_response = self.client.get(reverse('public_portal:public_updates_feed'))
-
-        self.assertNotContains(detail_response, self.pending_update.evidence.url)
-        self.assertNotContains(feed_response, self.pending_update.evidence.url)
+        self.assertNotContains(detail_response, self.pending_update.title)
+        self.assertNotContains(feed_response, self.pending_update.title)
 
     def test_public_portal_does_not_show_approved_evidence_from_non_active_project(self):
         private_project = create_project(code='PRJ-NO-PUBLIC', name='Proyecto suspendido con evidencia')
@@ -201,14 +183,9 @@ class PublicPortalTests(TestCase):
             project_id=private_project.pk,
             title='Avance aprobado que dejo de ser público',
             description='No debe aparecer cuando el proyecto deja de estar activo.',
-            evidence='project_updates/private-inactive.pdf',
             created_by=self.user,
         )
-        review_project_update(
-            update_id=private_update.pk,
-            reviewer=self.user,
-            status=ProjectUpdate.Status.APPROVED,
-        )
+        publish_project_update(private_update.pk, self.user)
         private_project.status = Project.Status.SUSPENDED
         private_project.save(update_fields=['status'])
 
@@ -216,8 +193,8 @@ class PublicPortalTests(TestCase):
         home_response = self.client.get(reverse('public_portal:public_home'))
 
         self.assertNotContains(feed_response, private_update.title)
-        self.assertNotContains(feed_response, private_update.evidence.url)
-        self.assertEqual(home_response.context['summary']['approved_update_count'], 1)
+        self.assertNotContains(feed_response, '/media/')
+        self.assertEqual(home_response.context['summary']['published_update_count'], 1)
 
     def test_approved_update_from_closed_project_is_not_public(self):
         closed_project, closed_update = self.create_approved_update_for_project_status(
@@ -233,13 +210,13 @@ class PublicPortalTests(TestCase):
         self.assertNotContains(feed_response, closed_update.title)
         self.assertEqual(detail_response.status_code, 404)
 
-    def test_approved_update_count_excludes_suspended_and_closed_projects(self):
+    def test_published_update_count_excludes_suspended_and_closed_projects(self):
         self.create_approved_update_for_project_status('PRJ-SUSP-COUNT', Project.Status.SUSPENDED)
         self.create_approved_update_for_project_status('PRJ-CLOSED-COUNT', Project.Status.CLOSED)
 
         response = self.client.get(reverse('public_portal:public_home'))
 
-        self.assertEqual(response.context['summary']['approved_update_count'], 1)
+        self.assertEqual(response.context['summary']['published_update_count'], 1)
 
     def test_every_update_in_public_feed_links_to_an_available_public_detail(self):
         suspended_project, suspended_update = self.create_approved_update_for_project_status(
@@ -372,7 +349,7 @@ class PublicPortalTests(TestCase):
             'user.is_authenticated',
             'project_update_create',
             'project_update_create_for_project',
-            'project_update_review',
+            'project_update_publish',
             'project_update_update',
             'project_update_delete',
         ]
@@ -402,13 +379,28 @@ class PublicPortalTests(TestCase):
                 title=f'Avance aprobado {index}',
                 description='Avance aprobado para paginación.',
             )
-            review_project_update(
-                update_id=update.pk,
-                reviewer=self.user,
-                status=ProjectUpdate.Status.APPROVED,
-            )
+            publish_project_update(update.pk, self.user)
 
         response = self.client.get(reverse('public_portal:public_updates_feed'))
 
         self.assertTrue(response.context['is_paginated'])
         self.assertEqual(len(response.context['updates']), 20)
+
+    def test_public_projects_json_does_not_expose_private_data(self):
+        response = self.client.get(reverse('public_portal:public_projects_json'))
+        content = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('privado@example.com', content)
+        self.assertNotIn('contact_email', content)
+        self.assertNotIn('/media/', content)
+        self.assertNotIn('uploaded_by', content)
+
+    def test_public_json_endpoints_return_valid_structures(self):
+        projects_response = self.client.get(reverse('public_portal:public_projects_json'))
+        metrics_response = self.client.get(reverse('public_portal:public_metrics_json'))
+
+        self.assertIsInstance(projects_response.json()['projects'], list)
+        self.assertIn('code', projects_response.json()['projects'][0])
+        self.assertIn('metrics', metrics_response.json())
+        self.assertIn('project_count', metrics_response.json()['metrics'])

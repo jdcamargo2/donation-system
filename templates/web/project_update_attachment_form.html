@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Agregar adjunto - SIGEDON{% endblock %}
+{% block content %}
+<h1 class="h3">Agregar adjunto</h1>
+<p>{{ view.project_update.title }}</p>
+<form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}{{ form.as_p }}
+    <button class="btn btn-primary" type="submit">Guardar</button>
+    <a class="btn btn-outline-secondary" href="{% url 'project_update_detail' view.project_update.pk %}">Cancelar</a>
+</form>
+{% endblock %}
