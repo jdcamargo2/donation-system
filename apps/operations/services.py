@@ -714,31 +714,70 @@ def sum_money(queryset, field_name: str):
     return queryset.aggregate(total=Sum(field_name))['total'] or ZERO_MONEY
 
 
-def get_dashboard_metrics() -> dict:
+def get_dashboard_metrics(*, user) -> dict:
     """
-    PRE: La base de datos debe estar migrada y los modelos operativos disponibles.
-    POST: Retorna un diccionario con las métricas financieras y operativas necesarias para el dashboard.
+    PRE: user es un usuario autenticado de Django.
+    POST: retorna únicamente métricas y actividad autorizadas por sus permisos.
     """
-    donations = Donation.objects.filter(currency=OPERATING_CURRENCY).exclude(status=Donation.Status.ANNULLED)
-    allocations = FundAllocation.objects.filter(
-        donation__currency=OPERATING_CURRENCY
-    ).exclude(status=FundAllocation.Status.ANNULLED)
-    expenses = Expense.objects.filter(
-        currency=OPERATING_CURRENCY,
-        allocation__donation__currency=OPERATING_CURRENCY,
-    ).exclude(status__in=Expense.non_executing_statuses())
-    total_donations = sum_money(donations, 'amount')
-    total_assigned = sum_money(allocations, 'amount')
-    total_executed = sum_money(expenses, 'amount')
-    return {
-        'total_donations': total_donations,
-        'total_assigned': total_assigned,
-        'total_executed': total_executed,
-        'available_balance': max(total_donations - total_assigned, ZERO_MONEY),
-        'recent_donations': donations.select_related('donor')[:5],
-        'recent_expenses': expenses.select_related('allocation', 'allocation__project')[:5],
-        'recent_audit_logs': AuditLog.objects.select_related('user')[:5],
+    can_view_donations = user.has_perm('operations.view_donation')
+    can_view_allocations = user.has_perm('operations.view_fundallocation')
+    can_view_expenses = user.has_perm('operations.view_expense')
+    can_view_audit = user.has_perm('operations.view_auditlog')
+
+    context = {
+        'can_view_donations': can_view_donations,
+        'can_view_allocations': can_view_allocations,
+        'can_view_expenses': can_view_expenses,
+        'can_view_audit': can_view_audit,
+        'can_view_available_balance': (
+            can_view_donations and can_view_allocations
+        ),
+        'total_donations': None,
+        'total_assigned': None,
+        'total_executed': None,
+        'available_balance': None,
+        'recent_donations': Donation.objects.none(),
+        'recent_expenses': Expense.objects.none(),
+        'recent_audit_logs': AuditLog.objects.none(),
     }
+
+    donations = None
+    allocations = None
+
+    if can_view_donations:
+        donations = Donation.objects.filter(
+            currency=OPERATING_CURRENCY,
+        ).exclude(status=Donation.Status.ANNULLED)
+        context['total_donations'] = sum_money(donations, 'amount')
+        context['recent_donations'] = donations.select_related('donor')[:5]
+
+    if can_view_allocations:
+        allocations = FundAllocation.objects.filter(
+            donation__currency=OPERATING_CURRENCY,
+        ).exclude(status=FundAllocation.Status.ANNULLED)
+        context['total_assigned'] = sum_money(allocations, 'amount')
+
+    if can_view_expenses:
+        expenses = Expense.objects.filter(
+            currency=OPERATING_CURRENCY,
+            allocation__donation__currency=OPERATING_CURRENCY,
+        ).exclude(status__in=Expense.non_executing_statuses())
+        context['total_executed'] = sum_money(expenses, 'amount')
+        context['recent_expenses'] = expenses.select_related(
+            'allocation',
+            'allocation__project',
+        )[:5]
+
+    if can_view_donations and can_view_allocations:
+        context['available_balance'] = max(
+            context['total_donations'] - context['total_assigned'],
+            ZERO_MONEY,
+        )
+
+    if can_view_audit:
+        context['recent_audit_logs'] = AuditLog.objects.select_related('user')[:5]
+
+    return context
 
 
 def get_project_financial_summary(project: Project) -> dict:

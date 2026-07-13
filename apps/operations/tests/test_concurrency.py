@@ -20,6 +20,7 @@ from apps.operations.models import (
     ProjectUpdate,
     SupportingDocument,
     ZERO_MONEY,
+    OPERATIONAL_CODE_PREFIXES,
 )
 from apps.operations.services import (
     ExpenseFinalizedError,
@@ -49,7 +50,20 @@ BARRIER_TIMEOUT_SECONDS = 10
 @skipUnless(connection.vendor == 'postgresql', POSTGRESQL_LOCKING_REQUIRED)
 class PostgreSQLConcurrencyTests(TransactionTestCase):
     reset_sequences = True
-    serialized_rollback = True
+
+    def setUp(self):
+        super().setUp()
+        OperationalCodeSequence.objects.bulk_create(
+            [
+                OperationalCodeSequence(
+                    namespace=namespace,
+                    prefix=prefix,
+                    next_value=1,
+                )
+                for namespace, prefix in OPERATIONAL_CODE_PREFIXES.items()
+            ],
+            ignore_conflicts=True,
+        )
 
     def run_concurrently(self, operations):
         """

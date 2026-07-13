@@ -191,7 +191,7 @@ class DashboardView(LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context.update(get_dashboard_metrics())
+        context.update(get_dashboard_metrics(user=self.request.user))
         return context
 
 

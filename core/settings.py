@@ -124,11 +124,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django_countries',
-    'apps.users',
     'apps.operations',
     'apps.public_portal',
     'apps.integrations.kobo',
-    'apps.integrations.payments',
     'web',
 ]
 

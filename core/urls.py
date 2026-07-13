@@ -22,10 +22,8 @@ from django.urls import include, path
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/', include('django.contrib.auth.urls')),
-    path('users/', include('apps.users.urls')),
     path('transparency/', include('apps.public_portal.urls')),
     path('integrations/kobo/', include('apps.integrations.kobo.urls')),
-    path('integrations/payments/', include('apps.integrations.payments.urls')),
     path('', include('apps.operations.urls')),
     path('', include('web.urls')),
 ]

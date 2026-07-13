@@ -5,6 +5,9 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
+
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ZERO_MONEY
 from apps.operations.services import (
     create_expense as create_expense_service,
@@ -135,7 +138,23 @@ class OperationServiceTests(TestCase):
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
 
     def test_get_dashboard_metrics_returns_expected_keys_with_empty_database(self):
-        metrics = get_dashboard_metrics()
+        user = get_user_model().objects.create_user(
+            username='dashboard-service-user',
+            password='pass-12345',
+        )
+        user.user_permissions.add(
+            *Permission.objects.filter(
+                content_type__app_label='operations',
+                codename__in={
+                    'view_donation',
+                    'view_fundallocation',
+                    'view_expense',
+                    'view_auditlog',
+                },
+            )
+        )
+
+        metrics = get_dashboard_metrics(user=user)
 
         self.assertEqual(metrics['total_donations'], ZERO_MONEY)
         self.assertEqual(metrics['total_assigned'], ZERO_MONEY)
@@ -144,6 +163,22 @@ class OperationServiceTests(TestCase):
         self.assertIn('recent_donations', metrics)
         self.assertIn('recent_expenses', metrics)
         self.assertIn('recent_audit_logs', metrics)
+
+    def test_get_dashboard_metrics_hides_data_without_permissions(self):
+        user = get_user_model().objects.create_user(
+            username='dashboard-restricted-user',
+            password='pass-12345',
+        )
+
+        metrics = get_dashboard_metrics(user=user)
+
+        self.assertIsNone(metrics['total_donations'])
+        self.assertIsNone(metrics['total_assigned'])
+        self.assertIsNone(metrics['total_executed'])
+        self.assertIsNone(metrics['available_balance'])
+        self.assertFalse(metrics['recent_donations'].exists())
+        self.assertFalse(metrics['recent_expenses'].exists())
+        self.assertFalse(metrics['recent_audit_logs'].exists())
 
     def test_create_fund_allocation_rejects_over_allocation(self):
         donation = self.create_donation(amount=Decimal('100.00'))

@@ -34,7 +34,6 @@ private_media/
 .DS_Store
 Thumbs.db
 
-backups/db.sqlite3.pre-postgresql
 backups/*.sqlite3*
 
 docs/sondeos/
