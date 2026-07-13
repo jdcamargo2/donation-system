@@ -13,6 +13,7 @@ from apps.integrations.kobo.errors import (
 )
 from apps.integrations.kobo.form_registry import get_registered_form, list_registered_forms
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
+from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
 from apps.integrations.kobo.models import (
     KoboAttachment,
     KoboAsset,
@@ -26,6 +27,12 @@ from apps.integrations.kobo.processors import (
     PROCESSABLE_STATUSES,
     process_submission,
 )
+
+
+FORM_DEFINITION_ROLES = {
+    (FICHA_01_FORM_ID, FICHA_01_VERSION): KoboAsset.FormRole.TERRITORIAL_PROFILE,
+    (FICHA_10_FORM_ID, FICHA_10_VERSION): KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+}
 
 
 @dataclass(frozen=True)
@@ -573,7 +580,10 @@ def associate_submission_with_project(
                 error_code="asset_inactive",
                 error_message="Configured Kobo asset is inactive.",
             )
-        if asset.form_role != KoboAsset.FormRole.TERRITORIAL_PROFILE:
+        expected_role = FORM_DEFINITION_ROLES.get(
+            (asset.form_definition.form_id, asset.form_definition.version)
+        )
+        if asset.form_role != expected_role:
             return _association_failure(
                 locked_submission,
                 previous_status=previous_status,
@@ -811,6 +821,11 @@ def configure_discovered_asset(
     valid_roles = {value for value, _label in KoboAsset.FormRole.choices}
     if form_role not in valid_roles:
         raise ValidationError("Kobo asset form role is invalid.")
+    expected_role = FORM_DEFINITION_ROLES.get(
+        (form_definition.form_id, form_definition.version)
+    )
+    if form_role != expected_role:
+        raise ValidationError("Kobo asset role is incompatible with its form definition.")
     clean_name = name.strip() if isinstance(name, str) else ""
     if not clean_name:
         raise ValidationError("Kobo asset name is required.")

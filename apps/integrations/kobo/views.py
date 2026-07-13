@@ -18,6 +18,10 @@ from apps.integrations.kobo.forms import (
     KoboReviewForm,
     get_compatible_asset_configuration,
 )
+from apps.integrations.kobo.mappings.ficha_10 import (
+    FICHA_10_FORM_ID,
+    FICHA_10_VERSION,
+)
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboAttachment,
@@ -84,6 +88,101 @@ def _can_view_sensitive_kobo_data(user) -> bool:
     # PRE: user is an authenticated request user.
     # POST: returns elevated Kobo review authorization without side effects.
     return user.is_superuser or user.has_perm("kobo.change_kobosubmission")
+
+
+MICROPROJECT_CHOICE_LABELS = {
+    "component": {
+        "infrastructure": "Infraestructura",
+        "health_psychosocial": "Salud y atención psicosocial",
+        "training": "Formación",
+        "livelihoods": "Medios de vida",
+        "communication": "Comunicación",
+        "mixed": "Mixto",
+    },
+    "beneficiary_group": {
+        "youth": "Jóvenes",
+        "women": "Mujeres",
+        "adults": "Adultos",
+        "unemployed": "Personas desempleadas",
+        "entrepreneurs": "Emprendedores",
+        "parish_volunteers": "Voluntariado parroquial",
+        "mixed": "Mixto",
+        "other": "Otro",
+    },
+    "estimated_cost_range": {
+        "under_1000": "Menos de USD 1.000",
+        "1000_5000": "USD 1.000 a 5.000",
+        "5000_15000": "USD 5.000 a 15.000",
+        "15000_50000": "USD 15.000 a 50.000",
+        "over_50000": "Más de USD 50.000",
+        "unknown": "Por determinar",
+    },
+    "implementation_urgency": {
+        "immediate": "Inmediata",
+        "short_term": "Corto plazo",
+        "medium_term": "Mediano plazo",
+        "follow_up": "Seguimiento",
+        "unknown": "Por determinar",
+    },
+    "technical_viability": {
+        "high": "Alta",
+        "medium": "Media",
+        "low": "Baja",
+        "requires_design": "Requiere diseño",
+        "not_viable": "No viable",
+    },
+}
+
+
+def _project_submission_detail_rows(submission):
+    # PRE: submission is an imported Kobo record with normalized payload data.
+    # POST: returns labelled Ficha 10 fields only; territorial forms return none.
+    if (
+        submission.form_definition.form_id != FICHA_10_FORM_ID
+        or submission.form_definition.version != FICHA_10_VERSION
+    ):
+        return ()
+    payload = submission.normalized_payload or {}
+    beneficiary_groups = payload.get("beneficiary_group", ())
+    beneficiary_labels = ", ".join(
+        MICROPROJECT_CHOICE_LABELS["beneficiary_group"].get(value, value)
+        for value in beneficiary_groups
+    )
+    return (
+        ("Código del Núcleo Vital", payload.get("nucleo_code")),
+        ("Nombre del microproyecto", payload.get("microproject_name")),
+        (
+            "Componente",
+            MICROPROJECT_CHOICE_LABELS["component"].get(
+                payload.get("component"), payload.get("component")
+            ),
+        ),
+        ("Problema resumido", payload.get("problem_summary")),
+        ("Objetivo específico", payload.get("specific_objective")),
+        ("Población beneficiaria", beneficiary_labels),
+        ("Actividades principales", payload.get("main_activities")),
+        (
+            "Rango de costo estimado",
+            MICROPROJECT_CHOICE_LABELS["estimated_cost_range"].get(
+                payload.get("estimated_cost_range"),
+                payload.get("estimated_cost_range"),
+            ),
+        ),
+        (
+            "Urgencia de implementación",
+            MICROPROJECT_CHOICE_LABELS["implementation_urgency"].get(
+                payload.get("implementation_urgency"),
+                payload.get("implementation_urgency"),
+            ),
+        ),
+        (
+            "Viabilidad técnica",
+            MICROPROJECT_CHOICE_LABELS["technical_viability"].get(
+                payload.get("technical_viability"), payload.get("technical_viability")
+            ),
+        ),
+        ("Resultado esperado", payload.get("expected_result")),
+    )
 
 
 def _detail_context(submission, user, *, review_form=None):
@@ -291,6 +390,9 @@ def project_submission_detail(request, pk):
             "normalized_payload": normalized_payload,
             "evidences": evidences,
             "can_view_sensitive": can_view_sensitive,
+            "project_submission_detail_rows": _project_submission_detail_rows(
+                submission
+            ),
             "sensitive_data": {
                 "parish_delegate": normalized_payload.get("parish_delegate"),
                 "contact_phone": normalized_payload.get("contact_phone"),

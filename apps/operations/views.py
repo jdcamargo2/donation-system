@@ -682,11 +682,18 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
             from apps.integrations.kobo.models import KoboAsset
             from apps.integrations.kobo.services import get_project_imported_submissions
 
-            context['kobo_submissions'] = get_project_imported_submissions(
+            context['kobo_territorial_submissions'] = get_project_imported_submissions(
                 self.object,
                 form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE,
             )
+            context['kobo_microproject_submissions'] = get_project_imported_submissions(
+                self.object,
+                form_role=KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+            )
+            context['kobo_submissions'] = context['kobo_territorial_submissions']
         else:
+            context['kobo_territorial_submissions'] = ()
+            context['kobo_microproject_submissions'] = ()
             context['kobo_submissions'] = ()
         return context
 

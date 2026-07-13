@@ -7,10 +7,13 @@
     <a href="{% url 'project_detail' submission.project.pk %}" class="text-decoration-none">← Volver al proyecto</a>
     <div class="my-3"><div class="text-uppercase text-muted small">Levantamiento de campo importado</div><h1 class="h3">{{ submission.form_definition.title }}</h1></div>
 
-    <section class="card card-body mb-3"><h2 class="h5">Proyecto y territorio</h2><dl class="row mb-0">
+    <section class="card card-body mb-3"><h2 class="h5">{% if project_submission_detail_rows %}Microproyecto priorizado{% else %}Proyecto y territorio{% endif %}</h2><dl class="row mb-0">
         <dt class="col-sm-4">Proyecto</dt><dd class="col-sm-8">{{ submission.project }}</dd>
         <dt class="col-sm-4">Formulario</dt><dd class="col-sm-8">{{ submission.form_definition.form_id }}</dd>
         <dt class="col-sm-4">Fecha</dt><dd class="col-sm-8">{{ submission.assessment_date|default:"—" }}</dd>
+        {% if project_submission_detail_rows %}
+            {% for label, value in project_submission_detail_rows %}<dt class="col-sm-4">{{ label }}</dt><dd class="col-sm-8">{{ value|default:"—" }}</dd>{% endfor %}
+        {% else %}
         <dt class="col-sm-4">Zona pastoral</dt><dd class="col-sm-8">{{ submission.pastoral_zone|default:"—" }}</dd>
         <dt class="col-sm-4">Parroquia</dt><dd class="col-sm-8">{{ submission.parish|default:"—" }}</dd>
         <dt class="col-sm-4">Comunidad</dt><dd class="col-sm-8">{{ submission.primary_community|default:"—" }}</dd>
@@ -22,6 +25,7 @@
         <dt class="col-sm-4">Percepción inicial de prioridad</dt><dd class="col-sm-8">{{ normalized_payload.initial_priority_perception|default:"—" }}</dd>
         <dt class="col-sm-4">Notas generales</dt><dd class="col-sm-8">{{ normalized_payload.general_notes|default:"—" }}</dd>
         <dt class="col-sm-4">Ubicación</dt><dd class="col-sm-8">{{ normalized_payload.location|default:"—" }}</dd>
+        {% endif %}
         <dt class="col-sm-4">Recibido</dt><dd class="col-sm-8">{{ submission.received_at }}</dd>
         <dt class="col-sm-4">Importado</dt><dd class="col-sm-8">{{ submission.imported_at|default:"—" }}</dd>
     </dl></section>

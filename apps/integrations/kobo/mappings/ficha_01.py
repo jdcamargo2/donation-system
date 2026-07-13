@@ -1,14 +1,11 @@
 from datetime import tzinfo
 from typing import Mapping
 
-from apps.integrations.kobo.contracts import (
-    AttachmentPrivacy,
-    KoboAttachmentPayload,
-    KoboSubmissionPayload,
-)
+from apps.integrations.kobo.contracts import KoboSubmissionPayload
 from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.mappings.common import (
     optional_string,
+    parse_attachments,
     parse_geolocation,
     parse_integer,
     parse_optional_date,
@@ -48,39 +45,6 @@ def _require_choice(
     if value not in choices:
         raise KoboPayloadError(f"Field {key!r} has an unsupported value.")
     return value
-
-
-def _parse_attachments(
-    raw_attachments: object,
-) -> tuple[KoboAttachmentPayload, ...]:
-    # PRE: raw_attachments is optional Kobo attachment collection data.
-    # POST: returns active internal-review descriptors or raises an indexed error.
-    if raw_attachments is None:
-        return ()
-    if not isinstance(raw_attachments, list):
-        raise KoboPayloadError("Field '_attachments' must be a list.")
-
-    attachments = []
-    for index, raw_attachment in enumerate(raw_attachments):
-        if not isinstance(raw_attachment, dict):
-            raise KoboPayloadError(f"Attachment {index} must be an object.")
-        if raw_attachment.get("is_deleted") is True:
-            continue
-        try:
-            attachment = KoboAttachmentPayload(
-                field_name=require_non_empty_string(
-                    raw_attachment,
-                    "question_xpath",
-                ),
-                source_url=require_non_empty_string(raw_attachment, "download_url"),
-                filename=optional_string(raw_attachment, "media_file_basename"),
-                content_type=optional_string(raw_attachment, "mimetype"),
-                privacy_level=AttachmentPrivacy.INTERNAL_REVIEW,
-            )
-        except KoboPayloadError as exc:
-            raise KoboPayloadError(f"Attachment {index} is invalid: {exc}") from exc
-        attachments.append(attachment)
-    return tuple(attachments)
 
 
 def normalize_ficha_01(
@@ -141,5 +105,5 @@ def normalize_ficha_01(
         submitted_by=optional_string(raw_payload, "_submitted_by"),
         device_id=optional_string(raw_payload, "deviceid"),
         normalized_payload=normalized_payload,
-        attachments=_parse_attachments(raw_payload.get("_attachments")),
+        attachments=parse_attachments(raw_payload.get("_attachments")),
     )

@@ -1,6 +1,7 @@
 from datetime import date, datetime, tzinfo
 from typing import Mapping
 
+from apps.integrations.kobo.contracts import AttachmentPrivacy, KoboAttachmentPayload
 from apps.integrations.kobo.errors import KoboPayloadError
 
 
@@ -125,6 +126,36 @@ def parse_multiselect(value: object) -> tuple[str, ...]:
             choices.append(choice.strip())
         return tuple(choices)
     raise KoboPayloadError("Field 'multiselect' must be text or a string sequence.")
+
+
+def parse_attachments(raw_attachments: object) -> tuple[KoboAttachmentPayload, ...]:
+    """
+    PRE: raw_attachments is optional Kobo attachment descriptor data.
+    POST: returns active INTERNAL_REVIEW descriptors or raises an indexed error.
+    """
+    if raw_attachments is None:
+        return ()
+    if not isinstance(raw_attachments, list):
+        raise KoboPayloadError("Field '_attachments' must be a list.")
+
+    attachments = []
+    for index, raw_attachment in enumerate(raw_attachments):
+        if not isinstance(raw_attachment, dict):
+            raise KoboPayloadError(f"Attachment {index} must be an object.")
+        if raw_attachment.get("is_deleted") is True:
+            continue
+        try:
+            attachment = KoboAttachmentPayload(
+                field_name=require_non_empty_string(raw_attachment, "question_xpath"),
+                source_url=require_non_empty_string(raw_attachment, "download_url"),
+                filename=optional_string(raw_attachment, "media_file_basename"),
+                content_type=optional_string(raw_attachment, "mimetype"),
+                privacy_level=AttachmentPrivacy.INTERNAL_REVIEW,
+            )
+        except KoboPayloadError as exc:
+            raise KoboPayloadError(f"Attachment {index} is invalid: {exc}") from exc
+        attachments.append(attachment)
+    return tuple(attachments)
 
 
 def _parse_coordinate(value: object, *, field_name: str) -> float | None:

@@ -6,12 +6,12 @@
 {% if show_kobo_section %}
 <section class="card border-0 ops-detail-card mt-4">
     <div class="card-body">
-        <h2 class="h5 mb-3">Levantamientos de campo</h2>
+        <h2 class="h5 mb-3">Levantamientos de campo: Identificación territorial</h2>
         <div class="table-responsive">
             <table class="table table-sm align-middle mb-0">
                 <thead><tr><th>Tipo de ficha</th><th>Fecha</th><th>Parroquia</th><th>Comunidad</th><th>Adjuntos</th><th>Descargados</th><th></th></tr></thead>
                 <tbody>
-                {% for submission in kobo_submissions %}
+                {% for submission in kobo_territorial_submissions %}
                     <tr>
                         <td>{{ submission.asset.get_form_role_display }}</td>
                         <td>{{ submission.assessment_date|default:"—" }}</td>
@@ -23,6 +23,32 @@
                     </tr>
                 {% empty %}
                     <tr><td colspan="7" class="text-muted">No hay levantamientos importados.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="card border-0 ops-detail-card mt-4">
+    <div class="card-body">
+        <h2 class="h5 mb-3">Microproyectos priorizados</h2>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead><tr><th>Nombre</th><th>Componente</th><th>Urgencia</th><th>Viabilidad</th><th>Adjuntos</th><th>Descargados</th><th></th></tr></thead>
+                <tbody>
+                {% for submission in kobo_microproject_submissions %}
+                    <tr>
+                        <td>{{ submission.normalized_payload.microproject_name|default:"—" }}</td>
+                        <td>{{ submission.normalized_payload.component|default:"—" }}</td>
+                        <td>{{ submission.normalized_payload.implementation_urgency|default:"—" }}</td>
+                        <td>{{ submission.normalized_payload.technical_viability|default:"—" }}</td>
+                        <td>{{ submission.attachment_count }}</td>
+                        <td>{{ submission.downloaded_attachment_count }}</td>
+                        <td><a href="{% url 'kobo:project_submission_detail' submission.pk %}">Ver microproyecto</a></td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="text-muted">No hay microproyectos priorizados importados.</td></tr>
                 {% endfor %}
                 </tbody>
             </table>
