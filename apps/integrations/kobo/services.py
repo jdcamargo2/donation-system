@@ -12,6 +12,7 @@ from apps.integrations.kobo.errors import (
     KoboPayloadError,
 )
 from apps.integrations.kobo.form_registry import get_registered_form, list_registered_forms
+from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.models import (
     KoboAttachment,
     KoboAsset,
@@ -25,10 +26,6 @@ from apps.integrations.kobo.processors import (
     PROCESSABLE_STATUSES,
     process_submission,
 )
-
-
-FICHA_01_FORM_ID = "ficha_01_territorio"
-FICHA_01_VERSION = "20260710"
 
 
 @dataclass(frozen=True)
@@ -160,7 +157,7 @@ def receive_api_submission(
     raw_payload: dict,
 ) -> tuple[KoboSubmission, bool]:
     """
-    PRE: form_definition is Ficha 1 version 20260710 and raw_payload contains
+    PRE: form_definition is the active Ficha 1 definition and raw_payload contains
     a valid non-empty _uuid.
     POST: returns the existing submission or creates it as received, preserving
     raw_payload without normalization, attachments, or operations changes.
@@ -529,10 +526,8 @@ def associate_submission_with_project(
         raise KoboConfigurationError("An authenticated reviewer is required.")
 
     with transaction.atomic():
-        locked_submission = (
-            KoboSubmission.objects.select_for_update()
-            .select_related("asset", "project")
-            .get(pk=submission.pk)
+        locked_submission = KoboSubmission.objects.select_for_update().get(
+            pk=submission.pk
         )
         previous_status = locked_submission.status
         if previous_status == KoboSubmission.Status.IMPORTED:

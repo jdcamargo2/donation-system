@@ -91,13 +91,13 @@ def _detail_context(submission, user, *, review_form=None):
     # POST: returns separated review context without exposing attachment sources.
     normalized_payload = submission.normalized_payload or {}
     sensitive_data = {
-        "survey_responsible": normalized_payload.get("survey_responsible"),
-        "parish_priest": normalized_payload.get("parish_priest"),
+        "parish_delegate": normalized_payload.get("parish_delegate"),
         "contact_phone": normalized_payload.get("contact_phone"),
+        "main_informant_role": normalized_payload.get("main_informant_role"),
         "submitted_by": submission.raw_payload.get("_submitted_by"),
         "device_id": submission.raw_payload.get("deviceid"),
     }
-    sensitive_keys = {"survey_responsible", "parish_priest", "contact_phone"}
+    sensitive_keys = {"parish_delegate", "contact_phone", "main_informant_role"}
     display_normalized_payload = {
         key: value
         for key, value in normalized_payload.items()
@@ -292,9 +292,9 @@ def project_submission_detail(request, pk):
             "evidences": evidences,
             "can_view_sensitive": can_view_sensitive,
             "sensitive_data": {
-                "survey_responsible": normalized_payload.get("survey_responsible"),
-                "parish_priest": normalized_payload.get("parish_priest"),
+                "parish_delegate": normalized_payload.get("parish_delegate"),
                 "contact_phone": normalized_payload.get("contact_phone"),
+                "main_informant_role": normalized_payload.get("main_informant_role"),
                 "submitted_by": submission.raw_payload.get("_submitted_by"),
                 "device_id": submission.raw_payload.get("deviceid"),
             },

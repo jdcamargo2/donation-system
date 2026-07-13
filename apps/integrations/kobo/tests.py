@@ -52,6 +52,7 @@ from apps.integrations.kobo.form_registry import (
     get_registered_form,
     list_registered_forms,
 )
+from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.forms import KoboProjectBindingForm
 from apps.integrations.kobo.models import (
     KoboAttachment,
@@ -266,131 +267,134 @@ class KoboFicha01NormalizerTests(SimpleTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        sample_path = (
-            Path(__file__).resolve().parents[3]
-            / "docs/kobo/samples/ficha_01.sample.json"
-        )
-        with sample_path.open(encoding="utf-8") as sample_file:
-            cls.sample_payload = json.load(sample_file)["results"][0]
         cls.default_timezone = ZoneInfo("America/Caracas")
+
+    def valid_payload(self, **overrides):
+        # PRE: overrides contains only Ficha 1 XLSForm values or Kobo metadata.
+        # POST: returns a complete new-contract payload without persistence.
+        payload = {
+            "_uuid": "ficha-01-normalized",
+            "_xform_id_string": "ficha-01-asset",
+            "_submission_time": "2026-07-12T12:30:00",
+            "_submitted_by": "internal-submitter",
+            "deviceid": "private-device-id",
+            "today": "2026-07-12",
+            "nucleo_code": " NV-001 ",
+            "pastoral_zone": "catia_la_mar",
+            "parish": "Caraballeda",
+            "community_sector": "Tanaguarena",
+            "location": "10.5 -66.5 12 3",
+            "parish_delegate": "Delegada reservada",
+            "contact_phone": "+58-sensitive-phone",
+            "main_informant_role": "Vocero comunitario",
+            "communities_covered": "Tanaguarena y zonas vecinas",
+            "estimated_households": "0",
+            "access_difficulties": "yes",
+            "access_difficulties_notes": "",
+            "initial_priority_perception": "high",
+            "general_notes": "Nota general.",
+            "_attachments": [
+                {
+                    "question_xpath": "evidence/photo",
+                    "download_url": "https://kf.example.test/private/photo.jpg",
+                    "media_file_basename": "photo.jpg",
+                    "mimetype": "image/jpeg",
+                }
+            ],
+        }
+        payload.update(overrides)
+        return payload
 
     def normalize(self, payload=None, **routing_overrides):
         # PRE: payload is Ficha 1-like data and overrides contains routing fields.
         # POST: returns a pure normalization result using an explicit timezone.
         routing = {
-            "form_id": "ficha_01_territorio",
-            "form_version": "20260710",
+            "form_id": FICHA_01_FORM_ID,
+            "form_version": FICHA_01_VERSION,
         }
         routing.update(routing_overrides)
         return normalize_submission(
-            self.sample_payload if payload is None else payload,
+            self.valid_payload() if payload is None else payload,
             default_timezone=self.default_timezone,
             **routing,
         )
 
-    def test_normalizes_anonymized_real_payload(self):
+    def test_normalizes_complete_depurated_payload(self):
         result = self.normalize()
 
-        self.assertEqual(result.external_id, self.sample_payload["_uuid"])
-        self.assertEqual(result.form_id, "ficha_01_territorio")
-        self.assertEqual(result.form_version, "20260710")
+        self.assertEqual(result.external_id, "ficha-01-normalized")
+        self.assertEqual(result.form_id, FICHA_01_FORM_ID)
+        self.assertEqual(result.form_version, FICHA_01_VERSION)
         self.assertEqual(result.pastoral_zone, "catia_la_mar")
-        self.assertEqual(result.parish, "caraballeda")
+        self.assertEqual(result.parish, "Caraballeda")
+        self.assertEqual(result.primary_community, "Tanaguarena")
+        self.assertEqual(result.assessment_date, date(2026, 7, 12))
+        self.assertEqual(result.normalized_payload["nucleo_code"], "NV-001")
+        self.assertNotIn("_submitted_by", result.normalized_payload)
+        self.assertNotIn("deviceid", result.normalized_payload)
+        self.assertNotIn("download_url", result.normalized_payload)
 
     def test_does_not_modify_raw_payload(self):
-        raw_payload = deepcopy(self.sample_payload)
+        raw_payload = self.valid_payload()
         original_payload = deepcopy(raw_payload)
 
         self.normalize(raw_payload)
 
         self.assertEqual(raw_payload, original_payload)
 
-    def test_trims_strings_and_converts_optional_empty_strings_to_none(self):
-        raw_payload = deepcopy(self.sample_payload)
-        raw_payload["identification/pastoral_zone"] = "  catia_la_mar  "
-        raw_payload["identification/primary_community"] = "   "
-        raw_payload["territorial_profile/church_advocation"] = "  Santa Ana  "
+    def test_trims_nucleo_code_and_allows_empty_access_notes(self):
+        raw_payload = self.valid_payload(nucleo_code="  NV-010  ")
 
         result = self.normalize(raw_payload)
 
-        self.assertEqual(result.pastoral_zone, "catia_la_mar")
-        self.assertIsNone(result.primary_community)
-        self.assertEqual(
-            result.normalized_payload["church_advocation"],
-            "Santa Ana",
-        )
+        self.assertEqual(result.normalized_payload["nucleo_code"], "NV-010")
+        self.assertIsNone(result.normalized_payload["access_difficulties_notes"])
 
     def test_parses_assessment_date_and_aware_submission_time(self):
         result = self.normalize()
 
-        self.assertEqual(result.assessment_date, date(2026, 7, 11))
+        self.assertEqual(result.assessment_date, date(2026, 7, 12))
         self.assertIsNotNone(result.submitted_at.utcoffset())
         self.assertEqual(result.submitted_at.tzinfo, self.default_timezone)
 
-    def test_converts_population_and_households_to_integers(self):
-        result = self.normalize()
+    def test_estimated_households_zero_and_none_are_valid(self):
+        self.assertEqual(self.normalize(self.valid_payload(estimated_households=0)).normalized_payload["estimated_households"], 0)
+        self.assertIsNone(self.normalize(self.valid_payload(estimated_households=None)).normalized_payload["estimated_households"])
 
-        self.assertEqual(result.normalized_payload["estimated_population"], 15000)
-        self.assertEqual(result.normalized_payload["estimated_households"], 10000)
-
-    def test_rejects_negative_population_or_households(self):
-        fields = (
-            "territorial_profile/estimated_population",
-            "territorial_profile/estimated_households",
-        )
-
-        for field in fields:
-            with self.subTest(field=field):
-                raw_payload = deepcopy(self.sample_payload)
-                raw_payload[field] = "-1"
-                with self.assertRaises(KoboPayloadError):
-                    self.normalize(raw_payload)
-
-    def test_converts_territory_type_to_ordered_tuple(self):
-        result = self.normalize()
-
-        self.assertEqual(
-            result.normalized_payload["territory_type"],
-            ("insular", "linear_coastal"),
-        )
-
-    def test_prefers_geolocation_coordinates(self):
-        raw_payload = deepcopy(self.sample_payload)
-        raw_payload["_geolocation"] = [10.5, -66.5, 12, 3]
-        raw_payload["territorial_profile/location"] = "1 2 3 4"
+    def test_normalizes_flat_location_and_prefers_geolocation(self):
+        raw_payload = self.valid_payload(_geolocation=[10.6, -66.6, 12, 3])
 
         location = self.normalize(raw_payload).normalized_payload["location"]
 
         self.assertEqual(
             location,
             {
-                "latitude": 10.5,
-                "longitude": -66.5,
+                "latitude": 10.6,
+                "longitude": -66.6,
                 "altitude": 12.0,
                 "accuracy": 3.0,
             },
         )
 
-    def test_uses_text_location_when_geolocation_is_missing(self):
-        raw_payload = deepcopy(self.sample_payload)
-        raw_payload.pop("_geolocation")
+    def test_uses_flat_location_when_geolocation_is_missing(self):
+        raw_payload = self.valid_payload()
+        raw_payload.pop("_geolocation", None)
 
         location = self.normalize(raw_payload).normalized_payload["location"]
 
-        self.assertEqual(location["latitude"], 10.0)
-        self.assertEqual(location["longitude"], -66.0)
+        self.assertEqual(location["latitude"], 10.5)
+        self.assertEqual(location["longitude"], -66.5)
 
     def test_rejects_coordinates_outside_valid_range(self):
-        raw_payload = deepcopy(self.sample_payload)
-        raw_payload["_geolocation"] = [91, -66]
+        raw_payload = self.valid_payload(location="91 -66")
 
         with self.assertRaises(KoboPayloadError):
             self.normalize(raw_payload)
 
-    def test_creates_three_internal_review_attachment_descriptors(self):
+    def test_attachments_are_internal_and_absent_from_normalized_payload(self):
         result = self.normalize()
 
-        self.assertEqual(len(result.attachments), 3)
+        self.assertEqual(len(result.attachments), 1)
         self.assertTrue(
             all(
                 attachment.privacy_level == AttachmentPrivacy.INTERNAL_REVIEW
@@ -401,35 +405,46 @@ class KoboFicha01NormalizerTests(SimpleTestCase):
         self.assertNotIn("download_url", result.normalized_payload)
 
     def test_ignores_deleted_attachments(self):
-        raw_payload = deepcopy(self.sample_payload)
+        raw_payload = self.valid_payload()
         deleted_attachment = deepcopy(raw_payload["_attachments"][0])
         deleted_attachment["is_deleted"] = True
         raw_payload["_attachments"].append(deleted_attachment)
 
         result = self.normalize(raw_payload)
 
-        self.assertEqual(len(result.attachments), 3)
+        self.assertEqual(len(result.attachments), 1)
 
     def test_invalid_attachment_reports_its_index(self):
-        raw_payload = deepcopy(self.sample_payload)
-        raw_payload["_attachments"][1].pop("download_url")
+        raw_payload = self.valid_payload()
+        raw_payload["_attachments"][0].pop("download_url")
 
-        with self.assertRaisesMessage(KoboPayloadError, "Attachment 1"):
+        with self.assertRaisesMessage(KoboPayloadError, "Attachment 0"):
             self.normalize(raw_payload)
 
     def test_missing_uuid_fails_early(self):
-        raw_payload = deepcopy(self.sample_payload)
+        raw_payload = self.valid_payload()
         raw_payload.pop("_uuid")
 
         with self.assertRaisesMessage(KoboPayloadError, "_uuid"):
             self.normalize(raw_payload)
 
-    def test_empty_parish_fails_early(self):
-        raw_payload = deepcopy(self.sample_payload)
-        raw_payload["identification/parish"] = "   "
+    def test_rejects_required_and_controlled_values(self):
+        cases = (
+            ("nucleo_code", "   "),
+            ("pastoral_zone", "unknown"),
+            ("estimated_households", -1),
+            ("estimated_households", True),
+            ("estimated_households", "not-an-integer"),
+            ("access_difficulties", "sometimes"),
+            ("initial_priority_perception", "urgent"),
+            ("location", "bad-location"),
+            ("_attachments", {}),
+        )
 
-        with self.assertRaisesMessage(KoboPayloadError, "identification/parish"):
-            self.normalize(raw_payload)
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                with self.assertRaises(KoboPayloadError):
+                    self.normalize(self.valid_payload(**{field: value}))
 
     def test_unknown_form_or_version_fails(self):
         routing_overrides = (
@@ -880,12 +895,17 @@ class KoboFormRegistryTests(SimpleTestCase):
     def test_first_form_uses_expected_identifier(self):
         first_form = list_registered_forms()[0]
 
-        self.assertEqual(first_form.form_id, "ficha_01_territorio")
+        self.assertEqual(first_form.form_id, FICHA_01_FORM_ID)
+        self.assertEqual(first_form.version, FICHA_01_VERSION)
+        self.assertEqual(
+            first_form.title,
+            "Ficha 1 - Identificación territorial del Núcleo Vital (depurada)",
+        )
 
     def test_every_form_uses_initial_version(self):
         versions = {form.version for form in list_registered_forms()}
 
-        self.assertEqual(versions, {"20260710"})
+        self.assertEqual(versions, {FICHA_01_VERSION, "20260710"})
 
     def test_get_registered_form_returns_exact_definition(self):
         registered_form = get_registered_form(
@@ -902,7 +922,7 @@ class KoboFormRegistryTests(SimpleTestCase):
 
     def test_unknown_version_raises_payload_error(self):
         with self.assertRaises(KoboPayloadError):
-            get_registered_form("ficha_01_territorio", "unknown_version")
+            get_registered_form(FICHA_01_FORM_ID, "unknown_version")
 
     def test_normalizer_names_follow_numbered_pattern(self):
         pattern = re.compile(r"^normalize_ficha_\d{2}$")
@@ -925,6 +945,26 @@ class KoboFormSynchronizationTests(TestCase):
 
         self.assertEqual(KoboFormDefinition.objects.count(), 9)
 
+    def test_sync_preserves_historical_definition(self):
+        KoboFormDefinition.objects.create(
+            form_id="ficha_01_territorio",
+            title="Ficha 01 histórica",
+            version="20260710",
+        )
+
+        sync_registered_forms()
+
+        self.assertTrue(
+            KoboFormDefinition.objects.filter(
+                form_id="ficha_01_territorio", version="20260710"
+            ).exists()
+        )
+        self.assertTrue(
+            KoboFormDefinition.objects.filter(
+                form_id=FICHA_01_FORM_ID, version=FICHA_01_VERSION
+            ).exists()
+        )
+
     def test_register_command_is_idempotent(self):
         first_output = StringIO()
         second_output = StringIO()
@@ -942,9 +982,9 @@ class KoboSubmissionSynchronizationTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.form_definition = KoboFormDefinition.objects.create(
-            form_id="ficha_01_territorio",
-            title="Ficha 01 - Territorio",
-            version="20260710",
+            form_id=FICHA_01_FORM_ID,
+            title="Ficha 1 - Identificación territorial del Núcleo Vital (depurada)",
+            version=FICHA_01_VERSION,
         )
 
     def valid_payload(self, external_id="submission-001", **overrides):
@@ -954,7 +994,7 @@ class KoboSubmissionSynchronizationTests(TestCase):
             "_uuid": external_id,
             "_id": 9876,
             "_xform_id_string": "ficha-01-asset",
-            "version": "20260710",
+            "version": FICHA_01_VERSION,
             "meta/instanceID": f"uuid:{external_id}",
             "contact_phone": "+58-sensitive-phone",
             "gps_coordinates": "sensitive-coordinates",
@@ -1059,6 +1099,16 @@ class KoboSubmissionSynchronizationTests(TestCase):
         self.assertEqual(event.code, "invalid_payload")
         self.assertNotIn("sensitive", event.message)
 
+    def test_old_definition_is_rejected(self):
+        old_definition = KoboFormDefinition.objects.create(
+            form_id="ficha_01_territorio",
+            title="Ficha 01 histórica",
+            version="20260710",
+        )
+
+        with self.assertRaises(KoboPayloadError):
+            receive_api_submission(old_definition, self.valid_payload())
+
     @override_settings(KOBO_FICHA_01_ASSET_UID="")
     def test_missing_configured_asset_uid_uses_configuration_error(self):
         with self.assertRaises(KoboConfigurationError):
@@ -1075,9 +1125,9 @@ class KoboFicha01SyncCommandTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         KoboFormDefinition.objects.create(
-            form_id="ficha_01_territorio",
-            title="Ficha 01 - Territorio",
-            version="20260710",
+            form_id=FICHA_01_FORM_ID,
+            title="Ficha 1 - Identificación territorial del Núcleo Vital (depurada)",
+            version=FICHA_01_VERSION,
         )
 
     def test_command_queries_only_ficha_01_and_prints_safe_counts(self):
@@ -1140,24 +1190,28 @@ class KoboSubmissionProcessorTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.form_definition = KoboFormDefinition.objects.create(
-            form_id="ficha_01_territorio",
-            title="Ficha 01 - Territorio",
-            version="20260710",
+            form_id=FICHA_01_FORM_ID,
+            title="Ficha 1 - Identificación territorial del Núcleo Vital (depurada)",
+            version=FICHA_01_VERSION,
         )
-        sample_path = (
-            Path(__file__).resolve().parents[3]
-            / "docs/kobo/samples/ficha_01.sample.json"
-        )
-        with sample_path.open(encoding="utf-8") as sample_file:
-            cls.sample_payload = json.load(sample_file)["results"][0]
         cls.default_timezone = ZoneInfo("America/Caracas")
 
     def create_submission(self, external_id="processor-submission", **overrides):
         # PRE: external_id is unique within this test and overrides are model fields.
-        # POST: returns persisted retryable staging based on the anonymized sample.
-        raw_payload = deepcopy(self.sample_payload)
-        raw_payload["_uuid"] = external_id
-        raw_payload["meta/instanceID"] = f"uuid:{external_id}"
+        # POST: returns persisted retryable staging for the active Ficha 1 contract.
+        raw_payload = {
+            "_uuid": external_id,
+            "today": "2026-07-12",
+            "nucleo_code": "NV-001",
+            "pastoral_zone": "catia_la_mar",
+            "parish": "caraballeda",
+            "community_sector": "caraballeda_tanaguarena",
+            "location": "10 -66",
+            "estimated_households": 10000,
+            "access_difficulties": "unknown",
+            "initial_priority_perception": "medium",
+            "_attachments": [],
+        }
         values = {
             "form_definition": self.form_definition,
             "external_id": external_id,
@@ -1178,17 +1232,18 @@ class KoboSubmissionProcessorTests(TestCase):
 
         self.assertTrue(outcome.processed)
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
-        self.assertEqual(submission.normalized_payload["estimated_population"], 15000)
+        self.assertEqual(submission.normalized_payload["nucleo_code"], "NV-001")
+        self.assertEqual(submission.normalized_payload["estimated_households"], 10000)
         self.assertEqual(submission.pastoral_zone, "catia_la_mar")
         self.assertEqual(submission.parish, "caraballeda")
         self.assertEqual(
             submission.primary_community,
             "caraballeda_tanaguarena",
         )
-        self.assertEqual(submission.assessment_date, date(2026, 7, 11))
+        self.assertEqual(submission.assessment_date, date(2026, 7, 12))
         self.assertIsNotNone(submission.normalized_at)
 
-    def test_creates_three_pending_attachments_without_duplicates(self):
+    def test_creates_no_attachments_without_attachment_descriptors(self):
         submission = self.create_submission()
 
         first_outcome = process_submission(
@@ -1202,16 +1257,16 @@ class KoboSubmissionProcessorTests(TestCase):
             default_timezone=self.default_timezone,
         )
 
-        self.assertEqual(first_outcome.attachment_count, 3)
-        self.assertEqual(second_outcome.attachment_count, 3)
-        self.assertEqual(submission.attachments.count(), 3)
+        self.assertEqual(first_outcome.attachment_count, 0)
+        self.assertEqual(second_outcome.attachment_count, 0)
+        self.assertEqual(submission.attachments.count(), 0)
         self.assertFalse(
             submission.attachments.exclude(status=KoboAttachment.Status.PENDING).exists()
         )
 
     def test_invalid_payload_becomes_validation_failed_with_error_event(self):
         submission = self.create_submission()
-        submission.raw_payload.pop("identification/parish")
+        submission.raw_payload.pop("parish")
         submission.save(update_fields=("raw_payload",))
 
         outcome = process_submission(
@@ -1360,13 +1415,34 @@ class KoboSubmissionProcessorTests(TestCase):
             )
 
         download_mock.assert_not_called()
-        self.assertEqual(submission.attachments.count(), 3)
+        self.assertEqual(submission.attachments.count(), 0)
         self.assertFalse(
             submission.attachments.exclude(status=KoboAttachment.Status.PENDING).exists()
         )
 
     def test_command_with_flag_downloads_created_attachments(self):
         submission = self.create_submission("with-download-flag")
+        submission.raw_payload["_attachments"] = [
+            {
+                "question_xpath": "evidence/rear",
+                "download_url": "https://kf.example.test/private/rear.jpg",
+                "media_file_basename": "rear.jpg",
+                "mimetype": "image/jpeg",
+            },
+            {
+                "question_xpath": "evidence/side",
+                "download_url": "https://kf.example.test/private/side.png",
+                "media_file_basename": "side.png",
+                "mimetype": "image/png",
+            },
+            {
+                "question_xpath": "evidence/front",
+                "download_url": "https://kf.example.test/private/front.jpg",
+                "media_file_basename": "front.jpg",
+                "mimetype": "image/jpeg",
+            },
+        ]
+        submission.save(update_fields=("raw_payload",))
         client = StubAttachmentClient(
             [
                 DownloadedContent(b"\xff\xd8\xffrear", "image/jpeg", 7),
@@ -1750,10 +1826,10 @@ class KoboReviewPanelTests(TestCase):
                 "deviceid": "private-device-id",
             },
             normalized_payload={
-                "survey_responsible": "Sensitive Responsible",
-                "parish_priest": "Sensitive Priest",
+                "parish_delegate": "Sensitive Delegate",
                 "contact_phone": "+58-secret-phone",
-                "official_parish_name": "Public Parish Name",
+                "main_informant_role": "Sensitive Informant Role",
+                "nucleo_code": "NV-001",
             },
             status=KoboSubmission.Status.READY_FOR_REVIEW,
             pastoral_zone="zone-one",
@@ -1812,12 +1888,12 @@ class KoboReviewPanelTests(TestCase):
         response = self.client.get(self.detail_url)
 
         self.assertContains(response, "Datos internos sensibles")
-        self.assertContains(response, "Sensitive Responsible")
-        self.assertContains(response, "Sensitive Priest")
+        self.assertContains(response, "Sensitive Delegate")
+        self.assertContains(response, "Sensitive Informant Role")
         self.assertContains(response, "+58-secret-phone")
         self.assertContains(response, "internal-submitter")
         self.assertContains(response, "private-device-id")
-        self.assertContains(response, "Public Parish Name")
+        self.assertContains(response, "NV-001")
 
     def test_raw_payload_requires_existing_elevated_permission(self):
         self.client.force_login(self.viewer)
@@ -2190,10 +2266,11 @@ class KoboRoutingResolutionTests(TestCase):
         self.assertEqual(resolution.binding_id, binding.pk)
         self.assertEqual(resolution.source_value, "catia_la_mar")
 
-    def test_normalized_payload_field_resolves_exactly(self):
+    def test_nucleo_code_payload_field_resolves_exactly(self):
+        self.submission.normalized_payload = {"nucleo_code": "NV-001"}
         binding = self.create_field_binding(
-            source_field="payload.project_code",
-            source_value="PROJECT-A",
+            source_field="payload.nucleo_code",
+            source_value="NV-001",
         )
 
         resolution = resolve_project_binding(self.submission, self.asset)
@@ -2205,7 +2282,7 @@ class KoboRoutingResolutionTests(TestCase):
         self.submission.normalized_payload = {}
 
         with self.assertRaises(KoboPayloadError):
-            resolve_routing_field(self.submission, "payload.project_code")
+            resolve_routing_field(self.submission, "payload.nucleo_code")
 
     def test_invalid_routing_field_syntax_is_rejected(self):
         source_fields = (
@@ -2522,9 +2599,9 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         )
         cls.unprivileged.user_permissions.add(permissions["view_project"])
         cls.form_definition = KoboFormDefinition.objects.create(
-            form_id="ficha_01_territorio",
-            title="Ficha 01 - Territorio",
-            version="20260710",
+            form_id=FICHA_01_FORM_ID,
+            title="Ficha 1 - Identificación territorial del Núcleo Vital (depurada)",
+            version=FICHA_01_VERSION,
         )
 
     def setUp(self):
@@ -2550,6 +2627,13 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             form_definition=self.form_definition,
             form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE,
             is_active=False,
+        )
+        self.binding = KoboProjectBinding.objects.create(
+            asset=self.asset,
+            project=self.project,
+            routing_type=KoboProjectBinding.RoutingType.FIELD_VALUE,
+            source_field="payload.nucleo_code",
+            source_value="NV-001",
         )
         self.imported = self.create_submission(
             "visible-imported",
@@ -2614,16 +2698,17 @@ class KoboProjectImportedSubmissionsTests(TestCase):
                 "deviceid": "Sensitive Device",
             },
             normalized_payload={
-                "official_parish_name": "Official Visible Parish",
-                "church_advocation": "Visible Advocation",
-                "estimated_population": 1200,
+                "nucleo_code": "NV-001",
+                "communities_covered": "Comunidades visibles",
                 "estimated_households": 300,
-                "main_accessibility": "Main road",
-                "territory_type": ["urban"],
+                "access_difficulties": "no",
+                "access_difficulties_notes": None,
+                "initial_priority_perception": "medium",
+                "general_notes": "Nota visible",
                 "location": {"latitude": 10.0, "longitude": -66.0},
-                "survey_responsible": "Sensitive Responsible",
-                "parish_priest": "Sensitive Priest",
+                "parish_delegate": "Sensitive Delegate",
                 "contact_phone": "+58-sensitive-phone",
+                "main_informant_role": "Sensitive Informant Role",
             },
             status=status,
             pastoral_zone="catia_la_mar",
@@ -2660,8 +2745,8 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertNotContains(response, "approved-hidden")
         self.assertNotContains(response, "inactive-asset-hidden")
         for sensitive_value in (
-            "Sensitive Responsible",
-            "Sensitive Priest",
+            "Sensitive Delegate",
+            "Sensitive Informant Role",
             "+58-sensitive-phone",
             "Sensitive Submitter",
             "Sensitive Device",
@@ -2694,15 +2779,19 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.client.force_login(self.viewer)
         viewer_response = self.client.get(url)
 
-        self.assertContains(viewer_response, "Official Visible Parish")
+        self.assertContains(viewer_response, "NV-001")
         self.assertNotContains(viewer_response, "Datos internos sensibles")
         self.assertNotContains(viewer_response, "+58-sensitive-phone")
+        self.assertNotContains(viewer_response, "Sensitive Delegate")
+        self.assertNotContains(viewer_response, "Sensitive Informant Role")
 
         self.client.force_login(self.reviewer)
         reviewer_response = self.client.get(url)
 
         self.assertContains(reviewer_response, "Datos internos sensibles")
         self.assertContains(reviewer_response, "+58-sensitive-phone")
+        self.assertContains(reviewer_response, "Sensitive Delegate")
+        self.assertContains(reviewer_response, "Sensitive Informant Role")
         self.assertContains(reviewer_response, "Sensitive Device")
 
     def test_detail_hides_sources_and_non_downloaded_attachments(self):
@@ -2740,17 +2829,23 @@ class KoboProjectImportedSubmissionsTests(TestCase):
 
 
 class KoboGenericRoutingMigrationTests(TransactionTestCase):
-    migrate_from = (
-        "kobo",
-        "0003_kobosubmission_asset_kobosubmission_imported_at_and_more",
-    )
-    migrate_to = ("kobo", "0004_generic_project_binding_routing")
-    migrate_latest = ("kobo", "0005_kobodiscoveredasset")
+    migrate_from = [
+        ("operations", "0015_projectupdatereviewdecision"),
+        ("kobo", "0003_kobosubmission_asset_kobosubmission_imported_at_and_more"),
+    ]
+    migrate_to = [
+        ("operations", "0015_projectupdatereviewdecision"),
+        ("kobo", "0004_generic_project_binding_routing"),
+    ]
+    migrate_latest = [
+        ("operations", "0015_projectupdatereviewdecision"),
+        ("kobo", "0005_kobodiscoveredasset"),
+    ]
 
     def test_pastoral_binding_migrates_without_losing_asset_or_project(self):
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_from])
-        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        executor.migrate(self.migrate_from)
+        old_apps = executor.loader.project_state(self.migrate_from).apps
         OldFormDefinition = old_apps.get_model("kobo", "KoboFormDefinition")
         OldAsset = old_apps.get_model("kobo", "KoboAsset")
         OldBinding = old_apps.get_model("kobo", "KoboProjectBinding")
@@ -2777,8 +2872,8 @@ class KoboGenericRoutingMigrationTests(TransactionTestCase):
         )
 
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        new_apps = executor.loader.project_state([self.migrate_to]).apps
+        executor.migrate(self.migrate_to)
+        new_apps = executor.loader.project_state(self.migrate_to).apps
         NewBinding = new_apps.get_model("kobo", "KoboProjectBinding")
         migrated = NewBinding.objects.get(pk=old_binding.pk)
 
@@ -2789,7 +2884,7 @@ class KoboGenericRoutingMigrationTests(TransactionTestCase):
         self.assertEqual(migrated.source_value, "catia_la_mar")
 
     def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_latest])
+        MigrationExecutor(connection).migrate(self.migrate_latest)
         super().tearDown()
 
 
@@ -2946,9 +3041,9 @@ class KoboAssetManualConfigurationTests(TestCase):
             permissions["view_koboasset"], permissions["change_koboasset"]
         )
         cls.definition = KoboFormDefinition.objects.create(
-            form_id="ficha_01_territorio",
-            title="Ficha 01",
-            version="20260710",
+            form_id=FICHA_01_FORM_ID,
+            title="Ficha 1 - Identificación territorial del Núcleo Vital (depurada)",
+            version=FICHA_01_VERSION,
         )
 
     def setUp(self):

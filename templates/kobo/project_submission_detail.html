@@ -14,12 +14,13 @@
         <dt class="col-sm-4">Zona pastoral</dt><dd class="col-sm-8">{{ submission.pastoral_zone|default:"—" }}</dd>
         <dt class="col-sm-4">Parroquia</dt><dd class="col-sm-8">{{ submission.parish|default:"—" }}</dd>
         <dt class="col-sm-4">Comunidad</dt><dd class="col-sm-8">{{ submission.primary_community|default:"—" }}</dd>
-        <dt class="col-sm-4">Parroquia oficial</dt><dd class="col-sm-8">{{ normalized_payload.official_parish_name|default:"—" }}</dd>
-        <dt class="col-sm-4">Advocación</dt><dd class="col-sm-8">{{ normalized_payload.church_advocation|default:"—" }}</dd>
-        <dt class="col-sm-4">Población estimada</dt><dd class="col-sm-8">{{ normalized_payload.estimated_population|default_if_none:"—" }}</dd>
+        <dt class="col-sm-4">Código del Núcleo Vital</dt><dd class="col-sm-8">{{ normalized_payload.nucleo_code|default:"—" }}</dd>
+        <dt class="col-sm-4">Comunidades cubiertas</dt><dd class="col-sm-8">{{ normalized_payload.communities_covered|default:"—" }}</dd>
         <dt class="col-sm-4">Hogares estimados</dt><dd class="col-sm-8">{{ normalized_payload.estimated_households|default_if_none:"—" }}</dd>
-        <dt class="col-sm-4">Accesibilidad</dt><dd class="col-sm-8">{{ normalized_payload.main_accessibility|default:"—" }}</dd>
-        <dt class="col-sm-4">Tipo de territorio</dt><dd class="col-sm-8">{{ normalized_payload.territory_type|default:"—" }}</dd>
+        <dt class="col-sm-4">Dificultades de acceso</dt><dd class="col-sm-8">{{ normalized_payload.access_difficulties|default:"—" }}</dd>
+        <dt class="col-sm-4">Notas de acceso</dt><dd class="col-sm-8">{{ normalized_payload.access_difficulties_notes|default:"—" }}</dd>
+        <dt class="col-sm-4">Percepción inicial de prioridad</dt><dd class="col-sm-8">{{ normalized_payload.initial_priority_perception|default:"—" }}</dd>
+        <dt class="col-sm-4">Notas generales</dt><dd class="col-sm-8">{{ normalized_payload.general_notes|default:"—" }}</dd>
         <dt class="col-sm-4">Ubicación</dt><dd class="col-sm-8">{{ normalized_payload.location|default:"—" }}</dd>
         <dt class="col-sm-4">Recibido</dt><dd class="col-sm-8">{{ submission.received_at }}</dd>
         <dt class="col-sm-4">Importado</dt><dd class="col-sm-8">{{ submission.imported_at|default:"—" }}</dd>

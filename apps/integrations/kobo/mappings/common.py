@@ -140,9 +140,13 @@ def _parse_coordinate(value: object, *, field_name: str) -> float | None:
         raise KoboPayloadError(f"Field {field_name!r} must be numeric.") from exc
 
 
-def parse_geolocation(payload: Mapping[str, object]) -> dict | None:
+def parse_geolocation(
+    payload: Mapping[str, object],
+    *,
+    location_key: str = "territorial_profile/location",
+) -> dict | None:
     """
-    PRE: payload may contain _geolocation or territorial_profile/location.
+    PRE: payload may contain _geolocation or location_key geolocation text.
     POST: returns validated coordinate components, None, or raises KoboPayloadError.
     """
     raw_geolocation = payload.get("_geolocation")
@@ -154,15 +158,15 @@ def parse_geolocation(payload: Mapping[str, object]) -> dict | None:
         components = tuple(raw_geolocation[:4])
         field_name = "_geolocation"
     else:
-        raw_location = payload.get("territorial_profile/location")
+        raw_location = payload.get(location_key)
         if raw_location is None or raw_location == "":
             return None
         if not isinstance(raw_location, str):
             raise KoboPayloadError(
-                "Field 'territorial_profile/location' must be geolocation text."
+                f"Field {location_key!r} must be geolocation text."
             )
         components = tuple(raw_location.strip().split())
-        field_name = "territorial_profile/location"
+        field_name = location_key
         if len(components) < 2 or len(components) > 4:
             raise KoboPayloadError(
                 f"Field {field_name!r} must contain two to four coordinates."

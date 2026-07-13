@@ -38,3 +38,5 @@ backups/db.sqlite3.pre-postgresql
 backups/*.sqlite3*
 
 docs/sondeos/
+
+sondeo_*.txt

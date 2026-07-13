@@ -1,6 +1,7 @@
 from django import forms
 from django.core.exceptions import ValidationError
 
+from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboDiscoveredAsset,
@@ -13,7 +14,7 @@ from apps.integrations.kobo.services import validate_routing_source_field
 
 
 SUPPORTED_FORM_ROLES = {
-    "ficha_01_territorio": KoboAsset.FormRole.TERRITORIAL_PROFILE,
+    FICHA_01_FORM_ID: KoboAsset.FormRole.TERRITORIAL_PROFILE,
 }
 
 
