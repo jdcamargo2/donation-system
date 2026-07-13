@@ -1,0 +1,242 @@
+# SIGEDON
+
+**Sistema Integral de Gestión, Seguimiento y Trazabilidad de Donaciones**
+
+SIGEDON es una aplicación web institucional diseñada para registrar, controlar, auditar y transparentar donaciones monetarias destinadas a proyectos sociales, pastorales o humanitarios.
+
+El sistema permite seguir la cadena completa de trazabilidad:
+
+```text
+Institución
+→ Donación
+→ Asignación de fondos
+→ Proyecto
+→ Gasto
+→ Evidencia
+→ Avance
+→ Revisión institucional
+→ Auditoría
+→ Transparencia pública
+```
+
+## Estado actual
+
+El MVP se encuentra funcional y cubierto por pruebas automatizadas.
+
+| Indicador                             | Estado          |
+| ------------------------------------- | --------------- |
+| Pruebas automatizadas                 | 620             |
+| Estado de la suite                    | OK              |
+| Migraciones pendientes                | Ninguna         |
+| Django system check                   | Sin incidencias |
+| Base de datos soportada en producción | PostgreSQL      |
+
+## Stack tecnológico
+
+* Python 3.12
+* Django 6.0.6
+* PostgreSQL mediante Psycopg 3
+* SQLite únicamente para desarrollo local con `DEBUG=True`
+* Django Templates
+* Bootstrap 5
+* `django-bootstrap5`
+* `django-countries`
+* `python-dotenv`
+* HTML, CSS y JavaScript sin proceso de compilación con Node.js
+
+## Módulos implementados
+
+### Operación interna
+
+* Instituciones
+* Proyectos
+* Donaciones
+* Asignaciones de fondos
+* Gastos
+* Documentos de soporte
+* Avances de proyectos
+* Evidencias de avances
+* Revisión institucional
+* Decisiones del Comité
+* Auditoría append-only
+* Exportaciones CSV
+
+### Transparencia pública
+
+* Página pública de proyectos
+* Detalle público de proyectos
+* Avances publicados
+* Métricas agregadas
+* Datos JSON autorizados
+* Exclusión de información privada o anulada
+
+### Integración con KoboToolbox
+
+* Descubrimiento de activos
+* Registro versionado de formularios
+* Configuración y activación de activos
+* Recepción mediante webhook
+* Sincronización y reconciliación
+* Staging del payload original
+* Normalización de las fichas 1, 10 y 11
+* Enrutamiento hacia proyectos
+* Revisión humana
+* Importación, rechazo y restauración
+* Descarga protegida de archivos adjuntos
+* Historial técnico de procesamiento
+
+## Aplicaciones Django activas
+
+```text
+apps.operations
+apps.public_portal
+apps.integrations.kobo
+web
+```
+
+El paquete `web` se conserva como componente histórico de compatibilidad para las pruebas y la organización de templates. Actualmente, no contiene modelos ni vistas productivas propias.
+
+## Roles operativos
+
+* Administrador SIGEDON
+* Operador de campo
+* Auditor externo
+* Comité de proyectos
+* Administrador técnico de Kobo mediante permisos `kobo.*`
+* Superusuario de Django
+* Usuario público no autenticado
+
+La matriz completa de roles y permisos se encuentra en:
+
+* [Roles y permisos](docs/ROLES_AND_PERMISSIONS.md)
+
+## Instalación local
+
+### 1. Crear el entorno virtual
+
+```bash
+python3.12 -m venv venv
+source venv/bin/activate
+```
+
+### 2. Instalar las dependencias
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Crear el archivo de entorno
+
+```bash
+cp .env.example .env
+```
+
+Configuración mínima para desarrollo:
+
+```env
+DJANGO_DEBUG=True
+DJANGO_SECRET_KEY=
+DATABASE_ENGINE=sqlite
+ALLOWED_HOSTS=localhost,127.0.0.1
+KOBO_ENABLED=False
+```
+
+### 4. Aplicar las migraciones
+
+```bash
+python manage.py migrate
+```
+
+### 5. Crear un superusuario
+
+```bash
+python manage.py createsuperuser
+```
+
+### 6. Sincronizar los roles
+
+```bash
+python manage.py sync_sigedon_roles
+```
+
+### 7. Ejecutar el servidor
+
+```bash
+python manage.py runserver
+```
+
+## Rutas locales
+
+### Panel interno
+
+```text
+http://127.0.0.1:8000/
+```
+
+### Portal público
+
+```text
+http://127.0.0.1:8000/transparency/
+```
+
+### Administración de Django
+
+```text
+http://127.0.0.1:8000/admin/
+```
+
+## Comandos administrativos
+
+```bash
+python manage.py sync_sigedon_roles
+python manage.py seed_sigedon_demo
+python manage.py register_kobo_forms
+python manage.py discover_kobo_assets
+python manage.py process_kobo_submissions
+python manage.py reconcile_kobo_submissions
+python manage.py sync_kobo_ficha_01
+```
+
+> [!NOTE]
+> El comando `sync_kobo_ficha_01` pertenece al flujo legado de compatibilidad de la Ficha 1. El procesamiento ordinario debe utilizar los activos configurados y el pipeline general de Kobo.
+
+## Verificación
+
+Antes de considerar válido un cambio, se recomienda ejecutar:
+
+```bash
+python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py test
+git diff --check
+```
+
+## Documentación
+
+* [Alcance del MVP](docs/MVP_SCOPE.md)
+* [Arquitectura](docs/ARCHITECTURE.md)
+* [Modelo de dominio](docs/DOMAIN_MODEL.md)
+* [Flujos funcionales](docs/FLOWS.md)
+* [Roles y permisos](docs/ROLES_AND_PERMISSIONS.md)
+* [Seguridad](docs/SECURITY.md)
+* [Integración con KoboToolbox](docs/KOBO.md)
+* [Operación y mantenimiento](docs/OPERATIONS.md)
+* [Pruebas](docs/TESTING.md)
+* [Portal público](docs/PUBLIC_PORTAL.md)
+* [Despliegue](docs/DEPLOYMENT.md)
+* [Decisiones técnicas](docs/DECISIONS.md)
+* [Instrucciones para agentes](docs/AGENTS.md)
+
+## Regla de fuente de verdad
+
+En caso de contradicción, debe utilizarse el siguiente orden de prioridad:
+
+```text
+Código productivo
+→ Migraciones
+→ Pruebas automatizadas
+→ Documentación vigente
+→ Documentos históricos
+```
+
+Los documentos ubicados en `docs/audits/` describen estados anteriores del sistema y no sustituyen la documentación vigente.
