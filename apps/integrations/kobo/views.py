@@ -17,7 +17,7 @@ from apps.integrations.kobo.client import KoboApiClient
 from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.forms import (
     KoboAssetConfigurationForm,
-    KoboProjectBindingForm,
+    KoboAssetProjectLinkForm,
     KoboReviewForm,
     get_compatible_asset_configuration,
 )
@@ -43,11 +43,10 @@ from apps.integrations.kobo.services import (
     associate_submission_with_project,
     activate_kobo_asset,
     configure_discovered_asset,
-    create_project_binding,
-    deactivate_kobo_asset,
-    get_asset_readiness,
+    link_asset_to_project,
     review_submission,
     receive_webhook_submission,
+    unlink_asset_from_project,
 )
 
 
@@ -109,12 +108,14 @@ def _local_asset_state(asset: KoboAsset | None) -> str:
 
 def _asset_configuration_context(asset, *, binding_form=None):
     # PRE: asset is loaded with its form definition and bindings are queryable.
-    # POST: returns safe configuration/readiness context without changing state.
+    # POST: returns the non-technical operational-link context without changing state.
     return {
         "asset": asset,
-        "bindings": asset.project_bindings.select_related("project").order_by("pk"),
-        "readiness": get_asset_readiness(asset),
-        "binding_form": binding_form or KoboProjectBindingForm(),
+        "active_project_binding": asset.project_bindings.select_related("project").filter(
+            is_active=True,
+            routing_type="direct",
+        ).first(),
+        "binding_form": binding_form or KoboAssetProjectLinkForm(),
     }
 
 
@@ -665,26 +666,26 @@ def asset_configuration_detail(request, pk):
 @login_required
 @permission_required("kobo.change_koboasset", raise_exception=True)
 def create_project_binding_action(request, pk):
-    # PRE: authorized POST supplies one candidate binding for a configured asset.
-    # POST: creates only a valid binding and never activates the asset.
+    # PRE: authorized POST supplies one selected active project.
+    # POST: creates or updates the sole operational direct binding and activates it.
     _require_kobo_enabled()
     asset = get_object_or_404(KoboAsset, pk=pk)
-    form = KoboProjectBindingForm(request.POST)
+    form = KoboAssetProjectLinkForm(request.POST)
     if form.is_valid():
         try:
-            create_project_binding(
+            link_asset_to_project(
                 asset,
-                routing_type=form.cleaned_data["routing_type"],
                 project=form.cleaned_data["project"],
-                source_field=form.cleaned_data["source_field"],
-                source_value=form.cleaned_data["source_value"],
-                is_active=form.cleaned_data["is_active"],
-                configured_by=request.user,
+                linked_by=request.user,
             )
         except ValidationError as exc:
             form.add_error(None, exc)
         else:
-            messages.success(request, "Binding creado.")
+            messages.success(
+                request,
+                "Ficha enlazada correctamente. Todas las respuestas nuevas se "
+                "asignarán al proyecto seleccionado.",
+            )
             return redirect("kobo:asset_configuration", pk=asset.pk)
     return render(
         request,
@@ -716,9 +717,9 @@ def activate_kobo_asset_action(request, pk):
 @permission_required("kobo.change_koboasset", raise_exception=True)
 def deactivate_kobo_asset_action(request, pk):
     # PRE: authorized POST identifies a configured asset.
-    # POST: deactivates it while preserving routing and staged submissions.
+    # POST: unlinks it while preserving historical bindings and submissions.
     _require_kobo_enabled()
     asset = get_object_or_404(KoboAsset, pk=pk)
-    deactivate_kobo_asset(asset, deactivated_by=request.user)
-    messages.success(request, "Integración desactivada.")
+    unlink_asset_from_project(asset, unlinked_by=request.user)
+    messages.success(request, "Ficha desenlazada. Sin proyecto enlazado.")
     return redirect("kobo:asset_configuration", pk=asset.pk)

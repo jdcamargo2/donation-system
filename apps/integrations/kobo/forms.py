@@ -35,8 +35,12 @@ def get_compatible_asset_configuration(
         for registered in list_registered_forms()
         if (registered.form_id, registered.version) in SUPPORTED_FORM_ROLES
     }
-    remote_name = discovered_asset.name.strip().casefold()
-    if not remote_name:
+    metadata = discovered_asset.metadata_snapshot or {}
+    remote_form_id = metadata.get("id_string")
+    if not isinstance(remote_form_id, str) or not remote_form_id.strip():
+        return None
+    remote_version = metadata.get("version")
+    if remote_version is not None and not isinstance(remote_version, str):
         return None
     candidates = list(
         KoboFormDefinition.objects.filter(is_active=True).order_by("pk")
@@ -45,7 +49,8 @@ def get_compatible_asset_configuration(
         definition
         for definition in candidates
         if (definition.form_id, definition.version) in registered_versions
-        and definition.title.strip().casefold() == remote_name
+        and definition.form_id == remote_form_id.strip()
+        and (remote_version is None or definition.version == remote_version.strip())
     ]
     if len(matches) != 1:
         return None
@@ -113,6 +118,20 @@ class KoboProjectBindingForm(forms.Form):
         cleaned_data["source_field"] = source_field
         cleaned_data["source_value"] = source_value
         return cleaned_data
+
+
+class KoboAssetProjectLinkForm(forms.Form):
+    project = forms.ModelChoiceField(queryset=None, label="Proyecto")
+
+    def __init__(self, *args, **kwargs):
+        # PRE: the operations Project model is installed.
+        # POST: exposes only active projects for the simplified operational link.
+        from apps.operations.models import Project
+
+        super().__init__(*args, **kwargs)
+        self.fields["project"].queryset = Project.objects.filter(
+            status=Project.Status.ACTIVE
+        ).order_by("name", "pk")
 
 
 class KoboReviewForm(forms.Form):

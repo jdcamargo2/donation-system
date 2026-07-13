@@ -3,13 +3,12 @@
 {% block content %}
 <div class="container py-3">
   <h1 class="h3">{{ asset.name }}</h1>
-  <p>UID: {{ asset.asset_uid }} · Definición: {{ asset.form_definition }} · Rol: {{ asset.get_form_role_display }}</p>
-  <div class="alert {% if readiness.ready %}alert-success{% else %}alert-warning{% endif %}">{{ readiness.code }} — {{ readiness.message }}</div>
-  <h2 class="h5">Bindings</h2><ul>{% for binding in bindings %}<li>{{ binding.routing_type }} — {{ binding.project }}{% if binding.source_field %} — {{ binding.source_field }}={{ binding.source_value }}{% endif %} — {% if binding.is_active %}activo{% else %}inactivo{% endif %}</li>{% empty %}<li>Sin bindings.</li>{% endfor %}</ul>
+  <p>Definición: {{ asset.form_definition }} · Rol: {{ asset.get_form_role_display }}</p>
+  <p>Estado: {% if asset.is_active %}Activa{% else %}Sin proyecto enlazado{% endif %}</p>
+  <p>Proyecto actualmente enlazado: {% if active_project_binding %}{{ active_project_binding.project }}{% else %}Sin proyecto enlazado.{% endif %}</p>
   {% if perms.kobo.change_koboasset %}
-    <form method="post" action="{% url 'kobo:create_project_binding' asset.pk %}" class="card card-body mb-3">{% csrf_token %}{{ binding_form.as_p }}<button class="btn btn-primary" type="submit">Crear binding</button></form>
-    {% if asset.is_active %}<form method="post" action="{% url 'kobo:deactivate_asset' asset.pk %}">{% csrf_token %}<button class="btn btn-warning" type="submit">Desactivar</button></form>
-    {% elif readiness.ready %}<form method="post" action="{% url 'kobo:activate_asset' asset.pk %}">{% csrf_token %}<button class="btn btn-success" type="submit">Activar</button></form>{% endif %}
+    <form method="post" action="{% url 'kobo:create_project_binding' asset.pk %}" class="card card-body mb-3">{% csrf_token %}{{ binding_form.as_p }}<button class="btn btn-primary" type="submit">{% if active_project_binding %}Cambiar proyecto{% else %}Enlazar proyecto{% endif %}</button></form>
+    {% if active_project_binding %}<form method="post" action="{% url 'kobo:deactivate_asset' asset.pk %}">{% csrf_token %}<button class="btn btn-warning" type="submit">Desenlazar</button></form>{% endif %}
   {% endif %}
 </div>
 {% endblock %}

@@ -56,6 +56,7 @@ from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_
 from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
 from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID, FICHA_11_VERSION
 from apps.integrations.kobo.forms import (
+    KoboAssetProjectLinkForm,
     KoboProjectBindingForm,
     SUPPORTED_FORM_ROLES,
 )
@@ -78,6 +79,7 @@ from apps.integrations.kobo.services import (
     deactivate_kobo_asset,
     discover_assets,
     get_asset_readiness,
+    link_asset_to_project,
     get_project_imported_submissions,
     process_pending_submissions,
     receive_api_submission,
@@ -87,6 +89,7 @@ from apps.integrations.kobo.services import (
     review_submission,
     sync_ficha_01_submissions,
     sync_registered_forms,
+    unlink_asset_from_project,
     validate_routing_source_field,
 )
 from apps.operations.models import Project, ProjectUpdate
@@ -178,9 +181,10 @@ class SequenceHttpTransport:
 
 
 class StubAssetClient:
-    def __init__(self, assets=(), exception=None):
+    def __init__(self, assets=(), exception=None, details=None):
         self.assets = tuple(assets)
         self.exception = exception
+        self.details = details or {}
         self.calls = []
 
     def list_assets(self, *, limit=100):
@@ -190,6 +194,14 @@ class StubAssetClient:
         if self.exception is not None:
             raise self.exception
         return self.assets
+
+    def get_asset_detail(self, asset_uid):
+        # PRE: discovery requests technical metadata for one listed asset UID.
+        # POST: returns configured safe detail metadata or raises its configured error.
+        detail = self.details.get(asset_uid, {})
+        if isinstance(detail, Exception):
+            raise detail
+        return detail
 
 
 class KoboContractsTests(SimpleTestCase):
@@ -686,6 +698,34 @@ class KoboApiClientTests(SimpleTestCase):
         )
         self.assertEqual(transport.calls[0]["params"], {"limit": 25})
         self.assertEqual(transport.calls[0]["timeout"], 15)
+
+    def test_asset_detail_extracts_safe_technical_contract_metadata(self):
+        client = self.create_client(
+            StubHttpTransport(
+                body=(
+                    b'{"uid":"asset-1","content":{"settings":'
+                    b'{"id_string":"ficha_1_identificacion_territorial_depurada",'
+                    b'"version":"2026-07-12-depurada"}},"url":"private"}'
+                )
+            )
+        )
+
+        detail = client.get_asset_detail("asset-1")
+
+        self.assertEqual(detail["id_string"], FICHA_01_FORM_ID)
+        self.assertEqual(detail["version"], FICHA_01_VERSION)
+
+    def test_asset_detail_allows_missing_version_without_guessing(self):
+        client = self.create_client(
+            StubHttpTransport(
+                body=b'{"id_string":"ficha_10_microproyecto_priorizado_depurada"}'
+            )
+        )
+
+        self.assertEqual(
+            client.get_asset_detail("asset-10"),
+            {"id_string": FICHA_10_FORM_ID, "version": None},
+        )
 
     def test_missing_or_non_list_results_uses_payload_error(self):
         bodies = (
@@ -2450,10 +2490,12 @@ class KoboRoutingResolutionTests(TestCase):
         cls.project = Project.objects.create(
             code="PRJ-ROUTING-1",
             name="Exact routing project",
+            status=Project.Status.ACTIVE,
         )
         cls.other_project = Project.objects.create(
             code="PRJ-ROUTING-2",
             name="Other routing project",
+            status=Project.Status.ACTIVE,
         )
 
     def setUp(self):
@@ -2602,10 +2644,12 @@ class KoboProjectAssociationTests(TestCase):
         self.project = Project.objects.create(
             code="PRJ-ASSOCIATION",
             name="Configured exact project",
+            status=Project.Status.ACTIVE,
         )
         self.other_project = Project.objects.create(
             code="PRJ-BROWSER-CHOICE",
             name="Browser supplied project",
+            status=Project.Status.ACTIVE,
         )
         self.asset = KoboAsset.objects.create(
             asset_uid="exact-kobo-asset",
@@ -3651,7 +3695,11 @@ class KoboAssetManualConfigurationTests(TestCase):
             },
             last_seen_at=django_timezone.now(),
         )
-        self.project = Project.objects.create(code="PRJ-K13C", name="Proyecto K13C")
+        self.project = Project.objects.create(
+            code="PRJ-K13C",
+            name="Proyecto K13C",
+            status=Project.Status.ACTIVE,
+        )
 
     def configure(self):
         # PRE: the default discovery is available and not configured.
@@ -3835,8 +3883,9 @@ class KoboAssetManualConfigurationTests(TestCase):
         self.assertFalse(KoboAsset.objects.exists())
 
     def test_compatible_discovery_exposes_only_fixed_definition_and_role(self):
-        self.discovered.name = self.definition.title
-        self.discovered.save(update_fields=("name",))
+        self.discovered.metadata_snapshot["id_string"] = FICHA_01_FORM_ID
+        self.discovered.metadata_snapshot["version"] = FICHA_01_VERSION
+        self.discovered.save(update_fields=("metadata_snapshot",))
         other_definition = KoboFormDefinition.objects.create(
             form_id="ficha_02_capacidad_parroquial",
             title="Ficha 02 - Capacidad parroquial",
@@ -3901,6 +3950,155 @@ class KoboAssetManualConfigurationTests(TestCase):
         )
         self.assertFalse(form.is_valid())
         self.assertIn("project", form.errors)
+
+    @override_settings(KOBO_ENABLED=True)
+    def test_operational_configuration_hides_technical_routing_fields(self):
+        asset = self.configure()
+        self.client.force_login(self.editor)
+
+        response = self.client.get(
+            reverse("kobo:asset_configuration", args=(asset.pk,))
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Proyecto actualmente enlazado")
+        self.assertContains(response, "Enlazar proyecto")
+        self.assertNotContains(response, "routing_type")
+        self.assertNotContains(response, "source_field")
+        self.assertNotContains(response, "source_value")
+        self.assertNotContains(response, "no_active_bindings")
+        self.assertIsInstance(response.context["binding_form"], KoboAssetProjectLinkForm)
+
+    @override_settings(KOBO_ENABLED=True)
+    def test_operational_link_ignores_technical_post_fields_and_preserves_history(self):
+        asset = self.configure()
+        historical = KoboProjectBinding.objects.create(
+            asset=asset,
+            project=self.project,
+            routing_type=KoboProjectBinding.RoutingType.FIELD_VALUE,
+            source_field="payload.nucleo_code",
+            source_value="PRJ-000001",
+            is_active=True,
+        )
+        self.client.force_login(self.editor)
+
+        response = self.client.post(
+            reverse("kobo:create_project_binding", args=(asset.pk,)),
+            {
+                "project": self.project.pk,
+                "routing_type": KoboProjectBinding.RoutingType.FIELD_VALUE,
+                "source_field": "payload.nucleo_code",
+                "source_value": "PRJ-000001",
+                "is_active": "",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ficha enlazada correctamente")
+        historical.refresh_from_db()
+        direct = KoboProjectBinding.objects.get(
+            asset=asset,
+            routing_type=KoboProjectBinding.RoutingType.DIRECT,
+        )
+        asset.refresh_from_db()
+        self.assertTrue(direct.is_active)
+        self.assertEqual(direct.project, self.project)
+        self.assertEqual(direct.source_field, "")
+        self.assertEqual(direct.source_value, "")
+        self.assertFalse(historical.is_active)
+        self.assertTrue(asset.is_active)
+        self.assertEqual(asset.project_bindings.filter(is_active=True).count(), 1)
+
+    def test_link_change_and_unlink_preserve_submission_history(self):
+        asset = self.configure()
+        other_project = Project.objects.create(
+            code="PRJ-K13C-OTHER",
+            name="Proyecto K13C alterno",
+            status=Project.Status.ACTIVE,
+        )
+        historical_submission = KoboSubmission.objects.create(
+            form_definition=self.definition,
+            external_id="historical-linked-submission",
+            raw_payload={"_xform_id_string": asset.asset_uid},
+            normalized_payload={},
+            status=KoboSubmission.Status.IMPORTED,
+            project=self.project,
+            asset=asset,
+            processed_at=django_timezone.now(),
+        )
+        link_asset_to_project(asset, project=self.project, linked_by=self.editor)
+        link_asset_to_project(asset, project=other_project, linked_by=self.editor)
+
+        asset.refresh_from_db()
+        active_binding = asset.project_bindings.get(is_active=True)
+        historical_submission.refresh_from_db()
+        self.assertEqual(active_binding.project, other_project)
+        self.assertEqual(asset.project_bindings.filter(is_active=True).count(), 1)
+        self.assertEqual(historical_submission.project, self.project)
+
+        new_submission = KoboSubmission.objects.create(
+            form_definition=self.definition,
+            external_id="new-linked-submission",
+            raw_payload={"_xform_id_string": asset.asset_uid},
+            normalized_payload={},
+            status=KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        )
+        result = associate_submission_with_project(
+            new_submission,
+            reviewed_by=self.editor,
+        )
+        new_submission.refresh_from_db()
+        self.assertTrue(result.associated)
+        self.assertEqual(new_submission.project, other_project)
+
+        unlink_asset_from_project(asset, unlinked_by=self.editor)
+        asset.refresh_from_db()
+        self.assertFalse(asset.is_active)
+        self.assertFalse(asset.project_bindings.filter(is_active=True).exists())
+        historical_submission.refresh_from_db()
+        self.assertEqual(historical_submission.project, self.project)
+
+        unlinked_submission = KoboSubmission.objects.create(
+            form_definition=self.definition,
+            external_id="unlinked-submission",
+            raw_payload={"_xform_id_string": asset.asset_uid},
+            normalized_payload={},
+            status=KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        )
+        result = associate_submission_with_project(
+            unlinked_submission,
+            reviewed_by=self.editor,
+        )
+        self.assertFalse(result.associated)
+        unlinked_submission.refresh_from_db()
+        self.assertEqual(unlinked_submission.error_code, "asset_inactive")
+
+    def test_operational_link_rejects_inactive_definition_and_unsupported_asset(self):
+        asset = self.configure()
+        inactive_project = Project.objects.create(
+            code="PRJ-K13C-INACTIVE",
+            name="Proyecto K13C inactivo",
+            status=Project.Status.SUSPENDED,
+        )
+        with self.assertRaises(ValidationError):
+            link_asset_to_project(
+                asset,
+                project=inactive_project,
+                linked_by=self.editor,
+            )
+
+        self.definition.is_active = False
+        self.definition.save(update_fields=("is_active",))
+        with self.assertRaises(ValidationError):
+            link_asset_to_project(asset, project=self.project, linked_by=self.editor)
+
+        self.definition.is_active = True
+        self.definition.save(update_fields=("is_active",))
+        asset.form_role = KoboAsset.FormRole.PRIORITIZED_MICROPROJECT
+        asset.save(update_fields=("form_role",))
+        with self.assertRaises(ValidationError):
+            link_asset_to_project(asset, project=self.project, linked_by=self.editor)
 
 
 @override_settings(KOBO_ENABLED=True, KOBO_WEBHOOK_SECRET="test-webhook-secret")

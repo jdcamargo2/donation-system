@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -556,6 +556,10 @@ def resolve_project_binding(
     if len(direct_bindings) > 1:
         raise KoboConfigurationError("routing_ambiguous")
     if direct_bindings:
+        from apps.operations.models import Project
+
+        if direct_bindings[0].project.status != Project.Status.ACTIVE:
+            raise KoboConfigurationError("routing_project_inactive")
         return _routing_resolution(direct_bindings[0])
 
     matches = []
@@ -569,6 +573,10 @@ def resolve_project_binding(
         raise KoboConfigurationError("routing_not_found")
     if len(matches) > 1:
         raise KoboConfigurationError("routing_ambiguous")
+    from apps.operations.models import Project
+
+    if matches[0].project.status != Project.Status.ACTIVE:
+        raise KoboConfigurationError("routing_project_inactive")
     return _routing_resolution(matches[0])
 
 
@@ -781,7 +789,21 @@ def discover_assets(
     POST: after a complete successful fetch, creates/updates discovery staging,
     marks unseen history unavailable unless dry-run, and creates no integrations.
     """
-    remote_assets = client.list_assets(limit=limit)
+    listed_assets = client.list_assets(limit=limit)
+    remote_assets = []
+    detail_failures = 0
+    for remote_asset in listed_assets:
+        try:
+            detail = client.get_asset_detail(remote_asset.asset_uid)
+        except (KoboIntegrationError, KoboPayloadError):
+            detail_failures += 1
+            remote_assets.append(remote_asset)
+            continue
+        metadata = {
+            **remote_asset.safe_metadata,
+            **{key: value for key, value in detail.items() if value is not None},
+        }
+        remote_assets.append(replace(remote_asset, safe_metadata=metadata))
     remote_by_uid = {asset.asset_uid: asset for asset in remote_assets}
     existing_by_uid = {
         asset.asset_uid: asset
@@ -827,7 +849,7 @@ def discover_assets(
         updated_count=updated_count,
         unchanged_count=unchanged_count,
         unavailable_count=0 if dry_run else unavailable_count,
-        failed_count=0,
+        failed_count=detail_failures,
     )
 
 
@@ -950,6 +972,98 @@ def create_project_binding(
     binding.full_clean()
     binding.save()
     return binding
+
+
+def link_asset_to_project(
+    asset: KoboAsset,
+    *,
+    project,
+    linked_by,
+) -> KoboProjectBinding:
+    """
+    PRE: asset and project are persisted, the actor is authenticated, and the
+    project is active.
+    POST: preserves historical bindings as inactive, keeps exactly one active
+    direct binding, and activates the asset.
+    """
+    _require_authenticated_actor(linked_by, action="link a Kobo asset")
+    if asset is None or asset.pk is None:
+        raise ValidationError("La ficha Kobo no existe.")
+    if project is None or project.pk is None:
+        raise ValidationError("Debe seleccionar un proyecto.")
+
+    from apps.operations.models import Project
+
+    with transaction.atomic():
+        try:
+            locked_project = Project.objects.select_for_update().get(pk=project.pk)
+        except Project.DoesNotExist as exc:
+            raise ValidationError("El proyecto seleccionado no existe.") from exc
+        if locked_project.status != Project.Status.ACTIVE:
+            raise ValidationError("Solo se pueden enlazar proyectos activos.")
+        locked_asset = KoboAsset.objects.select_for_update().select_related(
+            "form_definition"
+        ).get(pk=asset.pk)
+        try:
+            _require_registered_active_definition(locked_asset.form_definition)
+        except ValidationError as exc:
+            raise ValidationError(
+                "La definición de la ficha no está activa o no es compatible."
+            ) from exc
+        expected_role = FORM_DEFINITION_ROLES.get(
+            (
+                locked_asset.form_definition.form_id,
+                locked_asset.form_definition.version,
+            )
+        )
+        if locked_asset.form_role != expected_role:
+            raise ValidationError("La ficha Kobo no es compatible con su definición.")
+
+        locked_asset.project_bindings.select_for_update().filter(
+            is_active=True
+        ).update(is_active=False)
+        binding = locked_asset.project_bindings.filter(
+            routing_type=KoboProjectBinding.RoutingType.DIRECT
+        ).first()
+        if binding is None:
+            binding = KoboProjectBinding(
+                asset=locked_asset,
+                project=locked_project,
+                routing_type=KoboProjectBinding.RoutingType.DIRECT,
+                source_field="",
+                source_value="",
+                is_active=True,
+            )
+        else:
+            binding.project = locked_project
+            binding.source_field = ""
+            binding.source_value = ""
+            binding.is_active = True
+        binding.full_clean()
+        binding.save()
+        locked_asset.is_active = True
+        locked_asset.save(update_fields=("is_active",))
+    return binding
+
+
+def unlink_asset_from_project(asset: KoboAsset, *, unlinked_by) -> KoboAsset:
+    """
+    PRE: asset is persisted and the actor is authenticated.
+    POST: deactivates current bindings and the asset without deleting historical
+    bindings or submissions.
+    """
+    _require_authenticated_actor(unlinked_by, action="unlink a Kobo asset")
+    if asset is None or asset.pk is None:
+        raise ValidationError("La ficha Kobo no existe.")
+
+    with transaction.atomic():
+        locked_asset = KoboAsset.objects.select_for_update().get(pk=asset.pk)
+        locked_asset.project_bindings.select_for_update().filter(
+            is_active=True
+        ).update(is_active=False)
+        locked_asset.is_active = False
+        locked_asset.save(update_fields=("is_active",))
+    return locked_asset
 
 
 def get_asset_readiness(asset: KoboAsset) -> AssetReadiness:
