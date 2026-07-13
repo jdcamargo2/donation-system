@@ -208,6 +208,14 @@ class ProjectUpdate(models.Model):
         null=True,
         related_name='created_project_updates',
     )
+    reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name='reported_project_updates',
+        verbose_name=_('Responsable institucional'),
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -239,6 +247,85 @@ class ProjectUpdate(models.Model):
             and self.project.status != Project.Status.ACTIVE
         ):
             errors['project'] = _('Solo se pueden crear avances para proyectos activos.')
+        if errors:
+            raise ValidationError(errors)
+
+
+class ProjectUpdateReview(models.Model):
+    project_update = models.OneToOneField(
+        ProjectUpdate,
+        on_delete=models.PROTECT,
+        related_name='committee_review',
+        verbose_name=_('Avance de proyecto'),
+    )
+    observations = models.TextField(_('Observaciones del Comité'))
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        editable=False,
+        related_name='project_update_reviews',
+        verbose_name=_('Revisado por'),
+    )
+    reviewed_at = models.DateTimeField(_('Fecha de revisión'), auto_now_add=True, editable=False)
+
+    class Meta:
+        ordering = ['-reviewed_at']
+        verbose_name = _('revisión documental de avance')
+        verbose_name_plural = _('revisiones documentales de avances')
+
+    def __str__(self):
+        return f'Revisión de {self.project_update}'
+
+    def clean(self):
+        errors = {}
+        if self.observations and not self.observations.strip():
+            errors['observations'] = _('Las observaciones del Comité son obligatorias.')
+        if self.project_update_id and self.project_update.status != ProjectUpdate.Status.PUBLISHED:
+            errors['project_update'] = _('Solo los avances publicados pueden recibir revisión documental.')
+        if errors:
+            raise ValidationError(errors)
+
+
+class ProjectUpdateReviewDecision(models.Model):
+    class Outcome(models.TextChoices):
+        CONFORMING = 'conforming', _('Conforme')
+        OBSERVED = 'observed', _('Observado')
+
+    review = models.OneToOneField(
+        ProjectUpdateReview,
+        on_delete=models.PROTECT,
+        related_name='decision',
+        verbose_name=_('Revisión del Comité'),
+    )
+    outcome = models.CharField(_('Resultado'), max_length=20, choices=Outcome.choices)
+    rationale = models.TextField(_('Fundamento de la decisión'))
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        editable=False,
+        related_name='project_update_review_decisions',
+        verbose_name=_('Registrado por'),
+    )
+    decided_at = models.DateTimeField(_('Fecha de decisión'), auto_now_add=True, editable=False)
+
+    class Meta:
+        ordering = ['-decided_at']
+        verbose_name = _('resultado de revisión del Comité')
+        verbose_name_plural = _('resultados de revisiones del Comité')
+
+    def __str__(self):
+        return f'{self.get_outcome_display()} · {self.review}'
+
+    def clean(self):
+        errors = {}
+        if self.rationale and not self.rationale.strip():
+            errors['rationale'] = _('El fundamento de la decisión es obligatorio.')
+        if self.review_id and self.review.project_update.status != ProjectUpdate.Status.PUBLISHED:
+            errors['review'] = _('La revisión debe pertenecer a un avance publicado.')
         if errors:
             raise ValidationError(errors)
 

@@ -93,7 +93,7 @@
                                 {{ update.title }}
                             </a>
                             <div class="small text-muted">
-                                {{ update.update_date }} · {{ update.progress_percentage }}%{% if update.created_by %} - {{ update.created_by }}{% endif %}
+                                {{ update.update_date }} · {{ update.progress_percentage }}% · Responsable institucional: {{ update.reported_by|default:"—" }}
                             </div>
                         </div>
                         <span class="badge ops-status-badge">{{ update.get_status_display }}</span>

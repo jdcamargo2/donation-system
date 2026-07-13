@@ -7,9 +7,20 @@ from django.urls import reverse
 
 from apps.operations.models import AuditLog, Project
 from apps.operations.role_services import sync_operation_roles
-from apps.operations.roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_SIGEDON_ADMIN
-from apps.operations.services import register_advance
+from apps.operations.roles import (
+    ROLE_EXTERNAL_AUDITOR,
+    ROLE_FIELD_OPERATOR,
+    ROLE_PROJECT_COMMITTEE,
+    ROLE_SIGEDON_ADMIN,
+)
+from apps.operations.services import (
+    create_project_update_review,
+    create_project_update_review_decision,
+    publish_project_update,
+    register_advance,
+)
 from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project
+from apps.operations.tests.test_permissions import create_user_with_permissions
 
 
 class RoleBasedUITests(TestCase):
@@ -39,6 +50,15 @@ class RoleBasedUITests(TestCase):
         user = get_user_model().objects.create_user(username=username, password='pass-12345')
         user.groups.add(Group.objects.get(name=role_name))
         return user
+
+    def assert_navigation_activity(self, response, label, url, is_active):
+        # PRE: response is an internal page response containing the sidebar navigation.
+        # POST: verifies aria-current only when the navigation link is active.
+        active_link = f'href="{url}" title="{label}" aria-current="page"'
+        if is_active:
+            self.assertContains(response, active_link)
+        else:
+            self.assertNotContains(response, active_link)
 
     def test_field_operator_does_not_see_create_project_action(self):
         self.client.force_login(self.create_user_for_role('ui-field-project', ROLE_FIELD_OPERATOR))
@@ -98,6 +118,181 @@ class RoleBasedUITests(TestCase):
         self.assertNotContains(response, 'Crear asignación')
         self.assertNotContains(response, 'Crear gasto')
         self.assertNotContains(response, 'Ver auditoría')
+
+    def test_project_navigation_is_visible_only_with_project_permission(self):
+        self.client.force_login(create_user_with_permissions('ui-project-viewer', 'view_project'))
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertContains(response, reverse('project_list'))
+        self.assertContains(response, 'title="Proyectos"')
+        self.assertNotContains(response, reverse('project_update_list'))
+        self.assertNotContains(response, 'title="Avances"')
+
+    def test_project_navigation_is_hidden_without_project_permission(self):
+        self.client.force_login(create_user_with_permissions('ui-update-only', 'view_projectupdate'))
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertNotContains(response, reverse('project_list'))
+        self.assertNotContains(response, 'title="Proyectos"')
+
+    def test_update_navigation_is_visible_only_with_project_update_permission(self):
+        self.client.force_login(create_user_with_permissions('ui-update-viewer', 'view_projectupdate'))
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertContains(response, reverse('project_update_list'))
+        self.assertContains(response, 'title="Avances"')
+        self.assertNotContains(response, reverse('project_list'))
+        self.assertNotContains(response, 'title="Proyectos"')
+
+    def test_update_navigation_is_hidden_without_project_update_permission(self):
+        self.client.force_login(create_user_with_permissions('ui-project-only', 'view_project'))
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertNotContains(response, reverse('project_update_list'))
+        self.assertNotContains(response, 'title="Avances"')
+
+    def test_project_navigation_is_active_on_project_list_and_detail(self):
+        self.client.force_login(self.create_user_for_role('ui-project-navigation', ROLE_FIELD_OPERATOR))
+
+        for url in [reverse('project_list'), reverse('project_detail', args=[self.project.pk])]:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assert_navigation_activity(response, 'Proyectos', reverse('project_list'), is_active=True)
+                self.assert_navigation_activity(response, 'Avances', reverse('project_update_list'), is_active=False)
+
+    def test_update_navigation_is_active_on_update_list_and_detail(self):
+        self.client.force_login(self.create_user_for_role('ui-update-navigation', ROLE_FIELD_OPERATOR))
+
+        for url in [reverse('project_update_list'), reverse('project_update_detail', args=[self.project_update.pk])]:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assert_navigation_activity(response, 'Proyectos', reverse('project_list'), is_active=False)
+                self.assert_navigation_activity(response, 'Avances', reverse('project_update_list'), is_active=True)
+
+    def test_field_operator_sees_project_and_update_navigation(self):
+        self.client.force_login(self.create_user_for_role('ui-field-navigation', ROLE_FIELD_OPERATOR))
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertContains(response, reverse('project_list'))
+        self.assertContains(response, 'title="Proyectos"')
+        self.assertContains(response, reverse('project_update_list'))
+        self.assertContains(response, 'title="Avances"')
+
+    def test_project_committee_sees_navigation_without_mutation_actions(self):
+        self.client.force_login(self.create_user_for_role('ui-project-committee', ROLE_PROJECT_COMMITTEE))
+
+        project_response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+        update_response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
+
+        self.assertContains(project_response, reverse('project_list'))
+        self.assertContains(project_response, 'title="Proyectos"')
+        self.assertContains(project_response, reverse('project_update_list'))
+        self.assertContains(project_response, 'title="Avances"')
+        self.assertNotContains(project_response, reverse('project_update_create_for_project', args=[self.project.pk]))
+        self.assertNotContains(update_response, reverse('project_update_update', args=[self.project_update.pk]))
+        self.assertNotContains(update_response, reverse('project_update_delete', args=[self.project_update.pk]))
+        self.assertNotContains(update_response, reverse('project_update_publish', args=[self.project_update.pk]))
+
+    def test_project_committee_sees_review_action_for_published_update(self):
+        publisher = self.create_user_for_role('ui-review-publisher', ROLE_SIGEDON_ADMIN)
+        published_update = register_advance(
+            project_id=self.project.pk,
+            title='Avance publicado para Comité',
+            description='Listo para revisión documental.',
+        )
+        publish_project_update(published_update.pk, publisher)
+        self.client.force_login(self.create_user_for_role('ui-review-committee', ROLE_PROJECT_COMMITTEE))
+
+        response = self.client.get(reverse('project_update_detail', args=[published_update.pk]))
+
+        self.assertContains(response, reverse('project_update_review_create', args=[published_update.pk]))
+        self.assertNotContains(response, reverse('project_update_publish', args=[published_update.pk]))
+
+    def test_project_committee_sees_decision_action_for_reviewed_update(self):
+        publisher = self.create_user_for_role('ui-decision-publisher', ROLE_SIGEDON_ADMIN)
+        published_update = register_advance(
+            project_id=self.project.pk,
+            title='Avance revisado para Comité',
+            description='Listo para resultado institucional.',
+        )
+        publish_project_update(published_update.pk, publisher)
+        committee_member = self.create_user_for_role('ui-decision-committee', ROLE_PROJECT_COMMITTEE)
+        review = create_project_update_review(
+            update_id=published_update.pk,
+            observations='Revisión documental disponible.',
+            actor=committee_member,
+        )
+        self.client.force_login(committee_member)
+
+        response = self.client.get(reverse('project_update_review_detail', args=[review.pk]))
+
+        self.assertContains(response, reverse('project_update_review_decision_create', args=[review.pk]))
+
+    def test_review_and_decision_routes_activate_update_navigation(self):
+        publisher = self.create_user_for_role('ui-review-navigation-publisher', ROLE_SIGEDON_ADMIN)
+        committee_member = self.create_user_for_role('ui-review-navigation-committee', ROLE_PROJECT_COMMITTEE)
+        unreviewed_update = register_advance(
+            project_id=self.project.pk,
+            title='Avance sin revisión para navegación',
+            description='Debe activar el enlace Avances.',
+        )
+        publish_project_update(unreviewed_update.pk, publisher)
+        reviewable_update = register_advance(
+            project_id=self.project.pk,
+            title='Avance para rutas de revisión',
+            description='Debe activar el enlace Avances.',
+        )
+        publish_project_update(reviewable_update.pk, publisher)
+        review = create_project_update_review(
+            update_id=reviewable_update.pk,
+            observations='Revisión para navegación.',
+            actor=committee_member,
+        )
+        decided_update = register_advance(
+            project_id=self.project.pk,
+            title='Avance para detalle de resultado',
+            description='Debe activar el enlace Avances.',
+        )
+        publish_project_update(decided_update.pk, publisher)
+        decided_review = create_project_update_review(
+            update_id=decided_update.pk,
+            observations='Revisión con resultado.',
+            actor=committee_member,
+        )
+        decision = create_project_update_review_decision(
+            review_id=decided_review.pk,
+            outcome='conforming',
+            rationale='Resultado para navegación.',
+            actor=committee_member,
+        )
+        self.client.force_login(committee_member)
+
+        cases = [
+            reverse('project_update_review_create', args=[unreviewed_update.pk]),
+            reverse('project_update_review_detail', args=[review.pk]),
+            reverse('project_update_review_decision_create', args=[review.pk]),
+            reverse('project_update_review_decision_detail', args=[decision.pk]),
+        ]
+        for url in cases:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assert_navigation_activity(response, 'Proyectos', reverse('project_list'), is_active=False)
+                self.assert_navigation_activity(response, 'Avances', reverse('project_update_list'), is_active=True)
+
+    def test_public_portal_navigation_remains_separate_from_internal_navigation(self):
+        source = Path('templates/public_portal/public_base.html').read_text()
+
+        self.assertIn("{% url 'public_portal:public_project_list' %}", source)
+        self.assertIn("{% url 'public_portal:public_updates_feed' %}", source)
+        self.assertNotIn("{% url 'project_update_list' %}", source)
 
     def test_internal_templates_do_not_import_public_portal_stylesheet(self):
         internal_sources = [Path('templates/base.html').read_text()]

@@ -6,7 +6,7 @@ from django.utils.translation import gettext_lazy as _
 from .choices import OPERATING_CURRENCY, OPERATING_CURRENCY_CHOICES
 from .models import (
     AuditLog, Donation, Expense, FundAllocation, Institution, Project,
-    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, SupportingDocument,
+    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
 )
 from .services import (
     ExpenseFinalizedError,
@@ -97,10 +97,13 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(ProjectUpdate)
 class ProjectUpdateAdmin(admin.ModelAdmin):
-    list_display = ('project', 'title', 'update_date', 'progress_percentage', 'status', 'created_at', 'created_by')
+    list_display = (
+        'project', 'title', 'reported_by', 'update_date', 'progress_percentage',
+        'status', 'created_at', 'created_by',
+    )
     list_filter = ('status', 'update_date', 'created_at')
     search_fields = ('title', 'description', 'project__name', 'project__code')
-    readonly_fields = ('status', 'created_at', 'updated_at')
+    readonly_fields = ('status', 'created_at', 'updated_at', 'created_by')
 
     def get_readonly_fields(self, request, obj=None):
         """
@@ -109,7 +112,9 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
         """
         readonly = set(super().get_readonly_fields(request, obj))
         if obj and obj.status != ProjectUpdate.Status.DRAFT:
-            readonly.update(('project', 'title', 'description', 'update_date', 'progress_percentage', 'evidence'))
+            readonly.update(
+                ('project', 'title', 'description', 'update_date', 'progress_percentage', 'reported_by')
+            )
         return tuple(readonly)
 
     def has_delete_permission(self, request, obj=None):
@@ -150,13 +155,51 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
             persisted = ProjectUpdate.objects.get(pk=obj.pk)
             ensure_project_update_is_editable(persisted)
             obj.status = persisted.status
+            obj.created_by = persisted.created_by
         else:
             obj.status = ProjectUpdate.Status.DRAFT
+            obj.created_by = request.user if request.user.is_authenticated else None
         super().save_model(request, obj, form, change)
         if change:
             log_update(request.user, obj, _('Borrador de avance actualizado desde administración.'))
         else:
             log_create(request.user, obj, _('Avance de proyecto creado como borrador desde administración.'))
+
+
+@admin.register(ProjectUpdateReview)
+class ProjectUpdateReviewAdmin(admin.ModelAdmin):
+    list_display = ('project_update', 'reviewed_by', 'reviewed_at')
+    search_fields = ('project_update__title', 'project_update__project__code')
+    readonly_fields = ('project_update', 'observations', 'reviewed_by', 'reviewed_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ProjectUpdateReviewDecision)
+class ProjectUpdateReviewDecisionAdmin(admin.ModelAdmin):
+    list_display = ('review', 'outcome', 'decided_by', 'decided_at')
+    search_fields = ('review__project_update__title', 'review__project_update__project__code')
+    readonly_fields = ('review', 'outcome', 'rationale', 'decided_by', 'decided_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ProjectDocument)

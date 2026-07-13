@@ -14,6 +14,8 @@ from .models import (
     Project,
     ProjectUpdate,
     ProjectUpdateAttachment,
+    ProjectUpdateReview,
+    ProjectUpdateReviewDecision,
     SupportingDocument,
     ZERO_MONEY,
 )
@@ -29,6 +31,14 @@ PROJECT_UPDATE_FINAL_STATUSES = frozenset({ProjectUpdate.Status.PUBLISHED})
 
 class ProjectUpdateImmutableError(ValidationError):
     """Raised when ordinary mutation targets a non-draft project update."""
+
+
+class ProjectUpdateReviewError(ValidationError):
+    """Raised when a documentary review cannot be registered safely."""
+
+
+class ProjectUpdateReviewDecisionError(ValidationError):
+    """Raised when an institutional review outcome cannot be registered safely."""
 
 
 class InvalidStateTransitionError(ValidationError):
@@ -778,6 +788,7 @@ def register_advance(
     progress_percentage: int = 0,
     attachments=(),
     created_by=None,
+    reported_by=None,
 ) -> ProjectUpdate:
     """
     PRE: project_id debe corresponder a un Project existente y apto para recibir avances.
@@ -791,6 +802,7 @@ def register_advance(
         update_date=update_date or timezone.localdate(),
         progress_percentage=progress_percentage,
         created_by=created_by,
+        reported_by=reported_by,
         status=ProjectUpdate.Status.DRAFT,
     )
     with transaction.atomic():
@@ -803,7 +815,7 @@ def register_advance(
 
 def update_project_update(
     *, update_id: int, project, title: str, description: str, update_date,
-    progress_percentage: int, actor, attachments=()
+    progress_percentage: int, reported_by, actor, attachments=()
 ) -> ProjectUpdate:
     """
     PRE: update_id identifies a DRAFT advance and submitted values are validated form data.
@@ -817,6 +829,7 @@ def update_project_update(
         project_update.description = description
         project_update.update_date = update_date
         project_update.progress_percentage = progress_percentage
+        project_update.reported_by = reported_by
         project_update.full_clean()
         project_update.save()
         _create_project_update_attachments(project_update, attachments, actor)
@@ -896,3 +909,67 @@ def publish_project_update(update_id: int, actor) -> ProjectUpdate:
             _('Avance de proyecto publicado.'),
         )
         return project_update
+
+
+def create_project_update_review(*, update_id: int, observations: str, actor) -> ProjectUpdateReview:
+    """
+    PRE: update_id identifies a persisted advance and actor is the authenticated committee member.
+    POST: creates and audits exactly one trimmed documentary review without modifying the advance.
+    """
+    if not getattr(actor, 'is_authenticated', False):
+        raise ProjectUpdateReviewError({'actor': _('La revisión exige un usuario autenticado.')})
+    clean_observations = (observations or '').strip()
+    with transaction.atomic():
+        project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
+        if project_update.status != ProjectUpdate.Status.PUBLISHED:
+            raise ProjectUpdateReviewError(
+                {'project_update': _('Solo los avances publicados pueden recibir revisión documental.')}
+            )
+        if ProjectUpdateReview.objects.filter(project_update_id=project_update.pk).exists():
+            raise ProjectUpdateReviewError(
+                {'project_update': _('Este avance ya tiene una revisión documental registrada.')}
+            )
+        review = ProjectUpdateReview(
+            project_update=project_update,
+            observations=clean_observations,
+            reviewed_by=actor,
+        )
+        review.full_clean()
+        review.save()
+        log_create(actor, review, _('Revisión documental del Comité registrada.'))
+        return review
+
+
+def create_project_update_review_decision(
+    *, review_id: int, outcome: str, rationale: str, actor
+) -> ProjectUpdateReviewDecision:
+    """
+    PRE: review_id identifies a persisted review and actor is an authenticated committee member.
+    POST: creates and audits exactly one trimmed institutional outcome without modifying the review or advance.
+    """
+    if not getattr(actor, 'is_authenticated', False):
+        raise ProjectUpdateReviewDecisionError(
+            {'actor': _('El resultado de revisión exige un usuario autenticado.')}
+        )
+    clean_rationale = (rationale or '').strip()
+    with transaction.atomic():
+        review = ProjectUpdateReview.objects.select_for_update().get(pk=review_id)
+        project_update = ProjectUpdate.objects.select_for_update().get(pk=review.project_update_id)
+        if project_update.status != ProjectUpdate.Status.PUBLISHED:
+            raise ProjectUpdateReviewDecisionError(
+                {'review': _('La revisión debe pertenecer a un avance publicado.')}
+            )
+        if ProjectUpdateReviewDecision.objects.filter(review_id=review.pk).exists():
+            raise ProjectUpdateReviewDecisionError(
+                {'review': _('Esta revisión ya tiene un resultado institucional registrado.')}
+            )
+        decision = ProjectUpdateReviewDecision(
+            review=review,
+            outcome=outcome,
+            rationale=clean_rationale,
+            decided_by=actor,
+        )
+        decision.full_clean()
+        decision.save()
+        log_create(actor, decision, _('Resultado de revisión del Comité registrado.'))
+        return decision

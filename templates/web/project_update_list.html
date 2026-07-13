@@ -21,6 +21,7 @@
                 <tr>
                     <th>Proyecto</th>
                     <th>Título</th>
+                    <th>Responsable institucional</th>
                     <th>Estado</th>
                     <th>Creado / progreso</th>
                     <th>Adjuntos</th>
@@ -32,6 +33,7 @@
                     <tr>
                         <td>{{ update.project }}</td>
                         <td><a class="fw-semibold text-decoration-none" href="{% url detail_url_name update.pk %}">{{ update.title }}</a></td>
+                        <td>{{ update.reported_by|default:"—" }}</td>
                         <td><span class="badge ops-status-badge">{{ update.get_status_display }}</span></td>
                         <td>{{ update.update_date }} / {{ update.progress_percentage }}%</td>
                         <td>
@@ -54,7 +56,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="6" class="text-muted">No hay avances registrados.</td>
+                        <td colspan="7" class="text-muted">No hay avances registrados.</td>
                     </tr>
                 {% endfor %}
             </tbody>

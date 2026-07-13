@@ -1,6 +1,7 @@
 ROLE_SIGEDON_ADMIN = 'Administrador SIGEDON'
 ROLE_FIELD_OPERATOR = 'Operador de campo'
 ROLE_EXTERNAL_AUDITOR = 'Auditor externo'
+ROLE_PROJECT_COMMITTEE = 'Comité de proyectos'
 
 
 ROLE_PERMISSION_CODENAMES = {
@@ -20,5 +21,15 @@ ROLE_PERMISSION_CODENAMES = {
         'view_supportingdocument',
         'view_projectupdate',
         'view_auditlog',
+    },
+    ROLE_PROJECT_COMMITTEE: {
+        'view_project',
+        'view_projectupdate',
+        'view_projectdocument',
+        'view_projectupdateattachment',
+        'view_projectupdatereview',
+        'add_projectupdatereview',
+        'view_projectupdatereviewdecision',
+        'add_projectupdatereviewdecision',
     },
 }

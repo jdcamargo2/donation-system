@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Registrar resultado institucional - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Comité de proyectos</div>
+        <h1>Registrar resultado institucional</h1>
+        <p>{{ review.project_update.title }}</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'project_update_review_detail' review.pk %}">Cancelar</a>
+</div>
+
+<div class="card border-0 ops-form-card">
+    <div class="card-body">
+        <form method="post" novalidate>
+            {% csrf_token %}
+            {% for field in form %}
+                <div class="ops-form-field ops-field mb-3">
+                    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}<div class="text-danger small" role="alert">{{ field.errors|striptags }}</div>{% endif %}
+                </div>
+            {% endfor %}
+            <button type="submit" class="btn btn-primary">Registrar resultado</button>
+            <a class="btn btn-outline-secondary" href="{% url 'project_update_review_detail' review.pk %}">Cancelar</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

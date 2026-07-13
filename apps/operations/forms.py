@@ -8,7 +8,7 @@ from django.utils.translation import gettext_lazy as _
 from .choices import OPERATING_CURRENCY
 from .models import (
     Donation, Expense, FundAllocation, Institution, Project, ProjectDocument,
-    ProjectUpdate, ProjectUpdateAttachment, SupportingDocument,
+    ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
 )
 
 
@@ -240,6 +240,7 @@ class ProjectUpdateForm(BootstrapFormMixin, forms.ModelForm):
             'description',
             'update_date',
             'progress_percentage',
+            'reported_by',
         ]
         labels = {
             'project': _('Proyecto'),
@@ -247,6 +248,7 @@ class ProjectUpdateForm(BootstrapFormMixin, forms.ModelForm):
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
             'progress_percentage': _('Porcentaje de progreso'),
+            'reported_by': _('Responsable institucional'),
         }
         widgets = {'update_date': build_date_widget()}
 
@@ -265,14 +267,33 @@ class ProjectUpdateForProjectForm(BootstrapFormMixin, forms.ModelForm):
             'description',
             'update_date',
             'progress_percentage',
+            'reported_by',
         ]
         labels = {
             'title': _('Título'),
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
             'progress_percentage': _('Porcentaje de progreso'),
+            'reported_by': _('Responsable institucional'),
         }
         widgets = {'update_date': build_date_widget()}
+
+
+class ProjectUpdateReviewForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectUpdateReview
+        fields = ['observations']
+        labels = {'observations': _('Observaciones del Comité')}
+
+
+class ProjectUpdateReviewDecisionForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectUpdateReviewDecision
+        fields = ['outcome', 'rationale']
+        labels = {
+            'outcome': _('Resultado'),
+            'rationale': _('Fundamento de la decisión'),
+        }
 
 
 class ProjectDocumentForm(BootstrapFormMixin, forms.ModelForm):

@@ -30,17 +30,21 @@ from .forms import (
     ProjectUpdateForProjectForm,
     ProjectUpdateAttachmentForm,
     ProjectUpdateForm,
+    ProjectUpdateReviewForm,
+    ProjectUpdateReviewDecisionForm,
     SupportingDocumentForm,
     TerminalActionConfirmationForm,
     TerminalActionReasonForm,
 )
 from .models import (
     AuditLog, Donation, Expense, FundAllocation, Institution, Project,
-    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, SupportingDocument,
+    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
 )
 from .services import (
     create_expense,
     create_fund_allocation,
+    create_project_update_review,
+    create_project_update_review_decision,
     get_allocation_financial_summary,
     get_dashboard_metrics,
     get_donation_financial_summary,
@@ -52,6 +56,8 @@ from .services import (
     ensure_project_update_is_deletable,
     ensure_project_update_is_editable,
     ProjectUpdateImmutableError,
+    ProjectUpdateReviewError,
+    ProjectUpdateReviewDecisionError,
     OperationalEntityFinalizedError,
     allocation_has_effective_expenses,
     add_project_update_attachment,
@@ -657,7 +663,7 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
             Project.Status.ANNULLED in allowed_targets
             and not self.object.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists()
         )
-        updates = self.object.updates.select_related('created_by').prefetch_related('attachments')
+        updates = self.object.updates.select_related('created_by', 'reported_by').prefetch_related('attachments')
         if not self.request.user.has_perm('operations.view_projectupdate'):
             updates = updates.filter(status=ProjectUpdate.Status.PUBLISHED)
         context['project_updates'] = updates.order_by('-update_date', '-created_at')
@@ -751,7 +757,7 @@ class ProjectUpdateListView(OperationsPermissionRequiredMixin, RouteContextMixin
     page_title = _('Avances de proyecto')
 
     def get_queryset(self):
-        return ProjectUpdate.objects.select_related('project', 'created_by')
+        return ProjectUpdate.objects.select_related('project', 'created_by', 'reported_by')
 
 
 class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailView):
@@ -760,6 +766,106 @@ class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMix
     template_name = 'web/project_update_detail.html'
     route_prefix = 'project_update'
     page_title = _('Avance de proyecto')
+
+    def get_queryset(self):
+        return ProjectUpdate.objects.select_related(
+            'project', 'created_by', 'reported_by', 'committee_review__reviewed_by'
+        )
+
+
+class ProjectUpdateReviewCreateView(OperationsPermissionRequiredMixin, FormView):
+    permission_required = 'operations.add_projectupdatereview'
+    form_class = ProjectUpdateReviewForm
+    template_name = 'web/project_update_review_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.project_update = get_object_or_404(ProjectUpdate, pk=kwargs['update_pk'])
+            if self.project_update.status != ProjectUpdate.Status.PUBLISHED:
+                raise PermissionDenied(_('Solo los avances publicados pueden recibir revisión documental.'))
+            if ProjectUpdateReview.objects.filter(project_update_id=self.project_update.pk).exists():
+                raise PermissionDenied(_('Este avance ya tiene una revisión documental registrada.'))
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['project_update'] = self.project_update
+        return context
+
+    def form_valid(self, form):
+        """
+        PRE: form contains validated observations for a published advance without a review.
+        POST: creates the review through the domain service and redirects to its detail.
+        """
+        try:
+            review = create_project_update_review(
+                update_id=self.project_update.pk,
+                observations=form.cleaned_data['observations'],
+                actor=self.request.user,
+            )
+        except ProjectUpdateReviewError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        messages.success(self.request, _('Revisión documental del Comité registrada.'))
+        return HttpResponseRedirect(reverse('project_update_review_detail', args=[review.pk]))
+
+
+class ProjectUpdateReviewDetailView(OperationsPermissionRequiredMixin, DetailView):
+    permission_required = 'operations.view_projectupdatereview'
+    model = ProjectUpdateReview
+    template_name = 'web/project_update_review_detail.html'
+
+    def get_queryset(self):
+        return ProjectUpdateReview.objects.select_related(
+            'project_update__project', 'reviewed_by', 'decision__decided_by'
+        )
+
+
+class ProjectUpdateReviewDecisionCreateView(OperationsPermissionRequiredMixin, FormView):
+    permission_required = 'operations.add_projectupdatereviewdecision'
+    form_class = ProjectUpdateReviewDecisionForm
+    template_name = 'web/project_update_review_decision_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.review = get_object_or_404(ProjectUpdateReview, pk=kwargs['review_pk'])
+            if self.review.project_update.status != ProjectUpdate.Status.PUBLISHED:
+                raise PermissionDenied(_('La revisión debe pertenecer a un avance publicado.'))
+            if ProjectUpdateReviewDecision.objects.filter(review_id=self.review.pk).exists():
+                raise PermissionDenied(_('Esta revisión ya tiene un resultado institucional registrado.'))
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['review'] = self.review
+        return context
+
+    def form_valid(self, form):
+        """
+        PRE: form contains a valid outcome and rationale for a review without a decision.
+        POST: creates the decision through the domain service and redirects to the review detail.
+        """
+        try:
+            create_project_update_review_decision(
+                review_id=self.review.pk,
+                outcome=form.cleaned_data['outcome'],
+                rationale=form.cleaned_data['rationale'],
+                actor=self.request.user,
+            )
+        except ProjectUpdateReviewDecisionError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        messages.success(self.request, _('Resultado de revisión del Comité registrado.'))
+        return HttpResponseRedirect(reverse('project_update_review_detail', args=[self.review.pk]))
+
+
+class ProjectUpdateReviewDecisionDetailView(OperationsPermissionRequiredMixin, DetailView):
+    permission_required = 'operations.view_projectupdatereviewdecision'
+    model = ProjectUpdateReviewDecision
+    template_name = 'web/project_update_review_decision_detail.html'
+
+    def get_queryset(self):
+        return ProjectUpdateReviewDecision.objects.select_related(
+            'review__project_update__project', 'decided_by'
+        )
 
 
 class ProjectUpdateCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):
@@ -780,6 +886,7 @@ class ProjectUpdateCreateView(OperationsPermissionRequiredMixin, RouteContextMix
             progress_percentage=form.cleaned_data['progress_percentage'],
             attachments=form.cleaned_data.get('attachments', ()),
             created_by=self.request.user if self.request.user.is_authenticated else None,
+            reported_by=form.cleaned_data['reported_by'],
         )
         messages.success(self.request, _('Avance de proyecto registrado.'))
         return HttpResponseRedirect(self.get_success_url())
@@ -812,6 +919,7 @@ class ProjectUpdateCreateForProjectView(OperationsPermissionRequiredMixin, Route
             progress_percentage=form.cleaned_data['progress_percentage'],
             attachments=form.cleaned_data.get('attachments', ()),
             created_by=self.request.user if self.request.user.is_authenticated else None,
+            reported_by=form.cleaned_data['reported_by'],
         )
         messages.success(self.request, _('Avance de proyecto registrado.'))
         return HttpResponseRedirect(self.get_success_url())
@@ -853,6 +961,7 @@ class ProjectUpdateUpdateView(OperationsPermissionRequiredMixin, RouteContextMix
                 description=form.cleaned_data['description'],
                 update_date=form.cleaned_data['update_date'],
                 progress_percentage=form.cleaned_data['progress_percentage'],
+                reported_by=form.cleaned_data['reported_by'],
                 actor=self.request.user,
                 attachments=form.cleaned_data.get('attachments', ()),
             )
