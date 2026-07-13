@@ -96,6 +96,7 @@ if not DEBUG and not ALLOWED_HOSTS:
 
 KOBO_BASE_URL = os.getenv("KOBO_BASE_URL", "")
 KOBO_API_TOKEN = os.getenv("KOBO_API_TOKEN", "")
+KOBO_WEBHOOK_USERNAME = os.getenv("KOBO_WEBHOOK_USERNAME", "")
 KOBO_WEBHOOK_SECRET = os.getenv("KOBO_WEBHOOK_SECRET", "")
 KOBO_FICHA_01_ASSET_UID = os.getenv("KOBO_FICHA_01_ASSET_UID", "")
 KOBO_ENABLED = os.getenv("KOBO_ENABLED", "False").strip().lower() in {
@@ -172,15 +173,9 @@ if DATABASE_ENGINE == 'sqlite':
     if not DEBUG:
         raise ImproperlyConfigured('SQLite solo está permitido cuando DEBUG=True.')
     DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": require_env("POSTGRES_DB"),
-            "USER": require_env("POSTGRES_USER"),
-            "PASSWORD": require_env("POSTGRES_PASSWORD"),
-            "HOST": require_env("POSTGRES_HOST"),
-            "PORT": os.getenv("POSTGRES_PORT", "5432"),
-            "CONN_MAX_AGE": int(os.getenv("DATABASE_CONN_MAX_AGE", "0")),
-            "CONN_HEALTH_CHECKS": True,
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
         }
     }
 elif DATABASE_ENGINE == 'postgresql':

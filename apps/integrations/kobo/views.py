@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import secrets
 
@@ -50,17 +52,64 @@ from apps.integrations.kobo.services import (
 )
 
 
+WEBHOOK_BASIC_REALM = "SIGEDON Kobo Webhook"
+
+
+def _has_valid_webhook_credentials(request) -> bool:
+    """
+    PRE: request is an HTTP request directed to the Kobo webhook.
+    POST: returns True only for non-empty configured Basic credentials or the
+    legacy secret header, without logging or raising for malformed input.
+    """
+    configured_username = settings.KOBO_WEBHOOK_USERNAME
+    configured_secret = settings.KOBO_WEBHOOK_SECRET
+    if not configured_secret:
+        return False
+
+    supplied_secret = request.headers.get("X-Kobo-Webhook-Secret", "")
+    if supplied_secret and secrets.compare_digest(supplied_secret, configured_secret):
+        return True
+
+    authorization = request.headers.get("Authorization", "")
+    try:
+        scheme, encoded_credentials = authorization.split(None, 1)
+        if scheme.casefold() != "basic":
+            return False
+        decoded_credentials = base64.b64decode(
+            encoded_credentials, validate=True
+        ).decode("utf-8")
+        supplied_username, supplied_password = decoded_credentials.split(":", 1)
+    except (ValueError, UnicodeDecodeError, binascii.Error):
+        return False
+
+    return bool(
+        configured_username
+        and supplied_username
+        and supplied_password
+        and secrets.compare_digest(supplied_username, configured_username)
+        and secrets.compare_digest(supplied_password, configured_secret)
+    )
+
+
+def _webhook_unauthorized_response():
+    # PRE: webhook authentication did not validate.
+    # POST: returns the Basic challenge without creating or processing staging data.
+    return JsonResponse(
+        {"ok": False, "error": "unauthorized"},
+        status=401,
+        headers={"WWW-Authenticate": f'Basic realm="{WEBHOOK_BASIC_REALM}"'},
+    )
+
+
 @csrf_exempt
 @require_POST
 def webhook_submission(request):
-    # PRE: Kobo POSTs JSON with the configured independent webhook secret.
+    # PRE: Kobo POSTs JSON with configured Basic credentials or legacy secret.
     # POST: safely stages and processes one configured asset submission idempotently.
     if not settings.KOBO_ENABLED:
         raise Http404
-    supplied_secret = request.headers.get("X-Kobo-Webhook-Secret", "")
-    configured_secret = settings.KOBO_WEBHOOK_SECRET
-    if not configured_secret or not secrets.compare_digest(supplied_secret, configured_secret):
-        return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
+    if not _has_valid_webhook_credentials(request):
+        return _webhook_unauthorized_response()
     if request.content_type.split(";", 1)[0].lower() != "application/json":
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     try:

@@ -1,3 +1,4 @@
+import base64
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from datetime import date, datetime, timezone
@@ -4101,7 +4102,11 @@ class KoboAssetManualConfigurationTests(TestCase):
             link_asset_to_project(asset, project=self.project, linked_by=self.editor)
 
 
-@override_settings(KOBO_ENABLED=True, KOBO_WEBHOOK_SECRET="test-webhook-secret")
+@override_settings(
+    KOBO_ENABLED=True,
+    KOBO_WEBHOOK_USERNAME="sigedon-kobo",
+    KOBO_WEBHOOK_SECRET="test-webhook-secret",
+)
 class KoboWebhookTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -4146,13 +4151,92 @@ class KoboWebhookTests(TestCase):
             HTTP_X_KOBO_WEBHOOK_SECRET=secret,
         )
 
+    def post_basic(
+        self,
+        payload,
+        *,
+        username="sigedon-kobo",
+        password="test-webhook-secret",
+    ):
+        # PRE: username and password are test-only Basic credential values.
+        # POST: sends one webhook POST using an encoded Authorization header.
+        credentials = base64.b64encode(
+            f"{username}:{password}".encode("utf-8")
+        ).decode("ascii")
+        return self.client.post(
+            reverse("kobo:webhook_submission"),
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Basic {credentials}",
+        )
+
     def test_rejects_method_disabled_feature_and_invalid_authentication(self):
         url = reverse("kobo:webhook_submission")
         self.assertEqual(self.client.get(url).status_code, 405)
-        self.assertEqual(self.client.post(url, data="{}", content_type="application/json").status_code, 403)
-        self.assertEqual(self.post({}, secret="wrong").status_code, 403)
+        response = self.client.post(url, data="{}", content_type="application/json")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response["WWW-Authenticate"],
+            'Basic realm="SIGEDON Kobo Webhook"',
+        )
+        self.assertEqual(self.post({}, secret="wrong").status_code, 401)
         with self.settings(KOBO_ENABLED=False):
             self.assertEqual(self.post({}).status_code, 404)
+
+    def test_basic_authentication_accepts_valid_credentials_and_processes_submission(self):
+        response = self.post_basic(self.payload(FICHA_01_FORM_ID))
+
+        self.assertEqual(response.status_code, 201)
+        submission = KoboSubmission.objects.get(external_id=f"webhook-{FICHA_01_FORM_ID}")
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+
+    def test_basic_authentication_rejects_invalid_or_malformed_credentials(self):
+        url = reverse("kobo:webhook_submission")
+        cases = (
+            self.post_basic({}, username="other"),
+            self.post_basic({}, password="other"),
+            self.client.post(
+                url,
+                data="{}",
+                content_type="application/json",
+                HTTP_AUTHORIZATION="Basic not-base64!",
+            ),
+            self.client.post(
+                url,
+                data="{}",
+                content_type="application/json",
+                HTTP_AUTHORIZATION="Bearer token",
+            ),
+            self.client.post(
+                url,
+                data="{}",
+                content_type="application/json",
+                HTTP_AUTHORIZATION="Basic Og==",
+            ),
+        )
+
+        for response in cases:
+            with self.subTest(status=response.status_code):
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(
+                    response["WWW-Authenticate"],
+                    'Basic realm="SIGEDON Kobo Webhook"',
+                )
+        self.assertFalse(KoboSubmission.objects.exists())
+
+    def test_basic_authentication_preserves_idempotency(self):
+        payload = self.payload(FICHA_10_FORM_ID)
+        first = self.post_basic(payload)
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        event_count = submission.processing_events.count()
+
+        second = self.post_basic(payload)
+        submission.refresh_from_db()
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertFalse(second.json()["created"])
+        self.assertEqual(submission.processing_events.count(), event_count)
 
     def test_rejects_invalid_json_and_unavailable_assets_safely(self):
         url = reverse("kobo:webhook_submission")
@@ -4205,7 +4289,13 @@ class KoboWebhookStagingTests(KoboWebhookTests):
             receive_webhook_submission(asset=asset, raw_payload={**payload, "_xform_id_string": "other"})
 
 
-@override_settings(KOBO_ENABLED=True, KOBO_BASE_URL="https://kf.example.test", KOBO_API_TOKEN="test-token")
+@override_settings(
+    KOBO_ENABLED=True,
+    KOBO_BASE_URL="https://kf.example.test",
+    KOBO_API_TOKEN="test-token",
+    KOBO_WEBHOOK_USERNAME="sigedon-kobo",
+    KOBO_WEBHOOK_SECRET="test-webhook-secret",
+)
 class KoboReconciliationCommandTests(KoboWebhookTests):
     def test_command_dry_run_and_asset_filter(self):
         asset = self.assets[FICHA_01_FORM_ID]
