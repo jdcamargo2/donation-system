@@ -680,7 +680,10 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
         context['show_kobo_section'] = has_kobo_binding
         if has_kobo_binding:
             from apps.integrations.kobo.models import KoboAsset
-            from apps.integrations.kobo.services import get_project_imported_submissions
+            from apps.integrations.kobo.services import (
+                get_project_imported_submissions,
+                get_project_pending_submissions,
+            )
 
             context['kobo_territorial_submissions'] = get_project_imported_submissions(
                 self.object,
@@ -695,11 +698,23 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
                 form_role=KoboAsset.FormRole.PRIORITIZATION_MATRIX,
             )
             context['kobo_submissions'] = context['kobo_territorial_submissions']
+            context['kobo_pending_submissions'] = get_project_pending_submissions(
+                self.object
+            )
+            context['kobo_pending_submission_count'] = context[
+                'kobo_pending_submissions'
+            ].count()
+            context['can_import_kobo_submissions'] = self.request.user.has_perm(
+                'operations.change_project'
+            )
         else:
             context['kobo_territorial_submissions'] = ()
             context['kobo_microproject_submissions'] = ()
             context['kobo_prioritization_submissions'] = ()
             context['kobo_submissions'] = ()
+            context['kobo_pending_submissions'] = ()
+            context['kobo_pending_submission_count'] = 0
+            context['can_import_kobo_submissions'] = False
         return context
 
     def get_template_names(self):

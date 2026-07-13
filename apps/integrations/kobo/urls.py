@@ -50,6 +50,41 @@ urlpatterns = [
         views.project_submission_evidence,
         name="project_submission_evidence",
     ),
+    path(
+        "projects/<int:project_pk>/pending-submissions/",
+        views.project_pending_submission_list,
+        name="project_pending_submission_list",
+    ),
+    path(
+        "projects/<int:project_pk>/pending-submissions/<int:pk>/",
+        views.project_pending_submission_review,
+        name="project_pending_submission_review",
+    ),
+    path(
+        "projects/<int:project_pk>/pending-submissions/<int:pk>/import/",
+        views.project_pending_submission_import,
+        name="project_pending_submission_import",
+    ),
+    path(
+        "projects/<int:project_pk>/pending-submissions/<int:pk>/reject/",
+        views.project_pending_submission_reject,
+        name="project_pending_submission_reject",
+    ),
+    path(
+        "projects/<int:project_pk>/submission-history/",
+        views.project_submission_history,
+        name="project_submission_history",
+    ),
+    path(
+        "projects/<int:project_pk>/submission-history/<int:pk>/",
+        views.project_submission_history_detail,
+        name="project_submission_history_detail",
+    ),
+    path(
+        "projects/<int:project_pk>/submission-history/<int:pk>/restore/",
+        views.project_rejected_submission_restore,
+        name="project_rejected_submission_restore",
+    ),
     path("submissions/", views.submission_list, name="submission_list"),
     path(
         "submissions/<int:pk>/",

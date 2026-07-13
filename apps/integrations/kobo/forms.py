@@ -13,6 +13,7 @@ from apps.integrations.kobo.models import (
 )
 from apps.integrations.kobo.form_registry import list_registered_forms
 from apps.integrations.kobo.services import validate_routing_source_field
+from apps.integrations.kobo.services import REJECTION_REASON_LABELS
 
 
 SUPPORTED_FORM_ROLES = {
@@ -165,4 +166,27 @@ class KoboReviewForm(forms.Form):
             and not cleaned_data.get("reason", "").strip()
         ):
             self.add_error("reason", "La razón es obligatoria al rechazar.")
+        return cleaned_data
+
+
+class KoboRejectionForm(forms.Form):
+    reason = forms.ChoiceField(
+        choices=tuple(REJECTION_REASON_LABELS.items()),
+        label="Motivo",
+    )
+    comment = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        label="Comentario",
+    )
+
+    def clean(self):
+        # PRE: rejection values come from the project review confirmation form.
+        # POST: requires a comment only for the other reason without mutating data.
+        cleaned_data = super().clean()
+        if (
+            cleaned_data.get("reason") == "other"
+            and not cleaned_data.get("comment", "").strip()
+        ):
+            self.add_error("comment", "El comentario es obligatorio para el motivo otro.")
         return cleaned_data

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% load kobo_presentation %}
+
+{% block title %}Revisar ficha Kobo | SIGEDON{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    {% if back_to_history %}<a href="{% url 'kobo:project_submission_history' project.pk %}" class="text-decoration-none">← Volver al historial</a>{% else %}<a href="{% url 'kobo:project_pending_submission_list' project.pk %}" class="text-decoration-none">← Volver a fichas pendientes</a>{% endif %}
+    <div class="my-3"><div class="text-uppercase text-muted small">Revisión Kobo</div><h1 class="h3">{{ project_submission_detail_title }}</h1></div>
+    <section class="card card-body mb-3"><dl class="row mb-0">
+        <dt class="col-sm-4">Proyecto destino</dt><dd class="col-sm-8">{{ project }}</dd>
+        <dt class="col-sm-4">Tipo de ficha</dt><dd class="col-sm-8">{{ submission.asset.form_role|kobo_label }}</dd>
+        <dt class="col-sm-4">Recibida</dt><dd class="col-sm-8">{{ submission.received_at }}</dd>
+        <dt class="col-sm-4">Estado</dt><dd class="col-sm-8">{{ submission.status|kobo_label }}</dd>
+        {% if project_submission_detail_rows %}
+            {% for label, value in project_submission_detail_rows %}<dt class="col-sm-4">{{ label }}</dt><dd class="col-sm-8">{{ value|default:"—" }}</dd>{% endfor %}
+        {% else %}
+            <dt class="col-sm-4">Zona pastoral</dt><dd class="col-sm-8">{{ submission.pastoral_zone|default:"—" }}</dd>
+            <dt class="col-sm-4">Parroquia</dt><dd class="col-sm-8">{{ submission.parish|default:"—" }}</dd>
+            <dt class="col-sm-4">Comunidad</dt><dd class="col-sm-8">{{ submission.primary_community|default:"—" }}</dd>
+            <dt class="col-sm-4">Código del Núcleo Vital</dt><dd class="col-sm-8">{{ normalized_payload.nucleo_code|default:"—" }}</dd>
+            <dt class="col-sm-4">Comunidades cubiertas</dt><dd class="col-sm-8">{{ normalized_payload.communities_covered|default:"—" }}</dd>
+            <dt class="col-sm-4">Hogares estimados</dt><dd class="col-sm-8">{{ normalized_payload.estimated_households|default_if_none:"—" }}</dd>
+            <dt class="col-sm-4">Notas generales</dt><dd class="col-sm-8">{{ normalized_payload.general_notes|default:"—" }}</dd>
+        {% endif %}
+    </dl></section>
+    <section class="card card-body mb-3"><h2 class="h5">Adjuntos</h2><ul class="mb-0">{% for attachment in attachments %}<li>{{ attachment.original_filename|default:attachment.field_name }} · {{ attachment.get_privacy_level_display }} · {{ attachment.get_status_display }}</li>{% empty %}<li class="text-muted">No hay adjuntos disponibles.</li>{% endfor %}</ul></section>
+    {% if not read_only %}<div class="d-flex flex-wrap gap-2"><form method="post" action="{% url 'kobo:project_pending_submission_import' project.pk submission.pk %}">{% csrf_token %}<button type="submit" class="btn btn-success">Importar al proyecto</button></form><button class="btn btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#rejection-form">Rechazar ficha</button></div><section class="collapse card card-body border-danger mt-3" id="rejection-form"><h2 class="h5">Rechazar ficha</h2><p>La ficha se conservará en el historial, pero no será importada al proyecto.</p><form method="post" action="{% url 'kobo:project_pending_submission_reject' project.pk submission.pk %}">{% csrf_token %}{{ rejection_form.as_p }}<button type="submit" class="btn btn-danger">Confirmar rechazo</button></form></section>{% endif %}
+</div>
+{% endblock %}
