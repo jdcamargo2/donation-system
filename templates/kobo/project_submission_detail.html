@@ -7,7 +7,7 @@
     <a href="{% url 'project_detail' submission.project.pk %}" class="text-decoration-none">← Volver al proyecto</a>
     <div class="my-3"><div class="text-uppercase text-muted small">Levantamiento de campo importado</div><h1 class="h3">{{ submission.form_definition.title }}</h1></div>
 
-    <section class="card card-body mb-3"><h2 class="h5">{% if project_submission_detail_rows %}Microproyecto priorizado{% else %}Proyecto y territorio{% endif %}</h2><dl class="row mb-0">
+    <section class="card card-body mb-3"><h2 class="h5">{{ project_submission_detail_title }}</h2><dl class="row mb-0">
         <dt class="col-sm-4">Proyecto</dt><dd class="col-sm-8">{{ submission.project }}</dd>
         <dt class="col-sm-4">Formulario</dt><dd class="col-sm-8">{{ submission.form_definition.form_id }}</dd>
         <dt class="col-sm-4">Fecha</dt><dd class="col-sm-8">{{ submission.assessment_date|default:"—" }}</dd>

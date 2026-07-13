@@ -22,6 +22,10 @@ from apps.integrations.kobo.mappings.ficha_10 import (
     FICHA_10_FORM_ID,
     FICHA_10_VERSION,
 )
+from apps.integrations.kobo.mappings.ficha_11 import (
+    FICHA_11_FORM_ID,
+    FICHA_11_VERSION,
+)
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboAttachment,
@@ -136,13 +140,36 @@ MICROPROJECT_CHOICE_LABELS = {
 
 def _project_submission_detail_rows(submission):
     # PRE: submission is an imported Kobo record with normalized payload data.
-    # POST: returns labelled Ficha 10 fields only; territorial forms return none.
+    # POST: returns labelled Ficha 10/11 fields only; territorial forms return none.
+    payload = submission.normalized_payload or {}
+    if (
+        submission.form_definition.form_id == FICHA_11_FORM_ID
+        and submission.form_definition.version == FICHA_11_VERSION
+    ):
+        return (
+            ("Código del Núcleo Vital / comunidad", payload.get("nucleo_code")),
+            ("Nivel de daño físico", payload.get("physical_damage_score")),
+            ("Familias afectadas", payload.get("affected_families_score")),
+            ("Vulnerabilidad social", payload.get("social_vulnerability_score")),
+            ("Interrupción de servicios básicos", payload.get("services_interruption_score")),
+            ("Pérdida de medios de vida", payload.get("livelihood_loss_score")),
+            ("Capacidad parroquial disponible", payload.get("parish_capacity_score")),
+            ("Accesibilidad territorial", payload.get("territorial_accessibility_score")),
+            ("Existencia de aliados", payload.get("allies_availability_score")),
+            ("Potencial de impacto rápido", payload.get("rapid_impact_score")),
+            ("Viabilidad financiera", payload.get("financial_viability_score")),
+            ("Puntaje total", payload.get("priority_total")),
+            ("Semáforo sugerido", payload.get("suggested_semaphore")),
+            ("Semáforo final validado", payload.get("final_semaphore")),
+            ("Prioridad final de intervención", payload.get("final_priority")),
+            ("Síntesis de decisión", payload.get("priority_summary")),
+            ("Microproyectos vinculados", payload.get("linked_microprojects")),
+        )
     if (
         submission.form_definition.form_id != FICHA_10_FORM_ID
         or submission.form_definition.version != FICHA_10_VERSION
     ):
         return ()
-    payload = submission.normalized_payload or {}
     beneficiary_groups = payload.get("beneficiary_group", ())
     beneficiary_labels = ", ".join(
         MICROPROJECT_CHOICE_LABELS["beneficiary_group"].get(value, value)
@@ -152,14 +179,14 @@ def _project_submission_detail_rows(submission):
         ("Código del Núcleo Vital", payload.get("nucleo_code")),
         ("Nombre del microproyecto", payload.get("microproject_name")),
         (
-            "Componente",
+            "Componente principal",
             MICROPROJECT_CHOICE_LABELS["component"].get(
                 payload.get("component"), payload.get("component")
             ),
         ),
-        ("Problema resumido", payload.get("problem_summary")),
+        ("Problema que atiende", payload.get("problem_summary")),
         ("Objetivo específico", payload.get("specific_objective")),
-        ("Población beneficiaria", beneficiary_labels),
+        ("Población beneficiaria principal", beneficiary_labels),
         ("Actividades principales", payload.get("main_activities")),
         (
             "Rango de costo estimado",
@@ -176,13 +203,29 @@ def _project_submission_detail_rows(submission):
             ),
         ),
         (
-            "Viabilidad técnica",
+            "Viabilidad técnica inicial",
             MICROPROJECT_CHOICE_LABELS["technical_viability"].get(
                 payload.get("technical_viability"), payload.get("technical_viability")
             ),
         ),
-        ("Resultado esperado", payload.get("expected_result")),
+        ("Resultado esperado verificable", payload.get("expected_result")),
     )
+
+
+def _project_submission_detail_title(submission) -> str:
+    # PRE: submission has its form definition loaded.
+    # POST: returns a form-specific internal detail title without exposing metadata.
+    if (
+        submission.form_definition.form_id == FICHA_11_FORM_ID
+        and submission.form_definition.version == FICHA_11_VERSION
+    ):
+        return "Matriz de priorización y semáforo"
+    if (
+        submission.form_definition.form_id == FICHA_10_FORM_ID
+        and submission.form_definition.version == FICHA_10_VERSION
+    ):
+        return "Microproyecto priorizado"
+    return "Proyecto y territorio"
 
 
 def _detail_context(submission, user, *, review_form=None):
@@ -391,6 +434,9 @@ def project_submission_detail(request, pk):
             "evidences": evidences,
             "can_view_sensitive": can_view_sensitive,
             "project_submission_detail_rows": _project_submission_detail_rows(
+                submission
+            ),
+            "project_submission_detail_title": _project_submission_detail_title(
                 submission
             ),
             "sensitive_data": {

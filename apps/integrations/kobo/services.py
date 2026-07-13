@@ -14,6 +14,7 @@ from apps.integrations.kobo.errors import (
 from apps.integrations.kobo.form_registry import get_registered_form, list_registered_forms
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
+from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID, FICHA_11_VERSION
 from apps.integrations.kobo.models import (
     KoboAttachment,
     KoboAsset,
@@ -32,6 +33,7 @@ from apps.integrations.kobo.processors import (
 FORM_DEFINITION_ROLES = {
     (FICHA_01_FORM_ID, FICHA_01_VERSION): KoboAsset.FormRole.TERRITORIAL_PROFILE,
     (FICHA_10_FORM_ID, FICHA_10_VERSION): KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+    (FICHA_11_FORM_ID, FICHA_11_VERSION): KoboAsset.FormRole.PRIORITIZATION_MATRIX,
 }
 
 

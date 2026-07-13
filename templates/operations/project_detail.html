@@ -32,6 +32,32 @@
 
 <section class="card border-0 ops-detail-card mt-4">
     <div class="card-body">
+        <h2 class="h5 mb-3">Matriz de priorización y semáforo</h2>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead><tr><th>Fecha</th><th>Núcleo Vital</th><th>Puntaje</th><th>Semáforo sugerido</th><th>Semáforo final</th><th>Prioridad final</th><th></th></tr></thead>
+                <tbody>
+                {% for submission in kobo_prioritization_submissions %}
+                    <tr>
+                        <td>{{ submission.assessment_date|default:"—" }}</td>
+                        <td>{{ submission.normalized_payload.nucleo_code|default:"—" }}</td>
+                        <td>{{ submission.normalized_payload.priority_total|default:"—" }}</td>
+                        <td>{{ submission.normalized_payload.suggested_semaphore|default:"—" }}</td>
+                        <td>{{ submission.normalized_payload.final_semaphore|default:"—" }}</td>
+                        <td>{{ submission.normalized_payload.final_priority|default:"—" }}</td>
+                        <td><a href="{% url 'kobo:project_submission_detail' submission.pk %}">Ver matriz</a></td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="text-muted">No hay matrices de priorización importadas.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="card border-0 ops-detail-card mt-4">
+    <div class="card-body">
         <h2 class="h5 mb-3">Microproyectos priorizados</h2>
         <div class="table-responsive">
             <table class="table table-sm align-middle mb-0">

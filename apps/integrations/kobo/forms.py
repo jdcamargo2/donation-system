@@ -1,8 +1,9 @@
 from django import forms
 from django.core.exceptions import ValidationError
 
-from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID
-from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID
+from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
+from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
+from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID, FICHA_11_VERSION
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboDiscoveredAsset,
@@ -15,8 +16,9 @@ from apps.integrations.kobo.services import validate_routing_source_field
 
 
 SUPPORTED_FORM_ROLES = {
-    FICHA_01_FORM_ID: KoboAsset.FormRole.TERRITORIAL_PROFILE,
-    FICHA_10_FORM_ID: KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+    (FICHA_01_FORM_ID, FICHA_01_VERSION): KoboAsset.FormRole.TERRITORIAL_PROFILE,
+    (FICHA_10_FORM_ID, FICHA_10_VERSION): KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+    (FICHA_11_FORM_ID, FICHA_11_VERSION): KoboAsset.FormRole.PRIORITIZATION_MATRIX,
 }
 
 
@@ -31,7 +33,7 @@ def get_compatible_asset_configuration(
     registered_versions = {
         (registered.form_id, registered.version)
         for registered in list_registered_forms()
-        if registered.form_id in SUPPORTED_FORM_ROLES
+        if (registered.form_id, registered.version) in SUPPORTED_FORM_ROLES
     }
     remote_name = discovered_asset.name.strip().casefold()
     if not remote_name:
@@ -48,7 +50,7 @@ def get_compatible_asset_configuration(
     if len(matches) != 1:
         return None
     definition = matches[0]
-    return definition, SUPPORTED_FORM_ROLES[definition.form_id]
+    return definition, SUPPORTED_FORM_ROLES[(definition.form_id, definition.version)]
 
 
 class KoboAssetConfigurationForm(forms.Form):

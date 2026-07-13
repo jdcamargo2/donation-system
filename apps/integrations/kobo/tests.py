@@ -54,6 +54,7 @@ from apps.integrations.kobo.form_registry import (
 )
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
+from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID, FICHA_11_VERSION
 from apps.integrations.kobo.forms import (
     KoboProjectBindingForm,
     SUPPORTED_FORM_ROLES,
@@ -569,6 +570,90 @@ class KoboFicha10NormalizerTests(SimpleTestCase):
             self.normalize(raw_payload)
 
 
+class KoboFicha11NormalizerTests(SimpleTestCase):
+    SCORE_FIELDS = (
+        "physical_damage_score",
+        "affected_families_score",
+        "social_vulnerability_score",
+        "services_interruption_score",
+        "livelihood_loss_score",
+        "parish_capacity_score",
+        "territorial_accessibility_score",
+        "allies_availability_score",
+        "rapid_impact_score",
+        "financial_viability_score",
+    )
+
+    def valid_payload(self, **overrides):
+        # PRE: overrides contains only Ficha 11 fields or Kobo metadata.
+        # POST: returns a complete prioritization payload without persistence.
+        payload = {
+            "_uuid": "ficha-11-normalized",
+            "today": "2026-07-12",
+            "nucleo_code": " NV-011 ",
+            **{field: "1" for field in self.SCORE_FIELDS},
+            "final_semaphore": "red",
+            "final_priority": "critical",
+            "priority_summary": "Intervención técnica prioritaria.",
+        }
+        payload.update(overrides)
+        return payload
+
+    def normalize(self, payload=None, **routing_overrides):
+        # PRE: payload is Ficha 11 data and routing values identify its contract.
+        # POST: returns the canonical dispatcher result with no persistence.
+        routing = {"form_id": FICHA_11_FORM_ID, "form_version": FICHA_11_VERSION}
+        routing.update(routing_overrides)
+        return normalize_submission(
+            self.valid_payload() if payload is None else payload,
+            default_timezone=ZoneInfo("America/Caracas"),
+            **routing,
+        )
+
+    def test_normalizes_scores_and_recalculates_total_and_semaphore(self):
+        result = self.normalize()
+
+        self.assertEqual(result.normalized_payload["nucleo_code"], "NV-011")
+        self.assertTrue(
+            all(isinstance(result.normalized_payload[field], int) for field in self.SCORE_FIELDS)
+        )
+        self.assertEqual(result.normalized_payload["priority_total"], 10)
+        self.assertEqual(result.normalized_payload["suggested_semaphore"], "gray")
+        self.assertEqual(result.normalized_payload["linked_microprojects"], "")
+
+    def test_calculates_each_semaphore_threshold(self):
+        for score, expected in ((1, "gray"), (2, "green"), (3, "yellow"), (4, "red"), (5, "red")):
+            with self.subTest(score=score):
+                payload = self.valid_payload(**{field: str(score) for field in self.SCORE_FIELDS})
+                self.assertEqual(
+                    self.normalize(payload).normalized_payload["suggested_semaphore"],
+                    expected,
+                )
+
+    def test_final_values_can_differ_from_suggested_and_linked_text_is_preserved(self):
+        result = self.normalize(
+            self.valid_payload(
+                final_semaphore="yellow",
+                final_priority="low",
+                linked_microprojects="MP-01, MP-02",
+            )
+        )
+
+        self.assertEqual(result.normalized_payload["final_semaphore"], "yellow")
+        self.assertEqual(result.normalized_payload["final_priority"], "low")
+        self.assertEqual(result.normalized_payload["linked_microprojects"], "MP-01, MP-02")
+
+    def test_rejects_invalid_scores_and_calculated_values(self):
+        for field, value in ((field, value) for field in self.SCORE_FIELDS for value in (None, "", "0", "6", "1.5", True, "no")):
+            with self.subTest(field=field, value=value):
+                with self.assertRaises(KoboPayloadError):
+                    self.normalize(self.valid_payload(**{field: value}))
+        for field, value in (("priority_total", "11"), ("suggested_semaphore", "red"), ("final_semaphore", "blue"), ("final_priority", "urgent"), ("priority_summary", " ")):
+            with self.subTest(field=field, value=value):
+                with self.assertRaises(KoboPayloadError):
+                    self.normalize(self.valid_payload(**{field: value}))
+
+
 class KoboApiClientTests(SimpleTestCase):
     def create_client(self, transport, **overrides):
         # PRE: transport implements get and overrides contains constructor values.
@@ -1000,8 +1085,8 @@ class KoboStagingModelsTests(TestCase):
 
 
 class KoboFormRegistryTests(SimpleTestCase):
-    def test_registry_contains_exactly_ten_forms(self):
-        self.assertEqual(len(list_registered_forms()), 10)
+    def test_registry_contains_exactly_eleven_forms(self):
+        self.assertEqual(len(list_registered_forms()), 11)
 
     def test_first_form_uses_expected_identifier(self):
         first_form = list_registered_forms()[0]
@@ -1018,7 +1103,7 @@ class KoboFormRegistryTests(SimpleTestCase):
 
         self.assertEqual(
             versions,
-            {FICHA_01_VERSION, FICHA_10_VERSION, "20260710"},
+            {FICHA_01_VERSION, FICHA_10_VERSION, FICHA_11_VERSION, "20260710"},
         )
 
     def test_ficha_10_uses_its_exact_contract(self):
@@ -1030,16 +1115,28 @@ class KoboFormRegistryTests(SimpleTestCase):
         )
         self.assertEqual(registered_form.normalizer_name, "normalize_ficha_10")
 
+    def test_ficha_11_uses_its_exact_contract(self):
+        registered_form = get_registered_form(FICHA_11_FORM_ID, FICHA_11_VERSION)
+
+        self.assertEqual(
+            registered_form.title,
+            "Ficha 11 - Matriz de priorización y semáforo (depurada)",
+        )
+        self.assertEqual(registered_form.normalizer_name, "normalize_ficha_11")
+
     def test_supported_roles_keep_ficha_10_separate_from_ficha_1(self):
         self.assertEqual(
-            SUPPORTED_FORM_ROLES[FICHA_01_FORM_ID],
+            SUPPORTED_FORM_ROLES[(FICHA_01_FORM_ID, FICHA_01_VERSION)],
             KoboAsset.FormRole.TERRITORIAL_PROFILE,
         )
         self.assertEqual(
-            SUPPORTED_FORM_ROLES[FICHA_10_FORM_ID],
+            SUPPORTED_FORM_ROLES[(FICHA_10_FORM_ID, FICHA_10_VERSION)],
             KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
         )
-        self.assertNotIn("ficha_11", SUPPORTED_FORM_ROLES)
+        self.assertEqual(
+            SUPPORTED_FORM_ROLES[(FICHA_11_FORM_ID, FICHA_11_VERSION)],
+            KoboAsset.FormRole.PRIORITIZATION_MATRIX,
+        )
 
     def test_get_registered_form_returns_exact_definition(self):
         registered_form = get_registered_form(
@@ -1067,17 +1164,17 @@ class KoboFormRegistryTests(SimpleTestCase):
 
 
 class KoboFormSynchronizationTests(TestCase):
-    def test_sync_creates_ten_form_definitions(self):
+    def test_sync_creates_eleven_form_definitions(self):
         synchronized_count = sync_registered_forms()
 
-        self.assertEqual(synchronized_count, 10)
-        self.assertEqual(KoboFormDefinition.objects.count(), 10)
+        self.assertEqual(synchronized_count, 11)
+        self.assertEqual(KoboFormDefinition.objects.count(), 11)
 
     def test_sync_twice_does_not_duplicate_definitions(self):
         sync_registered_forms()
         sync_registered_forms()
 
-        self.assertEqual(KoboFormDefinition.objects.count(), 10)
+        self.assertEqual(KoboFormDefinition.objects.count(), 11)
 
     def test_sync_preserves_historical_definition(self):
         KoboFormDefinition.objects.create(
@@ -1103,6 +1200,11 @@ class KoboFormSynchronizationTests(TestCase):
                 form_id=FICHA_10_FORM_ID, version=FICHA_10_VERSION
             ).exists()
         )
+        self.assertTrue(
+            KoboFormDefinition.objects.filter(
+                form_id=FICHA_11_FORM_ID, version=FICHA_11_VERSION
+            ).exists()
+        )
 
     def test_register_command_is_idempotent(self):
         first_output = StringIO()
@@ -1111,9 +1213,9 @@ class KoboFormSynchronizationTests(TestCase):
         call_command("register_kobo_forms", stdout=first_output)
         call_command("register_kobo_forms", stdout=second_output)
 
-        self.assertEqual(KoboFormDefinition.objects.count(), 10)
-        self.assertIn("10", first_output.getvalue())
-        self.assertIn("10", second_output.getvalue())
+        self.assertEqual(KoboFormDefinition.objects.count(), 11)
+        self.assertIn("11", first_output.getvalue())
+        self.assertIn("11", second_output.getvalue())
 
 
 @override_settings(KOBO_FICHA_01_ASSET_UID="ficha-01-asset")
@@ -2801,6 +2903,119 @@ class KoboFicha10AssociationTests(TestCase):
 
 
 @override_settings(KOBO_ENABLED=True)
+class KoboFicha11AssociationTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.reviewer = user_model.objects.create_user(
+            username="ficha-11-reviewer",
+            password="test-password",
+        )
+        cls.project = Project.objects.create(
+            code="PRJ-FICHA-11",
+            name="Proyecto para priorización",
+            status=Project.Status.ACTIVE,
+        )
+        cls.form_definition = KoboFormDefinition.objects.create(
+            form_id=FICHA_11_FORM_ID,
+            title="Ficha 11 - Matriz de priorización y semáforo (depurada)",
+            version=FICHA_11_VERSION,
+        )
+        cls.asset = KoboAsset.objects.create(
+            asset_uid="ficha-11-asset",
+            name="Ficha de priorización",
+            form_definition=cls.form_definition,
+            form_role=KoboAsset.FormRole.PRIORITIZATION_MATRIX,
+        )
+        KoboProjectBinding.objects.create(
+            asset=cls.asset,
+            project=cls.project,
+            routing_type=KoboProjectBinding.RoutingType.FIELD_VALUE,
+            source_field="payload.nucleo_code",
+            source_value="NV-011",
+        )
+
+    def valid_payload(self, **overrides):
+        # PRE: the Ficha 11 asset has an explicit active routing binding.
+        # POST: returns a complete raw priority matrix payload.
+        payload = {
+            "_uuid": "ficha-11-association",
+            "_xform_id_string": self.asset.asset_uid,
+            "nucleo_code": "NV-011",
+            **{field: "4" for field in KoboFicha11NormalizerTests.SCORE_FIELDS},
+            "priority_total": "40",
+            "suggested_semaphore": "red",
+            "final_semaphore": "yellow",
+            "final_priority": "high",
+            "priority_summary": "Validación técnica independiente.",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_ficha_11_processes_reviews_and_associates_without_operations_effects(self):
+        submission = KoboSubmission.objects.create(
+            form_definition=self.form_definition,
+            external_id="ficha-11-association",
+            raw_payload=self.valid_payload(),
+        )
+        process_submission(submission, default_timezone=ZoneInfo("America/Caracas"))
+        submission.refresh_from_db()
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        submission.raw_payload["nucleo_code"] = "RAW-MUST-NOT-ROUTE"
+        submission.save(update_fields=("raw_payload",))
+        review_submission(
+            submission,
+            decision=KoboSubmission.Status.APPROVED_FOR_IMPORT,
+            reason="",
+            reviewed_by=self.reviewer,
+        )
+
+        result = associate_submission_with_project(submission, reviewed_by=self.reviewer)
+        submission.refresh_from_db()
+
+        self.assertTrue(result.associated)
+        self.assertEqual(submission.project_id, self.project.pk)
+        self.assertEqual(submission.status, KoboSubmission.Status.IMPORTED)
+        self.assertEqual(submission.normalized_payload["priority_total"], 40)
+        self.assertFalse(ProjectUpdate.objects.exists())
+        self.assertEqual(Project.objects.count(), 1)
+
+    def test_manipulated_total_fails_processing_before_review(self):
+        submission = KoboSubmission.objects.create(
+            form_definition=self.form_definition,
+            external_id="ficha-11-invalid-total",
+            raw_payload=self.valid_payload(priority_total="39"),
+        )
+
+        process_submission(submission, default_timezone=ZoneInfo("America/Caracas"))
+        submission.refresh_from_db()
+
+        self.assertEqual(submission.status, KoboSubmission.Status.VALIDATION_FAILED)
+        self.assertFalse(ProjectUpdate.objects.exists())
+
+    def test_ficha_11_rejects_a_crossed_asset_role(self):
+        submission = KoboSubmission.objects.create(
+            form_definition=self.form_definition,
+            external_id="ficha-11-crossed-role",
+            raw_payload={
+                "_uuid": "ficha-11-crossed-role",
+                "_xform_id_string": self.asset.asset_uid,
+            },
+            normalized_payload={"nucleo_code": "NV-011"},
+            status=KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        )
+        self.asset.form_role = KoboAsset.FormRole.TERRITORIAL_PROFILE
+        self.asset.save(update_fields=("form_role",))
+
+        result = associate_submission_with_project(submission, reviewed_by=self.reviewer)
+        submission.refresh_from_db()
+
+        self.assertFalse(result.associated)
+        self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+        self.assertEqual(submission.error_code, "asset_role_incompatible")
+
+
+@override_settings(KOBO_ENABLED=True)
 class KoboProjectImportedSubmissionsTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -2847,6 +3062,11 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             title="Ficha 10 - Microproyecto priorizado (depurada)",
             version=FICHA_10_VERSION,
         )
+        cls.prioritization_form_definition = KoboFormDefinition.objects.create(
+            form_id=FICHA_11_FORM_ID,
+            title="Ficha 11 - Matriz de priorización y semáforo (depurada)",
+            version=FICHA_11_VERSION,
+        )
 
     def setUp(self):
         self.project = Project.objects.create(
@@ -2877,6 +3097,12 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             name="Ficha de microproyectos activa",
             form_definition=self.microproject_form_definition,
             form_role=KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+        )
+        self.prioritization_asset = KoboAsset.objects.create(
+            asset_uid="project-detail-prioritization-asset",
+            name="Ficha de priorización activa",
+            form_definition=self.prioritization_form_definition,
+            form_role=KoboAsset.FormRole.PRIORITIZATION_MATRIX,
         )
         self.binding = KoboProjectBinding.objects.create(
             asset=self.asset,
@@ -2933,6 +3159,36 @@ class KoboProjectImportedSubmissionsTests(TestCase):
                 "implementation_urgency": "immediate",
                 "technical_viability": "high",
                 "expected_result": "Espacio protegido.",
+            },
+            status=KoboSubmission.Status.IMPORTED,
+            assessment_date=date(2026, 7, 12),
+            imported_at=django_timezone.now(),
+            processed_at=django_timezone.now(),
+        )
+        self.prioritization_imported = KoboSubmission.objects.create(
+            form_definition=self.prioritization_form_definition,
+            asset=self.prioritization_asset,
+            project=self.project,
+            external_id="visible-prioritization-imported",
+            raw_payload={"_uuid": "visible-prioritization-imported"},
+            normalized_payload={
+                "nucleo_code": "NV-011",
+                "physical_damage_score": 4,
+                "affected_families_score": 4,
+                "social_vulnerability_score": 4,
+                "services_interruption_score": 4,
+                "livelihood_loss_score": 4,
+                "parish_capacity_score": 4,
+                "territorial_accessibility_score": 4,
+                "allies_availability_score": 4,
+                "rapid_impact_score": 4,
+                "financial_viability_score": 4,
+                "priority_total": 40,
+                "suggested_semaphore": "red",
+                "final_semaphore": "yellow",
+                "final_priority": "high",
+                "priority_summary": "Prioridad validada.",
+                "linked_microprojects": "MP-01",
             },
             status=KoboSubmission.Status.IMPORTED,
             assessment_date=date(2026, 7, 12),
@@ -3015,6 +3271,16 @@ class KoboProjectImportedSubmissionsTests(TestCase):
 
         self.assertEqual(submissions, [self.microproject_imported])
 
+    def test_service_separates_imported_prioritization_matrices_by_role(self):
+        submissions = list(
+            get_project_imported_submissions(
+                self.project,
+                form_role=KoboAsset.FormRole.PRIORITIZATION_MATRIX,
+            )
+        )
+
+        self.assertEqual(submissions, [self.prioritization_imported])
+
     def test_project_detail_shows_only_visible_imported_submission(self):
         self.client.force_login(self.viewer)
 
@@ -3030,6 +3296,8 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertNotContains(response, "inactive-asset-hidden")
         self.assertContains(response, "Microproyectos priorizados")
         self.assertContains(response, "Techo para el centro comunitario")
+        self.assertContains(response, "Matriz de priorización y semáforo")
+        self.assertContains(response, "NV-011")
         for sensitive_value in (
             "Sensitive Delegate",
             "Sensitive Informant Role",
@@ -3070,6 +3338,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertNotContains(viewer_response, "+58-sensitive-phone")
         self.assertNotContains(viewer_response, "Sensitive Delegate")
         self.assertNotContains(viewer_response, "Sensitive Informant Role")
+        self.assertNotContains(viewer_response, "Nombre del microproyecto")
 
         self.client.force_login(self.reviewer)
         reviewer_response = self.client.get(url)
@@ -3088,11 +3357,28 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         )
 
         self.assertContains(response, "Microproyecto priorizado")
+        self.assertContains(response, "Nombre del microproyecto")
         self.assertNotContains(response, "Salud y atención psicosocial")
         self.assertContains(response, "Infraestructura")
         self.assertContains(response, "Inmediata")
         self.assertContains(response, "Alta")
+        self.assertNotContains(response, "Hogares estimados")
         self.assertNotContains(response, "_submitted_by")
+
+    def test_prioritization_detail_distinguishes_suggested_and_final_semaphores(self):
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("kobo:project_submission_detail", args=(self.prioritization_imported.pk,))
+        )
+
+        self.assertContains(response, "Nivel de daño físico")
+        self.assertContains(response, "Puntaje total")
+        self.assertContains(response, "Semáforo sugerido")
+        self.assertContains(response, "Semáforo final validado")
+        self.assertNotContains(response, "Nombre del microproyecto")
+        self.assertNotContains(response, "Hogares estimados")
+        self.assertNotContains(response, "raw_payload")
 
     def test_detail_hides_sources_and_non_downloaded_attachments(self):
         self.client.force_login(self.viewer)

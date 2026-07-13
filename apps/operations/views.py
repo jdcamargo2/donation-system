@@ -690,10 +690,15 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
                 self.object,
                 form_role=KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
             )
+            context['kobo_prioritization_submissions'] = get_project_imported_submissions(
+                self.object,
+                form_role=KoboAsset.FormRole.PRIORITIZATION_MATRIX,
+            )
             context['kobo_submissions'] = context['kobo_territorial_submissions']
         else:
             context['kobo_territorial_submissions'] = ()
             context['kobo_microproject_submissions'] = ()
+            context['kobo_prioritization_submissions'] = ()
             context['kobo_submissions'] = ()
         return context
 
