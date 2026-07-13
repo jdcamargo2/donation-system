@@ -211,6 +211,21 @@ def receive_webhook_submission(*, asset: KoboAsset, raw_payload: dict) -> tuple[
         raise KoboPayloadError("Kobo submission _uuid must be a non-empty string.")
     if raw_payload.get("_xform_id_string") != asset.asset_uid:
         raise KoboPayloadError("Kobo submission asset UID does not match configuration.")
+    discovered_asset = KoboDiscoveredAsset.objects.filter(
+        asset_uid=asset.asset_uid
+    ).only("metadata_snapshot").first()
+    if discovered_asset is None:
+        raise KoboPayloadError("Kobo asset metadata is unavailable.")
+    metadata = discovered_asset.metadata_snapshot
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("id_string") != form_definition.form_id
+        or (
+            metadata.get("version") is not None
+            and metadata["version"] != form_definition.version
+        )
+    ):
+        raise KoboPayloadError("Kobo asset metadata is incompatible with configuration.")
     instance_id = raw_payload.get("meta/instanceID")
     if instance_id is not None and instance_id != f"uuid:{external_id}":
         raise KoboPayloadError("Kobo submission instanceID is inconsistent.")
@@ -578,6 +593,102 @@ def resolve_project_binding(
     if matches[0].project.status != Project.Status.ACTIVE:
         raise KoboConfigurationError("routing_project_inactive")
     return _routing_resolution(matches[0])
+
+
+def assign_normalized_submission_to_direct_project(
+    submission: KoboSubmission,
+) -> bool:
+    """
+    PRE: submission is persisted, normalized, and ready for review.
+    POST: assigns the sole active direct-binding project and processed timestamp,
+    or records a safe routing failure without changing the review status.
+    """
+    if submission is None or submission.pk is None:
+        raise KoboConfigurationError("Kobo submission must exist.")
+
+    def fail() -> bool:
+        with transaction.atomic():
+            locked_submission = KoboSubmission.objects.select_for_update().get(
+                pk=submission.pk
+            )
+            locked_submission.error_code = "routing_configuration_error"
+            locked_submission.error_message = "Kobo project routing could not be resolved."
+            locked_submission.save(update_fields=("error_code", "error_message"))
+            KoboProcessingEvent.objects.create(
+                submission=locked_submission,
+                stage="project_routing",
+                level=KoboProcessingEvent.Level.ERROR,
+                code="routing_configuration_error",
+                message="Kobo project routing could not be resolved.",
+            )
+        submission.error_code = "routing_configuration_error"
+        submission.error_message = "Kobo project routing could not be resolved."
+        return False
+
+    try:
+        locked_submission = KoboSubmission.objects.select_related(
+            "asset__form_definition"
+        ).get(pk=submission.pk)
+        asset = locked_submission.asset
+        if (
+            locked_submission.status != KoboSubmission.Status.READY_FOR_REVIEW
+            or asset is None
+            or not asset.is_active
+            or not asset.form_definition.is_active
+            or asset.form_role
+            != FORM_DEFINITION_ROLES.get(
+                (asset.form_definition.form_id, asset.form_definition.version)
+            )
+        ):
+            return fail()
+        bindings = list(
+            asset.project_bindings.filter(is_active=True).select_related("project")
+        )
+        if (
+            len(bindings) != 1
+            or bindings[0].routing_type != KoboProjectBinding.RoutingType.DIRECT
+        ):
+            return fail()
+        from apps.operations.models import Project
+
+        if bindings[0].project.status != Project.Status.ACTIVE:
+            return fail()
+    except (KoboAsset.DoesNotExist, KoboSubmission.DoesNotExist):
+        return fail()
+
+    with transaction.atomic():
+        locked_submission = KoboSubmission.objects.select_for_update().get(
+            pk=submission.pk
+        )
+        if (
+            locked_submission.project_id == bindings[0].project_id
+            and locked_submission.processed_at is not None
+        ):
+            return True
+        locked_submission.project_id = bindings[0].project_id
+        locked_submission.processed_at = timezone.now()
+        locked_submission.error_code = ""
+        locked_submission.error_message = ""
+        locked_submission.save(
+            update_fields=(
+                "project",
+                "processed_at",
+                "error_code",
+                "error_message",
+            )
+        )
+        KoboProcessingEvent.objects.create(
+            submission=locked_submission,
+            stage="project_routing",
+            level=KoboProcessingEvent.Level.INFO,
+            code="project_assigned",
+            message="Kobo submission assigned to its direct project.",
+        )
+    submission.project_id = bindings[0].project_id
+    submission.processed_at = locked_submission.processed_at
+    submission.error_code = ""
+    submission.error_message = ""
+    return True
 
 
 def associate_submission_with_project(

@@ -31,10 +31,10 @@ FINAL_SEMAPHORES = {"red", "yellow", "green", "gray"}
 FINAL_PRIORITIES = {"low", "medium", "high", "critical", "unknown"}
 
 
-def _parse_score(raw_payload: Mapping[str, object], key: str) -> int:
-    # PRE: key identifies one required Ficha 11 score in raw_payload.
+def _parse_score(scoring: Mapping[str, object], key: str) -> int:
+    # PRE: key identifies one required Ficha 11 score in the scoring section.
     # POST: returns an integer from 1 to 5 or raises KoboPayloadError.
-    value = raw_payload.get(key)
+    value = scoring.get(key)
     if isinstance(value, bool) or value is None:
         raise KoboPayloadError(f"Field {key!r} must be an integer from 1 to 5.")
     if isinstance(value, int):
@@ -61,14 +61,14 @@ def _calculate_suggested_semaphore(priority_total: int) -> str:
 
 
 def _validate_optional_calculation(
-    raw_payload: Mapping[str, object],
+    scoring: Mapping[str, object],
     *,
     key: str,
     expected_value: int | str,
 ) -> None:
     # PRE: expected_value is calculated by SIGEDON from validated scores.
     # POST: accepts absent values or an exact matching Kobo calculation only.
-    value = raw_payload.get(key)
+    value = scoring.get(key)
     if value is None or value == "":
         return
     if isinstance(expected_value, int):
@@ -81,10 +81,10 @@ def _validate_optional_calculation(
         raise KoboPayloadError(f"Field {key!r} must match the calculated value.")
 
 
-def _require_choice(raw_payload: Mapping[str, object], key: str, choices: set[str]) -> str:
-    # PRE: key identifies a required Ficha 11 select-one field.
+def _require_choice(scoring: Mapping[str, object], key: str, choices: set[str]) -> str:
+    # PRE: key identifies a required Ficha 11 select-one field in scoring.
     # POST: returns a supported trimmed value or raises KoboPayloadError.
-    value = require_non_empty_string(raw_payload, key)
+    value = require_non_empty_string(scoring, key)
     if value not in choices:
         raise KoboPayloadError(f"Field {key!r} has an unsupported value.")
     return value
@@ -101,17 +101,20 @@ def normalize_ficha_11(
     """
     if not isinstance(raw_payload, Mapping):
         raise KoboPayloadError("Ficha 11 payload must be an object.")
+    scoring = raw_payload.get("scoring")
+    if not isinstance(scoring, Mapping) or not scoring:
+        raise KoboPayloadError("Ficha 11 scoring section is required.")
 
-    scores = {key: _parse_score(raw_payload, key) for key in SCORE_FIELDS}
+    scores = {key: _parse_score(scoring, key) for key in SCORE_FIELDS}
     priority_total = sum(scores.values())
     suggested_semaphore = _calculate_suggested_semaphore(priority_total)
     _validate_optional_calculation(
-        raw_payload,
+        scoring,
         key="priority_total",
         expected_value=priority_total,
     )
     _validate_optional_calculation(
-        raw_payload,
+        scoring,
         key="suggested_semaphore",
         expected_value=suggested_semaphore,
     )
@@ -121,13 +124,13 @@ def normalize_ficha_11(
         "priority_total": priority_total,
         "suggested_semaphore": suggested_semaphore,
         "final_semaphore": _require_choice(
-            raw_payload, "final_semaphore", FINAL_SEMAPHORES
+            scoring, "final_semaphore", FINAL_SEMAPHORES
         ),
         "final_priority": _require_choice(
-            raw_payload, "final_priority", FINAL_PRIORITIES
+            scoring, "final_priority", FINAL_PRIORITIES
         ),
-        "priority_summary": require_non_empty_string(raw_payload, "priority_summary"),
-        "linked_microprojects": optional_string(raw_payload, "linked_microprojects")
+        "priority_summary": require_non_empty_string(scoring, "priority_summary"),
+        "linked_microprojects": optional_string(scoring, "linked_microprojects")
         or "",
     }
     return KoboSubmissionPayload(

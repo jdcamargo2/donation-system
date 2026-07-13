@@ -44,6 +44,7 @@ from apps.integrations.kobo.processors import (
 from apps.integrations.kobo.services import (
     associate_submission_with_project,
     activate_kobo_asset,
+    assign_normalized_submission_to_direct_project,
     configure_discovered_asset,
     link_asset_to_project,
     review_submission,
@@ -132,6 +133,28 @@ def webhook_submission(request):
             default_timezone=timezone.get_current_timezone(),
         )
         status = outcome.final_status
+        if status != KoboSubmission.Status.READY_FOR_REVIEW:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "processing_failed",
+                    "submission_id": submission.pk,
+                    "status": status,
+                },
+                status=422,
+            )
+        if (
+            not assign_normalized_submission_to_direct_project(submission)
+        ):
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "project_assignment_failed",
+                    "submission_id": submission.pk,
+                    "status": status,
+                },
+                status=422,
+            )
     else:
         status = submission.status
     return JsonResponse(

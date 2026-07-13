@@ -70,7 +70,7 @@ from apps.integrations.kobo.models import (
     KoboProjectBinding,
     KoboSubmission,
 )
-from apps.integrations.kobo.normalizers import normalize_submission
+from apps.integrations.kobo.normalizers import adapt_kobo_payload, normalize_submission
 from apps.integrations.kobo.processors import process_submission
 from apps.integrations.kobo.services import (
     activate_kobo_asset,
@@ -339,6 +339,69 @@ class KoboFicha01NormalizerTests(SimpleTestCase):
             **routing,
         )
 
+    def slash_payload(self, **overrides):
+        # PRE: overrides contains synthetic Ficha 1 slash-path values or metadata.
+        # POST: returns a complete Kobo REST Services-shaped payload.
+        payload = {
+            "_uuid": "ficha-01-slash-normalized",
+            "_xform_id_string": "ficha-01-asset",
+            "__version__": FICHA_01_VERSION,
+            "today": "2026-07-12",
+            "identification/nucleo_code": "NV-SYNTHETIC",
+            "identification/pastoral_zone": "catia_la_mar",
+            "identification/parish": "Parroquia sintética",
+            "identification/community_sector": "Sector sintético",
+            "identification/location": "10.5 -66.5",
+            "identification/parish_delegate": "",
+            "identification/contact_phone": "",
+            "identification/main_informant_role": "Vocería",
+            "territorial_summary/communities_covered": "Comunidad sintética",
+            "territorial_summary/estimated_households": "10",
+            "territorial_summary/access_difficulties": "unknown",
+            "territorial_summary/initial_priority_perception": "high",
+            "territorial_summary/general_notes": "Nota sintética.",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_adapts_slash_paths_without_mutating_raw_payload(self):
+        raw_payload = {
+            "_uuid": "adapter-synthetic",
+            "identification/parish": "Parroquia sintética",
+            "territorial_summary/estimated_households": 10,
+            "a/b/c": None,
+        }
+        original_payload = deepcopy(raw_payload)
+
+        adapted = adapt_kobo_payload(raw_payload)
+
+        self.assertEqual(adapted["_uuid"], "adapter-synthetic")
+        self.assertEqual(adapted["identification"]["parish"], "Parroquia sintética")
+        self.assertEqual(
+            adapted["territorial_summary"]["estimated_households"], 10
+        )
+        self.assertIsNone(adapted["a"]["b"]["c"])
+        self.assertEqual(raw_payload, original_payload)
+
+    def test_rejects_structural_slash_path_collisions(self):
+        with self.assertRaises(KoboPayloadError):
+            adapt_kobo_payload(
+                {
+                    "identification": "texto",
+                    "identification/parish": "Parroquia sintética",
+                }
+            )
+
+    def test_normalizes_realistic_slash_payload(self):
+        result = self.normalize(self.slash_payload())
+
+        self.assertEqual(result.external_id, "ficha-01-slash-normalized")
+        self.assertEqual(result.pastoral_zone, "catia_la_mar")
+        self.assertEqual(result.parish, "Parroquia sintética")
+        self.assertEqual(result.primary_community, "Sector sintético")
+        self.assertEqual(result.normalized_payload["nucleo_code"], "NV-SYNTHETIC")
+        self.assertEqual(result.normalized_payload["estimated_households"], 10)
+
     def test_normalizes_complete_depurated_payload(self):
         result = self.normalize()
 
@@ -494,16 +557,18 @@ class KoboFicha10NormalizerTests(SimpleTestCase):
             "deviceid": "private-device-id",
             "today": "2026-07-12",
             "nucleo_code": " NV-010 ",
-            "microproject_name": "Rehabilitación del centro comunitario",
-            "component": "infrastructure",
-            "problem_summary": "El centro requiere reparaciones urgentes.",
-            "specific_objective": "Recuperar un espacio seguro de atención.",
-            "beneficiary_group": "youth women parish_volunteers youth",
-            "main_activities": "Reparar techo y adecuar instalaciones.",
-            "estimated_cost_range": "5000_15000",
-            "implementation_urgency": "immediate",
-            "technical_viability": "high",
-            "expected_result": "Centro comunitario operativo.",
+            "microproject": {
+                "microproject_name": "Rehabilitación del centro comunitario",
+                "component": "infrastructure",
+                "problem_summary": "El centro requiere reparaciones urgentes.",
+                "specific_objective": "Recuperar un espacio seguro de atención.",
+                "beneficiary_group": "youth women parish_volunteers youth",
+                "main_activities": "Reparar techo y adecuar instalaciones.",
+                "estimated_cost_range": "5000_15000",
+                "implementation_urgency": "immediate",
+                "technical_viability": "high",
+                "expected_result": "Centro comunitario operativo.",
+            },
             "_attachments": [
                 {
                     "question_xpath": "evidence/photo",
@@ -513,7 +578,19 @@ class KoboFicha10NormalizerTests(SimpleTestCase):
                 }
             ],
         }
-        payload.update(overrides)
+        microproject_overrides = {
+            key: value
+            for key, value in overrides.items()
+            if key in payload["microproject"]
+        }
+        payload["microproject"].update(microproject_overrides)
+        payload.update(
+            {
+                key: value
+                for key, value in overrides.items()
+                if key not in microproject_overrides
+            }
+        )
         return payload
 
     def normalize(self, payload=None, **routing_overrides):
@@ -554,6 +631,32 @@ class KoboFicha10NormalizerTests(SimpleTestCase):
         self.assertEqual(raw_payload, original_payload)
         self.assertEqual(result.attachments[0].privacy_level, AttachmentPrivacy.INTERNAL_REVIEW)
         self.assertNotIn("_attachments", result.normalized_payload)
+
+    def test_normalizes_slash_paths_into_the_microproject_section(self):
+        raw_payload = self.valid_payload()
+        microproject = raw_payload.pop("microproject")
+        raw_payload.update(
+            {f"microproject/{key}": value for key, value in microproject.items()}
+        )
+
+        result = self.normalize(raw_payload)
+
+        self.assertEqual(
+            result.normalized_payload["microproject_name"],
+            "Rehabilitación del centro comunitario",
+        )
+        self.assertEqual(
+            result.normalized_payload["beneficiary_group"],
+            ["youth", "women", "parish_volunteers"],
+        )
+
+    def test_rejects_missing_empty_or_invalid_microproject_section(self):
+        for value in (None, {}, "not-a-mapping"):
+            with self.subTest(value=value):
+                raw_payload = self.valid_payload()
+                raw_payload["microproject"] = value
+                with self.assertRaises(KoboPayloadError):
+                    self.normalize(raw_payload)
 
     def test_rejects_required_and_unsupported_values(self):
         cases = (
@@ -597,6 +700,14 @@ class KoboFicha11NormalizerTests(SimpleTestCase):
         "rapid_impact_score",
         "financial_viability_score",
     )
+    SCORING_FIELDS = SCORE_FIELDS + (
+        "priority_total",
+        "suggested_semaphore",
+        "final_semaphore",
+        "final_priority",
+        "priority_summary",
+        "linked_microprojects",
+    )
 
     def valid_payload(self, **overrides):
         # PRE: overrides contains only Ficha 11 fields or Kobo metadata.
@@ -605,12 +716,24 @@ class KoboFicha11NormalizerTests(SimpleTestCase):
             "_uuid": "ficha-11-normalized",
             "today": "2026-07-12",
             "nucleo_code": " NV-011 ",
-            **{field: "1" for field in self.SCORE_FIELDS},
-            "final_semaphore": "red",
-            "final_priority": "critical",
-            "priority_summary": "Intervención técnica prioritaria.",
+            "scoring": {
+                **{field: "1" for field in self.SCORE_FIELDS},
+                "final_semaphore": "red",
+                "final_priority": "critical",
+                "priority_summary": "Intervención técnica prioritaria.",
+            },
         }
-        payload.update(overrides)
+        scoring_overrides = {
+            key: value for key, value in overrides.items() if key in self.SCORING_FIELDS
+        }
+        payload["scoring"].update(scoring_overrides)
+        payload.update(
+            {
+                key: value
+                for key, value in overrides.items()
+                if key not in scoring_overrides
+            }
+        )
         return payload
 
     def normalize(self, payload=None, **routing_overrides):
@@ -634,6 +757,31 @@ class KoboFicha11NormalizerTests(SimpleTestCase):
         self.assertEqual(result.normalized_payload["priority_total"], 10)
         self.assertEqual(result.normalized_payload["suggested_semaphore"], "gray")
         self.assertEqual(result.normalized_payload["linked_microprojects"], "")
+
+    def test_normalizes_slash_paths_into_the_scoring_section_without_mutation(self):
+        raw_payload = self.valid_payload()
+        scoring = raw_payload.pop("scoring")
+        raw_payload.update({f"scoring/{key}": value for key, value in scoring.items()})
+        original_payload = deepcopy(raw_payload)
+
+        result = self.normalize(raw_payload)
+
+        self.assertEqual(raw_payload, original_payload)
+        self.assertEqual(result.normalized_payload["physical_damage_score"], 1)
+        self.assertEqual(result.normalized_payload["final_semaphore"], "red")
+
+    def test_rejects_missing_empty_non_mapping_or_root_only_scoring_section(self):
+        for value in (None, {}, "not-a-mapping"):
+            with self.subTest(value=value):
+                raw_payload = self.valid_payload(scoring=value)
+                with self.assertRaises(KoboPayloadError):
+                    self.normalize(raw_payload)
+
+        raw_payload = self.valid_payload()
+        scoring = raw_payload.pop("scoring")
+        raw_payload.update(scoring)
+        with self.assertRaises(KoboPayloadError):
+            self.normalize(raw_payload)
 
     def test_calculates_each_semaphore_threshold(self):
         for score, expected in ((1, "gray"), (2, "green"), (3, "yellow"), (4, "red"), (5, "red")):
@@ -662,10 +810,24 @@ class KoboFicha11NormalizerTests(SimpleTestCase):
             with self.subTest(field=field, value=value):
                 with self.assertRaises(KoboPayloadError):
                     self.normalize(self.valid_payload(**{field: value}))
-        for field, value in (("priority_total", "11"), ("suggested_semaphore", "red"), ("final_semaphore", "blue"), ("final_priority", "urgent"), ("priority_summary", " ")):
+        for field, value in (
+            ("priority_total", "11"),
+            ("suggested_semaphore", "red"),
+            ("final_semaphore", "blue"),
+            ("final_priority", "urgent"),
+            ("priority_summary", " "),
+        ):
             with self.subTest(field=field, value=value):
                 with self.assertRaises(KoboPayloadError):
                     self.normalize(self.valid_payload(**{field: value}))
+
+    def test_accepts_matching_optional_calculations(self):
+        result = self.normalize(
+            self.valid_payload(priority_total="10", suggested_semaphore="gray")
+        )
+
+        self.assertEqual(result.normalized_payload["priority_total"], 10)
+        self.assertEqual(result.normalized_payload["suggested_semaphore"], "gray")
 
 
 class KoboApiClientTests(SimpleTestCase):
@@ -2894,16 +3056,18 @@ class KoboFicha10AssociationTests(TestCase):
             "_xform_id_string": self.asset.asset_uid,
             "today": "2026-07-12",
             "nucleo_code": "NV-010",
-            "microproject_name": "Rehabilitación del centro comunitario",
-            "component": "infrastructure",
-            "problem_summary": "Filtraciones persistentes.",
-            "specific_objective": "Recuperar la cubierta.",
-            "beneficiary_group": "youth women",
-            "main_activities": "Reparar el techo.",
-            "estimated_cost_range": "5000_15000",
-            "implementation_urgency": "immediate",
-            "technical_viability": "high",
-            "expected_result": "Espacio protegido.",
+            "microproject": {
+                "microproject_name": "Rehabilitación del centro comunitario",
+                "component": "infrastructure",
+                "problem_summary": "Filtraciones persistentes.",
+                "specific_objective": "Recuperar la cubierta.",
+                "beneficiary_group": "youth women",
+                "main_activities": "Reparar el techo.",
+                "estimated_cost_range": "5000_15000",
+                "implementation_urgency": "immediate",
+                "technical_viability": "high",
+                "expected_result": "Espacio protegido.",
+            },
         }
 
     def test_ficha_10_associates_without_creating_operational_records(self):
@@ -2994,14 +3158,26 @@ class KoboFicha11AssociationTests(TestCase):
             "_uuid": "ficha-11-association",
             "_xform_id_string": self.asset.asset_uid,
             "nucleo_code": "NV-011",
-            **{field: "4" for field in KoboFicha11NormalizerTests.SCORE_FIELDS},
-            "priority_total": "40",
-            "suggested_semaphore": "red",
-            "final_semaphore": "yellow",
-            "final_priority": "high",
-            "priority_summary": "Validación técnica independiente.",
+            "scoring": {
+                **{field: "4" for field in KoboFicha11NormalizerTests.SCORE_FIELDS},
+                "priority_total": "40",
+                "suggested_semaphore": "red",
+                "final_semaphore": "yellow",
+                "final_priority": "high",
+                "priority_summary": "Validación técnica independiente.",
+            },
         }
-        payload.update(overrides)
+        scoring_overrides = {
+            key: value for key, value in overrides.items() if key in payload["scoring"]
+        }
+        payload["scoring"].update(scoring_overrides)
+        payload.update(
+            {
+                key: value
+                for key, value in overrides.items()
+                if key not in scoring_overrides
+            }
+        )
         return payload
 
     def test_ficha_11_processes_reviews_and_associates_without_operations_effects(self):
@@ -4115,6 +4291,11 @@ class KoboWebhookTests(TestCase):
             (FICHA_10_FORM_ID, FICHA_10_VERSION, KoboAsset.FormRole.PRIORITIZED_MICROPROJECT),
             (FICHA_11_FORM_ID, FICHA_11_VERSION, KoboAsset.FormRole.PRIORITIZATION_MATRIX),
         )
+        cls.project = Project.objects.create(
+            code="PRJ-WEBHOOK-DIRECT",
+            name="Proyecto sintético de webhook",
+            status=Project.Status.ACTIVE,
+        )
         cls.assets = {}
         for index, (form_id, version, role) in enumerate(definitions, start=1):
             definition = KoboFormDefinition.objects.create(
@@ -4125,6 +4306,17 @@ class KoboWebhookTests(TestCase):
                 name=f"Webhook asset {index}",
                 form_definition=definition,
                 form_role=role,
+            )
+            KoboDiscoveredAsset.objects.create(
+                asset_uid=cls.assets[form_id].asset_uid,
+                name=f"Webhook discovery {index}",
+                metadata_snapshot={"id_string": form_id, "version": version},
+                last_seen_at=django_timezone.now(),
+            )
+            KoboProjectBinding.objects.create(
+                asset=cls.assets[form_id],
+                project=cls.project,
+                routing_type=KoboProjectBinding.RoutingType.DIRECT,
             )
 
     def payload(self, form_id, **overrides):
@@ -4140,6 +4332,38 @@ class KoboWebhookTests(TestCase):
             payload.update(KoboFicha11NormalizerTests().valid_payload())
         payload["_uuid"] = f"webhook-{form_id}"
         payload["_xform_id_string"] = asset.asset_uid
+        payload.update(overrides)
+        return payload
+
+    def ficha_01_slash_payload(self, **overrides):
+        # PRE: overrides contains only synthetic Kobo REST Services Ficha 1 data.
+        # POST: returns a valid asset-UID payload with slash-separated field paths.
+        payload = KoboFicha01NormalizerTests().slash_payload(
+            _uuid="webhook-ficha-01-slash",
+            _xform_id_string=self.assets[FICHA_01_FORM_ID].asset_uid,
+        )
+        payload.update(overrides)
+        return payload
+
+    def ficha_10_slash_payload(self, **overrides):
+        # PRE: overrides contains only synthetic Kobo REST Services Ficha 10 data.
+        # POST: returns a valid asset-UID payload with slash-separated microproject fields.
+        payload = self.payload(FICHA_10_FORM_ID)
+        microproject = payload.pop("microproject")
+        payload.update(
+            {f"microproject/{key}": value for key, value in microproject.items()}
+        )
+        payload["_uuid"] = "webhook-ficha-10-slash"
+        payload.update(overrides)
+        return payload
+
+    def ficha_11_slash_payload(self, **overrides):
+        # PRE: overrides contains only synthetic Kobo REST Services Ficha 11 data.
+        # POST: returns a valid asset-UID payload with slash-separated scoring fields.
+        payload = self.payload(FICHA_11_FORM_ID)
+        scoring = payload.pop("scoring")
+        payload.update({f"scoring/{key}": value for key, value in scoring.items()})
+        payload["_uuid"] = "webhook-ficha-11-slash"
         payload.update(overrides)
         return payload
 
@@ -4189,6 +4413,104 @@ class KoboWebhookTests(TestCase):
         self.assertEqual(response.status_code, 201)
         submission = KoboSubmission.objects.get(external_id=f"webhook-{FICHA_01_FORM_ID}")
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+
+    def test_webhook_normalizes_slash_payload_with_asset_uid_and_opaque_version(self):
+        payload = self.ficha_01_slash_payload(__version__="deployment-opaque-version")
+
+        response = self.post_basic(payload)
+
+        self.assertEqual(response.status_code, 201)
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        self.assertEqual(submission.asset, self.assets[FICHA_01_FORM_ID])
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(submission.raw_payload, payload)
+        self.assertEqual(submission.raw_payload["__version__"], "deployment-opaque-version")
+        self.assertEqual(submission.project, self.project)
+        self.assertIsNotNone(submission.processed_at)
+        self.assertTrue(
+            submission.processing_events.filter(
+                stage="project_routing", code="project_assigned"
+            ).exists()
+        )
+        self.assertEqual(submission.parish, "Parroquia sintética")
+        self.assertEqual(submission.normalized_payload["nucleo_code"], "NV-SYNTHETIC")
+
+    def test_webhook_normalizes_ficha_10_slash_payload_and_assigns_direct_project(self):
+        payload = self.ficha_10_slash_payload()
+
+        response = self.post(payload)
+
+        self.assertEqual(response.status_code, 201)
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(submission.project, self.project)
+        self.assertIsNotNone(submission.processed_at)
+        self.assertEqual(
+            submission.normalized_payload["microproject_name"],
+            "Rehabilitación del centro comunitario",
+        )
+
+    def test_webhook_normalizes_ficha_11_slash_payload_and_assigns_direct_project(self):
+        payload = self.ficha_11_slash_payload()
+
+        response = self.post(payload)
+
+        self.assertEqual(response.status_code, 201)
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(submission.project, self.project)
+        self.assertIsNotNone(submission.normalized_at)
+        self.assertIsNotNone(submission.processed_at)
+        self.assertEqual(submission.normalized_payload["priority_total"], 10)
+
+    def test_webhook_rejects_incompatible_discovered_asset_metadata_without_staging(self):
+        discovered = KoboDiscoveredAsset.objects.get(
+            asset_uid=self.assets[FICHA_01_FORM_ID].asset_uid
+        )
+        discovered.metadata_snapshot = {
+            "id_string": "wrong-form-id",
+            "version": FICHA_01_VERSION,
+        }
+        discovered.save(update_fields=("metadata_snapshot",))
+
+        response = self.post(self.ficha_01_slash_payload())
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(KoboSubmission.objects.exists())
+
+    def test_webhook_rejects_mismatched_discovered_asset_version_without_staging(self):
+        discovered = KoboDiscoveredAsset.objects.get(
+            asset_uid=self.assets[FICHA_01_FORM_ID].asset_uid
+        )
+        discovered.metadata_snapshot["version"] = "wrong-contract-version"
+        discovered.save(update_fields=("metadata_snapshot",))
+
+        response = self.post(self.ficha_01_slash_payload())
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(KoboSubmission.objects.exists())
+
+    def test_slash_payload_uses_the_direct_binding_not_nucleo_code(self):
+        project = self.project
+        reviewer = get_user_model().objects.create_user("slash-reviewer")
+        payload = self.ficha_01_slash_payload(
+            **{"identification/nucleo_code": "NOT-A-PROJECT-CODE"}
+        )
+
+        response = self.post(payload)
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        submission.status = KoboSubmission.Status.APPROVED_FOR_IMPORT
+        submission.save(update_fields=("status",))
+        result = associate_submission_with_project(submission, reviewed_by=reviewer)
+        submission.refresh_from_db()
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(result.associated)
+        self.assertEqual(submission.project, project)
+        self.assertEqual(submission.status, KoboSubmission.Status.IMPORTED)
+        self.assertIsNotNone(submission.processed_at)
+        self.assertEqual(submission.error_code, "")
+        self.assertEqual(submission.error_message, "")
 
     def test_basic_authentication_rejects_invalid_or_malformed_credentials(self):
         url = reverse("kobo:webhook_submission")
@@ -4252,24 +4574,84 @@ class KoboWebhookTests(TestCase):
                 self.assertEqual(response.status_code, 201)
                 self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
                 self.assertEqual(submission.asset, self.assets[form_id])
-                self.assertIsNone(submission.project_id)
+                self.assertEqual(submission.project, self.project)
+                self.assertIsNotNone(submission.processed_at)
+                self.assertTrue(
+                    submission.processing_events.filter(
+                        stage="project_routing", code="project_assigned"
+                    ).exists()
+                )
                 self.assertNotIn("raw_payload", response.json())
-        self.assertFalse(Project.objects.exists())
+        self.assertEqual(Project.objects.count(), 1)
         self.assertFalse(ProjectUpdate.objects.exists())
+
+    def test_webhook_preserves_staging_when_direct_binding_is_unavailable(self):
+        asset = self.assets[FICHA_01_FORM_ID]
+        asset.project_bindings.update(is_active=False)
+        payload = self.ficha_01_slash_payload()
+
+        response = self.post(payload)
+
+        self.assertEqual(response.status_code, 422)
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertIsNone(submission.project_id)
+        self.assertIsNone(submission.processed_at)
+        self.assertEqual(submission.error_code, "routing_configuration_error")
+        self.assertTrue(
+            submission.processing_events.filter(
+                stage="project_routing", code="routing_configuration_error"
+            ).exists()
+        )
+
+    def test_webhook_rejects_multiple_active_bindings_without_losing_staging(self):
+        asset = self.assets[FICHA_01_FORM_ID]
+        KoboProjectBinding.objects.create(
+            asset=asset,
+            project=self.project,
+            routing_type=KoboProjectBinding.RoutingType.FIELD_VALUE,
+            source_field="payload.nucleo_code",
+            source_value="unused",
+        )
+
+        response = self.post(self.ficha_01_slash_payload())
+
+        self.assertEqual(response.status_code, 422)
+        submission = KoboSubmission.objects.get(external_id="webhook-ficha-01-slash")
+        self.assertEqual(submission.error_code, "routing_configuration_error")
+
+    def test_webhook_rejects_inactive_direct_project_without_losing_staging(self):
+        self.project.status = Project.Status.SUSPENDED
+        self.project.save(update_fields=("status",))
+
+        response = self.post(self.ficha_01_slash_payload())
+
+        self.assertEqual(response.status_code, 422)
+        submission = KoboSubmission.objects.get(external_id="webhook-ficha-01-slash")
+        self.assertEqual(submission.error_code, "routing_configuration_error")
 
     def test_duplicate_preserves_payload_and_events(self):
         payload = self.payload(FICHA_10_FORM_ID)
         self.post(payload)
         submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
         event_count = submission.processing_events.count()
-        changed = {**payload, "microproject_name": "No debe sobrescribir"}
+        changed = {
+            **payload,
+            "microproject": {
+                **payload["microproject"],
+                "microproject_name": "No debe sobrescribir",
+            },
+        }
 
         response = self.post(changed)
         submission.refresh_from_db()
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["created"])
-        self.assertNotEqual(submission.raw_payload["microproject_name"], changed["microproject_name"])
+        self.assertNotEqual(
+            submission.raw_payload["microproject"]["microproject_name"],
+            changed["microproject"]["microproject_name"],
+        )
         self.assertEqual(submission.processing_events.count(), event_count)
 
 
@@ -4312,3 +4694,212 @@ class KoboReconciliationCommandTests(KoboWebhookTests):
                 call_command("reconcile_kobo_submissions", stdout=StringIO())
         with self.assertRaises(CommandError):
             call_command("reconcile_kobo_submissions", "--limit", "0", stdout=StringIO())
+
+    def test_command_reprocesses_local_failure_despite_remote_failure(self):
+        asset = self.assets[FICHA_01_FORM_ID]
+        project = self.project
+        payload = self.ficha_01_slash_payload()
+        submission = KoboSubmission.objects.create(
+            form_definition=asset.form_definition,
+            asset=asset,
+            external_id=payload["_uuid"],
+            raw_payload=payload,
+            status=KoboSubmission.Status.VALIDATION_FAILED,
+            error_code="invalid_payload",
+            error_message="Submission payload failed normalization.",
+        )
+        KoboProcessingEvent.objects.create(
+            submission=submission,
+            stage="normalization",
+            level=KoboProcessingEvent.Level.ERROR,
+            code="invalid_payload",
+            message="Submission payload failed normalization.",
+        )
+        client = SimpleNamespace(
+            get_submissions=lambda asset_uid, limit: (_ for _ in ()).throw(
+                KoboIntegrationError("remote unavailable")
+            )
+        )
+
+        with patch(
+            "apps.integrations.kobo.management.commands."
+            "reconcile_kobo_submissions.KoboApiClient",
+            return_value=client,
+        ):
+            output = StringIO()
+            call_command(
+                "reconcile_kobo_submissions",
+                "--asset-uid",
+                asset.asset_uid,
+                stdout=output,
+            )
+
+        submission.refresh_from_db()
+        self.assertEqual(KoboSubmission.objects.count(), 1)
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(submission.project, project)
+        self.assertTrue(submission.normalized_payload)
+        self.assertIsNotNone(submission.processed_at)
+        self.assertEqual(submission.error_code, "")
+        self.assertEqual(submission.error_message, "")
+        self.assertTrue(
+            submission.processing_events.filter(
+                stage="reconciliation", code="local_reprocessed"
+            ).exists()
+        )
+        self.assertIn("local_reprocessed=1", output.getvalue())
+        self.assertIn("failed_assets=1", output.getvalue())
+
+        with patch(
+            "apps.integrations.kobo.management.commands."
+            "reconcile_kobo_submissions.KoboApiClient",
+            return_value=client,
+        ):
+            output = StringIO()
+            call_command(
+                "reconcile_kobo_submissions",
+                "--asset-uid",
+                asset.asset_uid,
+                stdout=output,
+            )
+        self.assertIn("local_reprocessed=0", output.getvalue())
+        self.assertEqual(KoboSubmission.objects.count(), 1)
+
+    def test_command_dry_run_does_not_modify_local_recoverable_failure(self):
+        asset = self.assets[FICHA_01_FORM_ID]
+        payload = self.ficha_01_slash_payload()
+        submission = KoboSubmission.objects.create(
+            form_definition=asset.form_definition,
+            asset=asset,
+            external_id=payload["_uuid"],
+            raw_payload=payload,
+            status=KoboSubmission.Status.VALIDATION_FAILED,
+            error_code="invalid_payload",
+            error_message="Submission payload failed normalization.",
+        )
+        KoboProcessingEvent.objects.create(
+            submission=submission,
+            stage="normalization",
+            level=KoboProcessingEvent.Level.ERROR,
+            code="invalid_payload",
+            message="Submission payload failed normalization.",
+        )
+        client = SimpleNamespace(get_submissions=lambda asset_uid, limit: [])
+
+        with patch(
+            "apps.integrations.kobo.management.commands."
+            "reconcile_kobo_submissions.KoboApiClient",
+            return_value=client,
+        ):
+            output = StringIO()
+            call_command(
+                "reconcile_kobo_submissions",
+                "--asset-uid",
+                asset.asset_uid,
+                "--dry-run",
+                stdout=output,
+            )
+
+        submission.refresh_from_db()
+        self.assertEqual(submission.status, KoboSubmission.Status.VALIDATION_FAILED)
+        self.assertEqual(submission.processing_events.count(), 1)
+        self.assertIn("local_would_reprocess=1", output.getvalue())
+
+    def test_command_recovers_ficha_10_slash_validation_failure_idempotently(self):
+        asset = self.assets[FICHA_10_FORM_ID]
+        payload = self.ficha_10_slash_payload()
+        submission = KoboSubmission.objects.create(
+            form_definition=asset.form_definition,
+            asset=asset,
+            external_id=payload["_uuid"],
+            raw_payload=payload,
+            status=KoboSubmission.Status.VALIDATION_FAILED,
+            error_code="invalid_payload",
+            error_message="Submission payload failed normalization.",
+        )
+        KoboProcessingEvent.objects.create(
+            submission=submission,
+            stage="normalization",
+            level=KoboProcessingEvent.Level.ERROR,
+            code="invalid_payload",
+            message="Submission payload failed normalization.",
+        )
+        client = SimpleNamespace(get_submissions=lambda asset_uid, limit: [])
+
+        with patch(
+            "apps.integrations.kobo.management.commands."
+            "reconcile_kobo_submissions.KoboApiClient",
+            return_value=client,
+        ):
+            call_command(
+                "reconcile_kobo_submissions",
+                "--asset-uid",
+                asset.asset_uid,
+                stdout=StringIO(),
+            )
+
+        submission.refresh_from_db()
+        self.assertEqual(KoboSubmission.objects.count(), 1)
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(submission.project, self.project)
+        self.assertTrue(submission.normalized_payload)
+        self.assertIsNotNone(submission.normalized_at)
+        self.assertIsNotNone(submission.processed_at)
+        self.assertEqual(submission.error_code, "")
+        self.assertEqual(submission.error_message, "")
+
+    def test_command_recovers_ficha_11_scoring_validation_failure_idempotently(self):
+        asset = self.assets[FICHA_11_FORM_ID]
+        payload = self.ficha_11_slash_payload()
+        submission = KoboSubmission.objects.create(
+            form_definition=asset.form_definition,
+            asset=asset,
+            external_id=payload["_uuid"],
+            raw_payload=payload,
+            status=KoboSubmission.Status.VALIDATION_FAILED,
+            error_code="invalid_payload",
+            error_message="Submission payload failed normalization.",
+        )
+        KoboProcessingEvent.objects.create(
+            submission=submission,
+            stage="normalization",
+            level=KoboProcessingEvent.Level.ERROR,
+            code="invalid_payload",
+            message="Submission payload failed normalization.",
+        )
+        client = SimpleNamespace(get_submissions=lambda asset_uid, limit: [])
+
+        with patch(
+            "apps.integrations.kobo.management.commands."
+            "reconcile_kobo_submissions.KoboApiClient",
+            return_value=client,
+        ):
+            call_command(
+                "reconcile_kobo_submissions",
+                "--asset-uid",
+                asset.asset_uid,
+                stdout=StringIO(),
+            )
+
+        submission.refresh_from_db()
+        self.assertEqual(KoboSubmission.objects.count(), 1)
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(submission.project, self.project)
+        self.assertTrue(submission.normalized_payload)
+        self.assertIsNotNone(submission.normalized_at)
+        self.assertIsNotNone(submission.processed_at)
+        self.assertEqual(submission.error_code, "")
+        self.assertEqual(submission.error_message, "")
+
+        with patch(
+            "apps.integrations.kobo.management.commands."
+            "reconcile_kobo_submissions.KoboApiClient",
+            return_value=client,
+        ):
+            call_command(
+                "reconcile_kobo_submissions",
+                "--asset-uid",
+                asset.asset_uid,
+                stdout=StringIO(),
+            )
+        self.assertEqual(KoboSubmission.objects.count(), 1)

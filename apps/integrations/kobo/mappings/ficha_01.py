@@ -22,6 +22,48 @@ ACCESS_DIFFICULTIES = {"yes", "no", "unknown"}
 INITIAL_PRIORITY_PERCEPTIONS = {"low", "medium", "high", "critical", "unknown"}
 
 
+def _canonical_ficha_01_payload(raw_payload: Mapping[str, object]) -> dict[str, object]:
+    """
+    PRE: raw_payload has already passed the common Kobo shape adapter.
+    POST: returns Ficha 1's canonical flat fields without mutating the input and
+    rejects duplicate legacy and section values rather than overwriting either.
+    """
+    canonical = dict(raw_payload)
+    sections = {
+        "identification": {
+            "parish",
+            "location",
+            "nucleo_code",
+            "contact_phone",
+            "pastoral_zone",
+            "parish_delegate",
+            "community_sector",
+            "main_informant_role",
+        },
+        "territorial_summary": {
+            "general_notes",
+            "access_difficulties",
+            "access_difficulties_notes",
+            "communities_covered",
+            "estimated_households",
+            "initial_priority_perception",
+        },
+    }
+    for section_name, field_names in sections.items():
+        section = raw_payload.get(section_name)
+        if section is None:
+            continue
+        if not isinstance(section, Mapping):
+            raise KoboPayloadError("Ficha 1 section has an invalid structure.")
+        for field_name in field_names:
+            if field_name not in section:
+                continue
+            if field_name in canonical:
+                raise KoboPayloadError("Ficha 1 field is defined more than once.")
+            canonical[field_name] = section[field_name]
+    return canonical
+
+
 def _parse_non_negative_integer(
     raw_payload: Mapping[str, object],
     key: str,
@@ -60,6 +102,8 @@ def normalize_ficha_01(
     """
     if not isinstance(raw_payload, Mapping):
         raise KoboPayloadError("Ficha 1 payload must be an object.")
+
+    raw_payload = _canonical_ficha_01_payload(raw_payload)
 
     external_id = require_non_empty_string(raw_payload, "_uuid")
     nucleo_code = require_non_empty_string(raw_payload, "nucleo_code")

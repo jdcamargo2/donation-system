@@ -45,10 +45,10 @@ def _require_choice(raw_payload: Mapping[str, object], key: str, choices: set[st
     return value
 
 
-def _parse_beneficiary_groups(raw_payload: Mapping[str, object]) -> list[str]:
+def _parse_beneficiary_groups(microproject: Mapping[str, object]) -> list[str]:
     # PRE: beneficiary_group is a required Kobo multiselect value.
     # POST: returns ordered, unique supported choices or raises KoboPayloadError.
-    choices = parse_multiselect(raw_payload.get("beneficiary_group"))
+    choices = parse_multiselect(microproject.get("beneficiary_group"))
     if not choices:
         raise KoboPayloadError("Field 'beneficiary_group' must not be empty.")
     normalized = []
@@ -71,25 +71,28 @@ def normalize_ficha_10(
     """
     if not isinstance(raw_payload, Mapping):
         raise KoboPayloadError("Ficha 10 payload must be an object.")
+    microproject = raw_payload.get("microproject")
+    if not isinstance(microproject, Mapping) or not microproject:
+        raise KoboPayloadError("Ficha 10 microproject section is required.")
 
     normalized_payload = {
         "nucleo_code": require_non_empty_string(raw_payload, "nucleo_code"),
-        "microproject_name": require_non_empty_string(raw_payload, "microproject_name"),
-        "component": _require_choice(raw_payload, "component", COMPONENTS),
-        "problem_summary": require_non_empty_string(raw_payload, "problem_summary"),
-        "specific_objective": require_non_empty_string(raw_payload, "specific_objective"),
-        "beneficiary_group": _parse_beneficiary_groups(raw_payload),
-        "main_activities": require_non_empty_string(raw_payload, "main_activities"),
+        "microproject_name": require_non_empty_string(microproject, "microproject_name"),
+        "component": _require_choice(microproject, "component", COMPONENTS),
+        "problem_summary": require_non_empty_string(microproject, "problem_summary"),
+        "specific_objective": require_non_empty_string(microproject, "specific_objective"),
+        "beneficiary_group": _parse_beneficiary_groups(microproject),
+        "main_activities": require_non_empty_string(microproject, "main_activities"),
         "estimated_cost_range": _require_choice(
-            raw_payload, "estimated_cost_range", ESTIMATED_COST_RANGES
+            microproject, "estimated_cost_range", ESTIMATED_COST_RANGES
         ),
         "implementation_urgency": _require_choice(
-            raw_payload, "implementation_urgency", IMPLEMENTATION_URGENCIES
+            microproject, "implementation_urgency", IMPLEMENTATION_URGENCIES
         ),
         "technical_viability": _require_choice(
-            raw_payload, "technical_viability", TECHNICAL_VIABILITIES
+            microproject, "technical_viability", TECHNICAL_VIABILITIES
         ),
-        "expected_result": require_non_empty_string(raw_payload, "expected_result"),
+        "expected_result": require_non_empty_string(microproject, "expected_result"),
     }
     return KoboSubmissionPayload(
         external_id=require_non_empty_string(raw_payload, "_uuid"),
