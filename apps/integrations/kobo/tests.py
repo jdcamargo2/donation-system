@@ -81,6 +81,7 @@ from apps.integrations.kobo.services import (
     get_project_imported_submissions,
     process_pending_submissions,
     receive_api_submission,
+    receive_webhook_submission,
     resolve_project_binding,
     resolve_routing_field,
     review_submission,
@@ -1085,8 +1086,8 @@ class KoboStagingModelsTests(TestCase):
 
 
 class KoboFormRegistryTests(SimpleTestCase):
-    def test_registry_contains_exactly_eleven_forms(self):
-        self.assertEqual(len(list_registered_forms()), 11)
+    def test_registry_contains_exactly_three_supported_forms(self):
+        self.assertEqual(len(list_registered_forms()), 3)
 
     def test_first_form_uses_expected_identifier(self):
         first_form = list_registered_forms()[0]
@@ -1098,12 +1099,12 @@ class KoboFormRegistryTests(SimpleTestCase):
             "Ficha 1 - Identificación territorial del Núcleo Vital (depurada)",
         )
 
-    def test_every_form_uses_initial_version(self):
+    def test_registry_contains_only_active_contract_versions(self):
         versions = {form.version for form in list_registered_forms()}
 
         self.assertEqual(
             versions,
-            {FICHA_01_VERSION, FICHA_10_VERSION, FICHA_11_VERSION, "20260710"},
+            {FICHA_01_VERSION, FICHA_10_VERSION, FICHA_11_VERSION},
         )
 
     def test_ficha_10_uses_its_exact_contract(self):
@@ -1138,14 +1139,9 @@ class KoboFormRegistryTests(SimpleTestCase):
             KoboAsset.FormRole.PRIORITIZATION_MATRIX,
         )
 
-    def test_get_registered_form_returns_exact_definition(self):
-        registered_form = get_registered_form(
-            "ficha_04_servicios_infraestructura_abasto",
-            "20260710",
-        )
-
-        self.assertEqual(registered_form.normalizer_name, "normalize_ficha_04")
-        self.assertEqual(registered_form.mapping_version, "1")
+    def test_fichas_2_to_9_are_not_registered(self):
+        with self.assertRaises(KoboPayloadError):
+            get_registered_form("ficha_04_servicios_infraestructura_abasto", "20260710")
 
     def test_unknown_form_raises_payload_error(self):
         with self.assertRaises(KoboPayloadError):
@@ -1164,17 +1160,17 @@ class KoboFormRegistryTests(SimpleTestCase):
 
 
 class KoboFormSynchronizationTests(TestCase):
-    def test_sync_creates_eleven_form_definitions(self):
+    def test_sync_creates_three_form_definitions(self):
         synchronized_count = sync_registered_forms()
 
-        self.assertEqual(synchronized_count, 11)
-        self.assertEqual(KoboFormDefinition.objects.count(), 11)
+        self.assertEqual(synchronized_count, 3)
+        self.assertEqual(KoboFormDefinition.objects.count(), 3)
 
     def test_sync_twice_does_not_duplicate_definitions(self):
         sync_registered_forms()
         sync_registered_forms()
 
-        self.assertEqual(KoboFormDefinition.objects.count(), 11)
+        self.assertEqual(KoboFormDefinition.objects.count(), 3)
 
     def test_sync_preserves_historical_definition(self):
         KoboFormDefinition.objects.create(
@@ -1185,11 +1181,10 @@ class KoboFormSynchronizationTests(TestCase):
 
         sync_registered_forms()
 
-        self.assertTrue(
-            KoboFormDefinition.objects.filter(
-                form_id="ficha_01_territorio", version="20260710"
-            ).exists()
+        historical = KoboFormDefinition.objects.get(
+            form_id="ficha_01_territorio", version="20260710"
         )
+        self.assertFalse(historical.is_active)
         self.assertTrue(
             KoboFormDefinition.objects.filter(
                 form_id=FICHA_01_FORM_ID, version=FICHA_01_VERSION
@@ -1213,9 +1208,21 @@ class KoboFormSynchronizationTests(TestCase):
         call_command("register_kobo_forms", stdout=first_output)
         call_command("register_kobo_forms", stdout=second_output)
 
-        self.assertEqual(KoboFormDefinition.objects.count(), 11)
-        self.assertIn("11", first_output.getvalue())
-        self.assertIn("11", second_output.getvalue())
+        self.assertEqual(KoboFormDefinition.objects.count(), 3)
+        self.assertIn("3", first_output.getvalue())
+        self.assertIn("3", second_output.getvalue())
+
+    def test_sync_deactivates_unsupported_definition_without_deleting_it(self):
+        historical = KoboFormDefinition.objects.create(
+            form_id="ficha_02_capacidad_parroquial",
+            title="Ficha 02 histórica",
+            version="20260710",
+        )
+
+        sync_registered_forms()
+        historical.refresh_from_db()
+
+        self.assertFalse(historical.is_active)
 
 
 @override_settings(KOBO_FICHA_01_ASSET_UID="ficha-01-asset")
@@ -3894,3 +3901,126 @@ class KoboAssetManualConfigurationTests(TestCase):
         )
         self.assertFalse(form.is_valid())
         self.assertIn("project", form.errors)
+
+
+@override_settings(KOBO_ENABLED=True, KOBO_WEBHOOK_SECRET="test-webhook-secret")
+class KoboWebhookTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        definitions = (
+            (FICHA_01_FORM_ID, FICHA_01_VERSION, KoboAsset.FormRole.TERRITORIAL_PROFILE),
+            (FICHA_10_FORM_ID, FICHA_10_VERSION, KoboAsset.FormRole.PRIORITIZED_MICROPROJECT),
+            (FICHA_11_FORM_ID, FICHA_11_VERSION, KoboAsset.FormRole.PRIORITIZATION_MATRIX),
+        )
+        cls.assets = {}
+        for index, (form_id, version, role) in enumerate(definitions, start=1):
+            definition = KoboFormDefinition.objects.create(
+                form_id=form_id, version=version, title=f"Webhook {index}"
+            )
+            cls.assets[form_id] = KoboAsset.objects.create(
+                asset_uid=f"webhook-asset-{index}",
+                name=f"Webhook asset {index}",
+                form_definition=definition,
+                form_role=role,
+            )
+
+    def payload(self, form_id, **overrides):
+        # PRE: form_id identifies an active webhook asset.
+        # POST: returns a valid payload for that exact supported contract.
+        asset = self.assets[form_id]
+        payload = {"_uuid": f"webhook-{form_id}", "_xform_id_string": asset.asset_uid}
+        if form_id == FICHA_01_FORM_ID:
+            payload.update(KoboFicha01NormalizerTests().valid_payload())
+        elif form_id == FICHA_10_FORM_ID:
+            payload.update(KoboFicha10NormalizerTests().valid_payload())
+        else:
+            payload.update(KoboFicha11NormalizerTests().valid_payload())
+        payload["_uuid"] = f"webhook-{form_id}"
+        payload["_xform_id_string"] = asset.asset_uid
+        payload.update(overrides)
+        return payload
+
+    def post(self, payload, *, secret="test-webhook-secret"):
+        return self.client.post(
+            reverse("kobo:webhook_submission"),
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_X_KOBO_WEBHOOK_SECRET=secret,
+        )
+
+    def test_rejects_method_disabled_feature_and_invalid_authentication(self):
+        url = reverse("kobo:webhook_submission")
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertEqual(self.client.post(url, data="{}", content_type="application/json").status_code, 403)
+        self.assertEqual(self.post({}, secret="wrong").status_code, 403)
+        with self.settings(KOBO_ENABLED=False):
+            self.assertEqual(self.post({}).status_code, 404)
+
+    def test_rejects_invalid_json_and_unavailable_assets_safely(self):
+        url = reverse("kobo:webhook_submission")
+        self.assertEqual(self.client.post(url, data="[", content_type="application/json", HTTP_X_KOBO_WEBHOOK_SECRET="test-webhook-secret").status_code, 400)
+        self.assertEqual(self.post([]).status_code, 400)
+        self.assertEqual(self.post({"_xform_id_string": "missing"}).status_code, 400)
+
+    def test_stages_and_processes_each_supported_form_without_operations_effects(self):
+        for form_id in self.assets:
+            with self.subTest(form_id=form_id):
+                response = self.post(self.payload(form_id))
+                submission = KoboSubmission.objects.get(external_id=f"webhook-{form_id}")
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+                self.assertEqual(submission.asset, self.assets[form_id])
+                self.assertIsNone(submission.project_id)
+                self.assertNotIn("raw_payload", response.json())
+        self.assertFalse(Project.objects.exists())
+        self.assertFalse(ProjectUpdate.objects.exists())
+
+    def test_duplicate_preserves_payload_and_events(self):
+        payload = self.payload(FICHA_10_FORM_ID)
+        self.post(payload)
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        event_count = submission.processing_events.count()
+        changed = {**payload, "microproject_name": "No debe sobrescribir"}
+
+        response = self.post(changed)
+        submission.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["created"])
+        self.assertNotEqual(submission.raw_payload["microproject_name"], changed["microproject_name"])
+        self.assertEqual(submission.processing_events.count(), event_count)
+
+
+class KoboWebhookStagingTests(KoboWebhookTests):
+    def test_service_stages_only_once_and_validates_asset_uid(self):
+        asset = self.assets[FICHA_11_FORM_ID]
+        payload = self.payload(FICHA_11_FORM_ID)
+        submission, created = receive_webhook_submission(asset=asset, raw_payload=payload)
+        duplicate, duplicate_created = receive_webhook_submission(asset=asset, raw_payload=payload)
+
+        self.assertTrue(created)
+        self.assertFalse(duplicate_created)
+        self.assertEqual(submission.pk, duplicate.pk)
+        self.assertEqual(submission.status, KoboSubmission.Status.RECEIVED)
+        self.assertEqual(submission.asset, asset)
+        with self.assertRaises(KoboPayloadError):
+            receive_webhook_submission(asset=asset, raw_payload={**payload, "_xform_id_string": "other"})
+
+
+@override_settings(KOBO_ENABLED=True, KOBO_BASE_URL="https://kf.example.test", KOBO_API_TOKEN="test-token")
+class KoboReconciliationCommandTests(KoboWebhookTests):
+    def test_command_dry_run_and_asset_filter(self):
+        asset = self.assets[FICHA_01_FORM_ID]
+        client = SimpleNamespace(get_submissions=lambda asset_uid, limit: [self.payload(FICHA_01_FORM_ID)])
+        with patch("apps.integrations.kobo.management.commands.reconcile_kobo_submissions.KoboApiClient", return_value=client):
+            output = StringIO()
+            call_command("reconcile_kobo_submissions", "--asset-uid", asset.asset_uid, "--dry-run", stdout=output)
+        self.assertFalse(KoboSubmission.objects.exists())
+        self.assertIn("created=1", output.getvalue())
+
+    def test_command_rejects_disabled_feature_and_invalid_limit(self):
+        with self.settings(KOBO_ENABLED=False):
+            with self.assertRaises(CommandError):
+                call_command("reconcile_kobo_submissions", stdout=StringIO())
+        with self.assertRaises(CommandError):
+            call_command("reconcile_kobo_submissions", "--limit", "0", stdout=StringIO())

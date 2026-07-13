@@ -4,6 +4,7 @@ from apps.integrations.kobo import views
 
 app_name = "kobo"
 urlpatterns = [
+    path("webhook/", views.webhook_submission, name="webhook_submission"),
     path(
         "discovered-assets/",
         views.discovered_asset_list,

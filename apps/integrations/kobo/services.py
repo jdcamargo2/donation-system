@@ -105,8 +105,8 @@ class AssetReadiness:
 def sync_registered_forms() -> int:
     """
     PRE: the registry is defined and KoboFormDefinition has been migrated.
-    POST: creates or updates every registered form, removes none, and returns
-    the number of synchronized definitions.
+    POST: activates exact registered definitions, deactivates all other history,
+    removes none, and returns the registered-definition count.
     """
     registered_forms = list_registered_forms()
     for registered_form in registered_forms:
@@ -120,6 +120,13 @@ def sync_registered_forms() -> int:
                 "is_active": True,
             },
         )
+    supported_definitions = Q()
+    for registered_form in registered_forms:
+        supported_definitions |= Q(
+            form_id=registered_form.form_id,
+            version=registered_form.version,
+        )
+    KoboFormDefinition.objects.exclude(supported_definitions).update(is_active=False)
 
     return len(registered_forms)
 
@@ -180,6 +187,51 @@ def receive_api_submission(
             "status": KoboSubmission.Status.RECEIVED,
         },
     )
+
+
+def receive_webhook_submission(*, asset: KoboAsset, raw_payload: dict) -> tuple[KoboSubmission, bool]:
+    """
+    PRE: asset is active with an exact registered form/role and raw_payload is JSON.
+    POST: stages one immutable webhook submission idempotently without operations effects.
+    """
+    if not isinstance(raw_payload, dict):
+        raise KoboPayloadError("Kobo webhook payload must be an object.")
+    if asset is None or asset.pk is None or not asset.is_active:
+        raise KoboPayloadError("Kobo webhook asset is unavailable.")
+    form_definition = asset.form_definition
+    if not form_definition.is_active:
+        raise KoboPayloadError("Kobo webhook form definition is inactive.")
+    expected_role = FORM_DEFINITION_ROLES.get(
+        (form_definition.form_id, form_definition.version)
+    )
+    if asset.form_role != expected_role:
+        raise KoboPayloadError("Kobo webhook asset role is incompatible.")
+    external_id = raw_payload.get("_uuid")
+    if not isinstance(external_id, str) or not external_id.strip():
+        raise KoboPayloadError("Kobo submission _uuid must be a non-empty string.")
+    if raw_payload.get("_xform_id_string") != asset.asset_uid:
+        raise KoboPayloadError("Kobo submission asset UID does not match configuration.")
+    instance_id = raw_payload.get("meta/instanceID")
+    if instance_id is not None and instance_id != f"uuid:{external_id}":
+        raise KoboPayloadError("Kobo submission instanceID is inconsistent.")
+    submission, created = KoboSubmission.objects.get_or_create(
+        form_definition=form_definition,
+        external_id=external_id,
+        defaults={
+            "asset": asset,
+            "raw_payload": raw_payload,
+            "status": KoboSubmission.Status.RECEIVED,
+        },
+    )
+    if created:
+        KoboProcessingEvent.objects.create(
+            submission=submission,
+            stage="webhook",
+            level=KoboProcessingEvent.Level.INFO,
+            code="webhook_received",
+            message="Kobo webhook submission received.",
+        )
+    return submission, created
 
 
 def _record_invalid_payload_event(

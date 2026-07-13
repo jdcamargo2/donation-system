@@ -1,4 +1,5 @@
 import json
+import secrets
 
 from django.conf import settings
 from django.contrib import messages
@@ -6,12 +7,14 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.core.files.storage import default_storage
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count, Q
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
 
 from apps.integrations.kobo.client import KoboApiClient
+from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.forms import (
     KoboAssetConfigurationForm,
     KoboProjectBindingForm,
@@ -44,7 +47,49 @@ from apps.integrations.kobo.services import (
     deactivate_kobo_asset,
     get_asset_readiness,
     review_submission,
+    receive_webhook_submission,
 )
+
+
+@csrf_exempt
+@require_POST
+def webhook_submission(request):
+    # PRE: Kobo POSTs JSON with the configured independent webhook secret.
+    # POST: safely stages and processes one configured asset submission idempotently.
+    if not settings.KOBO_ENABLED:
+        raise Http404
+    supplied_secret = request.headers.get("X-Kobo-Webhook-Secret", "")
+    configured_secret = settings.KOBO_WEBHOOK_SECRET
+    if not configured_secret or not secrets.compare_digest(supplied_secret, configured_secret):
+        return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
+    if request.content_type.split(";", 1)[0].lower() != "application/json":
+        return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
+    try:
+        raw_payload = json.loads(request.body)
+    except (TypeError, ValueError, UnicodeDecodeError):
+        return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
+    if not isinstance(raw_payload, dict):
+        return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
+    asset_uid = raw_payload.get("_xform_id_string")
+    if not isinstance(asset_uid, str) or not asset_uid:
+        return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
+    try:
+        asset = KoboAsset.objects.select_related("form_definition").get(asset_uid=asset_uid)
+        submission, created = receive_webhook_submission(asset=asset, raw_payload=raw_payload)
+    except (KoboAsset.DoesNotExist, KoboPayloadError):
+        return JsonResponse({"ok": False, "error": "invalid_submission"}, status=400)
+    if created:
+        outcome = process_submission(
+            submission,
+            default_timezone=timezone.get_current_timezone(),
+        )
+        status = outcome.final_status
+    else:
+        status = submission.status
+    return JsonResponse(
+        {"ok": True, "created": created, "submission_id": submission.pk, "status": status},
+        status=201 if created else 200,
+    )
 
 
 def _require_kobo_enabled() -> None:
