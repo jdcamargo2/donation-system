@@ -469,6 +469,143 @@ class ProjectUpdateAttachment(models.Model):
         return super().delete(*args, **kwargs)
 
 
+class ProjectUpdateRemediationError(ValidationError):
+    """Raised when a remediation or its attachments violate their explicit lifecycle."""
+
+
+class ProjectUpdateRemediationQuerySet(models.QuerySet):
+    def _ensure_draft_only(self):
+        if self.exclude(status=ProjectUpdateRemediation.Status.DRAFT).exists():
+            raise ProjectUpdateRemediationError(_('Solo las remediaciones en borrador admiten esta operación.'))
+
+    def update(self, **kwargs):
+        self._ensure_draft_only()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_draft_only()
+        return super().delete()
+
+
+class ProjectUpdateRemediation(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = 'draft', _('Borrador')
+        SUBMITTED = 'submitted', _('Enviada')
+        ACCEPTED = 'accepted', _('Aceptada')
+        REJECTED = 'rejected', _('Rechazada')
+
+    decision = models.OneToOneField(
+        ProjectUpdateReviewDecision,
+        on_delete=models.PROTECT,
+        related_name='remediation',
+    )
+    response = models.TextField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='created_project_update_remediations')
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='submitted_project_update_remediations')
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='resolved_project_update_remediations')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ProjectUpdateRemediationQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = _('remediación de avance')
+        verbose_name_plural = _('remediaciones de avances')
+        permissions = [
+            ('submit_projectupdateremediation', _('Puede enviar remediaciones de avances')),
+            ('resolve_projectupdateremediation', _('Puede resolver remediaciones de avances')),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.decision_id and self.decision.outcome != ProjectUpdateReviewDecision.Outcome.OBSERVED:
+            errors['decision'] = _('Solo las decisiones observadas admiten remediación.')
+        if not (self.response or '').strip():
+            errors['response'] = _('La respuesta de remediación es obligatoria.')
+        submitted = self.submitted_by_id is not None and self.submitted_at is not None
+        resolved = self.resolved_by_id is not None and self.resolved_at is not None
+        if self.status == self.Status.DRAFT and (submitted or resolved):
+            errors['status'] = _('Una remediación en borrador no puede tener metadatos de envío o resolución.')
+        if self.status == self.Status.SUBMITTED and (not submitted or resolved):
+            errors['status'] = _('Una remediación enviada exige datos de envío y no admite resolución todavía.')
+        if self.status in {self.Status.ACCEPTED, self.Status.REJECTED}:
+            if not submitted or not resolved:
+                errors['status'] = _('Una remediación resuelta exige datos de envío y resolución.')
+            if not (self.resolution_notes or '').strip():
+                errors['resolution_notes'] = _('Las notas de resolución son obligatorias.')
+        if errors:
+            raise ValidationError(errors)
+
+    def _ensure_draft_mutation(self):
+        if self.pk and self.__class__.objects.exclude(status=self.Status.DRAFT).filter(pk=self.pk).exists():
+            raise ProjectUpdateRemediationError(_('Las remediaciones enviadas o resueltas son inmutables.'))
+        if self.decision_id and ProjectUpdateReviewDecision.objects.filter(
+            pk=self.decision_id,
+            outcome=ProjectUpdateReviewDecision.Outcome.CONFORMING,
+        ).exists():
+            raise ProjectUpdateRemediationError(_('Solo las decisiones observadas admiten remediación.'))
+
+    def save(self, *args, **kwargs):
+        if not getattr(self, '_allow_lifecycle_transition', False):
+            self._ensure_draft_mutation()
+        try:
+            return super().save(*args, **kwargs)
+        finally:
+            self._allow_lifecycle_transition = False
+
+    def delete(self, *args, **kwargs):
+        self._ensure_draft_mutation()
+        return super().delete(*args, **kwargs)
+
+
+class ProjectUpdateRemediationAttachmentQuerySet(models.QuerySet):
+    def _ensure_draft_only(self):
+        if self.exclude(remediation__status=ProjectUpdateRemediation.Status.DRAFT).exists():
+            raise ProjectUpdateRemediationError(_('Los adjuntos solo se pueden modificar en remediaciones en borrador.'))
+
+    def update(self, **kwargs):
+        self._ensure_draft_only()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_draft_only()
+        return super().delete()
+
+
+class ProjectUpdateRemediationAttachment(models.Model):
+    remediation = models.ForeignKey(ProjectUpdateRemediation, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='project_update_remediation_attachments/%Y/%m/')
+    title = models.CharField(max_length=200, blank=True)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='uploaded_project_update_remediation_attachments')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ProjectUpdateRemediationAttachmentQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['created_at']
+        verbose_name = _('adjunto de remediación')
+        verbose_name_plural = _('adjuntos de remediaciones')
+
+    def _ensure_draft_mutation(self):
+        if self.pk and self.__class__.objects.exclude(remediation__status=ProjectUpdateRemediation.Status.DRAFT).filter(pk=self.pk).exists():
+            raise ProjectUpdateRemediationError(_('Los adjuntos solo se pueden modificar en remediaciones en borrador.'))
+        if ProjectUpdateRemediation.objects.exclude(status=ProjectUpdateRemediation.Status.DRAFT).filter(pk=self.remediation_id).exists():
+            raise ProjectUpdateRemediationError(_('Los adjuntos solo se pueden crear en remediaciones en borrador.'))
+
+    def save(self, *args, **kwargs):
+        self._ensure_draft_mutation()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_draft_mutation()
+        return super().delete(*args, **kwargs)
+
+
 class DonationAllocationProgress(models.TextChoices):
     UNALLOCATED = 'unallocated', _('Sin asignar')
     PARTIALLY_ALLOCATED = 'partially_allocated', _('Parcialmente asignada')

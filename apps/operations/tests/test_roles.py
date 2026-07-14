@@ -75,6 +75,7 @@ class OperationRoleTests(TestCase):
             'add_projectupdatereview', 'change_projectupdatereview', 'delete_projectupdatereview',
             'add_projectupdatereviewdecision', 'change_projectupdatereviewdecision',
             'delete_projectupdatereviewdecision', 'review_projectupdate', 'decide_projectupdate',
+            'resolve_projectupdateremediation',
         }
 
         for permission in operations_permissions:
@@ -281,6 +282,13 @@ class OperationRoleTests(TestCase):
                 'add_projectupdate',
                 'view_supportingdocument',
                 'add_supportingdocument',
+                'view_projectupdateremediation',
+                'view_projectupdateremediationattachment',
+                'add_projectupdateremediation',
+                'change_projectupdateremediation',
+                'add_projectupdateremediationattachment',
+                'delete_projectupdateremediationattachment',
+                'submit_projectupdateremediation',
             },
             ROLE_EXTERNAL_AUDITOR: {
                 'view_institution',

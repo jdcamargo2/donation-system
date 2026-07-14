@@ -17,6 +17,9 @@ from .models import (
     ProjectUpdateImmutableError,
     ProjectUpdateReview,
     ProjectUpdateReviewDecision,
+    ProjectUpdateRemediation,
+    ProjectUpdateRemediationAttachment,
+    ProjectUpdateRemediationError,
     SupportingDocument,
     ZERO_MONEY,
 )
@@ -964,6 +967,114 @@ def delete_project_update_attachment(*, attachment_id: int, actor) -> int:
         log_delete(actor, attachment, _('Adjunto de avance eliminado.'))
         attachment.delete()
         return update_id
+
+
+def _require_remediation_actor(actor):
+    if not getattr(actor, 'is_authenticated', False):
+        raise ProjectUpdateRemediationError(_('La remediación exige un usuario autenticado.'))
+
+
+def _require_draft_remediation(remediation):
+    if remediation.status != ProjectUpdateRemediation.Status.DRAFT:
+        raise ProjectUpdateRemediationError(_('Solo las remediaciones en borrador admiten esta operación.'))
+
+
+def create_project_update_remediation(*, decision_id, response, actor):
+    """PRE: decision_id identifies an OBSERVED decision and actor is authenticated. POST: creates one audited DRAFT remediation."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        decision = ProjectUpdateReviewDecision.objects.select_for_update().get(pk=decision_id)
+        if decision.outcome != ProjectUpdateReviewDecision.Outcome.OBSERVED:
+            raise ProjectUpdateRemediationError(_('Solo las decisiones observadas admiten remediación.'))
+        if hasattr(decision, 'remediation'):
+            raise ProjectUpdateRemediationError(_('La decisión ya tiene una remediación registrada.'))
+        remediation = ProjectUpdateRemediation(
+            decision=decision,
+            response=(response or '').strip(),
+            created_by=actor,
+        )
+        remediation.full_clean()
+        remediation.save()
+        log_create(actor, remediation, _('Remediación creada como borrador.'))
+        return remediation
+
+
+def update_project_update_remediation(*, remediation_id, response, actor):
+    """PRE: remediation_id is DRAFT and actor is authenticated. POST: updates only response and audits once."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        _require_draft_remediation(remediation)
+        remediation.response = (response or '').strip()
+        remediation.full_clean()
+        remediation.save()
+        log_update(actor, remediation, _('Borrador de remediación actualizado.'))
+        return remediation
+
+
+def add_project_update_remediation_attachment(*, remediation_id, file, title, actor):
+    """PRE: remediation_id is DRAFT, file is valid, and actor is authenticated. POST: creates one audited attachment."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        _require_draft_remediation(remediation)
+        attachment = ProjectUpdateRemediationAttachment.objects.create(
+            remediation=remediation,
+            file=file,
+            title=(title or '').strip(),
+            uploaded_by=actor,
+        )
+        log_create(actor, attachment, _('Adjunto de remediación agregado.'))
+        return attachment
+
+
+def delete_project_update_remediation_attachment(*, attachment_id, actor):
+    """PRE: attachment_id exists and actor is authenticated. POST: deletes only DRAFT attachment and audits once."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        attachment = ProjectUpdateRemediationAttachment.objects.select_related('remediation').get(pk=attachment_id)
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=attachment.remediation_id)
+        _require_draft_remediation(remediation)
+        log_delete(actor, attachment, _('Adjunto de remediación eliminado.'))
+        attachment.delete()
+        return remediation.pk
+
+
+def submit_project_update_remediation(*, remediation_id, actor):
+    """PRE: remediation_id is DRAFT and actor authenticated. POST: locks decision/remediation and records submission metadata."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        remediation_ref = ProjectUpdateRemediation.objects.only('decision_id').get(pk=remediation_id)
+        ProjectUpdateReviewDecision.objects.select_for_update().get(pk=remediation_ref.decision_id)
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        _require_draft_remediation(remediation)
+        remediation.status = ProjectUpdateRemediation.Status.SUBMITTED
+        remediation.submitted_by = actor
+        remediation.submitted_at = timezone.now()
+        remediation.full_clean()
+        remediation.save()
+        log_action(actor, AuditLog.Action.UPDATED, remediation, _('Remediación enviada.'))
+        return remediation
+
+
+def resolve_project_update_remediation(*, remediation_id, status, resolution_notes, actor):
+    """PRE: remediation_id is SUBMITTED, status terminal, notes valid, actor authenticated. POST: resolves and audits once."""
+    _require_remediation_actor(actor)
+    if status not in {ProjectUpdateRemediation.Status.ACCEPTED, ProjectUpdateRemediation.Status.REJECTED}:
+        raise ProjectUpdateRemediationError(_('La resolución debe ser aceptada o rechazada.'))
+    with transaction.atomic():
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        if remediation.status != ProjectUpdateRemediation.Status.SUBMITTED:
+            raise ProjectUpdateRemediationError(_('Solo las remediaciones enviadas pueden resolverse.'))
+        remediation.status = status
+        remediation.resolution_notes = (resolution_notes or '').strip()
+        remediation.resolved_by = actor
+        remediation.resolved_at = timezone.now()
+        remediation.full_clean()
+        remediation._allow_lifecycle_transition = True
+        remediation.save()
+        log_action(actor, AuditLog.Action.UPDATED, remediation, _('Remediación resuelta.'))
+        return remediation
 
 
 def publish_project_update(update_id: int, actor) -> ProjectUpdate:

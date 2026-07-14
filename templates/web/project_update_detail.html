@@ -64,6 +64,7 @@
                 {% if perms.operations.view_projectupdatereview %}
                     <a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_review_detail' object.committee_review.pk %}">Ver revisión</a>
                 {% endif %}
+                {% if object.committee_review.decision.remediation %}<a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_remediation_detail' object.committee_review.decision.remediation.pk %}">Ver remediación</a>{% endif %}
             </div>
         </div>
     {% else %}

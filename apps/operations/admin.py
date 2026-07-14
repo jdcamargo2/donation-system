@@ -6,7 +6,8 @@ from django.utils.translation import gettext_lazy as _
 from .choices import OPERATING_CURRENCY, OPERATING_CURRENCY_CHOICES
 from .models import (
     AuditLog, Donation, Expense, FundAllocation, Institution, Project,
-    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
+    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
+    ProjectUpdateRemediation, ProjectUpdateRemediationAttachment, SupportingDocument,
 )
 from .services import (
     ExpenseFinalizedError,
@@ -248,6 +249,43 @@ class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
         for attachment in queryset.select_related('project_update'):
             ensure_project_update_is_editable(attachment.project_update)
         return super().delete_queryset(request, queryset)
+
+
+@admin.register(ProjectUpdateRemediation)
+class ProjectUpdateRemediationAdmin(admin.ModelAdmin):
+    list_display = ('decision', 'status', 'created_by', 'submitted_by', 'resolved_by')
+    readonly_fields = ('decision', 'created_by', 'submitted_by', 'submitted_at', 'resolved_by', 'resolved_at', 'created_at', 'updated_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and obj.status != ProjectUpdateRemediation.Status.DRAFT:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.status != ProjectUpdateRemediation.Status.DRAFT:
+            return False
+        return super().has_delete_permission(request, obj)
+
+
+@admin.register(ProjectUpdateRemediationAttachment)
+class ProjectUpdateRemediationAttachmentAdmin(admin.ModelAdmin):
+    list_display = ('remediation', 'title', 'created_at', 'uploaded_by')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and obj.remediation.status != ProjectUpdateRemediation.Status.DRAFT:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.remediation.status != ProjectUpdateRemediation.Status.DRAFT:
+            return False
+        return super().has_delete_permission(request, obj)
 
 
 @admin.register(Donation)

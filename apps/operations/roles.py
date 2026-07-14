@@ -15,6 +15,8 @@ COMMITTEE_READ_PERMISSION_CODENAMES = {
     'view_projectupdateattachment',
     'view_projectupdatereview',
     'view_projectupdatereviewdecision',
+    'view_projectupdateremediation',
+    'view_projectupdateremediationattachment',
 }
 
 
@@ -25,6 +27,13 @@ ROLE_PERMISSION_CODENAMES = {
         'add_projectupdate',
         'view_supportingdocument',
         'add_supportingdocument',
+        'view_projectupdateremediation',
+        'view_projectupdateremediationattachment',
+        'add_projectupdateremediation',
+        'change_projectupdateremediation',
+        'add_projectupdateremediationattachment',
+        'delete_projectupdateremediationattachment',
+        'submit_projectupdateremediation',
     },
     ROLE_EXTERNAL_AUDITOR: {
         'view_institution',
@@ -42,6 +51,7 @@ ROLE_PERMISSION_CODENAMES = {
     ROLE_PROJECT_UPDATE_REVIEWER: {
         *COMMITTEE_READ_PERMISSION_CODENAMES,
         'review_projectupdate',
+        'resolve_projectupdateremediation',
     },
     ROLE_PROJECT_UPDATE_DECIDER: {
         *COMMITTEE_READ_PERMISSION_CODENAMES,

@@ -24,6 +24,7 @@ REVIEW_AND_DECISION_MUTATION_PERMISSION_CODENAMES = frozenset(
         'delete_projectupdatereviewdecision',
         'review_projectupdate',
         'decide_projectupdate',
+        'resolve_projectupdateremediation',
     }
 )
 ADMIN_EXCLUDED_PERMISSION_CODENAMES = (

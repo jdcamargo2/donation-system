@@ -32,19 +32,29 @@ from .forms import (
     ProjectUpdateForm,
     ProjectUpdateReviewForm,
     ProjectUpdateReviewDecisionForm,
+    ProjectUpdateRemediationAttachmentForm,
+    ProjectUpdateRemediationForm,
+    ProjectUpdateRemediationResolveForm,
     SupportingDocumentForm,
     TerminalActionConfirmationForm,
     TerminalActionReasonForm,
 )
 from .models import (
     AuditLog, Donation, Expense, FundAllocation, Institution, Project,
-    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
+    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
+    ProjectUpdateRemediation, ProjectUpdateRemediationAttachment, SupportingDocument,
 )
 from .services import (
     create_expense,
     create_fund_allocation,
     create_project_update_review,
     create_project_update_review_decision,
+    create_project_update_remediation,
+    update_project_update_remediation,
+    add_project_update_remediation_attachment,
+    delete_project_update_remediation_attachment,
+    submit_project_update_remediation,
+    resolve_project_update_remediation,
     get_allocation_financial_summary,
     get_dashboard_metrics,
     get_donation_financial_summary,
@@ -58,6 +68,7 @@ from .services import (
     ProjectUpdateImmutableError,
     ProjectUpdateReviewError,
     ProjectUpdateReviewDecisionError,
+    ProjectUpdateRemediationError,
     OperationalEntityFinalizedError,
     allocation_has_effective_expenses,
     add_project_update_attachment,
@@ -893,6 +904,118 @@ class ProjectUpdateReviewDecisionDetailView(OperationsPermissionRequiredMixin, D
         return ProjectUpdateReviewDecision.objects.select_related(
             'review__project_update__project', 'decided_by'
         )
+
+
+class ProjectUpdateRemediationCreateView(OperationsPermissionRequiredMixin, FormView):
+    permission_required = 'operations.submit_projectupdateremediation'
+    form_class = ProjectUpdateRemediationForm
+    template_name = 'web/project_update_remediation_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.decision = get_object_or_404(ProjectUpdateReviewDecision, pk=kwargs['decision_pk'])
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        try:
+            remediation = create_project_update_remediation(
+                decision_id=self.decision.pk, response=form.cleaned_data['response'], actor=self.request.user
+            )
+        except ProjectUpdateRemediationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        return HttpResponseRedirect(reverse('project_update_remediation_detail', args=[remediation.pk]))
+
+
+class ProjectUpdateRemediationDetailView(OperationsPermissionRequiredMixin, DetailView):
+    permission_required = 'operations.view_projectupdateremediation'
+    model = ProjectUpdateRemediation
+    template_name = 'web/project_update_remediation_detail.html'
+
+    def get_queryset(self):
+        return ProjectUpdateRemediation.objects.select_related('decision__review__project_update', 'created_by', 'submitted_by', 'resolved_by').prefetch_related('attachments')
+
+
+class ProjectUpdateRemediationUpdateView(OperationsPermissionRequiredMixin, FormView):
+    permission_required = 'operations.change_projectupdateremediation'
+    form_class = ProjectUpdateRemediationForm
+    template_name = 'web/project_update_remediation_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.remediation = get_object_or_404(ProjectUpdateRemediation, pk=kwargs['pk'])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        return {'response': self.remediation.response}
+
+    def form_valid(self, form):
+        try:
+            update_project_update_remediation(remediation_id=self.remediation.pk, response=form.cleaned_data['response'], actor=self.request.user)
+        except ProjectUpdateRemediationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        return HttpResponseRedirect(reverse('project_update_remediation_detail', args=[self.remediation.pk]))
+
+
+class ProjectUpdateRemediationSubmitView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.submit_projectupdateremediation'
+
+    def post(self, request, *args, **kwargs):
+        try:
+            remediation = submit_project_update_remediation(remediation_id=kwargs['pk'], actor=request.user)
+        except ProjectUpdateRemediationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        return HttpResponseRedirect(reverse('project_update_remediation_detail', args=[remediation.pk]))
+
+
+class ProjectUpdateRemediationResolveView(OperationsPermissionRequiredMixin, FormView):
+    permission_required = 'operations.resolve_projectupdateremediation'
+    form_class = ProjectUpdateRemediationResolveForm
+    template_name = 'web/project_update_remediation_resolve_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.remediation = get_object_or_404(ProjectUpdateRemediation, pk=kwargs['pk'])
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        try:
+            resolve_project_update_remediation(remediation_id=self.remediation.pk, actor=self.request.user, **form.cleaned_data)
+        except ProjectUpdateRemediationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        return HttpResponseRedirect(reverse('project_update_remediation_detail', args=[self.remediation.pk]))
+
+
+class ProjectUpdateRemediationAttachmentCreateView(OperationsPermissionRequiredMixin, FormView):
+    permission_required = 'operations.add_projectupdateremediationattachment'
+    form_class = ProjectUpdateRemediationAttachmentForm
+    template_name = 'web/project_update_remediation_attachment_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.remediation = get_object_or_404(ProjectUpdateRemediation, pk=kwargs['pk'])
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        try:
+            add_project_update_remediation_attachment(remediation_id=self.remediation.pk, actor=self.request.user, **form.cleaned_data)
+        except ProjectUpdateRemediationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        return HttpResponseRedirect(reverse('project_update_remediation_detail', args=[self.remediation.pk]))
+
+
+class ProjectUpdateRemediationAttachmentDeleteView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.delete_projectupdateremediationattachment'
+
+    def post(self, request, *args, **kwargs):
+        try:
+            remediation_id = delete_project_update_remediation_attachment(attachment_id=kwargs['pk'], actor=request.user)
+        except ProjectUpdateRemediationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        return HttpResponseRedirect(reverse('project_update_remediation_detail', args=[remediation_id]))
+
+
+class ProjectUpdateRemediationAttachmentDownloadView(OperationsPermissionRequiredMixin, DetailView):
+    permission_required = 'operations.view_projectupdateremediationattachment'
+    model = ProjectUpdateRemediationAttachment
+
+    def get(self, request, *args, **kwargs):
+        return _protected_file_response(self.get_object().file, missing_message=_('El adjunto de remediación no está disponible.'))
 
 
 class ProjectUpdateCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):

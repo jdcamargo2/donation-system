@@ -8,7 +8,8 @@ from django.utils.translation import gettext_lazy as _
 from .choices import OPERATING_CURRENCY
 from .models import (
     Donation, Expense, FundAllocation, Institution, Project, ProjectDocument,
-    ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
+    ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
+    ProjectUpdateRemediation, SupportingDocument,
 )
 
 
@@ -149,6 +150,26 @@ class BootstrapFormMixin:
             field.widget.attrs['class'] = ' '.join(current_classes)
             if isinstance(field.widget, forms.Textarea):
                 field.widget.attrs['rows'] = 3
+
+
+class ProjectUpdateRemediationForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectUpdateRemediation
+        fields = ['response']
+        widgets = {'response': forms.Textarea(attrs={'rows': 5})}
+
+
+class ProjectUpdateRemediationResolveForm(BootstrapFormMixin, forms.Form):
+    status = forms.ChoiceField(choices=[
+        (ProjectUpdateRemediation.Status.ACCEPTED, _('Aceptar')),
+        (ProjectUpdateRemediation.Status.REJECTED, _('Rechazar')),
+    ])
+    resolution_notes = forms.CharField(widget=forms.Textarea(attrs={'rows': 4}))
+
+
+class ProjectUpdateRemediationAttachmentForm(BootstrapFormMixin, forms.Form):
+    title = forms.CharField(required=False, max_length=200)
+    file = forms.FileField()
 
 
 class InstitutionForm(BootstrapFormMixin, forms.ModelForm):
