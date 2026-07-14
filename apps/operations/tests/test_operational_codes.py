@@ -125,8 +125,14 @@ class OperationalCodeMigrationTests(TransactionTestCase):
     migrate_from = ('operations', '0006_monetary_row_constraints')
     migrate_to = ('operations', '0007_operational_codes')
 
+    def _restore_leaf_migrations(self):
+        executor = MigrationExecutor(transaction.get_connection())
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
     def setUp(self):
         super().setUp()
+        # Restaura hojas aunque setUp/test fallen a mitad de camino.
+        self.addCleanup(self._restore_leaf_migrations)
         executor = MigrationExecutor(transaction.get_connection())
         executor.migrate([self.migrate_from])
         old_apps = executor.loader.project_state([self.migrate_from]).apps
@@ -171,10 +177,6 @@ class OperationalCodeMigrationTests(TransactionTestCase):
         executor = MigrationExecutor(transaction.get_connection())
         executor.migrate([self.migrate_to])
         self.apps = executor.loader.project_state([self.migrate_to]).apps
-
-    def tearDown(self):
-        MigrationExecutor(transaction.get_connection()).migrate([self.migrate_to])
-        super().tearDown()
 
     def test_migration_preserves_and_backfills_codes_and_sequences(self):
         MigratedProject = self.apps.get_model('operations', 'Project')
