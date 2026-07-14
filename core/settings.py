@@ -113,6 +113,9 @@ KOBO_REQUEST_TIMEOUT_SECONDS = int(
 KOBO_MAX_ATTACHMENT_BYTES = int(
     os.getenv("KOBO_MAX_ATTACHMENT_BYTES", "10485760")
 )
+KOBO_WEBHOOK_MAX_BYTES = int(
+    os.getenv("KOBO_WEBHOOK_MAX_BYTES", "1048576")
+)
 
 # Application definition
 

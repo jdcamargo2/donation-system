@@ -90,6 +90,7 @@ KOBO_WEBHOOK_USERNAME=
 KOBO_WEBHOOK_SECRET=
 KOBO_REQUEST_TIMEOUT_SECONDS=15
 KOBO_MAX_ATTACHMENT_BYTES=10485760
+KOBO_WEBHOOK_MAX_BYTES=1048576
 ```
 
 ### Reglas
@@ -98,6 +99,7 @@ KOBO_MAX_ATTACHMENT_BYTES=10485760
 * El webhook debe publicarse únicamente mediante HTTPS.
 * Las credenciales deben rotarse cuando exista sospecha de exposición.
 * El tamaño máximo de adjuntos debe ajustarse a la capacidad del servidor.
+* `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo entrante antes de deserializarlo.
 * Los secretos no deben aparecer en logs.
 * La activación de Kobo requiere activos, definiciones y bindings correctamente configurados.
 

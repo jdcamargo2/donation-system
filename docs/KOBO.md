@@ -42,6 +42,7 @@ KOBO_WEBHOOK_SECRET=
 KOBO_FICHA_01_ASSET_UID=
 KOBO_REQUEST_TIMEOUT_SECONDS=15
 KOBO_MAX_ATTACHMENT_BYTES=10485760
+KOBO_WEBHOOK_MAX_BYTES=1048576
 ```
 
 ### Consideraciones
@@ -53,6 +54,7 @@ KOBO_MAX_ATTACHMENT_BYTES=10485760
 * `KOBO_WEBHOOK_SECRET` contiene el secreto utilizado para autenticar solicitudes entrantes.
 * `KOBO_REQUEST_TIMEOUT_SECONDS` define el tiempo máximo de espera para solicitudes externas.
 * `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
+* `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging.
 * `KOBO_FICHA_01_ASSET_UID` pertenece únicamente al flujo legado de la Ficha 1.
 
 Los valores secretos no deben versionarse ni registrarse en logs.

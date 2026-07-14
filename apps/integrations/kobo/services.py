@@ -1,8 +1,9 @@
 from dataclasses import dataclass, replace
+from datetime import tzinfo
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
 from django.utils.html import strip_tags
@@ -133,6 +134,13 @@ class AssetReadiness:
     active_binding_count: int
 
 
+@dataclass(frozen=True)
+class WebhookConvergenceResult:
+    submission_id: int
+    final_status: str
+    completed: bool
+
+
 def sync_registered_forms() -> int:
     """
     PRE: the registry is defined and KoboFormDefinition has been migrated.
@@ -260,15 +268,22 @@ def receive_webhook_submission(*, asset: KoboAsset, raw_payload: dict) -> tuple[
     instance_id = raw_payload.get("meta/instanceID")
     if instance_id is not None and instance_id != f"uuid:{external_id}":
         raise KoboPayloadError("Kobo submission instanceID is inconsistent.")
-    submission, created = KoboSubmission.objects.get_or_create(
-        form_definition=form_definition,
-        external_id=external_id,
-        defaults={
-            "asset": asset,
-            "raw_payload": raw_payload,
-            "status": KoboSubmission.Status.RECEIVED,
-        },
-    )
+    try:
+        submission, created = KoboSubmission.objects.get_or_create(
+            form_definition=form_definition,
+            external_id=external_id,
+            defaults={
+                "asset": asset,
+                "raw_payload": raw_payload,
+                "status": KoboSubmission.Status.RECEIVED,
+            },
+        )
+    except IntegrityError:
+        submission = KoboSubmission.objects.get(
+            form_definition=form_definition,
+            external_id=external_id,
+        )
+        created = False
     if created:
         KoboProcessingEvent.objects.create(
             submission=submission,
@@ -278,6 +293,39 @@ def receive_webhook_submission(*, asset: KoboAsset, raw_payload: dict) -> tuple[
             message="Kobo webhook submission received.",
         )
     return submission, created
+
+
+def converge_webhook_submission(
+    submission_id: int,
+    *,
+    default_timezone: tzinfo,
+) -> WebhookConvergenceResult:
+    """
+    PRE: submission_id identifies a staged webhook submission and no remote work is required.
+    POST: serializes processing and direct-project assignment until the persisted row is
+    complete or has a durable, retryable failure.
+    """
+    with transaction.atomic():
+        submission = KoboSubmission.objects.select_for_update().get(pk=submission_id)
+        if submission.status in PROCESSABLE_STATUSES:
+            process_submission(submission, default_timezone=default_timezone)
+            submission.refresh_from_db()
+
+        if submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
+            if submission.project_id is None:
+                assign_normalized_submission_to_direct_project(submission)
+                submission.refresh_from_db()
+            return WebhookConvergenceResult(
+                submission_id=submission.pk,
+                final_status=submission.status,
+                completed=submission.project_id is not None,
+            )
+
+        return WebhookConvergenceResult(
+            submission_id=submission.pk,
+            final_status=submission.status,
+            completed=submission.status not in PROCESSABLE_STATUSES,
+        )
 
 
 def _record_invalid_payload_event(
@@ -642,16 +690,22 @@ def assign_normalized_submission_to_direct_project(
             locked_submission = KoboSubmission.objects.select_for_update().get(
                 pk=submission.pk
             )
+            already_recorded = (
+                locked_submission.error_code == "routing_configuration_error"
+                and locked_submission.error_message
+                == "Kobo project routing could not be resolved."
+            )
             locked_submission.error_code = "routing_configuration_error"
             locked_submission.error_message = "Kobo project routing could not be resolved."
             locked_submission.save(update_fields=("error_code", "error_message"))
-            KoboProcessingEvent.objects.create(
-                submission=locked_submission,
-                stage="project_routing",
-                level=KoboProcessingEvent.Level.ERROR,
-                code="routing_configuration_error",
-                message="Kobo project routing could not be resolved.",
-            )
+            if not already_recorded:
+                KoboProcessingEvent.objects.create(
+                    submission=locked_submission,
+                    stage="project_routing",
+                    level=KoboProcessingEvent.Level.ERROR,
+                    code="routing_configuration_error",
+                    message="Kobo project routing could not be resolved.",
+                )
         submission.error_code = "routing_configuration_error"
         submission.error_message = "Kobo project routing could not be resolved."
         return False

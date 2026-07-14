@@ -5,8 +5,11 @@ from datetime import date, datetime, timezone
 from io import StringIO
 import json
 from pathlib import Path
+from queue import Queue
 import re
+from threading import Barrier, Thread
 from types import SimpleNamespace
+from unittest import skipUnless
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -17,9 +20,9 @@ from django.core.exceptions import ValidationError
 from django.core.files.storage import InMemoryStorage
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, close_old_connections, connection, connections, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone as django_timezone
@@ -4972,6 +4975,155 @@ class KoboWebhookTests(TestCase):
             changed["microproject"]["microproject_name"],
         )
         self.assertEqual(submission.processing_events.count(), event_count)
+
+    def test_retry_processes_an_existing_received_submission(self):
+        payload = self.ficha_01_slash_payload()
+        submission = KoboSubmission.objects.create(
+            form_definition=self.assets[FICHA_01_FORM_ID].form_definition,
+            asset=self.assets[FICHA_01_FORM_ID],
+            external_id=payload["_uuid"],
+            raw_payload=payload,
+            status=KoboSubmission.Status.RECEIVED,
+        )
+
+        response = self.post(payload)
+
+        submission.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(submission.project, self.project)
+
+    def test_retry_recovers_a_ready_submission_after_binding_is_restored(self):
+        asset = self.assets[FICHA_01_FORM_ID]
+        asset.project_bindings.update(is_active=False)
+        payload = self.ficha_01_slash_payload()
+
+        first = self.post(payload)
+        asset.project_bindings.update(is_active=True)
+        retry = self.post(payload)
+
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        self.assertEqual(first.status_code, 422)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(submission.project, self.project)
+        self.assertEqual(
+            submission.processing_events.filter(code="normalized").count(), 1
+        )
+
+    def test_rejects_oversized_body_without_staging(self):
+        with self.settings(KOBO_WEBHOOK_MAX_BYTES=8):
+            response = self.post(self.payload(FICHA_01_FORM_ID))
+
+        self.assertEqual(response.status_code, 413)
+        self.assertFalse(KoboSubmission.objects.exists())
+
+    def test_absent_or_invalid_content_length_is_safe(self):
+        payload = self.payload(FICHA_10_FORM_ID)
+        url = reverse("kobo:webhook_submission")
+        for content_length in (None, "invalid"):
+            with self.subTest(content_length=content_length):
+                headers = {"HTTP_X_KOBO_WEBHOOK_SECRET": "test-webhook-secret"}
+                if content_length is not None:
+                    headers["CONTENT_LENGTH"] = content_length
+                response = self.client.post(
+                    url,
+                    data=json.dumps({**payload, "_uuid": f"{payload['_uuid']}-{content_length}"}),
+                    content_type="application/json",
+                    **headers,
+                )
+                self.assertEqual(
+                    response.status_code,
+                    201 if content_length is None else 400,
+                )
+
+    def test_internal_errors_do_not_expose_request_data(self):
+        payload = self.payload(FICHA_01_FORM_ID)
+        with patch(
+            "apps.integrations.kobo.views.converge_webhook_submission",
+            side_effect=RuntimeError("secret payload diagnostic"),
+        ):
+            response = self.post(payload)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json(), {"ok": False, "error": "internal_error"})
+        self.assertNotIn("secret", response.content.decode())
+
+
+@skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row-level locking")
+@override_settings(
+    KOBO_ENABLED=True,
+    KOBO_WEBHOOK_USERNAME="sigedon-kobo",
+    KOBO_WEBHOOK_SECRET="test-webhook-secret",
+)
+class KoboWebhookConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        definition = KoboFormDefinition.objects.create(
+            form_id=FICHA_01_FORM_ID,
+            version=FICHA_01_VERSION,
+            title="Webhook concurrente",
+        )
+        self.project = Project.objects.create(
+            code="PRJ-WEBHOOK-CONCURRENT",
+            name="Proyecto concurrente",
+            status=Project.Status.ACTIVE,
+        )
+        self.asset = KoboAsset.objects.create(
+            asset_uid="webhook-concurrent-asset",
+            name="Webhook concurrente",
+            form_definition=definition,
+            form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE,
+        )
+        KoboDiscoveredAsset.objects.create(
+            asset_uid=self.asset.asset_uid,
+            name=self.asset.name,
+            metadata_snapshot={"id_string": FICHA_01_FORM_ID, "version": FICHA_01_VERSION},
+            last_seen_at=django_timezone.now(),
+        )
+        KoboProjectBinding.objects.create(
+            asset=self.asset,
+            project=self.project,
+            routing_type=KoboProjectBinding.RoutingType.DIRECT,
+        )
+
+    def test_simultaneous_webhooks_stage_and_converge_once(self):
+        payload = KoboFicha01NormalizerTests().valid_payload()
+        payload.update(
+            _uuid="webhook-concurrent-uuid",
+            _xform_id_string=self.asset.asset_uid,
+        )
+        barrier = Barrier(2)
+        results = Queue()
+
+        def post_webhook():
+            close_old_connections()
+            try:
+                barrier.wait(timeout=10)
+                response = Client().post(
+                    reverse("kobo:webhook_submission"),
+                    data=json.dumps(payload),
+                    content_type="application/json",
+                    HTTP_X_KOBO_WEBHOOK_SECRET="test-webhook-secret",
+                )
+                results.put(response.status_code)
+            finally:
+                connections.close_all()
+
+        threads = [Thread(target=post_webhook) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+        self.assertFalse([thread for thread in threads if thread.is_alive()])
+        self.assertEqual(sorted(results.get_nowait() for _ in threads), [200, 201])
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        self.assertEqual(KoboSubmission.objects.count(), 1)
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(submission.project, self.project)
+        self.assertEqual(
+            submission.processing_events.filter(code="webhook_received").count(), 1
+        )
+        self.assertEqual(submission.processing_events.filter(code="normalized").count(), 1)
 
 
 class KoboWebhookStagingTests(KoboWebhookTests):

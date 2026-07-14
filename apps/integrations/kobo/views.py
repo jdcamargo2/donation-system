@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.files.storage import default_storage
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied, RequestDataTooBig, ValidationError
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -46,8 +46,8 @@ from apps.integrations.kobo.services import (
     REJECTION_REASON_LABELS,
     associate_submission_with_project,
     activate_kobo_asset,
-    assign_normalized_submission_to_direct_project,
     configure_discovered_asset,
+    converge_webhook_submission,
     get_project_pending_submissions,
     get_project_submission_history,
     import_kobo_submission,
@@ -109,6 +109,22 @@ def _webhook_unauthorized_response():
     )
 
 
+def _webhook_payload_too_large_response():
+    # PRE: request payload exceeded the configured webhook boundary.
+    # POST: returns a generic 413 response without staging request data.
+    return JsonResponse({"ok": False, "error": "payload_too_large"}, status=413)
+
+
+def _declared_webhook_payload_exceeds_limit(request) -> bool:
+    # PRE: request is an authenticated webhook request and the limit is positive.
+    # POST: returns False for absent or malformed Content-Length without raising.
+    try:
+        content_length = int(request.META.get("CONTENT_LENGTH", ""))
+    except (TypeError, ValueError):
+        return False
+    return content_length > settings.KOBO_WEBHOOK_MAX_BYTES
+
+
 @csrf_exempt
 @require_POST
 def webhook_submission(request):
@@ -120,8 +136,18 @@ def webhook_submission(request):
         return _webhook_unauthorized_response()
     if request.content_type.split(";", 1)[0].lower() != "application/json":
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
+    if _declared_webhook_payload_exceeds_limit(request):
+        return _webhook_payload_too_large_response()
     try:
-        raw_payload = json.loads(request.body)
+        body = request.body
+    except RequestDataTooBig:
+        return _webhook_payload_too_large_response()
+    except ValueError:
+        return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
+    if len(body) > settings.KOBO_WEBHOOK_MAX_BYTES:
+        return _webhook_payload_too_large_response()
+    try:
+        raw_payload = json.loads(body)
     except (TypeError, ValueError, UnicodeDecodeError):
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     if not isinstance(raw_payload, dict):
@@ -134,38 +160,35 @@ def webhook_submission(request):
         submission, created = receive_webhook_submission(asset=asset, raw_payload=raw_payload)
     except (KoboAsset.DoesNotExist, KoboPayloadError):
         return JsonResponse({"ok": False, "error": "invalid_submission"}, status=400)
-    if created:
-        outcome = process_submission(
-            submission,
+    try:
+        convergence = converge_webhook_submission(
+            submission.pk,
             default_timezone=timezone.get_current_timezone(),
         )
-        status = outcome.final_status
-        if status != KoboSubmission.Status.READY_FOR_REVIEW:
-            return JsonResponse(
-                {
-                    "ok": False,
-                    "error": "processing_failed",
-                    "submission_id": submission.pk,
-                    "status": status,
-                },
-                status=422,
-            )
-        if (
-            not assign_normalized_submission_to_direct_project(submission)
-        ):
-            return JsonResponse(
-                {
-                    "ok": False,
-                    "error": "project_assignment_failed",
-                    "submission_id": submission.pk,
-                    "status": status,
-                },
-                status=422,
-            )
-    else:
-        status = submission.status
+    except Exception:
+        return JsonResponse({"ok": False, "error": "internal_error"}, status=500)
+    if not convergence.completed:
+        error = (
+            "project_assignment_failed"
+            if convergence.final_status == KoboSubmission.Status.READY_FOR_REVIEW
+            else "processing_failed"
+        )
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": error,
+                "submission_id": convergence.submission_id,
+                "status": convergence.final_status,
+            },
+            status=422,
+        )
     return JsonResponse(
-        {"ok": True, "created": created, "submission_id": submission.pk, "status": status},
+        {
+            "ok": True,
+            "created": created,
+            "submission_id": convergence.submission_id,
+            "status": convergence.final_status,
+        },
         status=201 if created else 200,
     )
 
