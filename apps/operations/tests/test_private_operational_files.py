@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from apps.operations.models import Project, ProjectUpdateAttachment
-from apps.operations.services import register_advance
+from apps.operations.services import publish_project_update, register_advance
 from apps.operations.tests.helpers import create_project, create_user
 
 
@@ -44,3 +44,12 @@ class PrivateOperationalFileDownloadTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Disposition'], 'attachment; filename="evidence.pdf"')
         self.assertEqual(ProjectUpdateAttachment.objects.count(), 1)
+
+    def test_published_attachment_download_remains_available_with_read_permission(self):
+        publish_project_update(self.update.pk, self.user)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('project_update_attachment_download', args=[self.attachment.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Disposition'], 'attachment; filename="evidence.pdf"')

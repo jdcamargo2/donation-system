@@ -14,6 +14,7 @@ from .models import (
     Project,
     ProjectUpdate,
     ProjectUpdateAttachment,
+    ProjectUpdateImmutableError,
     ProjectUpdateReview,
     ProjectUpdateReviewDecision,
     SupportingDocument,
@@ -27,10 +28,6 @@ class ExpenseFinalizedError(ValidationError):
 
 EXPENSE_FINAL_STATUSES = frozenset({Expense.Status.ANNULLED})
 PROJECT_UPDATE_FINAL_STATUSES = frozenset({ProjectUpdate.Status.PUBLISHED})
-
-
-class ProjectUpdateImmutableError(ValidationError):
-    """Raised when ordinary mutation targets a non-draft project update."""
 
 
 class ProjectUpdateReviewError(ValidationError):

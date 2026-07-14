@@ -253,6 +253,44 @@ class ProjectUpdate(models.Model):
             raise ValidationError(errors)
 
 
+class ProjectUpdateImmutableError(ValidationError):
+    """Raised when ordinary mutation targets a published project update or attachment."""
+
+
+class ProjectUpdateAttachmentQuerySet(models.QuerySet):
+    # PRE: queryset targets persisted project-update attachments.
+    # POST: returns only when no selected attachment belongs to a PUBLISHED update.
+    def _ensure_no_published_attachments(self):
+        if self.filter(project_update__status=ProjectUpdate.Status.PUBLISHED).exists():
+            raise ProjectUpdateImmutableError(
+                _('Los adjuntos de avances publicados no se pueden modificar ni eliminar.')
+            )
+
+    # PRE: queryset targets attachments and kwargs do not move them to a PUBLISHED update.
+    # POST: updates only attachments belonging to DRAFT updates; published attachments remain unchanged.
+    def update(self, **kwargs):
+        self._ensure_no_published_attachments()
+        target_project = kwargs.get('project_update', kwargs.get('project_update_id'))
+        target_project_id = getattr(target_project, 'pk', target_project)
+        if (
+            target_project_id is not None
+            and ProjectUpdate.objects.filter(
+                pk=target_project_id,
+                status=ProjectUpdate.Status.PUBLISHED,
+            ).exists()
+        ):
+            raise ProjectUpdateImmutableError(
+                _('No se pueden asociar adjuntos a avances publicados.')
+            )
+        return super().update(**kwargs)
+
+    # PRE: queryset targets persisted project-update attachments.
+    # POST: deletes only attachments belonging to DRAFT updates; published attachments remain unchanged.
+    def delete(self):
+        self._ensure_no_published_attachments()
+        return super().delete()
+
+
 class ProjectUpdateReview(models.Model):
     project_update = models.OneToOneField(
         ProjectUpdate,
@@ -386,6 +424,8 @@ class ProjectUpdateAttachment(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = ProjectUpdateAttachmentQuerySet.as_manager()
+
     class Meta:
         ordering = ['created_at']
         verbose_name = _('adjunto de avance')
@@ -393,6 +433,40 @@ class ProjectUpdateAttachment(models.Model):
 
     def __str__(self):
         return self.title or self.file.name.rsplit('/', 1)[-1]
+
+    # PRE: instance refers to a persisted attachment or a valid target ProjectUpdate.
+    # POST: returns only when neither its persisted nor proposed parent is PUBLISHED.
+    def _ensure_parent_update_is_editable(self):
+        if self.pk and self.__class__.objects.filter(
+            pk=self.pk,
+            project_update__status=ProjectUpdate.Status.PUBLISHED,
+        ).exists():
+            raise ProjectUpdateImmutableError(
+                _('Los adjuntos de avances publicados no se pueden modificar ni eliminar.')
+            )
+        if ProjectUpdate.objects.filter(
+            pk=self.project_update_id,
+            status=ProjectUpdate.Status.PUBLISHED,
+        ).exists():
+            raise ProjectUpdateImmutableError(
+                _('No se pueden asociar adjuntos a avances publicados.')
+            )
+
+    def save(self, *args, **kwargs):
+        """
+        PRE: the attachment has a valid parent update and ordinary mutation is requested.
+        POST: persists only an attachment associated with a DRAFT update.
+        """
+        self._ensure_parent_update_is_editable()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """
+        PRE: the attachment is persisted and ordinary deletion is requested.
+        POST: deletes only an attachment whose parent update remains DRAFT.
+        """
+        self._ensure_parent_update_is_editable()
+        return super().delete(*args, **kwargs)
 
 
 class DonationAllocationProgress(models.TextChoices):

@@ -221,6 +221,11 @@ class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
         ensure_project_update_is_editable(project_update)
         super().save_model(request, obj, form, change)
 
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'project_update':
+            kwargs['queryset'] = ProjectUpdate.objects.filter(status=ProjectUpdate.Status.DRAFT)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
     def has_change_permission(self, request, obj=None):
         if obj and obj.project_update.status == ProjectUpdate.Status.PUBLISHED:
             return False
@@ -230,6 +235,19 @@ class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
         if obj and obj.project_update.status == ProjectUpdate.Status.PUBLISHED:
             return False
         return super().has_delete_permission(request, obj)
+
+    def delete_model(self, request, obj):
+        # PRE: obj is an attachment selected for ordinary admin deletion.
+        # POST: deletes only an attachment whose parent update remains DRAFT.
+        ensure_project_update_is_editable(obj.project_update)
+        return super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        # PRE: queryset contains attachments selected by the admin bulk delete action.
+        # POST: deletes the batch only when every parent update remains DRAFT.
+        for attachment in queryset.select_related('project_update'):
+            ensure_project_update_is_editable(attachment.project_update)
+        return super().delete_queryset(request, queryset)
 
 
 @admin.register(Donation)
