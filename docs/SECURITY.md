@@ -55,6 +55,28 @@ Se bloquean las siguientes operaciones:
 * mutación desde el panel de administración;
 * asignación de permisos de creación, edición o eliminación a roles operativos.
 
+### Defensa a nivel de base de datos
+
+En PostgreSQL, `operations_auditlog` está protegida por una segunda capa,
+independiente de Django:
+
+* un trigger append-only (migración `0018_auditlog_append_only_trigger`)
+  rechaza `UPDATE`, `DELETE` y `TRUNCATE` a nivel de base de datos;
+* el rol runtime `sigedon_app` no recibe esos privilegios sobre la tabla
+  (ver `deploy/postgresql/harden_runtime_role.sql`);
+* `INSERT` y `SELECT` permanecen disponibles para que la aplicación siga
+  registrando eventos y consultando el historial;
+* el mensaje de error del trigger es genérico y nunca incluye el contenido
+  del registro afectado.
+
+Esta defensa complementa, no sustituye, la inmutabilidad ya aplicada en el
+modelo, el queryset, el admin y la UI. Un superusuario de PostgreSQL puede
+administrar o desactivar el trigger; esa capacidad debe reservarse para
+administración técnica explícita, nunca para el uso cotidiano de la
+aplicación. `python manage.py verify_postgres_security` verifica, de forma
+solo de lectura, que el rol runtime conectado no tenga esos privilegios y
+que el trigger esté instalado.
+
 Las acciones críticas deben registrar, como mínimo:
 
 * actor;
@@ -320,6 +342,12 @@ Esto implica:
 * revisar periódicamente grupos y usuarios;
 * no conceder permisos de modificación cuando basta con consulta;
 * limitar el acceso a payloads y archivos sensibles.
+
+A nivel de base de datos, esto se traduce en separar el rol propietario de
+migraciones (`sigedon_owner`) del rol runtime (`sigedon_app`), como describe
+`deploy/postgresql/harden_runtime_role.sql` y `docs/DEPLOYMENT.md`. El rol
+runtime nunca debe ser superusuario, propietario de las tablas, ni recibir
+`ALL PRIVILEGES`.
 
 ## 17. Limitaciones del MVP
 

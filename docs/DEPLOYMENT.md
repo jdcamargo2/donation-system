@@ -264,6 +264,45 @@ python manage.py showmigrations
 python manage.py migrate --plan
 ```
 
+### 9.1. Separación de roles PostgreSQL
+
+SIGEDON distingue dos roles conceptuales:
+
+* `sigedon_owner`: propietario del esquema, ejecuta migraciones.
+* `sigedon_app`: rol runtime utilizado por web, workers y comandos ordinarios.
+
+El script `deploy/postgresql/harden_runtime_role.sql` es una plantilla comentada que:
+
+* crea o ajusta ambos roles;
+* revoca `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` y `BYPASSRLS` de `sigedon_app`;
+* otorga `CONNECT`, `USAGE` sobre el esquema y privilegios mínimos (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) sobre tablas operativas, y `USAGE`/`SELECT` sobre secuencias;
+* limita `sigedon_app` sobre `operations_auditlog` a `SELECT` e `INSERT`, revocando explícitamente `UPDATE`, `DELETE`, `TRUNCATE`, `TRIGGER` y `REFERENCES`;
+* define `ALTER DEFAULT PRIVILEGES` para que las tablas y secuencias futuras hereden el mismo alcance mínimo.
+
+Debe ejecutarse conectado como `sigedon_owner` o un administrador equivalente, nunca con `sigedon_app`, y sus nombres de base/rol deben adaptarse a cada entorno.
+
+### Dos modos de credenciales
+
+**Migraciones.** Ejecutar temporalmente con las credenciales de `sigedon_owner`:
+
+```bash
+python manage.py migrate
+```
+
+**Runtime.** Ejecutar web, workers y comandos ordinarios con `sigedon_app`. Después de aplicar migraciones, las variables `POSTGRES_USER`/`POSTGRES_PASSWORD` del servicio deben cambiarse de vuelta a `sigedon_app` antes de servir tráfico.
+
+### Reglas
+
+* Nunca usar `postgres` como usuario runtime en producción.
+* No almacenar credenciales de `sigedon_owner` en el servicio web ni en los workers.
+* El trigger append-only instalado en `operations_auditlog` (migración `0018_auditlog_append_only_trigger`) es una defensa adicional, no un sustituto de la separación de roles.
+* Un superusuario de PostgreSQL puede administrar o desactivar el trigger o los privilegios; esa capacidad se reserva para administración técnica explícita.
+* Verificar la configuración runtime con:
+
+```bash
+python manage.py verify_postgres_security
+```
+
 ## 10. Proxy inverso
 
 El proxy HTTPS debe encargarse de:
@@ -304,13 +343,15 @@ Después de iniciar o actualizar la aplicación:
 12. ejecutar smoke tests;
 13. revisar logs;
 14. confirmar que no se expongan secretos;
-15. verificar que no existan migraciones pendientes.
+15. verificar que no existan migraciones pendientes;
+16. ejecutar `python manage.py verify_postgres_security` y confirmar código de salida 0.
 
 Comandos útiles:
 
 ```bash
 python manage.py check --deploy
 python manage.py makemigrations --check --dry-run
+python manage.py verify_postgres_security
 ```
 
 ## 12. Smoke tests
