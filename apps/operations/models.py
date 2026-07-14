@@ -242,11 +242,10 @@ class ProjectUpdate(models.Model):
             errors['status'] = _('El estado del avance no es válido.')
         if (
             self.project_id
-            and not self.pk
             and hasattr(self.project, 'status')
             and self.project.status != Project.Status.ACTIVE
         ):
-            errors['project'] = _('Solo se pueden crear avances para proyectos activos.')
+            errors['project'] = _('Solo los proyectos activos admiten avances.')
         if errors:
             raise ValidationError(errors)
 

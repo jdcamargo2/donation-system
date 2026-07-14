@@ -68,6 +68,29 @@ class ProjectUpdateTests(TestCase):
         self.assertEqual(update.created_by, self.user)
         self.assertIsNone(update.reported_by)
 
+    def test_register_advance_rejects_non_active_project(self):
+        rejected_statuses = (
+            Project.Status.PLANNED,
+            Project.Status.SUSPENDED,
+            Project.Status.CLOSED,
+            Project.Status.ANNULLED,
+        )
+        for status in rejected_statuses:
+            with self.subTest(status=status):
+                project = create_project(code=f'PRJ-UPDATE-{status}')
+                project.status = status
+                project.save(update_fields=('status',))
+
+                with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+                    register_advance(
+                        project_id=project.pk,
+                        title='Avance no permitido',
+                        description='No debe guardarse para un proyecto no activo.',
+                        created_by=self.user,
+                    )
+
+                self.assertFalse(project.updates.exists())
+
     def test_project_update_forms_include_reported_by_and_exclude_created_by(self):
         for form_class in (ProjectUpdateForm, ProjectUpdateForProjectForm):
             with self.subTest(form_class=form_class.__name__):
@@ -134,6 +157,28 @@ class ProjectUpdateTests(TestCase):
             entity_id=str(update.pk), action=AuditLog.Action.UPDATED, user=self.editor
         ).exists())
 
+    def test_draft_cannot_be_reassigned_to_non_active_project(self):
+        update = self.create_draft()
+        target_project = create_project(code='PRJ-UPDATE-SUSPENDED')
+        target_project.status = Project.Status.SUSPENDED
+        target_project.save(update_fields=('status',))
+
+        with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+            update_project_update(
+                update_id=update.pk,
+                project=target_project,
+                title='Reasignación no permitida',
+                description='No debe persistirse en un proyecto suspendido.',
+                update_date=date(2026, 7, 12),
+                progress_percentage=40,
+                reported_by=self.reported_by,
+                actor=self.editor,
+            )
+
+        update.refresh_from_db()
+        self.assertEqual(update.project, self.project)
+        self.assertEqual(update.title, 'Avance operativo')
+
     def test_draft_update_view_changes_reported_by(self):
         update = self.create_draft()
         self.client.force_login(self.editor)
@@ -171,6 +216,26 @@ class ProjectUpdateTests(TestCase):
         self.assertTrue(AuditLog.objects.filter(
             entity_id=str(update.pk), action=AuditLog.Action.PUBLISHED, user=self.user
         ).exists())
+
+    def test_publish_rejects_project_no_longer_active(self):
+        rejected_statuses = (
+            Project.Status.SUSPENDED,
+            Project.Status.CLOSED,
+            Project.Status.ANNULLED,
+        )
+        for status in rejected_statuses:
+            with self.subTest(status=status):
+                update = self.create_draft()
+                self.project.status = status
+                self.project.save(update_fields=('status',))
+
+                with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+                    publish_project_update(update.pk, self.user)
+
+                update.refresh_from_db()
+                self.assertEqual(update.status, ProjectUpdate.Status.DRAFT)
+                self.project.status = Project.Status.ACTIVE
+                self.project.save(update_fields=('status',))
 
     def test_published_project_update_cannot_be_edited(self):
         update = self.create_draft()

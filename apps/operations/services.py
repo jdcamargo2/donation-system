@@ -448,6 +448,24 @@ def _validate_donation_can_fund_allocations(donation):
         )
 
 
+# PRE: project is locked for update before an allocation is created or reassigned.
+# POST: returns only when the project is PLANNED or ACTIVE; otherwise raises a domain validation error.
+def _validate_project_accepts_allocations(project):
+    if project.status not in {Project.Status.PLANNED, Project.Status.ACTIVE}:
+        raise ValidationError(
+            {'project': _('Solo los proyectos planificados o activos admiten asignaciones.')}
+        )
+
+
+# PRE: project is locked for update before an expense or project update is written or published.
+# POST: returns only when the project is ACTIVE; otherwise raises a domain validation error.
+def _validate_project_is_active_for_execution_or_updates(project):
+    if project.status != Project.Status.ACTIVE:
+        raise ValidationError(
+            {'project': _('Solo los proyectos activos admiten gastos y avances.')}
+        )
+
+
 # PRE: donation is locked for update and amount is the complete proposed allocation amount.
 # POST: raises ValidationError unless amount is positive and fits the donation balance excluding exclude_pk.
 def _validate_allocation_balance(donation, amount, exclude_pk=None):
@@ -503,12 +521,14 @@ def create_fund_allocation(
 ):
     with transaction.atomic():
         locked_donation = Donation.objects.select_for_update().get(pk=donation.pk)
+        locked_project = Project.objects.select_for_update().get(pk=project.pk)
         _validate_donation_can_fund_allocations(locked_donation)
+        _validate_project_accepts_allocations(locked_project)
         _validate_operating_currency(locked_donation.currency, 'donation')
         _validate_allocation_balance(locked_donation, amount)
         allocation = FundAllocation(
             donation=locked_donation,
-            project=project,
+            project=locked_project,
             budget_category=budget_category,
             amount=amount,
             responsible_person=responsible_person,
@@ -544,12 +564,14 @@ def update_fund_allocation(
             for item in Donation.objects.select_for_update().filter(pk__in=donation_ids).order_by('pk')
         }
         locked_donation = locked_donations[donation.pk]
+        locked_project = Project.objects.select_for_update().get(pk=project.pk)
         _validate_donation_can_fund_allocations(locked_donation)
+        _validate_project_accepts_allocations(locked_project)
         _validate_operating_currency(locked_donation.currency, 'donation')
         _validate_allocation_balance(locked_donation, amount, exclude_pk=locked_allocation.pk)
         _validate_allocation_execution(locked_allocation, amount)
         locked_allocation.donation = locked_donation
-        locked_allocation.project = project
+        locked_allocation.project = locked_project
         locked_allocation.budget_category = budget_category
         locked_allocation.amount = amount
         locked_allocation.responsible_person = responsible_person
@@ -583,7 +605,9 @@ def create_expense(
         allocation_reference = FundAllocation.objects.only('donation_id').get(pk=allocation.pk)
         Donation.objects.select_for_update().get(pk=allocation_reference.donation_id)
         locked_allocation = FundAllocation.objects.select_for_update().get(pk=allocation.pk)
+        locked_project = Project.objects.select_for_update().get(pk=locked_allocation.project_id)
         ensure_operational_entity_is_editable(locked_allocation)
+        _validate_project_is_active_for_execution_or_updates(locked_project)
         _validate_operating_currency(currency)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
         _validate_expense_balance(locked_allocation, amount)
@@ -649,6 +673,8 @@ def update_expense(
         locked_expense = Expense.objects.select_for_update().get(pk=expense.pk)
         ensure_expense_is_editable(locked_expense)
         locked_allocation = locked_allocations[allocation.pk]
+        locked_project = Project.objects.select_for_update().get(pk=locked_allocation.project_id)
+        _validate_project_is_active_for_execution_or_updates(locked_project)
         _validate_operating_currency(currency)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
         exclude_pk = locked_expense.pk if locked_expense.allocation_id == locked_allocation.pk else None
@@ -844,18 +870,19 @@ def register_advance(
     PRE: project_id debe corresponder a un Project existente y apto para recibir avances.
     POST: crea un avance DRAFT validado y deja una auditoría de creación.
     """
-    project = Project.objects.get(pk=project_id)
-    project_update = ProjectUpdate(
-        project=project,
-        title=title,
-        description=description,
-        update_date=update_date or timezone.localdate(),
-        progress_percentage=progress_percentage,
-        created_by=created_by,
-        reported_by=reported_by,
-        status=ProjectUpdate.Status.DRAFT,
-    )
     with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_id)
+        _validate_project_is_active_for_execution_or_updates(project)
+        project_update = ProjectUpdate(
+            project=project,
+            title=title,
+            description=description,
+            update_date=update_date or timezone.localdate(),
+            progress_percentage=progress_percentage,
+            created_by=created_by,
+            reported_by=reported_by,
+            status=ProjectUpdate.Status.DRAFT,
+        )
         project_update.full_clean()
         project_update.save()
         _create_project_update_attachments(project_update, attachments, created_by)
@@ -874,7 +901,9 @@ def update_project_update(
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
         ensure_project_update_is_editable(project_update)
-        project_update.project = project
+        locked_project = Project.objects.select_for_update().get(pk=project.pk)
+        _validate_project_is_active_for_execution_or_updates(locked_project)
+        project_update.project = locked_project
         project_update.title = title
         project_update.description = description
         project_update.update_date = update_date
@@ -945,6 +974,8 @@ def publish_project_update(update_id: int, actor) -> ProjectUpdate:
         raise ValidationError({'actor': _('La publicación exige un usuario autenticado.')})
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
+        project = Project.objects.select_for_update().get(pk=project_update.project_id)
+        _validate_project_is_active_for_execution_or_updates(project)
         if project_update.status != ProjectUpdate.Status.DRAFT:
             raise ValidationError(
                 {'status': _('Solo un avance en borrador puede publicarse.')}
