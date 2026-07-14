@@ -15,7 +15,7 @@
 <section class="mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="h5 mb-0">Resultado institucional</h2>
-        {% if not object.decision and perms.operations.add_projectupdatereviewdecision %}
+        {% if not object.decision and perms.operations.decide_projectupdate %}
             <a class="btn btn-sm btn-primary" href="{% url 'project_update_review_decision_create' object.pk %}">Registrar resultado</a>
         {% endif %}
     </div>

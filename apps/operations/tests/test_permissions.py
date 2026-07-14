@@ -80,19 +80,23 @@ class OperationsPermissionTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_user_with_change_projectupdate_permission_can_publish(self):
-        self.client.force_login(create_user_with_permissions('review-update', 'change_projectupdate'))
+    def test_change_projectupdate_permission_can_edit_but_not_publish(self):
+        self.client.force_login(create_user_with_permissions('edit-update', 'change_projectupdate'))
 
-        response = self.client.post(reverse('project_update_publish', args=[self.project_update.pk]))
+        edit_response = self.client.get(reverse('project_update_update', args=[self.project_update.pk]))
+        publish_response = self.client.post(reverse('project_update_publish', args=[self.project_update.pk]))
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(edit_response.status_code, 200)
+        self.assertEqual(publish_response.status_code, 403)
 
-    def test_user_without_change_projectupdate_permission_gets_403_on_publish(self):
-        self.client.force_login(create_user('no-review-update'))
+    def test_publish_projectupdate_permission_can_publish_without_editing(self):
+        self.client.force_login(create_user_with_permissions('publish-update', 'publish_projectupdate'))
 
-        response = self.client.post(reverse('project_update_publish', args=[self.project_update.pk]))
+        edit_response = self.client.get(reverse('project_update_update', args=[self.project_update.pk]))
+        publish_response = self.client.post(reverse('project_update_publish', args=[self.project_update.pk]))
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(edit_response.status_code, 403)
+        self.assertEqual(publish_response.status_code, 302)
 
     def test_user_with_view_auditlog_permission_can_access_audit_log_list(self):
         self.client.force_login(create_user_with_permissions('view-auditlog', 'view_auditlog'))

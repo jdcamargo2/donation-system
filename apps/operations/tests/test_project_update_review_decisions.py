@@ -10,7 +10,13 @@ from apps.operations.admin import ProjectUpdateReviewDecisionAdmin
 from apps.operations.forms import ProjectUpdateReviewDecisionForm
 from apps.operations.models import AuditLog, Project, ProjectUpdateReviewDecision
 from apps.operations.role_services import sync_operation_roles
-from apps.operations.roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_PROJECT_COMMITTEE
+from apps.operations.roles import (
+    ROLE_EXTERNAL_AUDITOR,
+    ROLE_FIELD_OPERATOR,
+    ROLE_PROJECT_UPDATE_DECIDER,
+    ROLE_PROJECT_UPDATE_REVIEWER,
+    ROLE_SIGEDON_ADMIN,
+)
 from apps.operations.services import (
     ProjectUpdateReviewDecisionError,
     create_project_update_review,
@@ -27,7 +33,11 @@ class ProjectUpdateReviewDecisionTests(TestCase):
         self.committee_member = get_user_model().objects.create_user(
             username='committee-decision-maker', password='pass-12345'
         )
-        self.committee_member.groups.add(Group.objects.get(name=ROLE_PROJECT_COMMITTEE))
+        self.committee_member.groups.add(Group.objects.get(name=ROLE_PROJECT_UPDATE_DECIDER))
+        self.reviewer = get_user_model().objects.create_user(
+            username='committee-reviewer', password='pass-12345'
+        )
+        self.reviewer.groups.add(Group.objects.get(name=ROLE_PROJECT_UPDATE_REVIEWER))
         self.field_operator = get_user_model().objects.create_user(
             username='field-decision-operator', password='pass-12345'
         )
@@ -51,7 +61,7 @@ class ProjectUpdateReviewDecisionTests(TestCase):
         return create_project_update_review(
             update_id=published_update.pk,
             observations='Revisión documental registrada.',
-            actor=self.committee_member,
+            actor=self.reviewer,
         )
 
     def create_decision(self, review=None, outcome='conforming', rationale='El expediente documental está completo.'):
@@ -157,8 +167,12 @@ class ProjectUpdateReviewDecisionTests(TestCase):
 
     def test_users_without_decision_permission_cannot_create_it(self):
         review = self.create_review()
+        administrator = get_user_model().objects.create_user(
+            username='decision-admin', password='pass-12345'
+        )
+        administrator.groups.add(Group.objects.get(name=ROLE_SIGEDON_ADMIN))
 
-        for user in (self.field_operator, self.auditor):
+        for user in (administrator, self.reviewer, self.field_operator, self.auditor):
             with self.subTest(user=user.username):
                 self.client.force_login(user)
                 response = self.client.post(
@@ -166,6 +180,7 @@ class ProjectUpdateReviewDecisionTests(TestCase):
                     {'outcome': 'conforming', 'rationale': 'Intento no autorizado.'},
                 )
                 self.assertEqual(response.status_code, 403)
+                self.assertFalse(ProjectUpdateReviewDecision.objects.filter(review=review).exists())
 
     def test_user_without_decision_permission_cannot_distinguish_decision_state(self):
         undecided_review = self.create_review()
@@ -203,9 +218,10 @@ class ProjectUpdateReviewDecisionTests(TestCase):
         with self.assertRaises(NoReverseMatch):
             reverse('project_update_review_decision_delete', args=[1])
 
-    def test_committee_permission_matrix_keeps_decision_mutations_disabled(self):
-        self.assertTrue(self.committee_member.has_perm('operations.add_projectupdatereviewdecision'))
+    def test_decider_permission_matrix_keeps_crud_mutations_disabled(self):
+        self.assertTrue(self.committee_member.has_perm('operations.decide_projectupdate'))
         self.assertTrue(self.committee_member.has_perm('operations.view_projectupdatereviewdecision'))
+        self.assertFalse(self.committee_member.has_perm('operations.review_projectupdate'))
         self.assertFalse(self.committee_member.has_perm('operations.change_projectupdatereviewdecision'))
         self.assertFalse(self.committee_member.has_perm('operations.delete_projectupdatereviewdecision'))
         self.assertFalse(self.committee_member.has_perm('operations.change_projectupdate'))

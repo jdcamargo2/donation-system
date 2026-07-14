@@ -221,6 +221,9 @@ class ProjectUpdate(models.Model):
         ordering = ['-created_at']
         verbose_name = _('avance de proyecto')
         verbose_name_plural = _('avances de proyecto')
+        permissions = [
+            ('publish_projectupdate', _('Puede publicar avances de proyecto')),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(progress_percentage__gte=0, progress_percentage__lte=100),
@@ -273,6 +276,9 @@ class ProjectUpdateReview(models.Model):
         ordering = ['-reviewed_at']
         verbose_name = _('revisión documental de avance')
         verbose_name_plural = _('revisiones documentales de avances')
+        permissions = [
+            ('review_projectupdate', _('Puede registrar revisiones de avances')),
+        ]
 
     def __str__(self):
         return f'Revisión de {self.project_update}'
@@ -315,6 +321,9 @@ class ProjectUpdateReviewDecision(models.Model):
         ordering = ['-decided_at']
         verbose_name = _('resultado de revisión del Comité')
         verbose_name_plural = _('resultados de revisiones del Comité')
+        permissions = [
+            ('decide_projectupdate', _('Puede registrar decisiones institucionales de avances')),
+        ]
 
     def __str__(self):
         return f'{self.get_outcome_display()} · {self.review}'

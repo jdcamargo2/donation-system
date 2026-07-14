@@ -801,7 +801,7 @@ class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMix
 
 
 class ProjectUpdateReviewCreateView(OperationsPermissionRequiredMixin, FormView):
-    permission_required = 'operations.add_projectupdatereview'
+    permission_required = 'operations.review_projectupdate'
     form_class = ProjectUpdateReviewForm
     template_name = 'web/project_update_review_form.html'
 
@@ -848,7 +848,7 @@ class ProjectUpdateReviewDetailView(OperationsPermissionRequiredMixin, DetailVie
 
 
 class ProjectUpdateReviewDecisionCreateView(OperationsPermissionRequiredMixin, FormView):
-    permission_required = 'operations.add_projectupdatereviewdecision'
+    permission_required = 'operations.decide_projectupdate'
     form_class = ProjectUpdateReviewDecisionForm
     template_name = 'web/project_update_review_decision_form.html'
 
@@ -1021,11 +1021,11 @@ class ProjectUpdateDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixi
 
 
 class ProjectUpdatePublishView(OperationsPermissionRequiredMixin, View):
-    permission_required = 'operations.change_projectupdate'
+    permission_required = 'operations.publish_projectupdate'
 
     def post(self, request, *args, **kwargs):
         """
-        PRE: el usuario tiene permiso de cambio y pk identifica un avance.
+        PRE: el usuario tiene permiso funcional de publicación y pk identifica un avance.
         POST: publica mediante el servicio de dominio o responde 403 sin mutar.
         """
         try:

@@ -104,6 +104,8 @@
                         {% if update.status == 'draft' %}
                             {% if perms.operations.change_projectupdate %}
                                 <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_update' update.pk %}">Editar</a>
+                            {% endif %}
+                            {% if perms.operations.publish_projectupdate %}
                                 <form method="post" action="{% url 'project_update_publish' update.pk %}">
                                     {% csrf_token %}
                                     <button class="btn btn-sm btn-outline-primary" type="submit">Publicar</button>
