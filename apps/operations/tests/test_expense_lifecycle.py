@@ -8,7 +8,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
 from apps.operations.forms import ExpenseForm
-from apps.operations.models import AuditLog, Expense
+from apps.operations.models import AuditLog, Expense, Project
 from apps.operations.services import (
     ExpenseFinalizedError,
     annul_expense,
@@ -23,6 +23,8 @@ class ExpenseLifecycleTests(TestCase):
     def setUp(self):
         self.user = create_user()
         self.allocation = create_allocation(amount=Decimal('100.00'))
+        self.allocation.project.status = Project.Status.ACTIVE
+        self.allocation.project.save(update_fields=('status', 'updated_at'))
 
     def expense_data(self, amount='30.00'):
         # PRE: amount is candidate browser text for a payment already executed.

@@ -115,6 +115,14 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], (ValidationError, ExpenseFinalizedError))
 
+    def create_active_allocation(self, **kwargs):
+        # PRE: kwargs describe a valid allocation fixture for a concurrent expense operation.
+        # POST: returns an allocation whose persisted project status is ACTIVE before threads start.
+        allocation = create_allocation(**kwargs)
+        allocation.project.status = Project.Status.ACTIVE
+        allocation.project.save(update_fields=('status', 'updated_at'))
+        return allocation
+
     def test_concurrent_allocations_preserve_donation_balance(self):
         donation = create_donation(amount=Decimal('100.00'))
         donation_id = donation.pk
@@ -215,7 +223,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
 
     def test_concurrent_expenses_preserve_allocation_balance(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         allocation_id = allocation.pk
         allocation_amount = allocation.amount
         Expense.objects.create(
@@ -255,7 +263,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(SupportingDocument.objects.count(), 1)
 
     def test_concurrent_expense_creations_reserve_distinct_codes(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         before = OperationalCodeSequence.objects.get(namespace='expense').next_value
 
         def spend(label):
@@ -328,7 +336,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(FundAllocation.objects.get(pk=failed_id).amount, Decimal('20.00'))
 
     def test_concurrent_expense_updates_preserve_allocation_balance(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         allocation_id = allocation.pk
         allocation_amount = allocation.amount
         expense_ids = (
@@ -413,7 +421,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
 
     def test_concurrent_expense_annulment_creates_one_event(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         expense = create_expense_fixture(allocation=allocation, amount=Decimal('80.00'))
         expense_id = expense.pk
         allocation_amount = allocation.amount
@@ -449,7 +457,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
 
     def test_concurrent_expense_update_and_annulment_keep_serializable_balance(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         expense = create_expense_fixture(allocation=allocation, amount=Decimal('30.00'))
         SupportingDocument.objects.create(
             expense=expense,

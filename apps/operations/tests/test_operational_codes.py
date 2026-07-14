@@ -26,9 +26,16 @@ class OperationalCodeTests(TestCase):
         self.donor = create_institution()
 
     def test_all_entities_receive_unique_six_digit_codes(self):
-        projects = [Project.objects.create(name=f'Proyecto {index}') for index in range(2)]
+        projects = [
+            Project.objects.create(name=f'Proyecto {index}', status=Project.Status.ACTIVE)
+            for index in range(2)
+        ]
         donations = [
-            Donation.objects.create(donor=self.donor, amount=Decimal('100.00'))
+            Donation.objects.create(
+                donor=self.donor,
+                amount=Decimal('100.00'),
+                status=Donation.Status.RECEIVED,
+            )
             for _index in range(2)
         ]
         allocations = [

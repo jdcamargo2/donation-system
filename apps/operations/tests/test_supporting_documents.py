@@ -7,7 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from apps.operations.models import Expense, SupportingDocument
+from apps.operations.models import Expense, Project, SupportingDocument
 from apps.operations.role_services import sync_operation_roles
 from apps.operations.roles import ROLE_EXTERNAL_AUDITOR
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_expense
@@ -26,6 +26,8 @@ class SupportingDocumentWorkflowTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_superuser(username='support-admin', password='pass-12345')
         self.expense = create_expense(reason='Compra con soporte')
+        self.expense.allocation.project.status = Project.Status.ACTIVE
+        self.expense.allocation.project.save(update_fields=('status', 'updated_at'))
 
     def uploaded_file(self, name='support.pdf', content=b'file-content'):
         return SimpleUploadedFile(name, content, content_type='application/pdf')

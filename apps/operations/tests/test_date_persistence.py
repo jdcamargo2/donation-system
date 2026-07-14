@@ -25,6 +25,8 @@ class DateFormContractTests(TestCase):
     def setUp(self):
         self.donor = create_institution()
         self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status', 'updated_at'))
         self.donation = create_donation(donor=self.donor)
         self.allocation = create_allocation(donation=self.donation, project=self.project)
 
@@ -132,6 +134,8 @@ class DatePersistenceViewTests(TestCase):
         self.client.force_login(self.user)
         self.donor = create_institution()
         self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status', 'updated_at'))
         self.donation = create_donation(donor=self.donor, amount=Decimal('200.00'))
         self.allocation = create_allocation(
             donation=self.donation,

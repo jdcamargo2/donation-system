@@ -28,6 +28,14 @@ class CriticalAuditTests(TestCase):
     def uploaded_file(self, name='audit.pdf', content=b'audit-file'):
         return SimpleUploadedFile(name, content, content_type='application/pdf')
 
+    def create_active_expense(self, **kwargs):
+        # PRE: kwargs describe an expense fixture whose project must admit operational changes.
+        # POST: returns an expense attached to an allocation in an ACTIVE project.
+        allocation = kwargs.pop('allocation', None) or create_allocation()
+        allocation.project.status = Project.Status.ACTIVE
+        allocation.project.save(update_fields=('status', 'updated_at'))
+        return create_expense(allocation=allocation, **kwargs)
+
     def test_project_delete_generates_audit_log(self):
         project = create_project(code='PRJ-DEL-001', name='Proyecto eliminable')
 
@@ -60,7 +68,7 @@ class CriticalAuditTests(TestCase):
         )
 
     def test_expense_delete_generates_audit_log(self):
-        expense = create_expense(reason='Gasto eliminable')
+        expense = self.create_active_expense(reason='Gasto eliminable')
 
         response = self.client.post(reverse('expense_delete', args=[expense.pk]))
 
@@ -93,7 +101,7 @@ class CriticalAuditTests(TestCase):
 
 
     def test_attaching_support_generates_audit_log(self):
-        expense = create_expense(reason='Gasto con soporte auditado')
+        expense = self.create_active_expense(reason='Gasto con soporte auditado')
 
         response = self.client.post(
             reverse('supporting_document_create_for_expense', args=[expense.pk]),
@@ -111,7 +119,7 @@ class CriticalAuditTests(TestCase):
         )
 
     def test_deleting_support_generates_audit_log(self):
-        expense = create_expense(reason='Gasto con soporte eliminable')
+        expense = self.create_active_expense(reason='Gasto con soporte eliminable')
         SupportingDocument.objects.create(
             expense=expense,
             title='Soporte conservado',
@@ -137,7 +145,9 @@ class CriticalAuditTests(TestCase):
 
     def test_correcting_expense_generates_audit_log(self):
         allocation = create_allocation(amount='80.00')
-        expense = create_expense(allocation=allocation, amount='20.00', reason='Gasto validable')
+        expense = self.create_active_expense(
+            allocation=allocation, amount='20.00', reason='Gasto validable'
+        )
         SupportingDocument.objects.create(
             expense=expense,
             title='Soporte para validar',
