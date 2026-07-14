@@ -274,7 +274,7 @@ def finish_project(project_id: int, *, actor) -> Project:
 def annul_project(project_id: int, *, actor, reason) -> Project:
     """
     PRE: actor is authenticated, reason is valid, and project can transition to ANNULLED.
-    POST: annuls only a project without non-annulled allocations and audits atomically.
+    POST: annuls only a project without non-annulled allocations or draft updates and audits atomically.
     """
     _require_transition_actor(actor)
     clean_reason = validate_terminal_reason(reason)
@@ -288,6 +288,10 @@ def annul_project(project_id: int, *, actor, reason) -> Project:
         if project.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists():
             raise InvalidStateTransitionError(
                 {'allocations': _('El proyecto mantiene asignaciones no anuladas.')}
+            )
+        if project.updates.filter(status=ProjectUpdate.Status.DRAFT).exists():
+            raise InvalidStateTransitionError(
+                {'updates': _('El proyecto mantiene avances en borrador que deben resolverse antes de anularse.')}
             )
         return _finalize_operational_entity(
             entity=project,

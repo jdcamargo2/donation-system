@@ -7,13 +7,16 @@ from django.test import TestCase
 from django.urls import reverse
 
 from apps.operations.admin import DonationAdmin, FundAllocationAdmin, ProjectAdmin
-from apps.operations.models import AuditLog, Donation, Expense, FundAllocation, Project
+from apps.operations.models import AuditLog, Donation, Expense, FundAllocation, Project, ProjectUpdate
 from apps.operations.services import (
+    InvalidStateTransitionError,
     allocation_has_effective_expenses,
     annul_donation,
     annul_fund_allocation,
     annul_project,
     finish_project,
+    publish_project_update,
+    register_advance,
     update_fund_allocation,
 )
 from apps.operations.tests.helpers import (
@@ -66,6 +69,66 @@ class TerminalActionServiceTests(TestCase):
         annul_fund_allocation(allocation.pk, actor=self.actor, reason=VALID_REASON)
         annulled = annul_project(project.pk, actor=self.actor, reason=VALID_REASON)
         self.assertEqual(annulled.status, Project.Status.ANNULLED)
+
+    def test_project_annulment_rejects_draft_update_without_changes(self):
+        project = create_project(code='PRJ-DRAFT-ANNUL')
+        project.status = Project.Status.ACTIVE
+        project.save(update_fields=('status', 'updated_at'))
+        register_advance(
+            project_id=project.pk,
+            title='Avance pendiente',
+            description='Debe resolverse antes de anular el proyecto.',
+            created_by=self.actor,
+        )
+
+        with self.assertRaisesMessage(InvalidStateTransitionError, 'mantiene avances en borrador'):
+            annul_project(project.pk, actor=self.actor, reason=VALID_REASON)
+
+        project.refresh_from_db()
+        self.assertEqual(project.status, Project.Status.ACTIVE)
+        self.assertEqual(project.terminal_reason, '')
+        self.assertIsNone(project.terminal_at)
+        self.assertIsNone(project.terminal_by)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action=AuditLog.Action.ANNULLED,
+                entity_id=str(project.pk),
+            ).exists()
+        )
+
+    def test_project_annulment_allows_published_update_without_allocations(self):
+        project = create_project(code='PRJ-PUBLISHED-ANNUL')
+        project.status = Project.Status.ACTIVE
+        project.save(update_fields=('status', 'updated_at'))
+        update = register_advance(
+            project_id=project.pk,
+            title='Avance histórico',
+            description='La publicación conserva la evidencia histórica.',
+            created_by=self.actor,
+        )
+        publish_project_update(update.pk, self.actor)
+
+        annulled = annul_project(project.pk, actor=self.actor, reason=VALID_REASON)
+
+        update.refresh_from_db()
+        self.assertEqual(update.status, ProjectUpdate.Status.PUBLISHED)
+        self.assertEqual(annulled.status, Project.Status.ANNULLED)
+
+    def test_project_annulment_without_active_children_still_succeeds(self):
+        project = create_project(code='PRJ-EMPTY-ANNUL')
+        project.status = Project.Status.ACTIVE
+        project.save(update_fields=('status', 'updated_at'))
+
+        annulled = annul_project(project.pk, actor=self.actor, reason=VALID_REASON)
+
+        self.assertEqual(annulled.status, Project.Status.ANNULLED)
+        self.assertEqual(annulled.terminal_by, self.actor)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action=AuditLog.Action.ANNULLED,
+                entity_id=str(project.pk),
+            ).exists()
+        )
 
     def test_donation_annulment_requires_no_non_annulled_allocations(self):
         donation = create_donation(amount=Decimal('100.00'))
