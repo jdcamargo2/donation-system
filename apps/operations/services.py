@@ -439,6 +439,15 @@ def _validate_operating_currency(currency, field_name='currency'):
         raise ValidationError({field_name: _('SIGEDON solo permite operaciones financieras en USD.')})
 
 
+# PRE: donation is locked for update before funds are evaluated or reserved.
+# POST: returns only when the donation is RECEIVED; otherwise raises a domain validation error.
+def _validate_donation_can_fund_allocations(donation):
+    if donation.status != Donation.Status.RECEIVED:
+        raise ValidationError(
+            {'donation': _('Solo las donaciones recibidas pueden financiar asignaciones.')}
+        )
+
+
 # PRE: donation is locked for update and amount is the complete proposed allocation amount.
 # POST: raises ValidationError unless amount is positive and fits the donation balance excluding exclude_pk.
 def _validate_allocation_balance(donation, amount, exclude_pk=None):
@@ -494,6 +503,7 @@ def create_fund_allocation(
 ):
     with transaction.atomic():
         locked_donation = Donation.objects.select_for_update().get(pk=donation.pk)
+        _validate_donation_can_fund_allocations(locked_donation)
         _validate_operating_currency(locked_donation.currency, 'donation')
         _validate_allocation_balance(locked_donation, amount)
         allocation = FundAllocation(
@@ -534,6 +544,7 @@ def update_fund_allocation(
             for item in Donation.objects.select_for_update().filter(pk__in=donation_ids).order_by('pk')
         }
         locked_donation = locked_donations[donation.pk]
+        _validate_donation_can_fund_allocations(locked_donation)
         _validate_operating_currency(locked_donation.currency, 'donation')
         _validate_allocation_balance(locked_donation, amount, exclude_pk=locked_allocation.pk)
         _validate_allocation_execution(locked_allocation, amount)

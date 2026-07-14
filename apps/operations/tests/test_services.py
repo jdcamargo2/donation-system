@@ -201,6 +201,39 @@ class OperationServiceTests(TestCase):
 
         self.assertFalse(donation.allocations.exists())
 
+    def test_create_fund_allocation_rejects_registered_donation(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        donation.status = Donation.Status.REGISTERED
+        donation.save(update_fields=['status'])
+        project = self.create_project()
+
+        with self.assertRaisesMessage(ValidationError, 'Solo las donaciones recibidas pueden financiar asignaciones'):
+            create_fund_allocation(**self.allocation_service_data(donation, project, Decimal('20.00')))
+
+        self.assertFalse(donation.allocations.exists())
+
+    def test_create_fund_allocation_rejects_annulled_donation(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        donation.status = Donation.Status.ANNULLED
+        donation.save(update_fields=['status'])
+        project = self.create_project()
+
+        with self.assertRaisesMessage(ValidationError, 'Solo las donaciones recibidas pueden financiar asignaciones'):
+            create_fund_allocation(**self.allocation_service_data(donation, project, Decimal('20.00')))
+
+        self.assertFalse(donation.allocations.exists())
+
+    def test_create_fund_allocation_accepts_received_donation(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        project = self.create_project()
+
+        allocation = create_fund_allocation(
+            **self.allocation_service_data(donation, project, Decimal('20.00'))
+        )
+
+        self.assertEqual(allocation.donation, donation)
+        self.assertEqual(allocation.amount, Decimal('20.00'))
+
     def test_update_fund_allocation_excludes_its_previous_amount(self):
         donation = self.create_donation(amount=Decimal('100.00'))
         project = self.create_project()
@@ -213,6 +246,28 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(updated.amount, Decimal('100.00'))
         self.assertEqual(donation.available_balance, ZERO_MONEY)
+
+    def test_update_fund_allocation_rejects_reassociation_to_non_received_donation(self):
+        original_donation = self.create_donation(code='DON-ORIGINAL', amount=Decimal('100.00'))
+        target_donation = self.create_donation(code='DON-TARGET', amount=Decimal('100.00'))
+        target_donation.status = Donation.Status.REGISTERED
+        target_donation.save(update_fields=['status'])
+        project = self.create_project()
+        allocation = self.create_allocation(
+            donation=original_donation,
+            project=project,
+            amount=Decimal('60.00'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'Solo las donaciones recibidas pueden financiar asignaciones'):
+            update_fund_allocation(
+                allocation=allocation,
+                **self.allocation_service_data(target_donation, project, Decimal('20.00')),
+            )
+
+        allocation.refresh_from_db()
+        self.assertEqual(allocation.donation, original_donation)
+        self.assertEqual(allocation.amount, Decimal('60.00'))
 
     def test_update_fund_allocation_rechecks_balance_when_donation_changes(self):
         original_donation = self.create_donation(code='DON-ORIGINAL', amount=Decimal('100.00'))
