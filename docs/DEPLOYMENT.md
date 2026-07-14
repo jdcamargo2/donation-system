@@ -398,35 +398,47 @@ Debe existir una política de rotación y retención.
 
 ## 14. Copias de seguridad
 
-Debe definirse una política que incluya:
+Scripts manuales: `deploy/backups/` (`backup_sigedon.sh`, `verify_backup.sh`, `restore_sigedon.sh`). Detalle operativo en `deploy/backups/README.md` y `docs/OPERATIONS.md`.
 
-* frecuencia;
-* cifrado;
-* retención;
-* almacenamiento externo;
+Esta fase entrega el procedimiento verificable; **no** fija todavía frecuencia ni retención automatizadas (sin cron/systemd).
+
+Debe definirse a nivel de infraestructura una política que incluya:
+
+* frecuencia (pendiente de automatizar);
+* cifrado (requisito de infraestructura; no implementado en scripts);
+* retención (pendiente);
+* almacenamiento externo / off-site (requisito de infraestructura);
 * responsables;
-* restauración probada;
+* restauración probada (trimestral como mínimo);
 * protección de acceso;
 * eliminación segura.
 
-Los respaldos deben cubrir:
+Los respaldos de aplicación cubren:
 
-* PostgreSQL;
-* archivos privados;
-* archivos públicos necesarios;
-* configuración crítica;
-* secretos almacenados mediante un sistema seguro.
+* PostgreSQL (`pg_dump --format=custom`);
+* `MEDIA_ROOT` (`media.tar.gz`);
+* manifiesto con checksums (`manifest.json`).
 
-Un respaldo no se considera válido hasta verificar que puede restaurarse.
+La configuración crítica y los secretos deben respaldarse mediante un sistema seguro aparte. Preferir `~/.pgpass` para autenticación de cliente.
+
+Consistencia: **ventana de mantenimiento** con `SIGEDON_MAINTENANCE_CONFIRMED=YES`.
+
+Un respaldo no se considera válido hasta pasar `verify_backup.sh` y una restauración aislada de prueba.
+
+**RPO/RTO no están definidos** hasta medir una restauración real.
 
 ## 15. Restauración
 
-Después de restaurar un entorno:
+Restaurar solo a entornos aislados (`SIGEDON_RESTORE_DB` con prefijo `test_restore_` o `staging_restore_`), nunca sobre la base activa (`POSTGRES_DB`) ni sobre un `MEDIA_ROOT` no vacío. No modificar `.env`.
+
+Después de restaurar un entorno aislado:
 
 ```bash
-python manage.py migrate
-python manage.py sync_sigedon_roles
+python manage.py migrate --check
 python manage.py check
+python manage.py verify_postgres_security
+python manage.py verify_restored_data
+python manage.py sync_sigedon_roles
 ```
 
 También debe verificarse:

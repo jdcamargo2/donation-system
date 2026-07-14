@@ -232,31 +232,62 @@ python manage.py check
 
 Antes de despliegues, migraciones relevantes o cambios de infraestructura, debe existir una copia de seguridad verificable.
 
-Los respaldos deben incluir, según corresponda:
+Los scripts manuales viven en `deploy/backups/` (ver `deploy/backups/README.md`). Esta fase **no** automatiza frecuencia ni retención con cron/systemd.
 
-* base de datos;
-* archivos privados;
-* archivos públicos necesarios;
-* configuración de infraestructura;
-* variables de entorno almacenadas de forma segura.
+### Ventana de mantenimiento
+
+La consistencia del backup exige una **ventana de mantenimiento obligatoria**:
+
+* detener web, workers, comandos de procesamiento Kobo y uploads;
+* exportar `SIGEDON_MAINTENANCE_CONFIRMED=YES`;
+* exportar `SIGEDON_BACKUP_ROOT` (se crea automáticamente con permisos `0700` si no existe) y `SIGEDON_MEDIA_ROOT` (debe existir; no se crea);
+* ejecutar `deploy/backups/backup_sigedon.sh`.
+
+El script no puede comprobar por sí solo que esos procesos estén detenidos.
+
+### Contenido del respaldo
+
+Cada backup publicado es un directorio:
+
+```text
+<backup_id>/
+  database.dump    # pg_dump --format=custom
+  media.tar.gz
+  manifest.json
+```
+
+Incluye PostgreSQL + `MEDIA_ROOT`. La configuración crítica y los secretos deben respaldarse fuera de estos scripts, en un sistema seguro.
+
+### Verificación y restore aislado
+
+```bash
+./deploy/backups/verify_backup.sh /ruta/al/<backup_id>
+```
+
+La restauración solo está permitida hacia bases con prefijo seguro (`test_restore_` / `staging_restore_`), distintas de `POSTGRES_DB`, con `SIGEDON_RESTORE_CONFIRM=YES` y un directorio de media nuevo/vacío. Nunca sobreescribir el `MEDIA_ROOT` activo ni modificar `.env`.
+
+### Post-restore
+
+Con el entorno apuntando a la base y media restauradas:
+
+```bash
+python manage.py migrate --check
+python manage.py check
+python manage.py verify_postgres_security
+python manage.py verify_restored_data
+python manage.py sync_sigedon_roles
+```
 
 ### Reglas
 
 * Los respaldos no deben versionarse.
 * Deben almacenarse fuera del repositorio.
 * Deben protegerse mediante controles de acceso.
-* Las restauraciones deben probarse periódicamente.
+* Preferir `~/.pgpass` frente a `PGPASSWORD` en los scripts.
+* Las restauraciones deben probarse periódicamente (al menos trimestral).
 * Un respaldo no se considera válido hasta comprobar que puede restaurarse.
-
-Después de una restauración debe ejecutarse:
-
-```bash
-python manage.py migrate
-python manage.py sync_sigedon_roles
-python manage.py check
-```
-
-También debe verificarse la consistencia de archivos, secuencias y permisos.
+* Cifrado y copia off-site son requisitos de infraestructura (aún no implementados en scripts).
+* **RPO/RTO no están definidos** hasta medir restauraciones reales.
 
 ## 10. Auditoría
 

@@ -302,7 +302,9 @@ Las bases SQLite, los dumps y los respaldos:
 * deben tratarse como información potencialmente sensible;
 * deben protegerse con controles de acceso;
 * deben conservarse según una política definida;
-* deben probarse periódicamente mediante restauraciones controladas.
+* deben probarse periódicamente mediante restauraciones controladas (trimestral como mínimo).
+
+Los scripts en `deploy/backups/` no incluyen secretos, no leen `.env`, no imprimen contraseñas y rechazan restaurar sobre la base activa. Preferir `~/.pgpass` (permisos `0600`) frente a `PGPASSWORD`.
 
 También deben excluirse del repositorio archivos como:
 
@@ -314,7 +316,7 @@ También deben excluirse del repositorio archivos como:
 *.backup
 ```
 
-Los respaldos de producción deben cifrarse cuando la infraestructura lo permita.
+El cifrado de artefactos y la copia off-site son requisitos de infraestructura; esta fase aún no los implementa en los scripts. La frecuencia/retención automatizadas y los objetivos RPO/RTO permanecen pendientes hasta medir restauraciones reales.
 
 ## 15. Dependencias
 
