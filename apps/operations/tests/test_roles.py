@@ -8,7 +8,12 @@ from django.urls import reverse
 
 from apps.operations.models import Project
 from apps.operations.role_services import sync_operation_roles
-from apps.operations.roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_SIGEDON_ADMIN
+from apps.operations.roles import (
+    ROLE_EXTERNAL_AUDITOR,
+    ROLE_FIELD_OPERATOR,
+    ROLE_PROJECT_COMMITTEE,
+    ROLE_SIGEDON_ADMIN,
+)
 from apps.operations.services import register_advance
 from apps.operations.tests.helpers import create_project
 
@@ -44,9 +49,10 @@ class OperationRoleTests(TestCase):
         self.assertIn(ROLE_SIGEDON_ADMIN, output.getvalue())
         self.assertIn(ROLE_FIELD_OPERATOR, output.getvalue())
         self.assertIn(ROLE_EXTERNAL_AUDITOR, output.getvalue())
+        self.assertIn(ROLE_PROJECT_COMMITTEE, output.getvalue())
 
     def test_sync_operation_roles_creates_required_groups(self):
-        for role_name in [ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR]:
+        for role_name in [ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR, ROLE_PROJECT_COMMITTEE]:
             with self.subTest(role=role_name):
                 self.assertTrue(Group.objects.filter(name=role_name).exists())
 
@@ -83,25 +89,80 @@ class OperationRoleTests(TestCase):
         self.assert_lacks_perm(user, 'change_auditlog')
         self.assert_lacks_perm(user, 'delete_auditlog')
 
+    def test_project_committee_permission_matrix(self):
+        user = self.create_user_for_role('committee-role', ROLE_PROJECT_COMMITTEE)
+
+        for codename in {
+            'view_project',
+            'view_projectupdate',
+            'view_projectdocument',
+            'view_projectupdateattachment',
+            'view_projectupdatereview',
+            'add_projectupdatereview',
+            'view_projectupdatereviewdecision',
+            'add_projectupdatereviewdecision',
+        }:
+            with self.subTest(codename=codename):
+                self.assert_has_perm(user, codename)
+        for codename in {
+            'add_project',
+            'change_project',
+            'delete_project',
+            'add_projectupdate',
+            'change_projectupdate',
+            'delete_projectupdate',
+            'add_projectupdateattachment',
+            'change_projectupdateattachment',
+            'delete_projectupdateattachment',
+            'change_projectupdatereview',
+            'delete_projectupdatereview',
+            'change_projectupdatereviewdecision',
+            'delete_projectupdatereviewdecision',
+            'add_auditlog',
+            'change_auditlog',
+            'delete_auditlog',
+        }:
+            with self.subTest(codename=codename):
+                self.assert_lacks_perm(user, codename)
+
     def test_resync_removes_legacy_audit_mutation_permissions(self):
         protected_codenames = {'add_auditlog', 'change_auditlog', 'delete_auditlog'}
         legacy_permissions = Permission.objects.filter(
             content_type__app_label='operations', codename__in=protected_codenames
         )
         for group in Group.objects.filter(
-            name__in=(ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR)
+            name__in=(ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR, ROLE_PROJECT_COMMITTEE)
         ):
             group.permissions.add(*legacy_permissions)
 
         sync_operation_roles()
 
         for group in Group.objects.filter(
-            name__in=(ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR)
+            name__in=(ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR, ROLE_PROJECT_COMMITTEE)
         ):
             self.assertFalse(
                 group.permissions.filter(codename__in=protected_codenames).exists(),
                 group.name,
             )
+
+    def test_resync_removes_project_update_mutation_permissions_from_committee(self):
+        mutation_codenames = {
+            'add_projectupdate',
+            'change_projectupdate',
+            'delete_projectupdate',
+            'change_projectupdatereview',
+            'delete_projectupdatereview',
+            'change_projectupdatereviewdecision',
+            'delete_projectupdatereviewdecision',
+        }
+        committee = Group.objects.get(name=ROLE_PROJECT_COMMITTEE)
+        committee.permissions.add(*Permission.objects.filter(
+            content_type__app_label='operations', codename__in=mutation_codenames
+        ))
+
+        sync_operation_roles()
+
+        self.assertFalse(committee.permissions.filter(codename__in=mutation_codenames).exists())
 
     def test_field_operator_can_open_project_update_create_from_project(self):
         self.client.force_login(self.create_user_for_role('field-create-update', ROLE_FIELD_OPERATOR))
@@ -110,10 +171,10 @@ class OperationRoleTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_field_operator_cannot_open_project_update_review(self):
-        self.client.force_login(self.create_user_for_role('field-review-update', ROLE_FIELD_OPERATOR))
+    def test_field_operator_cannot_open_project_update_publish(self):
+        self.client.force_login(self.create_user_for_role('field-publish-update', ROLE_FIELD_OPERATOR))
 
-        response = self.client.get(reverse('project_update_review', args=[self.project_update.pk]))
+        response = self.client.post(reverse('project_update_publish', args=[self.project_update.pk]))
 
         self.assertEqual(response.status_code, 403)
 
@@ -131,19 +192,63 @@ class OperationRoleTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_project_committee_can_read_projects_and_updates_without_mutating_them(self):
+        self.client.force_login(self.create_user_for_role('committee-routes', ROLE_PROJECT_COMMITTEE))
+
+        self.assertEqual(self.client.get(reverse('project_list')).status_code, 200)
+        self.assertEqual(self.client.get(reverse('project_update_list')).status_code, 200)
+        self.assertEqual(self.client.get(reverse('project_update_detail', args=[self.project_update.pk])).status_code, 200)
+        self.assertEqual(self.client.get(reverse('project_update_create')).status_code, 403)
+        self.assertEqual(self.client.get(reverse('project_update_update', args=[self.project_update.pk])).status_code, 403)
+        self.assertEqual(self.client.get(reverse('project_update_delete', args=[self.project_update.pk])).status_code, 403)
+        self.assertEqual(self.client.post(reverse('project_update_publish', args=[self.project_update.pk])).status_code, 403)
+
+    def test_existing_role_permission_matrices_remain_unchanged(self):
+        expected_permissions = {
+            ROLE_FIELD_OPERATOR: {
+                'view_project',
+                'view_projectupdate',
+                'add_projectupdate',
+                'view_supportingdocument',
+                'add_supportingdocument',
+            },
+            ROLE_EXTERNAL_AUDITOR: {
+                'view_institution',
+                'view_project',
+                'view_donation',
+                'view_fundallocation',
+                'view_expense',
+                'view_supportingdocument',
+                'view_projectupdate',
+                'view_auditlog',
+            },
+        }
+
+        for role_name, codenames in expected_permissions.items():
+            with self.subTest(role=role_name):
+                actual_codenames = set(
+                    Group.objects.get(name=role_name).permissions.values_list('codename', flat=True)
+                )
+                self.assertEqual(actual_codenames, codenames)
+
     def test_sync_operation_roles_is_idempotent(self):
         first_snapshot = {
             group.name: set(group.permissions.values_list('codename', flat=True))
-            for group in Group.objects.filter(name__in=[ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR])
+            for group in Group.objects.filter(
+                name__in=[ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR, ROLE_PROJECT_COMMITTEE]
+            )
         }
 
         sync_operation_roles()
 
         second_snapshot = {
             group.name: set(group.permissions.values_list('codename', flat=True))
-            for group in Group.objects.filter(name__in=[ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR])
+            for group in Group.objects.filter(
+                name__in=[ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR, ROLE_PROJECT_COMMITTEE]
+            )
         }
         self.assertEqual(first_snapshot, second_snapshot)
         self.assertEqual(Group.objects.filter(name=ROLE_SIGEDON_ADMIN).count(), 1)
         self.assertEqual(Group.objects.filter(name=ROLE_FIELD_OPERATOR).count(), 1)
         self.assertEqual(Group.objects.filter(name=ROLE_EXTERNAL_AUDITOR).count(), 1)
+        self.assertEqual(Group.objects.filter(name=ROLE_PROJECT_COMMITTEE).count(), 1)

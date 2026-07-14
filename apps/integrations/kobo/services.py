@@ -1,10 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
+from django.utils.html import strip_tags
 
 from apps.integrations.kobo.client import KoboApiClient, KoboRemoteAsset
 from apps.integrations.kobo.errors import (
@@ -12,6 +13,9 @@ from apps.integrations.kobo.errors import (
     KoboPayloadError,
 )
 from apps.integrations.kobo.form_registry import get_registered_form, list_registered_forms
+from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
+from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
+from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID, FICHA_11_VERSION
 from apps.integrations.kobo.models import (
     KoboAttachment,
     KoboAsset,
@@ -27,8 +31,19 @@ from apps.integrations.kobo.processors import (
 )
 
 
-FICHA_01_FORM_ID = "ficha_01_territorio"
-FICHA_01_VERSION = "20260710"
+FORM_DEFINITION_ROLES = {
+    (FICHA_01_FORM_ID, FICHA_01_VERSION): KoboAsset.FormRole.TERRITORIAL_PROFILE,
+    (FICHA_10_FORM_ID, FICHA_10_VERSION): KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+    (FICHA_11_FORM_ID, FICHA_11_VERSION): KoboAsset.FormRole.PRIORITIZATION_MATRIX,
+}
+REJECTION_REASON_LABELS = {
+    "test_submission": "Submission de prueba",
+    "duplicate": "Duplicada",
+    "incorrect_data": "Datos incorrectos",
+    "incomplete": "Información incompleta",
+    "wrong_project": "Proyecto incorrecto",
+    "other": "Otro",
+}
 
 
 @dataclass(frozen=True)
@@ -68,6 +83,28 @@ class ProjectAssociationResult:
 
 
 @dataclass(frozen=True)
+class OperationalImportResult:
+    submission_id: int
+    project_id: int | None
+    imported: bool
+    already_imported: bool
+
+
+@dataclass(frozen=True)
+class KoboRejectionResult:
+    submission_id: int
+    rejected: bool
+    already_rejected: bool
+
+
+@dataclass(frozen=True)
+class KoboRestoreResult:
+    submission_id: int
+    restored: bool
+    already_ready: bool
+
+
+@dataclass(frozen=True)
 class RoutingResolution:
     binding_id: int
     asset_id: int
@@ -99,8 +136,8 @@ class AssetReadiness:
 def sync_registered_forms() -> int:
     """
     PRE: the registry is defined and KoboFormDefinition has been migrated.
-    POST: creates or updates every registered form, removes none, and returns
-    the number of synchronized definitions.
+    POST: activates exact registered definitions, deactivates all other history,
+    removes none, and returns the registered-definition count.
     """
     registered_forms = list_registered_forms()
     for registered_form in registered_forms:
@@ -114,6 +151,13 @@ def sync_registered_forms() -> int:
                 "is_active": True,
             },
         )
+    supported_definitions = Q()
+    for registered_form in registered_forms:
+        supported_definitions |= Q(
+            form_id=registered_form.form_id,
+            version=registered_form.version,
+        )
+    KoboFormDefinition.objects.exclude(supported_definitions).update(is_active=False)
 
     return len(registered_forms)
 
@@ -160,7 +204,7 @@ def receive_api_submission(
     raw_payload: dict,
 ) -> tuple[KoboSubmission, bool]:
     """
-    PRE: form_definition is Ficha 1 version 20260710 and raw_payload contains
+    PRE: form_definition is the active Ficha 1 definition and raw_payload contains
     a valid non-empty _uuid.
     POST: returns the existing submission or creates it as received, preserving
     raw_payload without normalization, attachments, or operations changes.
@@ -174,6 +218,66 @@ def receive_api_submission(
             "status": KoboSubmission.Status.RECEIVED,
         },
     )
+
+
+def receive_webhook_submission(*, asset: KoboAsset, raw_payload: dict) -> tuple[KoboSubmission, bool]:
+    """
+    PRE: asset is active with an exact registered form/role and raw_payload is JSON.
+    POST: stages one immutable webhook submission idempotently without operations effects.
+    """
+    if not isinstance(raw_payload, dict):
+        raise KoboPayloadError("Kobo webhook payload must be an object.")
+    if asset is None or asset.pk is None or not asset.is_active:
+        raise KoboPayloadError("Kobo webhook asset is unavailable.")
+    form_definition = asset.form_definition
+    if not form_definition.is_active:
+        raise KoboPayloadError("Kobo webhook form definition is inactive.")
+    expected_role = FORM_DEFINITION_ROLES.get(
+        (form_definition.form_id, form_definition.version)
+    )
+    if asset.form_role != expected_role:
+        raise KoboPayloadError("Kobo webhook asset role is incompatible.")
+    external_id = raw_payload.get("_uuid")
+    if not isinstance(external_id, str) or not external_id.strip():
+        raise KoboPayloadError("Kobo submission _uuid must be a non-empty string.")
+    if raw_payload.get("_xform_id_string") != asset.asset_uid:
+        raise KoboPayloadError("Kobo submission asset UID does not match configuration.")
+    discovered_asset = KoboDiscoveredAsset.objects.filter(
+        asset_uid=asset.asset_uid
+    ).only("metadata_snapshot").first()
+    if discovered_asset is None:
+        raise KoboPayloadError("Kobo asset metadata is unavailable.")
+    metadata = discovered_asset.metadata_snapshot
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("id_string") != form_definition.form_id
+        or (
+            metadata.get("version") is not None
+            and metadata["version"] != form_definition.version
+        )
+    ):
+        raise KoboPayloadError("Kobo asset metadata is incompatible with configuration.")
+    instance_id = raw_payload.get("meta/instanceID")
+    if instance_id is not None and instance_id != f"uuid:{external_id}":
+        raise KoboPayloadError("Kobo submission instanceID is inconsistent.")
+    submission, created = KoboSubmission.objects.get_or_create(
+        form_definition=form_definition,
+        external_id=external_id,
+        defaults={
+            "asset": asset,
+            "raw_payload": raw_payload,
+            "status": KoboSubmission.Status.RECEIVED,
+        },
+    )
+    if created:
+        KoboProcessingEvent.objects.create(
+            submission=submission,
+            stage="webhook",
+            level=KoboProcessingEvent.Level.INFO,
+            code="webhook_received",
+            message="Kobo webhook submission received.",
+        )
+    return submission, created
 
 
 def _record_invalid_payload_event(
@@ -498,6 +602,10 @@ def resolve_project_binding(
     if len(direct_bindings) > 1:
         raise KoboConfigurationError("routing_ambiguous")
     if direct_bindings:
+        from apps.operations.models import Project
+
+        if direct_bindings[0].project.status != Project.Status.ACTIVE:
+            raise KoboConfigurationError("routing_project_inactive")
         return _routing_resolution(direct_bindings[0])
 
     matches = []
@@ -511,7 +619,107 @@ def resolve_project_binding(
         raise KoboConfigurationError("routing_not_found")
     if len(matches) > 1:
         raise KoboConfigurationError("routing_ambiguous")
+    from apps.operations.models import Project
+
+    if matches[0].project.status != Project.Status.ACTIVE:
+        raise KoboConfigurationError("routing_project_inactive")
     return _routing_resolution(matches[0])
+
+
+def assign_normalized_submission_to_direct_project(
+    submission: KoboSubmission,
+) -> bool:
+    """
+    PRE: submission is persisted, normalized, and ready for review.
+    POST: assigns the sole active direct-binding project and processed timestamp,
+    or records a safe routing failure without changing the review status.
+    """
+    if submission is None or submission.pk is None:
+        raise KoboConfigurationError("Kobo submission must exist.")
+
+    def fail() -> bool:
+        with transaction.atomic():
+            locked_submission = KoboSubmission.objects.select_for_update().get(
+                pk=submission.pk
+            )
+            locked_submission.error_code = "routing_configuration_error"
+            locked_submission.error_message = "Kobo project routing could not be resolved."
+            locked_submission.save(update_fields=("error_code", "error_message"))
+            KoboProcessingEvent.objects.create(
+                submission=locked_submission,
+                stage="project_routing",
+                level=KoboProcessingEvent.Level.ERROR,
+                code="routing_configuration_error",
+                message="Kobo project routing could not be resolved.",
+            )
+        submission.error_code = "routing_configuration_error"
+        submission.error_message = "Kobo project routing could not be resolved."
+        return False
+
+    try:
+        locked_submission = KoboSubmission.objects.select_related(
+            "asset__form_definition"
+        ).get(pk=submission.pk)
+        asset = locked_submission.asset
+        if (
+            locked_submission.status != KoboSubmission.Status.READY_FOR_REVIEW
+            or asset is None
+            or not asset.is_active
+            or not asset.form_definition.is_active
+            or asset.form_role
+            != FORM_DEFINITION_ROLES.get(
+                (asset.form_definition.form_id, asset.form_definition.version)
+            )
+        ):
+            return fail()
+        bindings = list(
+            asset.project_bindings.filter(is_active=True).select_related("project")
+        )
+        if (
+            len(bindings) != 1
+            or bindings[0].routing_type != KoboProjectBinding.RoutingType.DIRECT
+        ):
+            return fail()
+        from apps.operations.models import Project
+
+        if bindings[0].project.status != Project.Status.ACTIVE:
+            return fail()
+    except (KoboAsset.DoesNotExist, KoboSubmission.DoesNotExist):
+        return fail()
+
+    with transaction.atomic():
+        locked_submission = KoboSubmission.objects.select_for_update().get(
+            pk=submission.pk
+        )
+        if (
+            locked_submission.project_id == bindings[0].project_id
+            and locked_submission.processed_at is not None
+        ):
+            return True
+        locked_submission.project_id = bindings[0].project_id
+        locked_submission.processed_at = timezone.now()
+        locked_submission.error_code = ""
+        locked_submission.error_message = ""
+        locked_submission.save(
+            update_fields=(
+                "project",
+                "processed_at",
+                "error_code",
+                "error_message",
+            )
+        )
+        KoboProcessingEvent.objects.create(
+            submission=locked_submission,
+            stage="project_routing",
+            level=KoboProcessingEvent.Level.INFO,
+            code="project_assigned",
+            message="Kobo submission assigned to its direct project.",
+        )
+    submission.project_id = bindings[0].project_id
+    submission.processed_at = locked_submission.processed_at
+    submission.error_code = ""
+    submission.error_message = ""
+    return True
 
 
 def associate_submission_with_project(
@@ -529,10 +737,8 @@ def associate_submission_with_project(
         raise KoboConfigurationError("An authenticated reviewer is required.")
 
     with transaction.atomic():
-        locked_submission = (
-            KoboSubmission.objects.select_for_update()
-            .select_related("asset", "project")
-            .get(pk=submission.pk)
+        locked_submission = KoboSubmission.objects.select_for_update().get(
+            pk=submission.pk
         )
         previous_status = locked_submission.status
         if previous_status == KoboSubmission.Status.IMPORTED:
@@ -578,7 +784,10 @@ def associate_submission_with_project(
                 error_code="asset_inactive",
                 error_message="Configured Kobo asset is inactive.",
             )
-        if asset.form_role != KoboAsset.FormRole.TERRITORIAL_PROFILE:
+        expected_role = FORM_DEFINITION_ROLES.get(
+            (asset.form_definition.form_id, asset.form_definition.version)
+        )
+        if asset.form_role != expected_role:
             return _association_failure(
                 locked_submission,
                 previous_status=previous_status,
@@ -695,6 +904,332 @@ def get_project_imported_submissions(
     return queryset
 
 
+def get_project_pending_submissions(project):
+    """
+    PRE: project exists and is the internal project selected by the user.
+    POST: returns only its active-asset submissions ready for an operational
+    import, with safe display relations and counts, without modifying state.
+    """
+    return (
+        KoboSubmission.objects.filter(
+            project=project,
+            status=KoboSubmission.Status.READY_FOR_REVIEW,
+            imported_at__isnull=True,
+            asset__is_active=True,
+        )
+        .select_related("form_definition", "asset", "project")
+        .annotate(
+            attachment_count=Count("attachments", distinct=True),
+            downloaded_attachment_count=Count(
+                "attachments",
+                filter=Q(attachments__status=KoboAttachment.Status.DOWNLOADED),
+                distinct=True,
+            ),
+        )
+        .order_by("-received_at", "-pk")
+    )
+
+
+def get_project_submission_history(project):
+    """
+    PRE: project exists and identifies the internal project being consulted.
+    POST: returns only imported or rejected submissions for that project without
+    applying active-asset filters that would hide historical decisions.
+    """
+    return (
+        KoboSubmission.objects.filter(
+            project=project,
+            status__in=(
+                KoboSubmission.Status.IMPORTED,
+                KoboSubmission.Status.REJECTED,
+            ),
+        )
+        .select_related("form_definition", "asset", "project")
+        .prefetch_related("processing_events")
+        .order_by("-imported_at", "-received_at", "-pk")
+    )
+
+
+def _operational_import_failure(
+    submission: KoboSubmission,
+    *,
+    error_code: str,
+    error_message: str,
+) -> OperationalImportResult:
+    """
+    PRE: submission is locked in an import transaction and remains reviewable.
+    POST: records a non-sensitive import failure without changing its lifecycle.
+    """
+    submission.error_code = error_code
+    submission.error_message = error_message
+    submission.save(update_fields=("error_code", "error_message"))
+    KoboProcessingEvent.objects.create(
+        submission=submission,
+        stage="operational_import",
+        level=KoboProcessingEvent.Level.ERROR,
+        code=error_code,
+        message=error_message,
+    )
+    return OperationalImportResult(
+        submission_id=submission.pk,
+        project_id=submission.project_id,
+        imported=False,
+        already_imported=False,
+    )
+
+
+def _lock_submission_for_operational_import(submission_id: int) -> KoboSubmission:
+    """
+    PRE: submission_id identifies a persisted KoboSubmission inside a transaction.
+    POST: locks only the KoboSubmission row, without joining nullable relations.
+    """
+    return KoboSubmission.objects.select_for_update().get(pk=submission_id)
+
+
+def _validate_project_operator(actor, submission: KoboSubmission) -> None:
+    """
+    PRE: actor and submission are persisted candidates for a project decision.
+    POST: returns only for an authenticated project operator and assigned project.
+    """
+    if not getattr(actor, "is_authenticated", False):
+        raise KoboConfigurationError("An authenticated project operator is required.")
+    if not actor.has_perm("operations.change_project"):
+        raise KoboConfigurationError("Project change permission is required.")
+    if submission.project_id is None:
+        raise KoboPayloadError("Submission has no assigned project.")
+
+
+def reject_kobo_submission(
+    submission: KoboSubmission,
+    *,
+    actor,
+    reason: str,
+    comment: str = "",
+) -> KoboRejectionResult:
+    """
+    PRE: submission is persisted, ready for review, and reason is a supported code.
+    POST: atomically records one auditable rejection without changing payloads or attachments.
+    """
+    if submission is None or submission.pk is None:
+        raise KoboConfigurationError("Kobo submission must exist.")
+    if reason not in REJECTION_REASON_LABELS:
+        raise KoboPayloadError("Rejection reason is invalid.")
+    cleaned_comment = strip_tags(comment).strip()
+    if reason == "other" and not cleaned_comment:
+        raise KoboPayloadError("A comment is required for the other rejection reason.")
+
+    with transaction.atomic():
+        locked_submission = _lock_submission_for_operational_import(submission.pk)
+        _validate_project_operator(actor, locked_submission)
+        if locked_submission.status == KoboSubmission.Status.REJECTED:
+            return KoboRejectionResult(
+                submission_id=locked_submission.pk,
+                rejected=False,
+                already_rejected=True,
+            )
+        if locked_submission.status != KoboSubmission.Status.READY_FOR_REVIEW:
+            raise KoboPayloadError("Only submissions ready for review can be rejected.")
+        if locked_submission.imported_at is not None:
+            raise KoboPayloadError("Imported submissions cannot be rejected.")
+
+        from apps.operations.models import AuditLog
+        from apps.operations.services import log_action
+
+        locked_submission.status = KoboSubmission.Status.REJECTED
+        locked_submission.save(update_fields=("status",))
+        KoboProcessingEvent.objects.create(
+            submission=locked_submission,
+            stage="review",
+            level=KoboProcessingEvent.Level.INFO,
+            code=reason,
+            message=cleaned_comment or REJECTION_REASON_LABELS[reason],
+        )
+        log_action(
+            actor,
+            AuditLog.Action.REJECTED,
+            locked_submission,
+            "Ficha Kobo rechazada.",
+        )
+
+    submission.status = KoboSubmission.Status.REJECTED
+    return KoboRejectionResult(
+        submission_id=submission.pk,
+        rejected=True,
+        already_rejected=False,
+    )
+
+
+def restore_kobo_submission_to_review(
+    submission: KoboSubmission,
+    *,
+    actor,
+) -> KoboRestoreResult:
+    """
+    PRE: submission is persisted and actor is a project operator.
+    POST: atomically restores only a rejected submission to ready-for-review.
+    """
+    if submission is None or submission.pk is None:
+        raise KoboConfigurationError("Kobo submission must exist.")
+
+    with transaction.atomic():
+        locked_submission = _lock_submission_for_operational_import(submission.pk)
+        _validate_project_operator(actor, locked_submission)
+        if locked_submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
+            return KoboRestoreResult(
+                submission_id=locked_submission.pk,
+                restored=False,
+                already_ready=True,
+            )
+        if locked_submission.status != KoboSubmission.Status.REJECTED:
+            raise KoboPayloadError("Only rejected submissions can be restored.")
+
+        from apps.operations.models import AuditLog
+        from apps.operations.services import log_action
+
+        locked_submission.status = KoboSubmission.Status.READY_FOR_REVIEW
+        locked_submission.save(update_fields=("status",))
+        KoboProcessingEvent.objects.create(
+            submission=locked_submission,
+            stage="review",
+            level=KoboProcessingEvent.Level.INFO,
+            code="restored",
+            message="Kobo submission restored to review.",
+        )
+        log_action(
+            actor,
+            AuditLog.Action.UPDATED,
+            locked_submission,
+            "Ficha Kobo restaurada a revisión.",
+        )
+
+    submission.status = KoboSubmission.Status.READY_FOR_REVIEW
+    return KoboRestoreResult(
+        submission_id=submission.pk,
+        restored=True,
+        already_ready=False,
+    )
+
+
+def import_kobo_submission(
+    submission: KoboSubmission,
+    *,
+    actor,
+) -> OperationalImportResult:
+    """
+    PRE: submission is persisted and actor is an authenticated project operator.
+    POST: atomically marks exactly one ready submission as imported, records a
+    processing event and audit entry, or leaves it reviewable on failure.
+    """
+    if submission is None or submission.pk is None:
+        raise KoboConfigurationError("Kobo submission must exist.")
+    if not getattr(actor, "is_authenticated", False):
+        raise KoboConfigurationError("An authenticated importer is required.")
+
+    with transaction.atomic():
+        locked_submission = _lock_submission_for_operational_import(submission.pk)
+        if locked_submission.status == KoboSubmission.Status.IMPORTED:
+            return OperationalImportResult(
+                submission_id=locked_submission.pk,
+                project_id=locked_submission.project_id,
+                imported=False,
+                already_imported=True,
+            )
+        if locked_submission.status != KoboSubmission.Status.READY_FOR_REVIEW:
+            return _operational_import_failure(
+                locked_submission,
+                error_code="import_state_invalid",
+                error_message="Submission is not ready for operational import.",
+            )
+        if locked_submission.imported_at is not None:
+            return _operational_import_failure(
+                locked_submission,
+                error_code="import_timestamp_invalid",
+                error_message="Submission already has an import timestamp.",
+            )
+        if locked_submission.project is None:
+            return _operational_import_failure(
+                locked_submission,
+                error_code="import_project_missing",
+                error_message="Submission has no project assigned for import.",
+            )
+
+        from apps.operations.models import AuditLog, Project
+        from apps.operations.services import log_action
+
+        asset = locked_submission.asset
+        expected_role = FORM_DEFINITION_ROLES.get(
+            (
+                locked_submission.form_definition.form_id,
+                locked_submission.form_definition.version,
+            )
+        )
+        if (
+            asset is None
+            or not asset.is_active
+            or not locked_submission.form_definition.is_active
+            or asset.form_definition_id != locked_submission.form_definition_id
+            or asset.form_role != expected_role
+        ):
+            return _operational_import_failure(
+                locked_submission,
+                error_code="import_asset_invalid",
+                error_message="Submission asset configuration is not valid for import.",
+            )
+        if locked_submission.project.status != Project.Status.ACTIVE:
+            return _operational_import_failure(
+                locked_submission,
+                error_code="import_project_inactive",
+                error_message="Submission project is not active for import.",
+            )
+        if (
+            not isinstance(locked_submission.normalized_payload, dict)
+            or not locked_submission.normalized_payload
+        ):
+            return _operational_import_failure(
+                locked_submission,
+                error_code="import_normalized_payload_missing",
+                error_message="Submission has no normalized data for import.",
+            )
+
+        imported_at = timezone.now()
+        locked_submission.status = KoboSubmission.Status.IMPORTED
+        locked_submission.imported_at = imported_at
+        locked_submission.error_code = ""
+        locked_submission.error_message = ""
+        locked_submission.save(
+            update_fields=(
+                "status",
+                "imported_at",
+                "error_code",
+                "error_message",
+            )
+        )
+        KoboProcessingEvent.objects.create(
+            submission=locked_submission,
+            stage="operational_import",
+            level=KoboProcessingEvent.Level.INFO,
+            code="imported",
+            message="Kobo submission imported into its assigned project.",
+        )
+        log_action(
+            actor,
+            AuditLog.Action.CREATED,
+            locked_submission,
+            "Ficha Kobo importada al proyecto.",
+        )
+
+    submission.status = KoboSubmission.Status.IMPORTED
+    submission.imported_at = imported_at
+    submission.error_code = ""
+    submission.error_message = ""
+    return OperationalImportResult(
+        submission_id=submission.pk,
+        project_id=locked_submission.project_id,
+        imported=True,
+        already_imported=False,
+    )
+
+
 def _remote_asset_values(remote_asset: KoboRemoteAsset) -> dict:
     # PRE: remote_asset is a validated safe client projection.
     # POST: returns only fields permitted in discovery staging.
@@ -722,7 +1257,21 @@ def discover_assets(
     POST: after a complete successful fetch, creates/updates discovery staging,
     marks unseen history unavailable unless dry-run, and creates no integrations.
     """
-    remote_assets = client.list_assets(limit=limit)
+    listed_assets = client.list_assets(limit=limit)
+    remote_assets = []
+    detail_failures = 0
+    for remote_asset in listed_assets:
+        try:
+            detail = client.get_asset_detail(remote_asset.asset_uid)
+        except (KoboIntegrationError, KoboPayloadError):
+            detail_failures += 1
+            remote_assets.append(remote_asset)
+            continue
+        metadata = {
+            **remote_asset.safe_metadata,
+            **{key: value for key, value in detail.items() if value is not None},
+        }
+        remote_assets.append(replace(remote_asset, safe_metadata=metadata))
     remote_by_uid = {asset.asset_uid: asset for asset in remote_assets}
     existing_by_uid = {
         asset.asset_uid: asset
@@ -768,7 +1317,7 @@ def discover_assets(
         updated_count=updated_count,
         unchanged_count=unchanged_count,
         unavailable_count=0 if dry_run else unavailable_count,
-        failed_count=0,
+        failed_count=detail_failures,
     )
 
 
@@ -816,6 +1365,11 @@ def configure_discovered_asset(
     valid_roles = {value for value, _label in KoboAsset.FormRole.choices}
     if form_role not in valid_roles:
         raise ValidationError("Kobo asset form role is invalid.")
+    expected_role = FORM_DEFINITION_ROLES.get(
+        (form_definition.form_id, form_definition.version)
+    )
+    if form_role != expected_role:
+        raise ValidationError("Kobo asset role is incompatible with its form definition.")
     clean_name = name.strip() if isinstance(name, str) else ""
     if not clean_name:
         raise ValidationError("Kobo asset name is required.")
@@ -886,6 +1440,98 @@ def create_project_binding(
     binding.full_clean()
     binding.save()
     return binding
+
+
+def link_asset_to_project(
+    asset: KoboAsset,
+    *,
+    project,
+    linked_by,
+) -> KoboProjectBinding:
+    """
+    PRE: asset and project are persisted, the actor is authenticated, and the
+    project is active.
+    POST: preserves historical bindings as inactive, keeps exactly one active
+    direct binding, and activates the asset.
+    """
+    _require_authenticated_actor(linked_by, action="link a Kobo asset")
+    if asset is None or asset.pk is None:
+        raise ValidationError("La ficha Kobo no existe.")
+    if project is None or project.pk is None:
+        raise ValidationError("Debe seleccionar un proyecto.")
+
+    from apps.operations.models import Project
+
+    with transaction.atomic():
+        try:
+            locked_project = Project.objects.select_for_update().get(pk=project.pk)
+        except Project.DoesNotExist as exc:
+            raise ValidationError("El proyecto seleccionado no existe.") from exc
+        if locked_project.status != Project.Status.ACTIVE:
+            raise ValidationError("Solo se pueden enlazar proyectos activos.")
+        locked_asset = KoboAsset.objects.select_for_update().select_related(
+            "form_definition"
+        ).get(pk=asset.pk)
+        try:
+            _require_registered_active_definition(locked_asset.form_definition)
+        except ValidationError as exc:
+            raise ValidationError(
+                "La definición de la ficha no está activa o no es compatible."
+            ) from exc
+        expected_role = FORM_DEFINITION_ROLES.get(
+            (
+                locked_asset.form_definition.form_id,
+                locked_asset.form_definition.version,
+            )
+        )
+        if locked_asset.form_role != expected_role:
+            raise ValidationError("La ficha Kobo no es compatible con su definición.")
+
+        locked_asset.project_bindings.select_for_update().filter(
+            is_active=True
+        ).update(is_active=False)
+        binding = locked_asset.project_bindings.filter(
+            routing_type=KoboProjectBinding.RoutingType.DIRECT
+        ).first()
+        if binding is None:
+            binding = KoboProjectBinding(
+                asset=locked_asset,
+                project=locked_project,
+                routing_type=KoboProjectBinding.RoutingType.DIRECT,
+                source_field="",
+                source_value="",
+                is_active=True,
+            )
+        else:
+            binding.project = locked_project
+            binding.source_field = ""
+            binding.source_value = ""
+            binding.is_active = True
+        binding.full_clean()
+        binding.save()
+        locked_asset.is_active = True
+        locked_asset.save(update_fields=("is_active",))
+    return binding
+
+
+def unlink_asset_from_project(asset: KoboAsset, *, unlinked_by) -> KoboAsset:
+    """
+    PRE: asset is persisted and the actor is authenticated.
+    POST: deactivates current bindings and the asset without deleting historical
+    bindings or submissions.
+    """
+    _require_authenticated_actor(unlinked_by, action="unlink a Kobo asset")
+    if asset is None or asset.pk is None:
+        raise ValidationError("La ficha Kobo no existe.")
+
+    with transaction.atomic():
+        locked_asset = KoboAsset.objects.select_for_update().get(pk=asset.pk)
+        locked_asset.project_bindings.select_for_update().filter(
+            is_active=True
+        ).update(is_active=False)
+        locked_asset.is_active = False
+        locked_asset.save(update_fields=("is_active",))
+    return locked_asset
 
 
 def get_asset_readiness(asset: KoboAsset) -> AssetReadiness:

@@ -62,93 +62,116 @@
     </div>
 </div>
 
-<div class="row g-3 mb-4 ops-metric-grid">
-    <div class="col-md-3">
-        <div class="card h-100 border-0 ops-metric-card">
-            <div class="card-body">
-                <div class="ops-metric-label">Donaciones recibidas</div>
-                <div class="ops-metric-value">{{ total_donations|money_es }}</div>
+{% if can_view_donations or can_view_allocations or can_view_expenses %}
+    <div class="row g-3 mb-4 ops-metric-grid">
+        {% if can_view_donations %}
+            <div class="col-md-3">
+                <div class="card h-100 border-0 ops-metric-card">
+                    <div class="card-body">
+                        <div class="ops-metric-label">Donaciones recibidas</div>
+                        <div class="ops-metric-value">{{ total_donations|money_es }}</div>
+                    </div>
+                </div>
             </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card h-100 border-0 ops-metric-card">
-            <div class="card-body">
-                <div class="ops-metric-label">Asignado</div>
-                <div class="ops-metric-value">{{ total_assigned|money_es }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card h-100 border-0 ops-metric-card">
-            <div class="card-body">
-                <div class="ops-metric-label">Ejecutado</div>
-                <div class="ops-metric-value">{{ total_executed|money_es }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card h-100 border-0 ops-metric-card ops-metric-card-available">
-            <div class="card-body">
-                <div class="ops-metric-label">Disponible</div>
-                <div class="ops-metric-value">{{ available_balance|money_es }}</div>
-            </div>
-        </div>
-    </div>
-</div>
+        {% endif %}
 
-<div class="row g-4">
-    <div class="col-lg-4">
-        <h2 class="h5 ops-section-title">Ingresos</h2>
-        <div class="list-group ops-activity-list">
-            {% if perms.operations.view_donation %}
-                {% for donation in recent_donations %}
-                    <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
-                        <div class="fw-semibold">{{ donation.code }}</div>
-                        <div class="small text-muted">{{ donation.donor }} - {{ donation.amount|money_es }} {{ donation.currency }}</div>
-                        <div class="small">Ciclo: {{ donation.get_status_display }} · Asignación: {{ donation.allocation_progress_label }}</div>
-                    </a>
-                {% empty %}
-                    <div class="list-group-item text-muted">Todavía no hay donaciones.</div>
-                {% endfor %}
-            {% else %}
-                <div class="list-group-item text-muted">Sin permisos para consultar donaciones.</div>
-            {% endif %}
-        </div>
+        {% if can_view_allocations %}
+            <div class="col-md-3">
+                <div class="card h-100 border-0 ops-metric-card">
+                    <div class="card-body">
+                        <div class="ops-metric-label">Asignado</div>
+                        <div class="ops-metric-value">{{ total_assigned|money_es }}</div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+
+        {% if can_view_expenses %}
+            <div class="col-md-3">
+                <div class="card h-100 border-0 ops-metric-card">
+                    <div class="card-body">
+                        <div class="ops-metric-label">Ejecutado</div>
+                        <div class="ops-metric-value">{{ total_executed|money_es }}</div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+
+        {% if can_view_available_balance %}
+            <div class="col-md-3">
+                <div class="card h-100 border-0 ops-metric-card ops-metric-card-available">
+                    <div class="card-body">
+                        <div class="ops-metric-label">Disponible</div>
+                        <div class="ops-metric-value">{{ available_balance|money_es }}</div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
     </div>
-    <div class="col-lg-4">
-        <h2 class="h5 ops-section-title">Gastos recientes</h2>
-        <div class="list-group ops-activity-list">
-            {% if perms.operations.view_expense %}
-                {% for expense in recent_expenses %}
-                    <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
-                        <div class="fw-semibold">{{ expense.reason }}</div>
-                        <div class="small text-muted">{{ expense.allocation.project }} - {{ expense.amount|money_es }} {{ expense.currency }}</div>
-                    </a>
-                {% empty %}
-                    <div class="list-group-item text-muted">Todavía no hay gastos.</div>
-                {% endfor %}
-            {% else %}
-                <div class="list-group-item text-muted">Sin permisos para consultar gastos.</div>
-            {% endif %}
-        </div>
+{% else %}
+    <div class="alert alert-light border mb-4" role="status">
+        Las métricas financieras se muestran según los permisos asignados a tu cuenta.
     </div>
-    <div class="col-lg-4">
-        <h2 class="h5 ops-section-title">Acciones recientes de auditoría</h2>
-        <div class="list-group ops-activity-list">
-            {% if perms.operations.view_auditlog %}
-                {% for log in recent_audit_logs %}
-                    <a class="list-group-item list-group-item-action" href="{% url 'audit_log_list' %}">
-                        <div class="fw-semibold">{{ log.get_action_display }} {{ log.display_model_name }}</div>
-                        <div class="small text-muted">{{ log.entity_label }} - {{ log.created_at }}</div>
-                    </a>
-                {% empty %}
-                    <div class="list-group-item text-muted">Todavía no hay registros de auditoría.</div>
-                {% endfor %}
-            {% else %}
-                <div class="list-group-item text-muted">Sin permisos para consultar auditoría.</div>
-            {% endif %}
-        </div>
+{% endif %}
+
+{% if can_view_donations or can_view_expenses or can_view_audit %}
+    <div class="row g-4">
+        {% if can_view_donations %}
+            <div class="col-lg-4">
+                <h2 class="h5 ops-section-title">Ingresos</h2>
+                <div class="list-group ops-activity-list">
+                    {% for donation in recent_donations %}
+                        <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
+                            <div class="fw-semibold">{{ donation.code }}</div>
+                            <div class="small text-muted">
+                                {{ donation.donor }} - {{ donation.amount|money_es }} {{ donation.currency }}
+                            </div>
+                            <div class="small">
+                                Ciclo: {{ donation.get_status_display }} · Asignación: {{ donation.allocation_progress_label }}
+                            </div>
+                        </a>
+                    {% empty %}
+                        <div class="list-group-item text-muted">Todavía no hay donaciones.</div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if can_view_expenses %}
+            <div class="col-lg-4">
+                <h2 class="h5 ops-section-title">Gastos recientes</h2>
+                <div class="list-group ops-activity-list">
+                    {% for expense in recent_expenses %}
+                        <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
+                            <div class="fw-semibold">{{ expense.reason }}</div>
+                            <div class="small text-muted">
+                                {{ expense.allocation.project }} - {{ expense.amount|money_es }} {{ expense.currency }}
+                            </div>
+                        </a>
+                    {% empty %}
+                        <div class="list-group-item text-muted">Todavía no hay gastos.</div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if can_view_audit %}
+            <div class="col-lg-4">
+                <h2 class="h5 ops-section-title">Acciones recientes de auditoría</h2>
+                <div class="list-group ops-activity-list">
+                    {% for log in recent_audit_logs %}
+                        <a class="list-group-item list-group-item-action" href="{% url 'audit_log_list' %}">
+                            <div class="fw-semibold">{{ log.get_action_display }} {{ log.display_model_name }}</div>
+                            <div class="small text-muted">
+                                {{ log.entity_label }} - {{ log.created_at }}
+                            </div>
+                        </a>
+                    {% empty %}
+                        <div class="list-group-item text-muted">Todavía no hay registros de auditoría.</div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
     </div>
-</div>
+{% endif %}
 {% endblock %}

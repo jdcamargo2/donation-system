@@ -20,13 +20,14 @@ from apps.operations.models import (
     ProjectUpdate,
     SupportingDocument,
     ZERO_MONEY,
+    OPERATIONAL_CODE_PREFIXES,
 )
 from apps.operations.services import (
     ExpenseFinalizedError,
     annul_expense,
     create_expense,
     create_fund_allocation,
-    review_project_update,
+    publish_project_update,
     update_expense,
     update_fund_allocation,
     annul_fund_allocation,
@@ -49,7 +50,20 @@ BARRIER_TIMEOUT_SECONDS = 10
 @skipUnless(connection.vendor == 'postgresql', POSTGRESQL_LOCKING_REQUIRED)
 class PostgreSQLConcurrencyTests(TransactionTestCase):
     reset_sequences = True
-    serialized_rollback = True
+
+    def setUp(self):
+        super().setUp()
+        OperationalCodeSequence.objects.bulk_create(
+            [
+                OperationalCodeSequence(
+                    namespace=namespace,
+                    prefix=prefix,
+                    next_value=1,
+                )
+                for namespace, prefix in OPERATIONAL_CODE_PREFIXES.items()
+            ],
+            ignore_conflicts=True,
+        )
 
     def run_concurrently(self, operations):
         """
@@ -361,7 +375,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         failed_id = next(pk for pk in expense_ids if pk != successful_id)
         self.assertEqual(Expense.objects.get(pk=failed_id).amount, Decimal('20.00'))
 
-    def test_concurrent_project_update_review_creates_one_decision(self):
+    def test_concurrent_project_update_publish_creates_one_decision(self):
         project = create_project(code='PRJ-CONCURRENT-REVIEW')
         project.status = Project.Status.ACTIVE
         project.save(update_fields=('status', 'updated_at'))
@@ -371,33 +385,29 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             project=project,
             title='Avance concurrente',
             description='Pendiente de dos revisores.',
-            status=ProjectUpdate.Status.PENDING_REVIEW,
+            status=ProjectUpdate.Status.DRAFT,
         )
         project_update_id = project_update.pk
 
-        def review(reviewer_id, status, notes):
+        def publish(reviewer_id):
             reviewer = get_user_model().objects.get(pk=reviewer_id)
-            reviewed = review_project_update(project_update_id, reviewer, status, notes)
+            reviewed = publish_project_update(project_update_id, reviewer)
             return reviewed.status
 
         results = self.run_concurrently(
             [
-                lambda: review(reviewer_ids[0], ProjectUpdate.Status.APPROVED, ''),
-                lambda: review(reviewer_ids[1], ProjectUpdate.Status.REJECTED, 'Rechazado.'),
+                lambda: publish(reviewer_ids[0]),
+                lambda: publish(reviewer_ids[1]),
             ]
         )
 
         self.assert_one_success_one_domain_error(results)
         project_update.refresh_from_db()
-        self.assertIn(project_update.status, (ProjectUpdate.Status.APPROVED, ProjectUpdate.Status.REJECTED))
-        self.assertIn(project_update.reviewed_by_id, reviewer_ids)
-        self.assertIsNotNone(project_update.reviewed_at)
-        expected_reviewer = reviewer_ids[0] if project_update.status == ProjectUpdate.Status.APPROVED else reviewer_ids[1]
-        self.assertEqual(project_update.reviewed_by_id, expected_reviewer)
+        self.assertEqual(project_update.status, ProjectUpdate.Status.PUBLISHED)
         self.assertEqual(
             AuditLog.objects.filter(
                 entity_id=str(project_update.pk),
-                action__in=(AuditLog.Action.VALIDATED, AuditLog.Action.REJECTED),
+                action=AuditLog.Action.PUBLISHED,
             ).count(),
             1,
         )

@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 
 from apps.operations.forms import DonationForm, ExpenseForm, FundAllocationForm, InstitutionForm, ProjectForm
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, SupportingDocument
-from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_institution, create_project
+from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_expense, create_institution, create_project
 
 
 class FormTests(TestCase):
@@ -338,6 +338,49 @@ class FormTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn('amount', form.errors)
+        self.assertIn('saldo disponible', form.errors['amount'][0])
+
+    def test_allocation_form_excludes_donation_without_balance(self):
+        create_allocation(donation=self.donation, project=self.project, amount=self.donation.amount)
+
+        form = FundAllocationForm()
+
+        self.assertNotIn(self.donation, form.fields['donation'].queryset)
+
+    def test_allocation_form_excludes_terminal_project(self):
+        self.project.status = Project.Status.CLOSED
+        self.project.save(update_fields=('status',))
+
+        form = FundAllocationForm()
+
+        self.assertNotIn(self.project, form.fields['project'].queryset)
+
+    def test_expense_form_excludes_allocation_without_balance(self):
+        allocation = create_allocation(
+            donation=self.donation,
+            project=self.project,
+            amount=Decimal('40.00'),
+        )
+        create_expense(allocation=allocation, amount=Decimal('40.00'))
+
+        form = ExpenseForm()
+
+        self.assertNotIn(allocation, form.fields['allocation'].queryset)
+
+    def test_allocation_form_shows_selected_donation_restrictions(self):
+        self.donation.restrictions = 'Uso exclusivo para alimentos.'
+        self.donation.save(update_fields=('restrictions',))
+
+        form = FundAllocationForm(data={'donation': self.donation.pk})
+
+        self.assertIn('Uso exclusivo para alimentos.', str(form.fields['donation'].help_text))
+        self.assertIn('Disponible:', form.fields['donation'].label_from_instance(self.donation))
+
+    def test_expense_form_explains_mandatory_support_and_reference(self):
+        form = ExpenseForm()
+
+        self.assertIn('Obligatorio', str(form.fields['support_file'].help_text))
+        self.assertIn('referencia', str(form.fields['support_title'].help_text).lower())
 
     def test_expense_form_rejects_over_execution(self):
         allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('40.00'))

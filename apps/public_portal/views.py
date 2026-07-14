@@ -1,10 +1,11 @@
+from django.http import JsonResponse
 from django.views.generic import ListView, TemplateView
 
 from .selectors import (
     get_public_project_detail,
     get_public_projects,
     get_public_transparency_summary,
-    get_recent_approved_updates,
+    get_recent_published_updates,
 )
 
 
@@ -14,7 +15,7 @@ class PublicHomeView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['summary'] = get_public_transparency_summary()
-        context['recent_updates'] = get_recent_approved_updates()
+        context['recent_updates'] = get_recent_published_updates()
         return context
 
 
@@ -42,4 +43,32 @@ class PublicUpdatesFeedView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return get_recent_approved_updates(limit=200)
+        return get_recent_published_updates(limit=200)
+
+
+def public_projects_json(request):
+    """
+    PRE: el selector público aplica la política vigente de visibilidad de proyectos.
+    POST: devuelve solo campos ya públicos, sin usuarios, contactos ni rutas de archivos.
+    """
+    projects = [
+        {
+            'code': project.code,
+            'name': project.name,
+            'description': project.description,
+            'location': project.location,
+            'status': project.status,
+            'start_date': project.start_date,
+            'end_date': project.end_date,
+        }
+        for project in get_public_projects()
+    ]
+    return JsonResponse({'projects': projects})
+
+
+def public_metrics_json(request):
+    """
+    PRE: el resumen público contiene solo agregados aprobados por los selectores existentes.
+    POST: devuelve una estructura JSON estable de métricas, sin datos privados ni archivos.
+    """
+    return JsonResponse({'metrics': get_public_transparency_summary()})

@@ -1,400 +1,469 @@
-Objetivo:
-Cerrar la Fase 0 del MVP de SIGEDON creando un documento formal de alcance,
-reglas de negocio, exclusiones y criterio de cierre.
-
-Rama actual:
-feat/core-module-completion
-
-Importante:
-- No cambiar de rama.
-- No modificar código productivo.
-- No crear modelos, migraciones, vistas, formularios ni tests.
-- No tocar Kobo.
-- No hacer commit todavía.
-- Crear únicamente documentación.
-
-Archivo a crear:
-docs/MVP_SCOPE.md
-
-Contenido obligatorio:
-
 # Alcance del MVP de SIGEDON
 
-## 1. Objetivo del MVP
+## 1. Propósito
 
-Definir que SIGEDON busca registrar, consultar y transparentar:
+El MVP de SIGEDON permite registrar, controlar, consultar, auditar y publicar información autorizada sobre donaciones monetarias y su ejecución mediante proyectos institucionales.
 
-- instituciones;
-- proyectos;
-- donaciones;
-- asignaciones;
-- gastos;
-- avances;
-- documentos;
-- auditoría;
-- información pública;
-- integración Kobo limitada.
+El MVP no busca cubrir toda la gestión humanitaria, pastoral o administrativa futura. Su alcance se concentra en:
 
-Aclarar que el MVP no pretende cubrir toda la gestión institucional futura.
+* trazabilidad financiera;
+* evidencia documental;
+* seguimiento de proyectos;
+* auditoría;
+* transparencia pública básica.
 
-## 2. Roles del sistema
+## 2. Cadena central
 
-### Administrador SIGEDON
+```text
+Institución donante
+→ Donación
+→ Asignación de fondos
+→ Proyecto
+→ Gasto
+→ Documento de soporte
+→ Avance
+→ Evidencia
+→ Revisión institucional
+→ Auditoría
+→ Publicación autorizada
+```
 
-Puede gestionar:
+## 3. Módulos incluidos
 
-- instituciones;
-- proyectos;
-- donaciones;
-- asignaciones;
-- gastos;
-- documentos;
-- avances;
-- auditoría.
+### 3.1. Instituciones
 
-### Operador de campo
+Permite registrar organizaciones con:
+
+* nombre;
+* tipo;
+* rol institucional;
+* país;
+* contacto;
+* responsable;
+* información legal;
+* estado operativo.
+
+Roles institucionales soportados:
+
+* donante;
+* receptora;
+* ejecutora;
+* aliada;
+* supervisora.
+
+### 3.2. Proyectos
+
+Permite registrar:
+
+* código inmutable;
+* nombre;
+* descripción;
+* objetivo;
+* ubicación;
+* presupuesto estimado;
+* fechas;
+* estado;
+* documentos;
+* avances;
+* resumen financiero;
+* levantamientos Kobo asociados.
+
+Estados:
+
+```text
+PLANNED
+ACTIVE
+SUSPENDED
+CLOSED
+ANNULLED
+```
+
+### 3.3. Donaciones
+
+Incluye:
+
+* código inmutable;
+* institución donante;
+* tipo;
+* monto;
+* moneda;
+* objetivo;
+* restricciones;
+* fecha de compromiso;
+* fecha de recepción;
+* referencia documental;
+* estado;
+* saldo y progreso derivados.
+
+Estados:
+
+```text
+REGISTERED
+RECEIVED
+ANNULLED
+```
+
+El nivel de asignación no es un estado editable. Se calcula a partir de las asignaciones no anuladas.
+
+### 3.4. Asignaciones de fondos
+
+Una asignación distribuye fondos desde una donación hacia un proyecto.
+
+Incluye:
+
+* código inmutable;
+* donación;
+* proyecto;
+* categoría presupuestaria;
+* monto;
+* responsable;
+* fecha;
+* notas;
+* gastos;
+* saldo;
+* progreso de ejecución.
+
+Estados:
+
+```text
+ACTIVE
+FINISHED
+ANNULLED
+```
+
+La ejecución parcial o completa se calcula automáticamente.
+
+### 3.5. Gastos
+
+Un gasto representa una ejecución monetaria previamente autorizada fuera del sistema.
+
+Incluye:
+
+* código inmutable;
+* asignación;
+* fecha;
+* categoría;
+* monto;
+* proveedor o receptor;
+* motivo;
+* método de pago;
+* referencia;
+* observaciones;
+* soporte obligatorio;
+* estado.
+
+Estados:
+
+```text
+REGISTERED
+ANNULLED
+```
+
+El MVP no incluye aprobación multinivel de gastos.
+
+### 3.6. Avances
+
+Flujo del avance:
+
+```text
+DRAFT
+→ PUBLISHED
+```
+
+Incluye:
+
+* proyecto;
+* título;
+* descripción;
+* fecha real;
+* porcentaje de progreso;
+* creador técnico;
+* responsable institucional;
+* evidencias;
+* publicación.
+
+Un avance publicado es inmutable.
+
+### 3.7. Revisión institucional
+
+La revisión no forma parte del estado del avance.
+
+Se registra mediante entidades separadas:
+
+```text
+ProjectUpdate
+→ ProjectUpdateReview
+→ ProjectUpdateReviewDecision
+```
+
+Un avance debe estar publicado para ser revisado.
+
+Resultados posibles:
+
+```text
+CONFORMING
+OBSERVED
+```
+
+### 3.8. Documentos
+
+El MVP separa:
+
+* documentos propios del proyecto;
+* adjuntos de avances;
+* soportes financieros;
+* adjuntos Kobo.
+
+Los archivos privados se descargan mediante endpoints autorizados.
+
+### 3.9. Auditoría
+
+Incluye:
+
+* actor;
+* acción;
+* entidad;
+* identificador;
+* resumen;
+* fecha y hora.
+
+`AuditLog` es append-only dentro de Django.
+
+No se permite:
+
+* edición;
+* eliminación;
+* mutación mediante el panel de administración;
+* modificación mediante servicios ordinarios.
+
+### 3.10. Portal público
+
+Incluye:
+
+* proyectos activos;
+* avances publicados;
+* métricas agregadas;
+* JSON público autorizado;
+* navegación pública.
+
+No expone:
+
+* usuarios;
+* notas internas;
+* payloads Kobo;
+* auditoría;
+* documentos privados;
+* donaciones individuales;
+* gastos individuales;
+* firmas;
+* datos anulados.
+
+### 3.11. KoboToolbox
+
+El MVP soporta directamente:
+
+* Ficha 1;
+* Ficha 10;
+* Ficha 11.
+
+Incluye:
+
+* descubrimiento;
+* configuración;
+* recepción;
+* normalización;
+* asociación;
+* revisión;
+* importación;
+* rechazo;
+* restauración;
+* reconciliación;
+* gestión de adjuntos.
+
+Las fichas 2 a 9 no se importan directamente dentro del MVP.
+
+## 4. Roles incluidos
+
+### 4.1. Administrador SIGEDON
+
+Gestiona el dominio operativo completo, excepto la mutación del registro de auditoría.
+
+### 4.2. Operador de campo
 
 Puede:
 
-- consultar proyectos;
-- crear avances;
-- guardar borradores;
-- adjuntar evidencias;
-- publicar avances.
+* consultar proyectos;
+* consultar avances;
+* registrar avances;
+* cargar adjuntos durante el registro;
+* consultar y registrar soportes autorizados.
 
-### Auditor externo
+No puede:
+
+* publicar avances;
+* editar avances después del registro;
+* gestionar finanzas;
+* revisar en nombre del Comité.
+
+### 4.3. Auditor externo
+
+Puede consultar:
+
+* instituciones;
+* proyectos;
+* donaciones;
+* asignaciones;
+* gastos;
+* soportes;
+* avances;
+* auditoría.
+
+No puede modificar información.
+
+### 4.4. Comité de proyectos
 
 Puede:
 
-- consultar información financiera;
-- consultar documentos autorizados;
-- recorrer donación → asignación → gasto;
-- consultar auditoría;
-- no modificar información.
+* consultar proyectos y avances;
+* consultar documentos y evidencias;
+* registrar una revisión;
+* registrar una decisión institucional.
 
-### Usuario público
+No puede modificar el contenido original del avance.
 
-Puede:
+### 4.5. Administración técnica de Kobo
 
-- consultar proyectos publicados;
-- consultar avances publicados;
-- consultar métricas agregadas;
-- descargar datos públicos autorizados.
+Utiliza permisos `kobo.*` separados de los roles operativos.
 
-## 3. Alcance funcional aprobado
+## 5. Reglas financieras
 
-### Proyectos
+### 5.1. Saldo de donación
 
-El MVP incluye:
+```text
+Saldo disponible
+=
+Monto recibido
+-
+Asignaciones no anuladas
+```
 
-- creación y edición;
-- estado activo, terminado y anulado;
-- información general;
-- avances;
-- documentos propios del proyecto;
-- resumen financiero;
-- métricas e indicadores básicos;
-- sección Kobo solo cuando exista integración.
+### 5.2. Saldo de asignación
 
-No incluye:
+```text
+Saldo disponible
+=
+Monto asignado
+-
+Gastos no anulados
+```
 
-- planificación avanzada;
-- tareas;
-- cronogramas complejos;
-- gestión completa de equipos;
-- IA;
-- resúmenes automáticos;
-- analítica avanzada.
+### 5.3. Reglas obligatorias
 
-### Donaciones
+* La asignación no es un gasto.
+* Los saldos no se guardan como campos editables.
+* Los saldos no se calculan únicamente en JavaScript.
+* Las operaciones críticas utilizan transacciones.
+* Las reservas concurrentes utilizan bloqueos de filas en PostgreSQL.
+* Los registros anulados no cuentan en métricas ni saldos.
+* USD es la moneda operativa del MVP.
+* Los registros históricos en monedas distintas de USD se excluyen de las métricas.
 
-Incluye:
+## 6. Códigos operativos
 
-- registrada;
-- recibida;
-- anulada;
-- soporte documental opcional;
-- objetivo;
-- restricciones;
-- monto;
-- total asignado;
-- saldo disponible.
+Formatos:
 
-Los estados asignada parcialmente y asignada totalmente son derivados
-automáticamente y no los controla el usuario.
+```text
+PRJ-000001
+DON-000001
+ASG-000001
+GAS-000001
+```
 
-### Asignaciones
+Los códigos:
 
-Incluye:
-
-- creación;
-- relación donación → proyecto;
-- monto;
-- ejecutado;
-- disponible;
-- gastos asociados;
-- estado activo, terminado y anulado;
-- anulación con motivo;
-- destino del saldo;
-- comprobante opcional de anulación.
-
-La ejecución parcial o total se calcula automáticamente.
-
-### Gastos
-
-El gasto representa un pago ya autorizado fuera del sistema.
-
-Incluye:
-
-- fecha;
-- categoría;
-- monto;
-- proveedor o receptor;
-- método de pago;
-- factura o referencia bancaria;
-- documento soporte obligatorio;
-- observaciones;
-- anulación excepcional.
-
-No incluye:
-
-- aprobación multinivel;
-- revisión interna;
-- rechazo como workflow ordinario.
-
-### Avances
-
-Flujo:
-
-Borrador → Publicado
-
-Incluye:
-
-- guardado de borrador;
-- edición del borrador;
-- fecha real del avance;
-- porcentaje de avance;
-- múltiples archivos;
-- publicación directa;
-- visibilidad pública al publicar.
-
-No incluye:
-
-- aprobación;
-- rechazo;
-- revisión previa obligatoria.
-
-### Documentos del proyecto
-
-Deben existir separados de los avances.
-
-Tipos mínimos:
-
-- propuesta;
-- plan de trabajo;
-- plan de acción;
-- informe;
-- otro.
-
-### Auditoría
-
-Incluye:
-
-- append-only dentro de Django;
-- consulta por admin y auditor;
-- filtros y búsqueda;
-- sin edición ni eliminación desde la aplicación.
-
-No incluye:
-
-- hash encadenado;
-- WORM;
-- snapshots before/after;
-- almacenamiento externo inmutable.
-
-### Datos abiertos
-
-Incluye:
-
-- CSV;
-- JSON;
-- proyectos públicos;
-- avances publicados;
-- métricas agregadas.
-
-No incluye:
-
-- API pública avanzada;
-- autenticación externa;
-- rate limiting sofisticado;
-- portal para desarrolladores.
-
-### Kobo
-
-El MVP integra únicamente:
-
-- Ficha 1;
-- Ficha 10;
-- Ficha 11.
-
-Las fichas 2–9 no se importan directamente.
-
-## 4. Reglas financieras
-
-### Saldo de donación
-
-Saldo disponible =
-monto de la donación
-- suma de asignaciones no anuladas
-
-### Saldo de asignación
-
-Saldo disponible =
-monto asignado
-- suma de gastos no anulados
-
-Reglas técnicas:
-
-- no calcular saldos únicamente en JavaScript;
-- no usar signals para proteger concurrencia;
-- no guardar saldos como campos editables;
-- usar servicios transaccionales;
-- usar transaction.atomic();
-- usar select_for_update() en PostgreSQL;
-- mantener pruebas concurrentes;
-- ignorar entidades anuladas.
-
-## 5. Estados derivados
-
-No pueden ser seleccionados por el usuario:
-
-- donación asignada parcialmente;
-- donación asignada totalmente;
-- asignación ejecutada parcialmente;
-- asignación ejecutada totalmente.
-
-Se calculan desde los montos persistidos.
-
-## 6. Restricciones de las donaciones
-
-Las restricciones deben:
-
-- mostrarse destacadas en el detalle de la donación;
-- mostrarse al crear una asignación;
-- ser visibles antes de distribuir fondos;
-- no aparecer como texto secundario sin énfasis.
+* son únicos;
+* son inmutables;
+* se reservan transaccionalmente;
+* no dependen del conteo de filas;
+* requieren secuencias inicializadas.
 
 ## 7. Acciones terminales
 
-Eliminar, anular o terminar requiere:
+Cerrar, anular o eliminar requiere:
 
-- solicitud POST;
-- confirmación;
-- motivo cuando corresponda;
-- auditoría;
-- explicación de consecuencias;
-- bloqueo de edición posterior cuando aplique.
-
-Nunca debe ejecutarse una acción terminal con un solo clic sin confirmación.
+* solicitud `POST`;
+* permiso;
+* confirmación;
+* validación de dominio;
+* motivo, cuando corresponda;
+* auditoría;
+* bloqueo posterior, cuando aplique.
 
 ## 8. Eliminaciones protegidas
 
-ProtectedError debe capturarse.
+Las relaciones protegidas deben producir mensajes comprensibles.
 
-El sistema debe mostrar:
+Nunca deben mostrarse al usuario:
 
-- qué entidad bloquea la eliminación;
-- cuántos registros relacionados existen;
-- nombre humano del tipo relacionado;
-- acción recomendada.
+* tracebacks;
+* nombres internos de modelos;
+* errores SQL;
+* mensajes falsos de éxito.
 
-Ejemplo:
+## 9. Exclusiones
 
-“No se puede eliminar esta asignación porque tiene 3 gastos asociados.
-Conserve la asignación como registro histórico o gestione primero los gastos.”
+Quedan fuera del MVP:
 
-Nunca mostrar:
+* inteligencia artificial;
+* chat;
+* tareas y cronogramas avanzados;
+* gestión completa de beneficiarios;
+* donaciones en especie completas;
+* distribución física;
+* firma digital;
+* pagos electrónicos;
+* API pública sofisticada;
+* autenticación externa;
+* mapas territoriales generales;
+* aprobación multinivel de gastos;
+* hash encadenado de auditoría;
+* almacenamiento WORM;
+* importación directa de las fichas Kobo 2 a 9.
 
-- traceback;
-- nombres técnicos internos;
-- mensaje falso de éxito.
+## 10. Definición de terminado
 
-## 9. Archivos
+El MVP se considera cerrado cuando:
 
-Todo archivo operativo debe:
+* los formularios guardan y validan correctamente;
+* las fechas persisten;
+* los códigos son seguros e inmutables;
+* los saldos se protegen transaccionalmente;
+* las acciones terminales están protegidas;
+* los archivos privados requieren autorización;
+* la auditoría es append-only;
+* los avances se registran y publican;
+* el Comité puede revisar y decidir;
+* el portal publica únicamente datos autorizados;
+* las fichas 1, 10 y 11 funcionan;
+* PostgreSQL está soportado;
+* no existen migraciones pendientes;
+* la suite automatizada está verde;
+* la documentación corresponde al comportamiento real.
 
-- descargarse mediante endpoint autorizado;
-- evitar enlaces directos FileField.url;
-- distinguir visibilidad pública y privada;
-- conservar trazabilidad;
-- tener validación de formato y tamaño según el tipo.
+## 11. Control de alcance
 
-## 10. Clasificación de nuevos hallazgos
+Toda nueva funcionalidad debe clasificarse como una de las siguientes categorías:
 
-### MVP-BLOCKER
+### `MVP-BLOCKER`
 
-Impide una tarea esencial o genera datos incorrectos.
+Impide una tarea esencial o amenaza la integridad de los datos.
 
-### MVP-REQUIRED
+### `MVP-REQUIRED`
 
-Forma parte del alcance aprobado, aunque no impida usar el sistema hoy.
+Pertenece al contrato aprobado del MVP.
 
-### POST-MVP
+### `POST-MVP`
 
-Mejora útil fuera del alcance actual.
+Es una mejora futura que no impide operar el sistema actual.
 
-Solo MVP-BLOCKER y MVP-REQUIRED entran antes del cierre.
-
-## 11. Exclusiones explícitas
-
-No forman parte del MVP:
-
-- IA;
-- resúmenes automáticos;
-- planificación avanzada;
-- gestión de tareas;
-- chat;
-- aprobación multinivel;
-- dashboard analítico complejo;
-- mapas genéricos;
-- API pública sofisticada;
-- integración directa de fichas Kobo 2–9;
-- hash encadenado de auditoría;
-- arquitectura WORM.
-
-## 12. Definición de terminado
-
-El MVP se considera terminado cuando:
-
-- todos los formularios guardan correctamente;
-- las fechas persisten;
-- los enlaces llevan a la entidad correcta;
-- las acciones terminales requieren confirmación;
-- los estados derivados se calculan automáticamente;
-- los gastos tienen soporte trazable;
-- las asignaciones anuladas explican el destino del dinero;
-- los proyectos separan avances y documentos;
-- los avances pueden guardarse como borrador y publicarse directamente;
-- existen filtros y búsquedas esenciales;
-- el portal ofrece CSV y JSON públicos;
-- Kobo 1, 10 y 11 funcionan;
-- PostgreSQL es la base soportada;
-- la documentación funcional y técnica está completa.
-
-## 13. Regla de control del alcance
-
-Toda nueva funcionalidad requiere aprobación explícita.
-
-No se introduce una tarea solo porque sería útil.
-Debe demostrar que:
-
-- bloquea una tarea real;
-- pertenece al alcance aprobado;
-- o corrige un riesgo crítico.
-
-Entrega:
-- crear docs/MVP_SCOPE.md;
-- revisar ortografía y coherencia;
-- ejecutar git diff --check;
-- mostrar únicamente resumen y ruta del archivo;
-- no hacer commit.
+No se incorpora una funcionalidad únicamente porque resulte interesante o conveniente.

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load kobo_presentation %}
+
+{% block title %}Fichas Kobo pendientes | SIGEDON{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <a href="{% url 'project_detail' project.pk %}" class="text-decoration-none">← Volver al proyecto</a>
+    <div class="my-3"><div class="text-uppercase text-muted small">{{ project.code }}</div><h1 class="h3">Fichas Kobo pendientes de revisión</h1></div>
+    <section class="card card-body"><div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Tipo de ficha</th><th>Recibida</th><th>Identificador externo</th><th>Resumen</th><th>Estado</th><th></th></tr></thead>
+        <tbody>
+        {% for row in pending_submission_rows %}
+            <tr><td>{{ row.submission.asset.form_role|kobo_label }}</td><td>{{ row.submission.received_at }}</td><td>{{ row.submission.external_id }}</td><td>{{ row.summary }}</td><td>{{ row.submission.status|kobo_label }}</td><td>{% if can_import_kobo_submissions %}<a href="{% url 'kobo:project_pending_submission_review' project.pk row.submission.pk %}">Revisar</a>{% endif %}</td></tr>
+        {% empty %}
+            <tr><td colspan="6" class="text-muted">No hay fichas Kobo pendientes de revisión.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div></section>
+</div>
+{% endblock %}

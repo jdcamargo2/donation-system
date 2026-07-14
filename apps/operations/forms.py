@@ -6,7 +6,10 @@ from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
 from .choices import OPERATING_CURRENCY
-from .models import Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate, SupportingDocument
+from .models import (
+    Donation, Expense, FundAllocation, Institution, Project, ProjectDocument,
+    ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
+)
 
 
 SELECT_PLACEHOLDER = _('Seleccione una opción')
@@ -21,6 +24,18 @@ TERMINAL_REASON_MAX_LENGTH = 500
 CANONICAL_MONEY_RE = re.compile(r'^\d+(?:\.\d{1,2})?$')
 LOCALIZED_MONEY_RE = re.compile(r'^\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?$')
 LOCALIZED_DECIMAL_RE = re.compile(r'^\d+(?:,\d{1,2})?$')
+
+
+class MultipleFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
+class MultipleFileField(forms.FileField):
+    def clean(self, data, initial=None):
+        # PRE: data contiene cero o más archivos enviados por el navegador.
+        # POST: devuelve una lista cuyos archivos fueron validados individualmente.
+        files = data if isinstance(data, (list, tuple)) else [data]
+        return [super(MultipleFileField, self).clean(item, initial) for item in files if item]
 
 
 # PRE: value is a submitted monetary value or an empty value accepted by the field.
@@ -211,63 +226,122 @@ class ProjectForm(BootstrapFormMixin, forms.ModelForm):
 
 
 class ProjectUpdateForm(BootstrapFormMixin, forms.ModelForm):
+    attachments = MultipleFileField(
+        label=_('Adjuntos'),
+        required=False,
+        widget=MultipleFileInput,
+    )
+
     class Meta:
         model = ProjectUpdate
         fields = [
             'project',
             'title',
             'description',
-            'evidence',
+            'update_date',
+            'progress_percentage',
+            'reported_by',
         ]
         labels = {
             'project': _('Proyecto'),
             'title': _('Título'),
             'description': _('Descripción'),
-            'evidence': _('Evidencia'),
+            'update_date': _('Fecha del avance'),
+            'progress_percentage': _('Porcentaje de progreso'),
+            'reported_by': _('Responsable institucional'),
         }
+        widgets = {'update_date': build_date_widget()}
 
 
 class ProjectUpdateForProjectForm(BootstrapFormMixin, forms.ModelForm):
+    attachments = MultipleFileField(
+        label=_('Adjuntos'),
+        required=False,
+        widget=MultipleFileInput,
+    )
+
     class Meta:
         model = ProjectUpdate
         fields = [
             'title',
             'description',
-            'evidence',
+            'update_date',
+            'progress_percentage',
+            'reported_by',
         ]
         labels = {
             'title': _('Título'),
             'description': _('Descripción'),
-            'evidence': _('Evidencia'),
+            'update_date': _('Fecha del avance'),
+            'progress_percentage': _('Porcentaje de progreso'),
+            'reported_by': _('Responsable institucional'),
+        }
+        widgets = {'update_date': build_date_widget()}
+
+
+class ProjectUpdateReviewForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectUpdateReview
+        fields = ['observations']
+        labels = {'observations': _('Observaciones del Comité')}
+
+
+class ProjectUpdateReviewDecisionForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectUpdateReviewDecision
+        fields = ['outcome', 'rationale']
+        labels = {
+            'outcome': _('Resultado'),
+            'rationale': _('Fundamento de la decisión'),
         }
 
 
-class ProjectUpdateReviewForm(BootstrapFormMixin, forms.Form):
-    status = forms.ChoiceField(
-        choices=[
-            (ProjectUpdate.Status.APPROVED, _('Aprobado')),
-            (ProjectUpdate.Status.REJECTED, _('Rechazado')),
-        ],
-        label=_('Decisión'),
-    )
-    review_notes = forms.CharField(
-        required=False,
-        label=_('Notas de revisión'),
-        widget=forms.Textarea,
-    )
+class ProjectDocumentForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectDocument
+        fields = ('document_type', 'title', 'file', 'description')
+        labels = {
+            'document_type': _('Tipo de documento'),
+            'title': _('Título'),
+            'file': _('Archivo'),
+            'description': _('Descripción'),
+        }
 
-    def clean(self):
-        """
-        PRE: status and review_notes contain the submitted review decision.
-        POST: requires a non-blank reason for rejection and returns cleaned data.
-        """
-        cleaned_data = super().clean()
-        if (
-            cleaned_data.get('status') == ProjectUpdate.Status.REJECTED
-            and not (cleaned_data.get('review_notes') or '').strip()
-        ):
-            self.add_error('review_notes', _('La razón del rechazo es obligatoria.'))
-        return cleaned_data
+
+class ProjectUpdateAttachmentForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectUpdateAttachment
+        fields = ('title', 'file')
+        labels = {'title': _('Título'), 'file': _('Archivo')}
+
+
+def format_usd_amount(value: Decimal) -> str:
+    # PRE: value es un monto Decimal calculado por el dominio.
+    # POST: retorna una etiqueta USD estable para ayudas y opciones del formulario.
+    return f'USD {value:,.2f}'
+
+
+class DonationWithBalanceChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, donation):
+        # PRE: donation pertenece al queryset operable del formulario.
+        # POST: muestra identidad, saldo y restricciones sin alterar la donación.
+        restrictions = (donation.restrictions or '').strip() or _('Sin restricciones registradas')
+        return _('%(donation)s · Disponible: %(balance)s · Restricciones: %(restrictions)s') % {
+            'donation': donation,
+            'balance': format_usd_amount(donation.available_balance),
+            'restrictions': restrictions,
+        }
+
+
+class AllocationWithBalanceChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, allocation):
+        # PRE: allocation pertenece al queryset operativo del formulario.
+        # POST: muestra asignación, ejecutado y saldo disponible sin mutación.
+        return _('%(allocation)s · Ejecutado: %(executed)s · Disponible: %(available)s') % {
+            'allocation': allocation,
+            'executed': format_usd_amount(allocation.executed_amount),
+            'available': format_usd_amount(allocation.available_balance),
+        }
 
 
 class DonationForm(BootstrapFormMixin, forms.ModelForm):
@@ -317,6 +391,11 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
 
 
 class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
+    donation = DonationWithBalanceChoiceField(
+        queryset=Donation.objects.none(),
+        label=_('Donación'),
+        error_messages={'invalid_choice': _('La donación no está operativa o no tiene saldo disponible.')},
+    )
     amount = MoneyDecimalField(
         label=_('Monto'),
         help_text=_('Ingrese el monto en USD. Ejemplo: 1.500,00. El nivel de ejecución se calcula automáticamente según los gastos registrados.'),
@@ -352,15 +431,65 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['donation'].queryset = Donation.objects.filter(currency=OPERATING_CURRENCY)
+        current_donation_id = self.instance.donation_id if self.instance.pk else None
+        donations = Donation.objects.filter(currency=OPERATING_CURRENCY).exclude(
+            status=Donation.Status.ANNULLED
+        )
+        eligible_donation_ids = [
+            donation.pk for donation in donations
+            if donation.available_balance > 0 or donation.pk == current_donation_id
+        ]
+        self.fields['donation'].queryset = donations.filter(pk__in=eligible_donation_ids)
+        self.fields['project'].queryset = Project.objects.exclude(
+            status__in=(Project.Status.CLOSED, Project.Status.ANNULLED)
+        )
+        selected_donation_id = self.data.get(self.add_prefix('donation')) or current_donation_id
+        selected_donation = donations.filter(pk=selected_donation_id).first() if selected_donation_id else None
+        if selected_donation:
+            restrictions = (selected_donation.restrictions or '').strip() or _('Sin restricciones registradas.')
+            maximum = selected_donation.available_balance
+            if self.instance.pk and self.instance.donation_id == selected_donation.pk:
+                maximum += self.instance.amount
+            self.fields['donation'].help_text = _('Restricciones: %(restrictions)s') % {'restrictions': restrictions}
+            self.fields['amount'].help_text = _('Monto máximo disponible: %(maximum)s.') % {
+                'maximum': format_usd_amount(maximum)
+            } + ' ' + _('Ejemplo: 1.500,00.')
+        else:
+            self.fields['amount'].help_text = _(
+                'Seleccione una donación para consultar el monto máximo disponible. Ejemplo: 1.500,00.'
+            )
+
+    def clean(self):
+        # PRE: donation y amount contienen la selección propuesta o errores de campo previos.
+        # POST: rechaza sin saldo o exceso con mensajes operativos antes de delegar al backend.
+        cleaned_data = super().clean()
+        donation = cleaned_data.get('donation')
+        amount = cleaned_data.get('amount')
+        if not donation or amount is None:
+            return cleaned_data
+        available = donation.available_balance
+        if self.instance.pk and self.instance.donation_id == donation.pk:
+            available += self.instance.amount
+        if available <= 0:
+            self.add_error('donation', _('La donación seleccionada no tiene saldo disponible.'))
+        elif amount > available:
+            self.add_error('amount', _('El monto excede el saldo disponible de %(balance)s.') % {
+                'balance': format_usd_amount(available)
+            })
+        return cleaned_data
 
 
 class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
+    allocation = AllocationWithBalanceChoiceField(
+        queryset=FundAllocation.objects.none(),
+        label=_('Asignación'),
+        error_messages={'invalid_choice': _('La asignación no está operativa o no tiene saldo disponible.')},
+    )
     amount = MoneyDecimalField(
         label=_('Monto'),
         help_text=_('Ingrese el monto en USD. Ejemplo: 1.500,00'),
     )
-    support_title = forms.CharField(required=False, max_length=160, label=_('Título del documento soporte'))
+    support_title = forms.CharField(required=False, max_length=160, label=_('Referencia o título del soporte'))
     support_file = forms.FileField(required=False, label=_('Documento soporte'))
 
     class Meta:
@@ -403,16 +532,56 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
         support_file = cleaned_data.get('support_file')
         has_existing_support = self.instance.pk and self.instance.supporting_documents.exists()
         if not support_file and not has_existing_support:
-            self.add_error('support_file', _('Todo gasto debe tener un documento soporte.'))
+            self.add_error('support_file', _('Falta el documento soporte obligatorio para verificar el gasto.'))
+        allocation = cleaned_data.get('allocation')
+        amount = cleaned_data.get('amount')
+        if allocation and allocation.status != FundAllocation.Status.ACTIVE:
+            self.add_error('allocation', _('La asignación seleccionada no está operativa y no acepta gastos.'))
+        elif allocation and amount is not None:
+            available = allocation.available_balance
+            if self.instance.pk and self.instance.allocation_id == allocation.pk:
+                available += self.instance.amount
+            if available <= 0:
+                self.add_error('allocation', _('La asignación seleccionada no tiene saldo disponible.'))
+            elif amount > available:
+                self.add_error('amount', _('El monto excede el saldo disponible de %(balance)s.') % {
+                    'balance': format_usd_amount(available)
+                })
         return cleaned_data
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['allocation'].queryset = FundAllocation.objects.filter(
-            donation__currency=OPERATING_CURRENCY
+        current_allocation_id = self.instance.allocation_id if self.instance.pk else None
+        allocations = FundAllocation.objects.filter(
+            donation__currency=OPERATING_CURRENCY,
+            status=FundAllocation.Status.ACTIVE,
+        )
+        eligible_allocation_ids = [
+            allocation.pk for allocation in allocations
+            if allocation.available_balance > 0 or allocation.pk == current_allocation_id
+        ]
+        self.fields['allocation'].queryset = allocations.filter(pk__in=eligible_allocation_ids)
+        selected_allocation_id = self.data.get(self.add_prefix('allocation')) or current_allocation_id
+        selected_allocation = allocations.filter(pk=selected_allocation_id).first() if selected_allocation_id else None
+        if selected_allocation:
+            available = selected_allocation.available_balance
+            if self.instance.pk and self.instance.allocation_id == selected_allocation.pk:
+                available += self.instance.amount
+            self.fields['amount'].help_text = _(
+                'Ejecutado: %(executed)s. Máximo disponible para este gasto: %(available)s.'
+            ) % {
+                'executed': format_usd_amount(selected_allocation.executed_amount),
+                'available': format_usd_amount(available),
+            } + ' ' + _('Ejemplo: 1.500,00.')
+        else:
+            self.fields['amount'].help_text = _(
+                'Seleccione una asignación para consultar lo ejecutado y disponible. Ejemplo: 1.500,00.'
+            )
+        self.fields['support_title'].help_text = _(
+            'Indique la referencia, número o título que identifica el soporte.'
         )
         self.fields['support_file'].help_text = _(
-            'Registre únicamente pagos ya autorizados y ejecutados. El soporte y la referencia deben permitir verificar la operación.'
+            'Obligatorio al crear el gasto. Adjunte el archivo que permite verificar la operación.'
         )
 
     # PRE: form.is_valid() has returned True and the expense can be saved.

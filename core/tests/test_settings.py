@@ -70,6 +70,7 @@ class IsolatedSettingsTests(SimpleTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload['database']['ENGINE'], 'django.db.backends.sqlite3')
+        self.assertEqual(payload['database']['NAME'], str(BASE_DIR / 'db.sqlite3'))
 
     def test_production_rejects_sqlite(self):
         result = self.run_settings(

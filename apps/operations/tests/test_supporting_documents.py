@@ -177,7 +177,11 @@ class SupportingDocumentWorkflowTests(TestCase):
         self.expense.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.expense.status, Expense.Status.REGISTERED)
-        self.assertFormError(response.context['form'], 'support_file', 'Todo gasto debe tener un documento soporte.')
+        self.assertFormError(
+            response.context['form'],
+            'support_file',
+            'Falta el documento soporte obligatorio para verificar el gasto.',
+        )
 
     def test_operational_flow_can_edit_expense_with_existing_support(self):
         SupportingDocument.objects.create(

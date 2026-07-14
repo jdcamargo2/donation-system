@@ -2,8 +2,10 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import Sum
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
 
@@ -185,19 +187,20 @@ class Project(models.Model):
 class ProjectUpdate(models.Model):
     class Status(models.TextChoices):
         DRAFT = 'draft', _('Borrador')
-        PENDING_REVIEW = 'pending_review', _('Pendiente de revisión')
-        APPROVED = 'approved', _('Aprobado')
-        REJECTED = 'rejected', _('Rechazado')
+        PUBLISHED = 'published', _('Publicado')
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='updates')
     title = models.CharField(max_length=200)
     description = models.TextField()
-    evidence = models.FileField(upload_to='project_updates/', blank=True, null=True)
+    update_date = models.DateField(_('fecha del avance'), default=timezone.localdate)
+    progress_percentage = models.PositiveSmallIntegerField(
+        _('porcentaje de progreso'),
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    reviewed_at = models.DateTimeField(blank=True, null=True)
-    review_notes = models.TextField(blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -205,18 +208,25 @@ class ProjectUpdate(models.Model):
         null=True,
         related_name='created_project_updates',
     )
-    reviewed_by = models.ForeignKey(
+    reported_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         blank=True,
         null=True,
-        related_name='reviewed_project_updates',
+        related_name='reported_project_updates',
+        verbose_name=_('Responsable institucional'),
     )
 
     class Meta:
         ordering = ['-created_at']
         verbose_name = _('avance de proyecto')
         verbose_name_plural = _('avances de proyecto')
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(progress_percentage__gte=0, progress_percentage__lte=100),
+                name='project_update_progress_between_0_and_100',
+            ),
+        ]
 
     def __str__(self):
         project_label = self.project.code if getattr(self.project, 'code', '') else str(self.project)
@@ -230,8 +240,6 @@ class ProjectUpdate(models.Model):
             errors['description'] = _('La descripción del avance no puede estar vacía.')
         if self.status not in self.Status.values:
             errors['status'] = _('El estado del avance no es válido.')
-        if self.status in {self.Status.APPROVED, self.Status.REJECTED} and not (self.reviewed_by_id or self.reviewed_at):
-            errors['status'] = _('Un avance aprobado o rechazado debe tener revisor o fecha de revisión.')
         if (
             self.project_id
             and not self.pk
@@ -241,6 +249,142 @@ class ProjectUpdate(models.Model):
             errors['project'] = _('Solo se pueden crear avances para proyectos activos.')
         if errors:
             raise ValidationError(errors)
+
+
+class ProjectUpdateReview(models.Model):
+    project_update = models.OneToOneField(
+        ProjectUpdate,
+        on_delete=models.PROTECT,
+        related_name='committee_review',
+        verbose_name=_('Avance de proyecto'),
+    )
+    observations = models.TextField(_('Observaciones del Comité'))
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        editable=False,
+        related_name='project_update_reviews',
+        verbose_name=_('Revisado por'),
+    )
+    reviewed_at = models.DateTimeField(_('Fecha de revisión'), auto_now_add=True, editable=False)
+
+    class Meta:
+        ordering = ['-reviewed_at']
+        verbose_name = _('revisión documental de avance')
+        verbose_name_plural = _('revisiones documentales de avances')
+
+    def __str__(self):
+        return f'Revisión de {self.project_update}'
+
+    def clean(self):
+        errors = {}
+        if self.observations and not self.observations.strip():
+            errors['observations'] = _('Las observaciones del Comité son obligatorias.')
+        if self.project_update_id and self.project_update.status != ProjectUpdate.Status.PUBLISHED:
+            errors['project_update'] = _('Solo los avances publicados pueden recibir revisión documental.')
+        if errors:
+            raise ValidationError(errors)
+
+
+class ProjectUpdateReviewDecision(models.Model):
+    class Outcome(models.TextChoices):
+        CONFORMING = 'conforming', _('Conforme')
+        OBSERVED = 'observed', _('Observado')
+
+    review = models.OneToOneField(
+        ProjectUpdateReview,
+        on_delete=models.PROTECT,
+        related_name='decision',
+        verbose_name=_('Revisión del Comité'),
+    )
+    outcome = models.CharField(_('Resultado'), max_length=20, choices=Outcome.choices)
+    rationale = models.TextField(_('Fundamento de la decisión'))
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        editable=False,
+        related_name='project_update_review_decisions',
+        verbose_name=_('Registrado por'),
+    )
+    decided_at = models.DateTimeField(_('Fecha de decisión'), auto_now_add=True, editable=False)
+
+    class Meta:
+        ordering = ['-decided_at']
+        verbose_name = _('resultado de revisión del Comité')
+        verbose_name_plural = _('resultados de revisiones del Comité')
+
+    def __str__(self):
+        return f'{self.get_outcome_display()} · {self.review}'
+
+    def clean(self):
+        errors = {}
+        if self.rationale and not self.rationale.strip():
+            errors['rationale'] = _('El fundamento de la decisión es obligatorio.')
+        if self.review_id and self.review.project_update.status != ProjectUpdate.Status.PUBLISHED:
+            errors['review'] = _('La revisión debe pertenecer a un avance publicado.')
+        if errors:
+            raise ValidationError(errors)
+
+
+class ProjectDocument(models.Model):
+    class DocumentType(models.TextChoices):
+        PROPOSAL = 'proposal', _('Propuesta')
+        WORK_PLAN = 'work_plan', _('Plan de trabajo')
+        ACTION_PLAN = 'action_plan', _('Plan de acción')
+        REPORT = 'report', _('Informe')
+        OTHER = 'other', _('Otro')
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='documents')
+    document_type = models.CharField(max_length=20, choices=DocumentType.choices)
+    title = models.CharField(max_length=200)
+    file = models.FileField(upload_to='project_documents/%Y/%m/')
+    description = models.TextField(blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name='uploaded_project_documents',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = _('documento de proyecto')
+        verbose_name_plural = _('documentos de proyecto')
+
+    def __str__(self):
+        return self.title
+
+
+class ProjectUpdateAttachment(models.Model):
+    project_update = models.ForeignKey(
+        ProjectUpdate,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+    )
+    file = models.FileField(upload_to='project_update_attachments/%Y/%m/')
+    title = models.CharField(max_length=200, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name='uploaded_project_update_attachments',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        verbose_name = _('adjunto de avance')
+        verbose_name_plural = _('adjuntos de avance')
+
+    def __str__(self):
+        return self.title or self.file.name.rsplit('/', 1)[-1]
 
 
 class DonationAllocationProgress(models.TextChoices):
@@ -612,6 +756,7 @@ class AuditLog(models.Model):
         EXECUTED = 'executed', _('Ejecutada')
         CLOSED = 'closed', _('Cerrada')
         EXPENSE_CANCELLED = 'expense_cancelled', _('Gasto anulado')
+        PUBLISHED = 'published', _('Publicada')
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

@@ -55,7 +55,7 @@ class InternalExperienceTemplateTests(TestCase):
             (
                 reverse('project_update_list'),
                 'web/project_update_list.html',
-                ['Proyecto', 'Título', 'Estado', 'Creado', 'Evidencia', 'Avance operativo'],
+                ['Proyecto', 'Título', 'Estado', 'Creado', 'Adjuntos', 'Avance operativo'],
             ),
         ]
 
@@ -84,7 +84,7 @@ class InternalExperienceTemplateTests(TestCase):
             (
                 reverse('allocation_detail', args=[self.allocation.pk]),
                 'web/allocation_detail.html',
-                ['Donación origen', 'Proyecto destino', 'Monto asignado', 'Ejecutado', 'Disponible', 'Gastos asociados'],
+                ['Donación origen', 'Proyecto destino', 'Monto asignado', 'Ejecutado', 'Disponible', 'Gastos registrados', 'Gastos anulados'],
             ),
         ]
 

@@ -17,7 +17,7 @@
         <form method="post" enctype="multipart/form-data" novalidate>
             {% csrf_token %}
             {% if form.non_field_errors %}
-                <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
             {% endif %}
             <div class="ops-form-section">
                 <div class="ops-form-grid">
@@ -32,7 +32,7 @@
                         <div class="form-text">{{ field.help_text }}</div>
                     {% endif %}
                     {% if field.errors %}
-                        <div id="{{ field.id_for_label }}_error" class="text-danger small">{{ field.errors|striptags }}</div>
+                        <div id="{{ field.id_for_label }}_error" class="text-danger small" role="alert">{{ field.errors|striptags }}</div>
                     {% endif %}
                 </div>
             {% endfor %}

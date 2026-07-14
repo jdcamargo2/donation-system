@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Resultado institucional - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Comité de proyectos</div>
+        <h1>Resultado institucional</h1>
+        <p>{{ object.review.project_update.title }}</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'project_update_review_detail' object.review.pk %}">Volver a la revisión</a>
+</div>
+
+<div class="card border-0">
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-4">Avance de proyecto</dt>
+            <dd class="col-sm-8">{{ object.review.project_update }}</dd>
+            <dt class="col-sm-4">Revisión del Comité</dt>
+            <dd class="col-sm-8">{{ object.review }}</dd>
+            <dt class="col-sm-4">Resultado</dt>
+            <dd class="col-sm-8">{{ object.get_outcome_display }}</dd>
+            <dt class="col-sm-4">Fundamento de la decisión</dt>
+            <dd class="col-sm-8">{{ object.rationale }}</dd>
+            <dt class="col-sm-4">Registrado por</dt>
+            <dd class="col-sm-8">{{ object.decided_by|default:"—" }}</dd>
+            <dt class="col-sm-4">Fecha de decisión</dt>
+            <dd class="col-sm-8">{{ object.decided_at }}</dd>
+        </dl>
+    </div>
+</div>
+{% endblock %}

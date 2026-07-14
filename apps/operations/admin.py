@@ -4,13 +4,18 @@ from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
 from .choices import OPERATING_CURRENCY, OPERATING_CURRENCY_CHOICES
-from .models import AuditLog, Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate, SupportingDocument
+from .models import (
+    AuditLog, Donation, Expense, FundAllocation, Institution, Project,
+    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
+)
 from .services import (
     ExpenseFinalizedError,
     ProjectUpdateImmutableError,
     ensure_expense_is_deletable,
     ensure_project_update_is_deletable,
     ensure_project_update_is_editable,
+    log_create,
+    log_update,
     ensure_operational_entity_is_editable,
 )
 
@@ -92,19 +97,24 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(ProjectUpdate)
 class ProjectUpdateAdmin(admin.ModelAdmin):
-    list_display = ('project', 'title', 'status', 'created_at', 'created_by', 'reviewed_at')
-    list_filter = ('status', 'created_at', 'reviewed_at')
+    list_display = (
+        'project', 'title', 'reported_by', 'update_date', 'progress_percentage',
+        'status', 'created_at', 'created_by',
+    )
+    list_filter = ('status', 'update_date', 'created_at')
     search_fields = ('title', 'description', 'project__name', 'project__code')
-    readonly_fields = ('status', 'created_at', 'updated_at', 'reviewed_by', 'reviewed_at', 'review_notes')
+    readonly_fields = ('status', 'created_at', 'updated_at', 'created_by')
 
     def get_readonly_fields(self, request, obj=None):
         """
         PRE: obj is the optional advance displayed by Django admin.
-        POST: review metadata/status are always readonly; pending/final material fields are readonly.
+        POST: status is always readonly; published material fields are readonly.
         """
         readonly = set(super().get_readonly_fields(request, obj))
         if obj and obj.status != ProjectUpdate.Status.DRAFT:
-            readonly.update(('project', 'title', 'description', 'evidence'))
+            readonly.update(
+                ('project', 'title', 'description', 'update_date', 'progress_percentage', 'reported_by')
+            )
         return tuple(readonly)
 
     def has_delete_permission(self, request, obj=None):
@@ -145,12 +155,81 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
             persisted = ProjectUpdate.objects.get(pk=obj.pk)
             ensure_project_update_is_editable(persisted)
             obj.status = persisted.status
+            obj.created_by = persisted.created_by
         else:
             obj.status = ProjectUpdate.Status.DRAFT
-            obj.reviewed_by = None
-            obj.reviewed_at = None
-            obj.review_notes = ''
+            obj.created_by = request.user if request.user.is_authenticated else None
         super().save_model(request, obj, form, change)
+        if change:
+            log_update(request.user, obj, _('Borrador de avance actualizado desde administración.'))
+        else:
+            log_create(request.user, obj, _('Avance de proyecto creado como borrador desde administración.'))
+
+
+@admin.register(ProjectUpdateReview)
+class ProjectUpdateReviewAdmin(admin.ModelAdmin):
+    list_display = ('project_update', 'reviewed_by', 'reviewed_at')
+    search_fields = ('project_update__title', 'project_update__project__code')
+    readonly_fields = ('project_update', 'observations', 'reviewed_by', 'reviewed_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ProjectUpdateReviewDecision)
+class ProjectUpdateReviewDecisionAdmin(admin.ModelAdmin):
+    list_display = ('review', 'outcome', 'decided_by', 'decided_at')
+    search_fields = ('review__project_update__title', 'review__project_update__project__code')
+    readonly_fields = ('review', 'outcome', 'rationale', 'decided_by', 'decided_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ProjectDocument)
+class ProjectDocumentAdmin(admin.ModelAdmin):
+    list_display = ('title', 'project', 'document_type', 'created_at', 'uploaded_by')
+    list_filter = ('document_type', 'created_at')
+    search_fields = ('title', 'project__code', 'project__name')
+
+
+@admin.register(ProjectUpdateAttachment)
+class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
+    list_display = ('project_update', 'title', 'created_at', 'uploaded_by')
+    search_fields = ('title', 'project_update__title')
+
+    def save_model(self, request, obj, form, change):
+        # PRE: el formulario admin contiene un adjunto nuevo o modificado.
+        # POST: guarda solo cuando el avance padre continúa DRAFT.
+        project_update = ProjectUpdate.objects.get(pk=obj.project_update_id)
+        ensure_project_update_is_editable(project_update)
+        super().save_model(request, obj, form, change)
+
+    def has_change_permission(self, request, obj=None):
+        if obj and obj.project_update.status == ProjectUpdate.Status.PUBLISHED:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.project_update.status == ProjectUpdate.Status.PUBLISHED:
+            return False
+        return super().has_delete_permission(request, obj)
 
 
 @admin.register(Donation)

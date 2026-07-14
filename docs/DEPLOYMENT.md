@@ -1,62 +1,456 @@
-# Despliegue de SIGEDON con PostgreSQL
+# Despliegue de SIGEDON
 
-PostgreSQL es obligatorio cuando `DJANGO_DEBUG=False`. SQLite queda limitado al
-desarrollo local explícito y no demuestra la semántica de bloqueo usada por los
-servicios financieros.
+Este documento describe los requisitos mínimos, la configuración y las verificaciones necesarias para desplegar SIGEDON en un entorno de producción.
 
-## Variables requeridas
+## 1. Requisitos
 
-```text
+El entorno de producción requiere:
+
+* Python 3.12;
+* PostgreSQL;
+* un servidor WSGI o ASGI;
+* un proxy inverso con HTTPS;
+* almacenamiento persistente para archivos;
+* variables de entorno seguras;
+* acceso controlado a logs y respaldos;
+* un mecanismo de supervisión y reinicio del proceso de aplicación.
+
+## 2. Variables obligatorias
+
+Configuración mínima:
+
+```env
 DJANGO_DEBUG=False
-DJANGO_SECRET_KEY=<valor aleatorio largo>
-ALLOWED_HOSTS=sigedon.example.org
+DJANGO_SECRET_KEY=
+ALLOWED_HOSTS=
 DATABASE_ENGINE=postgresql
-POSTGRES_DB=sigedon
-POSTGRES_USER=sigedon_app
-POSTGRES_PASSWORD=<secreto administrado fuera del repositorio>
-POSTGRES_HOST=<host interno de PostgreSQL>
+
+POSTGRES_DB=
+POSTGRES_USER=
+POSTGRES_PASSWORD=
+POSTGRES_HOST=
 POSTGRES_PORT=5432
+
 DATABASE_CONN_MAX_AGE=60
 ```
 
-`SECURE_SSL_REDIRECT` vale `True` por defecto en producción.
-`SECURE_HSTS_SECONDS` vale `3600`; increméntelo después de verificar HTTPS.
-`SECURE_HSTS_INCLUDE_SUBDOMAINS` y `SECURE_HSTS_PRELOAD` son `False` por defecto.
-Active `SECURE_PROXY_SSL_HEADER_ENABLED=True` únicamente si un proxy confiable
-elimina el encabezado recibido del cliente y establece `X-Forwarded-Proto`.
+### Reglas
 
-## Preparación
+* `DJANGO_SECRET_KEY` debe contener un valor seguro y no predecible.
+* `ALLOWED_HOSTS` debe incluir únicamente los dominios autorizados.
+* `DATABASE_ENGINE` debe permanecer en `postgresql`.
+* Las credenciales no deben almacenarse en el repositorio.
+* El archivo `.env` no debe versionarse.
+* `DATABASE_CONN_MAX_AGE` debe ajustarse según la infraestructura y el pool de conexiones.
 
-Cree la base y el usuario desde una sesión administrativa de PostgreSQL, sin
-guardar contraseñas en el historial del shell:
+## 3. Seguridad HTTPS
 
-```sql
-CREATE ROLE sigedon_app LOGIN;
-CREATE DATABASE sigedon OWNER sigedon_app;
+Configuración de referencia:
+
+```env
+SECURE_SSL_REDIRECT=True
+SECURE_HSTS_SECONDS=3600
+SECURE_HSTS_INCLUDE_SUBDOMAINS=False
+SECURE_HSTS_PRELOAD=False
+SECURE_PROXY_SSL_HEADER_ENABLED=False
 ```
 
-Entregue la contraseña mediante el gestor de secretos del entorno. Después de
-instalar `requirements.txt` y exportar las variables:
+También deben configurarse los orígenes HTTPS autorizados:
+
+```env
+CSRF_TRUSTED_ORIGINS=https://sigedon.example.org
+```
+
+### Consideraciones
+
+* `SECURE_SSL_REDIRECT=True` obliga a utilizar HTTPS.
+* `SECURE_HSTS_SECONDS` debe aumentarse progresivamente después de verificar el despliegue.
+* `SECURE_HSTS_INCLUDE_SUBDOMAINS` solo debe activarse si todos los subdominios utilizan HTTPS.
+* `SECURE_HSTS_PRELOAD` no debe activarse sin comprender las implicaciones permanentes del preload.
+* `SECURE_PROXY_SSL_HEADER_ENABLED` depende de la configuración real del proxy.
+* La aplicación debe confiar únicamente en cabeceras insertadas por un proxy controlado.
+
+Cuando el proxy termina TLS y envía tráfico HTTP interno, debe verificarse la configuración de:
+
+```python
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+```
+
+No debe habilitarse esta opción si clientes externos pueden falsificar directamente esa cabecera.
+
+## 4. Configuración de KoboToolbox
+
+Cuando la integración esté habilitada:
+
+```env
+KOBO_ENABLED=True
+KOBO_BASE_URL=
+KOBO_API_TOKEN=
+KOBO_WEBHOOK_USERNAME=
+KOBO_WEBHOOK_SECRET=
+KOBO_REQUEST_TIMEOUT_SECONDS=15
+KOBO_MAX_ATTACHMENT_BYTES=10485760
+```
+
+### Reglas
+
+* `KOBO_API_TOKEN` y `KOBO_WEBHOOK_SECRET` deben mantenerse fuera del repositorio.
+* El webhook debe publicarse únicamente mediante HTTPS.
+* Las credenciales deben rotarse cuando exista sospecha de exposición.
+* El tamaño máximo de adjuntos debe ajustarse a la capacidad del servidor.
+* Los secretos no deben aparecer en logs.
+* La activación de Kobo requiere activos, definiciones y bindings correctamente configurados.
+
+## 5. Preparación del despliegue
+
+### 5.1. Instalar dependencias
 
 ```bash
-./venv/bin/python manage.py migrate
-./venv/bin/python manage.py collectstatic --noinput
-./venv/bin/python manage.py check --deploy
+pip install -r requirements.txt
 ```
 
-No use SQLite en producción. Para ejecutar las pruebas concurrentes reales:
+### 5.2. Aplicar migraciones
 
 ```bash
-DATABASE_ENGINE=postgresql \
-POSTGRES_DB=sigedon_test \
-POSTGRES_USER=... \
-POSTGRES_PASSWORD=... \
-POSTGRES_HOST=localhost \
-./venv/bin/python manage.py test \
-  apps.operations.tests.test_concurrency --verbosity 2
+python manage.py migrate
 ```
 
-Django creará y eliminará la base de test; el usuario PostgreSQL necesita
-permiso para crear bases. La suite se omite explícitamente bajo SQLite y debe
-ejecutarse contra una base PostgreSQL aislada antes de cada release financiero;
-nunca use la base operativa.
+### 5.3. Recopilar archivos estáticos
+
+```bash
+python manage.py collectstatic --noinput
+```
+
+### 5.4. Sincronizar roles
+
+```bash
+python manage.py sync_sigedon_roles
+```
+
+### 5.5. Verificar la configuración
+
+```bash
+python manage.py check
+```
+
+Para una verificación específica de producción:
+
+```bash
+python manage.py check --deploy
+```
+
+### Orden recomendado
+
+```text
+Instalar dependencias
+→ Validar variables
+→ Crear respaldo
+→ Aplicar migraciones
+→ Recopilar estáticos
+→ Sincronizar roles
+→ Verificar configuración
+→ Reiniciar aplicación
+→ Ejecutar comprobaciones funcionales
+```
+
+## 6. Servidor de aplicación
+
+SIGEDON debe ejecutarse mediante un servidor WSGI o ASGI apropiado para producción.
+
+Ejemplos de arquitectura:
+
+```text
+Cliente
+→ Proxy HTTPS
+→ Servidor WSGI o ASGI
+→ Django
+→ PostgreSQL
+```
+
+El servidor de desarrollo:
+
+```bash
+python manage.py runserver
+```
+
+no debe utilizarse en producción.
+
+El proceso debe gestionarse mediante una herramienta de supervisión capaz de:
+
+* iniciar la aplicación;
+* reiniciarla ante fallos;
+* conservar logs;
+* aplicar límites de recursos;
+* iniciar el servicio después de reiniciar el servidor.
+
+## 7. Usuarios y roles
+
+### Crear un superusuario administrativo
+
+```bash
+python manage.py createsuperuser
+```
+
+Después deben crearse las cuentas operativas y asignarse los grupos correspondientes desde el panel de administración.
+
+### Reglas
+
+* El superusuario debe reservarse para administración técnica.
+* No debe utilizarse como cuenta operativa diaria.
+* Cada usuario debe contar únicamente con los permisos necesarios.
+* Los permisos técnicos `kobo.*` deben asignarse por separado.
+* Las cuentas compartidas deben evitarse.
+* Las credenciales iniciales deben cambiarse de forma segura.
+
+## 8. Gestión de archivos
+
+Deben separarse:
+
+```text
+Archivos estáticos
+Multimedia pública
+Archivos privados
+```
+
+### Archivos estáticos
+
+Pueden ser servidos por el proxy o por un servicio de almacenamiento adecuado después de ejecutar:
+
+```bash
+python manage.py collectstatic --noinput
+```
+
+### Multimedia pública
+
+Solo debe contener archivos autorizados para exposición directa.
+
+### Archivos privados
+
+* no deben exponerse directamente mediante el proxy;
+* deben descargarse mediante endpoints autorizados;
+* requieren autenticación y permisos cuando corresponda;
+* deben almacenarse de forma persistente;
+* deben incluirse en la estrategia de respaldo.
+
+El proxy no debe mapear públicamente el directorio `private_media/`.
+
+## 9. Base de datos
+
+PostgreSQL es obligatorio en producción.
+
+SQLite está prohibido cuando:
+
+```env
+DJANGO_DEBUG=False
+```
+
+### Reglas
+
+* Las migraciones deben ejecutarse sobre PostgreSQL.
+* Debe existir un respaldo antes de migraciones relevantes.
+* Las credenciales deben tener privilegios limitados.
+* La conexión debe utilizar cifrado cuando la infraestructura lo permita.
+* Deben monitorearse espacio, conexiones y rendimiento.
+* Las pruebas concurrentes críticas deben validarse sobre PostgreSQL.
+
+Antes de aplicar migraciones:
+
+```bash
+python manage.py showmigrations
+python manage.py migrate --plan
+```
+
+## 10. Proxy inverso
+
+El proxy HTTPS debe encargarse de:
+
+* terminación TLS;
+* redirección HTTP a HTTPS;
+* cabeceras de seguridad;
+* entrega de archivos estáticos;
+* límites de tamaño de solicitud;
+* timeouts;
+* reenvío correcto de IP y protocolo;
+* bloqueo del acceso directo a archivos privados.
+
+Debe configurarse un tamaño máximo de cuerpo compatible con:
+
+* formularios;
+* soportes financieros;
+* adjuntos de avances;
+* adjuntos Kobo.
+
+El límite del proxy no debe ser menor que el límite aceptado por la aplicación cuando se esperen archivos de ese tamaño.
+
+## 11. Checklist posterior al despliegue
+
+Después de iniciar o actualizar la aplicación:
+
+1. verificar que el proceso está activo;
+2. comprobar el acceso mediante HTTPS;
+3. verificar el inicio de sesión;
+4. probar el dashboard con distintos roles;
+5. abrir el portal público;
+6. comprobar una descarga privada autorizada;
+7. verificar que una descarga no autorizada sea rechazada;
+8. revisar la consulta de auditoría;
+9. verificar la creación transaccional de códigos;
+10. confirmar la conexión con PostgreSQL;
+11. probar el webhook Kobo, cuando esté habilitado;
+12. ejecutar smoke tests;
+13. revisar logs;
+14. confirmar que no se expongan secretos;
+15. verificar que no existan migraciones pendientes.
+
+Comandos útiles:
+
+```bash
+python manage.py check --deploy
+python manage.py makemigrations --check --dry-run
+```
+
+## 12. Smoke tests
+
+Las comprobaciones mínimas posteriores al despliegue deben incluir:
+
+* respuesta correcta de la página de inicio;
+* autenticación;
+* autorización por rol;
+* carga del dashboard;
+* consulta de un proyecto;
+* acceso al portal público;
+* respuesta de los endpoints JSON;
+* descarga protegida;
+* acceso al panel administrativo;
+* recepción del webhook Kobo, cuando corresponda.
+
+Los smoke tests no deben alterar datos reales de forma irreversible.
+
+## 13. Logs y monitoreo
+
+Deben revisarse:
+
+* errores HTTP `500`;
+* accesos `403` inesperados;
+* fallos de base de datos;
+* errores de migración;
+* fallos del webhook;
+* submissions detenidas;
+* errores de descarga de archivos;
+* consumo de disco;
+* conexiones PostgreSQL;
+* reinicios del proceso.
+
+Los logs no deben contener:
+
+* contraseñas;
+* tokens;
+* secretos;
+* payloads sensibles completos;
+* datos personales innecesarios.
+
+Debe existir una política de rotación y retención.
+
+## 14. Copias de seguridad
+
+Debe definirse una política que incluya:
+
+* frecuencia;
+* cifrado;
+* retención;
+* almacenamiento externo;
+* responsables;
+* restauración probada;
+* protección de acceso;
+* eliminación segura.
+
+Los respaldos deben cubrir:
+
+* PostgreSQL;
+* archivos privados;
+* archivos públicos necesarios;
+* configuración crítica;
+* secretos almacenados mediante un sistema seguro.
+
+Un respaldo no se considera válido hasta verificar que puede restaurarse.
+
+## 15. Restauración
+
+Después de restaurar un entorno:
+
+```bash
+python manage.py migrate
+python manage.py sync_sigedon_roles
+python manage.py check
+```
+
+También debe verificarse:
+
+* consistencia de archivos;
+* secuencias operativas;
+* permisos;
+* usuarios;
+* integridad de auditoría;
+* configuración Kobo;
+* acceso al portal público;
+* descargas privadas.
+
+## 16. Actualización de una versión
+
+Flujo recomendado:
+
+```text
+Activar modo de mantenimiento, si corresponde
+→ Crear respaldo
+→ Descargar nueva versión
+→ Instalar dependencias
+→ Aplicar migraciones
+→ Recopilar estáticos
+→ Sincronizar roles
+→ Reiniciar procesos
+→ Ejecutar verificaciones
+→ Retirar modo de mantenimiento
+```
+
+Comandos de referencia:
+
+```bash
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py collectstatic --noinput
+python manage.py sync_sigedon_roles
+python manage.py check --deploy
+```
+
+## 17. Reversión
+
+Antes de desplegar debe existir una estrategia de reversión.
+
+Debe contemplar:
+
+* versión anterior del código;
+* respaldo previo;
+* compatibilidad de migraciones;
+* restauración de archivos;
+* procedimiento de reinicio;
+* responsables de aprobar la reversión.
+
+No todas las migraciones pueden revertirse de forma segura. La estrategia debe revisarse antes de ejecutar cambios destructivos.
+
+## 18. Criterio de despliegue completado
+
+El despliegue se considera completado cuando:
+
+* la aplicación responde mediante HTTPS;
+* PostgreSQL está conectado;
+* las migraciones están aplicadas;
+* los archivos estáticos están disponibles;
+* los archivos privados permanecen protegidos;
+* los roles están sincronizados;
+* el panel interno funciona;
+* el portal público funciona;
+* la auditoría puede consultarse;
+* Kobo funciona cuando está habilitado;
+* los logs no muestran errores críticos;
+* existe un respaldo verificable;
+* las comprobaciones posteriores resultan satisfactorias.

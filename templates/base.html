@@ -42,9 +42,15 @@
                     <span class="sigedon-nav-label">Panel financiero</span>
                 </a>
                 {% if perms.operations.view_project %}
-                    <a class="sigedon-nav-link {% if 'project_' in current_url %}active{% endif %}" href="{% url 'project_list' %}" title="Proyectos" {% if 'project_' in current_url %}aria-current="page"{% endif %}>
+                    <a class="sigedon-nav-link {% if current_url == 'project_list' or current_url == 'project_export_csv' or current_url == 'project_create' or current_url == 'project_detail' or current_url == 'project_update' or current_url == 'project_delete' or current_url == 'project_finish' or current_url == 'project_annul' or current_url == 'project_status_transition' or current_url == 'project_document_create' or current_url == 'project_document_download' or current_url == 'project_document_delete' %}active{% endif %}" href="{% url 'project_list' %}" title="Proyectos" {% if current_url == 'project_list' or current_url == 'project_export_csv' or current_url == 'project_create' or current_url == 'project_detail' or current_url == 'project_update' or current_url == 'project_delete' or current_url == 'project_finish' or current_url == 'project_annul' or current_url == 'project_status_transition' or current_url == 'project_document_create' or current_url == 'project_document_download' or current_url == 'project_document_delete' %}aria-current="page"{% endif %}>
                         <i class="bi bi-folder2-open sigedon-nav-icon" aria-hidden="true"></i>
                         <span class="sigedon-nav-label">Proyectos</span>
+                    </a>
+                {% endif %}
+                {% if perms.operations.view_projectupdate %}
+                    <a class="sigedon-nav-link {% if current_url == 'project_update_list' or current_url == 'project_update_create' or current_url == 'project_update_detail' or current_url == 'project_update_create_for_project' or current_url == 'project_update_update' or current_url == 'project_update_delete' or current_url == 'project_update_publish' or current_url == 'project_update_attachment_create' or current_url == 'project_update_attachment_download' or current_url == 'project_update_attachment_delete' or current_url == 'project_update_review_create' or current_url == 'project_update_review_detail' or current_url == 'project_update_review_decision_create' or current_url == 'project_update_review_decision_detail' %}active{% endif %}" href="{% url 'project_update_list' %}" title="Avances" {% if current_url == 'project_update_list' or current_url == 'project_update_create' or current_url == 'project_update_detail' or current_url == 'project_update_create_for_project' or current_url == 'project_update_update' or current_url == 'project_update_delete' or current_url == 'project_update_publish' or current_url == 'project_update_attachment_create' or current_url == 'project_update_attachment_download' or current_url == 'project_update_attachment_delete' or current_url == 'project_update_review_create' or current_url == 'project_update_review_detail' or current_url == 'project_update_review_decision_create' or current_url == 'project_update_review_decision_detail' %}aria-current="page"{% endif %}>
+                        <i class="bi bi-clipboard2-data sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Avances</span>
                     </a>
                 {% endif %}
                 {% if perms.operations.view_institution %}
@@ -86,7 +92,7 @@
                 </div>
                 <form method="post" action="{% url 'logout' %}">
                     {% csrf_token %}
-                    <button class="sigedon-nav-link sigedon-logout-button" type="submit" title="Cerrar sesión">
+                    <button class="sigedon-nav-link sigedon-logout-button" type="submit" title="Cerrar sesión" aria-label="Cerrar sesión">
                         <i class="bi bi-box-arrow-right sigedon-nav-icon" aria-hidden="true"></i>
                         <span class="sigedon-nav-label">Cerrar sesión</span>
                     </button>
@@ -161,7 +167,7 @@
             if (sidebar) {
                 try {
                     const storedState = localStorage.getItem(storageKey);
-                    const shouldCollapse = storedState === 'true' || (storedState === null && isMobile());
+                    const shouldCollapse = isMobile() || storedState === 'true';
                     setCollapsed(root.classList.contains('sidebar-collapsed') || shouldCollapse, false);
                 } catch (error) {
                     setCollapsed(isMobile(), false);

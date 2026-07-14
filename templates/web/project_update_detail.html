@@ -7,13 +7,14 @@
     <h1 class="h3 mb-0">{{ object.title }}</h1>
     <div>
         <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Volver al proyecto</a>
-        {% if object.status == 'pending_review' and perms.operations.change_projectupdate %}
-            <a class="btn btn-outline-primary" href="{% url 'project_update_review' object.pk %}">Revisar avance</a>
-        {% endif %}
         {% if object.status == 'draft' and perms.operations.change_projectupdate %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+            <form class="d-inline" method="post" action="{% url 'project_update_publish' object.pk %}">
+                {% csrf_token %}
+                <button class="btn btn-outline-primary" type="submit">Publicar</button>
+            </form>
         {% endif %}
-        {% if object.status != 'approved' and object.status != 'rejected' and perms.operations.delete_projectupdate %}
+        {% if object.status == 'draft' and perms.operations.delete_projectupdate %}
             <a class="btn btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
         {% endif %}
     </div>
@@ -29,26 +30,70 @@
             <dt class="col-sm-4">Descripción</dt>
             <dd class="col-sm-8">{{ object.description }}</dd>
             <dt class="col-sm-4">Estado</dt>
-            <dd class="col-sm-8">{{ object.get_status_display }}</dd>
+            <dd class="col-sm-8"><span class="badge ops-status-badge">{{ object.get_status_display }}</span></dd>
+            <dt class="col-sm-4">Fecha del avance</dt>
+            <dd class="col-sm-8">{{ object.update_date }}</dd>
+            <dt class="col-sm-4">Progreso</dt>
+            <dd class="col-sm-8">{{ object.progress_percentage }}%</dd>
             <dt class="col-sm-4">Fecha de creación</dt>
             <dd class="col-sm-8">{{ object.created_at }}</dd>
             <dt class="col-sm-4">Creado por</dt>
             <dd class="col-sm-8">{{ object.created_by|default:"-" }}</dd>
-            <dt class="col-sm-4">Revisado por</dt>
-            <dd class="col-sm-8">{{ object.reviewed_by|default:"-" }}</dd>
-            <dt class="col-sm-4">Fecha de revisión</dt>
-            <dd class="col-sm-8">{{ object.reviewed_at|default:"-" }}</dd>
-            <dt class="col-sm-4">Notas de revisión</dt>
-            <dd class="col-sm-8">{{ object.review_notes|default:"-" }}</dd>
-            <dt class="col-sm-4">Evidencia</dt>
-            <dd class="col-sm-8">
-                {% if object.evidence %}
-                    <a href="{% url 'project_update_evidence_download' object.pk %}">Ver evidencia</a>
-                {% else %}
-                    -
-                {% endif %}
-            </dd>
+            <dt class="col-sm-4">Responsable institucional</dt>
+            <dd class="col-sm-8">{{ object.reported_by|default:"—" }}</dd>
         </dl>
     </div>
 </div>
+
+<section class="mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h5 mb-0">Revisión documental del Comité</h2>
+        {% if not object.committee_review and object.status == 'published' and perms.operations.add_projectupdatereview %}
+            <a class="btn btn-sm btn-primary" href="{% url 'project_update_review_create' object.pk %}">Registrar revisión</a>
+        {% endif %}
+    </div>
+    {% if object.committee_review %}
+        <div class="card border-0">
+            <div class="card-body">
+                <p class="mb-2">{{ object.committee_review.observations|truncatewords:30 }}</p>
+                <div class="small text-muted">
+                    {{ object.committee_review.reviewed_by|default:"—" }} · {{ object.committee_review.reviewed_at }}
+                </div>
+                {% if perms.operations.view_projectupdatereview %}
+                    <a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_review_detail' object.committee_review.pk %}">Ver revisión</a>
+                {% endif %}
+            </div>
+        </div>
+    {% else %}
+        <p class="text-muted mb-0">Sin revisión del Comité</p>
+    {% endif %}
+</section>
+
+<section class="mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h5 mb-0">Adjuntos</h2>
+        {% if object.status == 'draft' and perms.operations.add_projectupdateattachment %}
+            <a class="btn btn-sm btn-primary" href="{% url 'project_update_attachment_create' object.pk %}">Agregar adjunto</a>
+        {% endif %}
+    </div>
+    <div class="list-group">
+        {% for attachment in object.attachments.all %}
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <span>{{ attachment.title|default:attachment }}</span>
+                <div class="d-flex gap-2">
+                    {% if perms.operations.view_projectupdateattachment %}
+                        <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_attachment_download' attachment.pk %}">Descargar</a>
+                    {% endif %}
+                    {% if object.status == 'draft' and perms.operations.delete_projectupdateattachment %}
+                        <form method="post" action="{% url 'project_update_attachment_delete' attachment.pk %}">
+                            {% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Eliminar</button>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
+        {% empty %}
+            <div class="list-group-item text-muted">Este avance no tiene adjuntos.</div>
+        {% endfor %}
+    </div>
+</section>
 {% endblock %}

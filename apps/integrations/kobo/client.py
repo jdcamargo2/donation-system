@@ -48,6 +48,8 @@ SAFE_ASSET_METADATA_FIELDS = (
     "deployment_status",
     "date_created",
     "date_modified",
+    "id_string",
+    "version",
 )
 
 
@@ -237,6 +239,32 @@ class KoboApiClient:
                 "Kobo API response previous must be a string or null."
             )
         return submissions
+
+    def get_asset_detail(self, asset_uid: str) -> dict[str, str | None]:
+        """
+        PRE: asset_uid is a non-empty Kobo asset UID.
+        POST: returns only safe technical form metadata without persistence.
+        """
+        if not isinstance(asset_uid, str) or not asset_uid.strip():
+            raise KoboConfigurationError("Kobo asset_uid is required.")
+        payload = self._request_json(
+            f"{self._base_url}/api/v2/assets/{asset_uid}/",
+            params={},
+        )
+        if not isinstance(payload, dict):
+            raise KoboPayloadError("Kobo asset detail must be an object.")
+        content = payload.get("content")
+        settings = content.get("settings") if isinstance(content, dict) else {}
+        id_string = payload.get("id_string", settings.get("id_string"))
+        version = payload.get("version", settings.get("version"))
+        if id_string is not None and (not isinstance(id_string, str) or not id_string.strip()):
+            raise KoboPayloadError("Kobo asset id_string is invalid.")
+        if version is not None and not isinstance(version, str):
+            raise KoboPayloadError("Kobo asset version is invalid.")
+        return {
+            "id_string": id_string.strip() if isinstance(id_string, str) else None,
+            "version": version.strip() if isinstance(version, str) else None,
+        }
 
     def download_attachment(self, url: str) -> DownloadedContent:
         """

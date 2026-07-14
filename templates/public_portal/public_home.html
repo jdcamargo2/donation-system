@@ -9,7 +9,7 @@
         <p class="public-eyebrow">SIGEDON Transparencia</p>
         <h1>Transparencia pública para seguir proyectos y avances</h1>
         <p class="public-lead">
-            Consulta información agregada sobre proyectos, donaciones, ejecución financiera y avances aprobados,
+            Consulta información agregada sobre proyectos, donaciones, ejecución financiera y avances publicados,
             sin exponer datos personales ni información interna sensible.
         </p>
         <div class="public-actions">
@@ -20,7 +20,7 @@
     <div class="public-hero-visual" aria-hidden="true">
         <div class="public-data-card">
             <span class="public-badge">Consulta pública</span>
-            <strong>Información aprobada para consulta pública</strong>
+            <strong>Información publicada para consulta pública</strong>
             <div class="data-lines">
                 <span style="--line-width: 86%"></span>
                 <span style="--line-width: 64%"></span>
@@ -28,7 +28,7 @@
             </div>
             <div class="data-points">
                 <span>{{ summary.project_count }}</span>
-                <span>{{ summary.approved_update_count }}</span>
+                <span>{{ summary.published_update_count }}</span>
                 <span>{{ summary.available_balance|money_es }}</span>
             </div>
         </div>
@@ -63,8 +63,8 @@
     </article>
     <article class="public-card metric-card">
         <span class="metric-icon" aria-hidden="true">✔</span>
-        <div class="public-card-label">Avances aprobados</div>
-        <div class="public-card-value">{{ summary.approved_update_count }}</div>
+        <div class="public-card-label">Avances publicados</div>
+        <div class="public-card-value">{{ summary.published_update_count }}</div>
     </article>
 </section>
 
@@ -72,13 +72,13 @@
     <p>
         <strong>Privacidad y alcance:</strong>
         este portal muestra información pública y agregada. No se publican datos personales,
-        contactos internos, notas de revisión ni información sensible de gestión interna.
+        contactos internos, datos internos ni información sensible de gestión interna.
     </p>
 </section>
 
 <section class="public-section">
     <div class="public-section-header">
-        <h2>Avances aprobados recientes</h2>
+        <h2>Avances publicados recientes</h2>
         <a href="{% url 'public_portal:public_updates_feed' %}">Ver todos</a>
     </div>
     <div class="public-list">
@@ -97,7 +97,7 @@
                 </div>
             </article>
         {% empty %}
-            <div class="public-list-item public-meta">Todavía no hay avances aprobados.</div>
+            <div class="public-list-item public-meta">Todavía no hay avances publicados.</div>
         {% endfor %}
     </div>
 </section>
@@ -109,15 +109,15 @@
             <h3>Qué se publica</h3>
             <p>
                 Se presentan proyectos activos o cerrados, montos agregados, asignaciones financieras,
-                ejecución reportada y avances que ya pasaron por revisión.
+                ejecución reportada y avances que fueron publicados explícitamente.
             </p>
         </article>
         <article class="public-editorial-item">
             <p class="public-eyebrow">Criterio de publicación</p>
-            <h3>Avances aprobados</h3>
+            <h3>Avances publicados</h3>
             <p>
-                Los avances visibles corresponden a registros aprobados para consulta pública.
-                Los borradores, rechazos y revisiones internas permanecen fuera del portal.
+                Los avances visibles corresponden a registros publicados para consulta pública.
+                Los borradores permanecen fuera del portal.
             </p>
         </article>
     </div>

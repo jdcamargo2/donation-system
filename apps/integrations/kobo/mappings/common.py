@@ -1,6 +1,7 @@
 from datetime import date, datetime, tzinfo
 from typing import Mapping
 
+from apps.integrations.kobo.contracts import AttachmentPrivacy, KoboAttachmentPayload
 from apps.integrations.kobo.errors import KoboPayloadError
 
 
@@ -127,6 +128,36 @@ def parse_multiselect(value: object) -> tuple[str, ...]:
     raise KoboPayloadError("Field 'multiselect' must be text or a string sequence.")
 
 
+def parse_attachments(raw_attachments: object) -> tuple[KoboAttachmentPayload, ...]:
+    """
+    PRE: raw_attachments is optional Kobo attachment descriptor data.
+    POST: returns active INTERNAL_REVIEW descriptors or raises an indexed error.
+    """
+    if raw_attachments is None:
+        return ()
+    if not isinstance(raw_attachments, list):
+        raise KoboPayloadError("Field '_attachments' must be a list.")
+
+    attachments = []
+    for index, raw_attachment in enumerate(raw_attachments):
+        if not isinstance(raw_attachment, dict):
+            raise KoboPayloadError(f"Attachment {index} must be an object.")
+        if raw_attachment.get("is_deleted") is True:
+            continue
+        try:
+            attachment = KoboAttachmentPayload(
+                field_name=require_non_empty_string(raw_attachment, "question_xpath"),
+                source_url=require_non_empty_string(raw_attachment, "download_url"),
+                filename=optional_string(raw_attachment, "media_file_basename"),
+                content_type=optional_string(raw_attachment, "mimetype"),
+                privacy_level=AttachmentPrivacy.INTERNAL_REVIEW,
+            )
+        except KoboPayloadError as exc:
+            raise KoboPayloadError(f"Attachment {index} is invalid: {exc}") from exc
+        attachments.append(attachment)
+    return tuple(attachments)
+
+
 def _parse_coordinate(value: object, *, field_name: str) -> float | None:
     # PRE: value is optional numeric coordinate data.
     # POST: returns a float/None or raises KoboPayloadError naming the field.
@@ -140,9 +171,13 @@ def _parse_coordinate(value: object, *, field_name: str) -> float | None:
         raise KoboPayloadError(f"Field {field_name!r} must be numeric.") from exc
 
 
-def parse_geolocation(payload: Mapping[str, object]) -> dict | None:
+def parse_geolocation(
+    payload: Mapping[str, object],
+    *,
+    location_key: str = "territorial_profile/location",
+) -> dict | None:
     """
-    PRE: payload may contain _geolocation or territorial_profile/location.
+    PRE: payload may contain _geolocation or location_key geolocation text.
     POST: returns validated coordinate components, None, or raises KoboPayloadError.
     """
     raw_geolocation = payload.get("_geolocation")
@@ -154,15 +189,15 @@ def parse_geolocation(payload: Mapping[str, object]) -> dict | None:
         components = tuple(raw_geolocation[:4])
         field_name = "_geolocation"
     else:
-        raw_location = payload.get("territorial_profile/location")
+        raw_location = payload.get(location_key)
         if raw_location is None or raw_location == "":
             return None
         if not isinstance(raw_location, str):
             raise KoboPayloadError(
-                "Field 'territorial_profile/location' must be geolocation text."
+                f"Field {location_key!r} must be geolocation text."
             )
         components = tuple(raw_location.strip().split())
-        field_name = "territorial_profile/location"
+        field_name = location_key
         if len(components) < 2 or len(components) > 4:
             raise KoboPayloadError(
                 f"Field {field_name!r} must contain two to four coordinates."

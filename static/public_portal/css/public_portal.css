@@ -695,3 +695,48 @@ h3 {
         grid-template-columns: 1fr;
     }
 }
+
+/* Resiliencia responsive para contenido público variable. */
+.public-card-value,
+.public-list-item,
+.public-meta,
+.public-page-title,
+.public-lead,
+.public-badge {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+.public-card-actions,
+.public-actions,
+.public-pagination,
+.public-links {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+}
+
+.public-badge {
+    line-height: 1.25;
+    white-space: normal;
+}
+
+@media (max-width: 520px) {
+    .public-main {
+        padding-bottom: 2.5rem;
+    }
+
+    .public-actions > *,
+    .public-card-actions > * {
+        flex: 1 1 auto;
+        text-align: center;
+    }
+
+    .public-list-item,
+    .public-card,
+    .metric-card {
+        min-width: 0;
+        padding: 0.9rem;
+    }
+}

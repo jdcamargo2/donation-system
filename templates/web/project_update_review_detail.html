@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Revisión documental - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Comité de proyectos</div>
+        <h1>Revisión documental</h1>
+        <p>{{ object.project_update.title }}</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'project_update_detail' object.project_update.pk %}">Volver al avance</a>
+</div>
+
+<section class="mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h5 mb-0">Resultado institucional</h2>
+        {% if not object.decision and perms.operations.add_projectupdatereviewdecision %}
+            <a class="btn btn-sm btn-primary" href="{% url 'project_update_review_decision_create' object.pk %}">Registrar resultado</a>
+        {% endif %}
+    </div>
+    {% if object.decision %}
+        <div class="card border-0">
+            <div class="card-body">
+                <p class="mb-2"><strong>{{ object.decision.get_outcome_display }}</strong></p>
+                <p class="mb-2">{{ object.decision.rationale }}</p>
+                <div class="small text-muted">
+                    {{ object.decision.decided_by|default:"—" }} · {{ object.decision.decided_at }}
+                </div>
+                {% if perms.operations.view_projectupdatereviewdecision %}
+                    <a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_review_decision_detail' object.decision.pk %}">Ver resultado</a>
+                {% endif %}
+            </div>
+        </div>
+    {% else %}
+        <p class="text-muted mb-0">Sin resultado institucional registrado</p>
+    {% endif %}
+</section>
+
+<div class="card border-0">
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-4">Avance de proyecto</dt>
+            <dd class="col-sm-8">{{ object.project_update }}</dd>
+            <dt class="col-sm-4">Observaciones del Comité</dt>
+            <dd class="col-sm-8">{{ object.observations }}</dd>
+            <dt class="col-sm-4">Revisado por</dt>
+            <dd class="col-sm-8">{{ object.reviewed_by|default:"—" }}</dd>
+            <dt class="col-sm-4">Fecha de revisión</dt>
+            <dd class="col-sm-8">{{ object.reviewed_at }}</dd>
+        </dl>
+    </div>
+</div>
+{% endblock %}

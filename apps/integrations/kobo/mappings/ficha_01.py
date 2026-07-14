@@ -1,25 +1,67 @@
 from datetime import tzinfo
 from typing import Mapping
 
-from apps.integrations.kobo.contracts import (
-    AttachmentPrivacy,
-    KoboAttachmentPayload,
-    KoboSubmissionPayload,
-)
+from apps.integrations.kobo.contracts import KoboSubmissionPayload
 from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.mappings.common import (
     optional_string,
+    parse_attachments,
     parse_geolocation,
     parse_integer,
-    parse_multiselect,
     parse_optional_date,
     parse_optional_datetime,
     require_non_empty_string,
 )
 
 
-FICHA_01_FORM_ID = "ficha_01_territorio"
-FICHA_01_VERSION = "20260710"
+FICHA_01_FORM_ID = "ficha_1_identificacion_territorial_depurada"
+FICHA_01_VERSION = "2026-07-12-depurada"
+
+PASTORAL_ZONES = {"catia_la_mar", "centro", "este", "montana", "insular"}
+ACCESS_DIFFICULTIES = {"yes", "no", "unknown"}
+INITIAL_PRIORITY_PERCEPTIONS = {"low", "medium", "high", "critical", "unknown"}
+
+
+def _canonical_ficha_01_payload(raw_payload: Mapping[str, object]) -> dict[str, object]:
+    """
+    PRE: raw_payload has already passed the common Kobo shape adapter.
+    POST: returns Ficha 1's canonical flat fields without mutating the input and
+    rejects duplicate legacy and section values rather than overwriting either.
+    """
+    canonical = dict(raw_payload)
+    sections = {
+        "identification": {
+            "parish",
+            "location",
+            "nucleo_code",
+            "contact_phone",
+            "pastoral_zone",
+            "parish_delegate",
+            "community_sector",
+            "main_informant_role",
+        },
+        "territorial_summary": {
+            "general_notes",
+            "access_difficulties",
+            "access_difficulties_notes",
+            "communities_covered",
+            "estimated_households",
+            "initial_priority_perception",
+        },
+    }
+    for section_name, field_names in sections.items():
+        section = raw_payload.get(section_name)
+        if section is None:
+            continue
+        if not isinstance(section, Mapping):
+            raise KoboPayloadError("Ficha 1 section has an invalid structure.")
+        for field_name in field_names:
+            if field_name not in section:
+                continue
+            if field_name in canonical:
+                raise KoboPayloadError("Ficha 1 field is defined more than once.")
+            canonical[field_name] = section[field_name]
+    return canonical
 
 
 def _parse_non_negative_integer(
@@ -34,37 +76,17 @@ def _parse_non_negative_integer(
     return value
 
 
-def _parse_attachments(
-    raw_attachments: object,
-) -> tuple[KoboAttachmentPayload, ...]:
-    # PRE: raw_attachments is optional Kobo attachment collection data.
-    # POST: returns active internal-review descriptors or raises an indexed error.
-    if raw_attachments is None:
-        return ()
-    if not isinstance(raw_attachments, list):
-        raise KoboPayloadError("Field '_attachments' must be a list.")
-
-    attachments = []
-    for index, raw_attachment in enumerate(raw_attachments):
-        if not isinstance(raw_attachment, dict):
-            raise KoboPayloadError(f"Attachment {index} must be an object.")
-        if raw_attachment.get("is_deleted") is True:
-            continue
-        try:
-            attachment = KoboAttachmentPayload(
-                field_name=require_non_empty_string(
-                    raw_attachment,
-                    "question_xpath",
-                ),
-                source_url=require_non_empty_string(raw_attachment, "download_url"),
-                filename=optional_string(raw_attachment, "media_file_basename"),
-                content_type=optional_string(raw_attachment, "mimetype"),
-                privacy_level=AttachmentPrivacy.INTERNAL_REVIEW,
-            )
-        except KoboPayloadError as exc:
-            raise KoboPayloadError(f"Attachment {index} is invalid: {exc}") from exc
-        attachments.append(attachment)
-    return tuple(attachments)
+def _require_choice(
+    raw_payload: Mapping[str, object],
+    key: str,
+    choices: set[str],
+) -> str:
+    # PRE: key identifies a required XLSForm select-one value.
+    # POST: returns a supported trimmed value or raises KoboPayloadError.
+    value = require_non_empty_string(raw_payload, key)
+    if value not in choices:
+        raise KoboPayloadError(f"Field {key!r} has an unsupported value.")
+    return value
 
 
 def normalize_ficha_01(
@@ -81,52 +103,36 @@ def normalize_ficha_01(
     if not isinstance(raw_payload, Mapping):
         raise KoboPayloadError("Ficha 1 payload must be an object.")
 
+    raw_payload = _canonical_ficha_01_payload(raw_payload)
+
     external_id = require_non_empty_string(raw_payload, "_uuid")
-    pastoral_zone = require_non_empty_string(
-        raw_payload,
-        "identification/pastoral_zone",
-    )
-    parish = require_non_empty_string(raw_payload, "identification/parish")
-    estimated_population = _parse_non_negative_integer(
-        raw_payload,
-        "territorial_profile/estimated_population",
-    )
+    nucleo_code = require_non_empty_string(raw_payload, "nucleo_code")
+    pastoral_zone = _require_choice(raw_payload, "pastoral_zone", PASTORAL_ZONES)
+    parish = require_non_empty_string(raw_payload, "parish")
+    community_sector = require_non_empty_string(raw_payload, "community_sector")
     estimated_households = _parse_non_negative_integer(
         raw_payload,
-        "territorial_profile/estimated_households",
+        "estimated_households",
     )
 
     normalized_payload = {
-        "survey_responsible": optional_string(
-            raw_payload,
-            "identification/survey_responsible",
-        ),
-        "parish_priest": optional_string(
-            raw_payload,
-            "identification/parish_priest",
-        ),
-        "contact_phone": optional_string(
-            raw_payload,
-            "identification/contact_phone",
-        ),
-        "official_parish_name": optional_string(
-            raw_payload,
-            "territorial_profile/official_parish_name",
-        ),
-        "church_advocation": optional_string(
-            raw_payload,
-            "territorial_profile/church_advocation",
-        ),
-        "estimated_population": estimated_population,
+        "nucleo_code": nucleo_code,
+        "location": parse_geolocation(raw_payload, location_key="location"),
+        "parish_delegate": optional_string(raw_payload, "parish_delegate"),
+        "contact_phone": optional_string(raw_payload, "contact_phone"),
+        "main_informant_role": optional_string(raw_payload, "main_informant_role"),
+        "communities_covered": optional_string(raw_payload, "communities_covered"),
         "estimated_households": estimated_households,
-        "location": parse_geolocation(raw_payload),
-        "main_accessibility": optional_string(
+        "access_difficulties": _require_choice(
+            raw_payload, "access_difficulties", ACCESS_DIFFICULTIES
+        ),
+        "access_difficulties_notes": optional_string(raw_payload, "access_difficulties_notes"),
+        "initial_priority_perception": _require_choice(
             raw_payload,
-            "territorial_profile/main_accessibility",
+            "initial_priority_perception",
+            INITIAL_PRIORITY_PERCEPTIONS,
         ),
-        "territory_type": parse_multiselect(
-            raw_payload.get("territorial_profile/territory_type")
-        ),
+        "general_notes": optional_string(raw_payload, "general_notes"),
     }
     return KoboSubmissionPayload(
         external_id=external_id,
@@ -134,13 +140,8 @@ def normalize_ficha_01(
         form_version=FICHA_01_VERSION,
         pastoral_zone=pastoral_zone,
         parish=parish,
-        primary_community=optional_string(
-            raw_payload,
-            "identification/primary_community",
-        ),
-        assessment_date=parse_optional_date(
-            raw_payload.get("identification/assessment_date")
-        ),
+        primary_community=community_sector,
+        assessment_date=parse_optional_date(raw_payload.get("today")),
         submitted_at=parse_optional_datetime(
             raw_payload.get("_submission_time"),
             default_timezone=default_timezone,
@@ -148,5 +149,5 @@ def normalize_ficha_01(
         submitted_by=optional_string(raw_payload, "_submitted_by"),
         device_id=optional_string(raw_payload, "deviceid"),
         normalized_payload=normalized_payload,
-        attachments=_parse_attachments(raw_payload.get("_attachments")),
+        attachments=parse_attachments(raw_payload.get("_attachments")),
     )

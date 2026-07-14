@@ -1,6 +1,9 @@
 from django import forms
 from django.core.exceptions import ValidationError
 
+from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
+from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
+from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID, FICHA_11_VERSION
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboDiscoveredAsset,
@@ -10,10 +13,13 @@ from apps.integrations.kobo.models import (
 )
 from apps.integrations.kobo.form_registry import list_registered_forms
 from apps.integrations.kobo.services import validate_routing_source_field
+from apps.integrations.kobo.services import REJECTION_REASON_LABELS
 
 
 SUPPORTED_FORM_ROLES = {
-    "ficha_01_territorio": KoboAsset.FormRole.TERRITORIAL_PROFILE,
+    (FICHA_01_FORM_ID, FICHA_01_VERSION): KoboAsset.FormRole.TERRITORIAL_PROFILE,
+    (FICHA_10_FORM_ID, FICHA_10_VERSION): KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
+    (FICHA_11_FORM_ID, FICHA_11_VERSION): KoboAsset.FormRole.PRIORITIZATION_MATRIX,
 }
 
 
@@ -28,10 +34,14 @@ def get_compatible_asset_configuration(
     registered_versions = {
         (registered.form_id, registered.version)
         for registered in list_registered_forms()
-        if registered.form_id in SUPPORTED_FORM_ROLES
+        if (registered.form_id, registered.version) in SUPPORTED_FORM_ROLES
     }
-    remote_name = discovered_asset.name.strip().casefold()
-    if not remote_name:
+    metadata = discovered_asset.metadata_snapshot or {}
+    remote_form_id = metadata.get("id_string")
+    if not isinstance(remote_form_id, str) or not remote_form_id.strip():
+        return None
+    remote_version = metadata.get("version")
+    if remote_version is not None and not isinstance(remote_version, str):
         return None
     candidates = list(
         KoboFormDefinition.objects.filter(is_active=True).order_by("pk")
@@ -40,12 +50,13 @@ def get_compatible_asset_configuration(
         definition
         for definition in candidates
         if (definition.form_id, definition.version) in registered_versions
-        and definition.title.strip().casefold() == remote_name
+        and definition.form_id == remote_form_id.strip()
+        and (remote_version is None or definition.version == remote_version.strip())
     ]
     if len(matches) != 1:
         return None
     definition = matches[0]
-    return definition, SUPPORTED_FORM_ROLES[definition.form_id]
+    return definition, SUPPORTED_FORM_ROLES[(definition.form_id, definition.version)]
 
 
 class KoboAssetConfigurationForm(forms.Form):
@@ -110,6 +121,20 @@ class KoboProjectBindingForm(forms.Form):
         return cleaned_data
 
 
+class KoboAssetProjectLinkForm(forms.Form):
+    project = forms.ModelChoiceField(queryset=None, label="Proyecto")
+
+    def __init__(self, *args, **kwargs):
+        # PRE: the operations Project model is installed.
+        # POST: exposes only active projects for the simplified operational link.
+        from apps.operations.models import Project
+
+        super().__init__(*args, **kwargs)
+        self.fields["project"].queryset = Project.objects.filter(
+            status=Project.Status.ACTIVE
+        ).order_by("name", "pk")
+
+
 class KoboReviewForm(forms.Form):
     decision = forms.ChoiceField(
         choices=(
@@ -141,4 +166,27 @@ class KoboReviewForm(forms.Form):
             and not cleaned_data.get("reason", "").strip()
         ):
             self.add_error("reason", "La razón es obligatoria al rechazar.")
+        return cleaned_data
+
+
+class KoboRejectionForm(forms.Form):
+    reason = forms.ChoiceField(
+        choices=tuple(REJECTION_REASON_LABELS.items()),
+        label="Motivo",
+    )
+    comment = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        label="Comentario",
+    )
+
+    def clean(self):
+        # PRE: rejection values come from the project review confirmation form.
+        # POST: requires a comment only for the other reason without mutating data.
+        cleaned_data = super().clean()
+        if (
+            cleaned_data.get("reason") == "other"
+            and not cleaned_data.get("comment", "").strip()
+        ):
+            self.add_error("comment", "El comentario es obligatorio para el motivo otro.")
         return cleaned_data
