@@ -1,3 +1,5 @@
+from contextlib import contextmanager, nullcontext
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
@@ -31,6 +33,42 @@ class ExpenseFinalizedError(ValidationError):
 
 EXPENSE_FINAL_STATUSES = frozenset({Expense.Status.ANNULLED})
 PROJECT_UPDATE_FINAL_STATUSES = frozenset({ProjectUpdate.Status.PUBLISHED})
+
+
+def _store_upload_for_field(instance, field_name, uploaded_file):
+    """
+    PRE: uploaded_file is validated and instance supplies the target FileField metadata.
+    POST: stores the bytes outside any service transaction and returns its storage and name.
+    """
+    field = instance._meta.get_field(field_name)
+    storage = field.storage
+    generated_name = field.generate_filename(instance, uploaded_file.name)
+    return storage, storage.save(generated_name, uploaded_file)
+
+
+def _compensate_stored_upload(storage, stored_name):
+    """
+    PRE: stored_name was created by this request and its relational confirmation failed.
+    POST: attempts only its compensating delete and never masks the original exception.
+    """
+    try:
+        storage.delete(stored_name)
+    except Exception:
+        pass
+
+
+@contextmanager
+def _stored_upload(instance, field_name, uploaded_file):
+    """PRE: uploaded_file may be absent or valid. POST: compensates its new file if the caller raises."""
+    if not uploaded_file:
+        yield None
+        return
+    storage, stored_name = _store_upload_for_field(instance, field_name, uploaded_file)
+    try:
+        yield stored_name
+    except Exception:
+        _compensate_stored_upload(storage, stored_name)
+        raise
 
 
 class ProjectUpdateReviewError(ValidationError):
@@ -605,7 +643,10 @@ def create_expense(
     support_title='',
     support_file=None,
 ):
-    with transaction.atomic():
+    if not support_file:
+        raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
+    support_document = SupportingDocument(title=support_title or support_file.name)
+    with _stored_upload(support_document, 'document', support_file) as stored_name, transaction.atomic():
         allocation_reference = FundAllocation.objects.only('donation_id').get(pk=allocation.pk)
         Donation.objects.select_for_update().get(pk=allocation_reference.donation_id)
         locked_allocation = FundAllocation.objects.select_for_update().get(pk=allocation.pk)
@@ -615,8 +656,6 @@ def create_expense(
         _validate_operating_currency(currency)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
         _validate_expense_balance(locked_allocation, amount)
-        if not support_file:
-            raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
         expense = Expense(
             allocation=locked_allocation,
             expense_date=expense_date,
@@ -635,7 +674,7 @@ def create_expense(
         SupportingDocument.objects.create(
             expense=expense,
             title=support_title or support_file.name,
-            document=support_file,
+            document=stored_name,
         )
         if getattr(actor, 'is_authenticated', False):
             log_action(
@@ -665,7 +704,15 @@ def update_expense(
     support_title='',
     support_file=None,
 ):
-    with transaction.atomic():
+    support_document = (
+        SupportingDocument(title=support_title or support_file.name)
+        if support_file else None
+    )
+    upload_context = (
+        _stored_upload(support_document, 'document', support_file)
+        if support_file else nullcontext(None)
+    )
+    with upload_context as stored_name, transaction.atomic():
         expense_reference = Expense.objects.only('allocation_id').get(pk=expense.pk)
         allocation_ids = {expense_reference.allocation_id, allocation.pk}
         donation_ids = FundAllocation.objects.filter(pk__in=allocation_ids).values_list('donation_id', flat=True)
@@ -704,7 +751,7 @@ def update_expense(
             SupportingDocument.objects.create(
                 expense=locked_expense,
                 title=support_title or support_file.name,
-                document=support_file,
+                document=stored_name,
             )
         if getattr(actor, 'is_authenticated', False):
             after = {'allocation': locked_expense.allocation_id, 'amount': str(locked_expense.amount)}
@@ -889,8 +936,8 @@ def register_advance(
         )
         project_update.full_clean()
         project_update.save()
-        _create_project_update_attachments(project_update, attachments, created_by)
         log_create(created_by, project_update, _('Avance de proyecto creado como borrador.'))
+    _create_project_update_attachments(project_update, attachments, created_by)
     return project_update
 
 
@@ -915,9 +962,9 @@ def update_project_update(
         project_update.reported_by = reported_by
         project_update.full_clean()
         project_update.save()
-        _create_project_update_attachments(project_update, attachments, actor)
         log_update(actor, project_update, _('Borrador de avance actualizado.'))
-        return project_update
+    _create_project_update_attachments(project_update, attachments, actor)
+    return project_update
 
 
 def _create_project_update_attachments(project_update, files, actor) -> list[ProjectUpdateAttachment]:
@@ -927,10 +974,11 @@ def _create_project_update_attachments(project_update, files, actor) -> list[Pro
     """
     assert project_update.status == ProjectUpdate.Status.DRAFT
     return [
-        ProjectUpdateAttachment.objects.create(
-            project_update=project_update,
+        add_project_update_attachment(
+            update_id=project_update.pk,
             file=file,
-            uploaded_by=actor if getattr(actor, 'is_authenticated', False) else None,
+            title='',
+            actor=actor,
         )
         for file in files
     ]
@@ -944,14 +992,27 @@ def add_project_update_attachment(*, update_id: int, file, title: str, actor) ->
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
         ensure_project_update_is_editable(project_update)
-        attachment = ProjectUpdateAttachment.objects.create(
+        draft_attachment = ProjectUpdateAttachment(
             project_update=project_update,
-            file=file,
             title=(title or '').strip(),
             uploaded_by=actor if getattr(actor, 'is_authenticated', False) else None,
         )
-        log_create(actor, attachment, _('Adjunto de avance agregado.'))
-        return attachment
+    storage, stored_name = _store_upload_for_field(draft_attachment, 'file', file)
+    try:
+        with transaction.atomic():
+            project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
+            ensure_project_update_is_editable(project_update)
+            attachment = ProjectUpdateAttachment.objects.create(
+                project_update=project_update,
+                file=stored_name,
+                title=draft_attachment.title,
+                uploaded_by=draft_attachment.uploaded_by,
+            )
+            log_create(actor, attachment, _('Adjunto de avance agregado.'))
+            return attachment
+    except Exception:
+        _compensate_stored_upload(storage, stored_name)
+        raise
 
 
 def delete_project_update_attachment(*, attachment_id: int, actor) -> int:
@@ -1018,14 +1079,27 @@ def add_project_update_remediation_attachment(*, remediation_id, file, title, ac
     with transaction.atomic():
         remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
         _require_draft_remediation(remediation)
-        attachment = ProjectUpdateRemediationAttachment.objects.create(
+        draft_attachment = ProjectUpdateRemediationAttachment(
             remediation=remediation,
-            file=file,
             title=(title or '').strip(),
             uploaded_by=actor,
         )
-        log_create(actor, attachment, _('Adjunto de remediación agregado.'))
-        return attachment
+    storage, stored_name = _store_upload_for_field(draft_attachment, 'file', file)
+    try:
+        with transaction.atomic():
+            remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+            _require_draft_remediation(remediation)
+            attachment = ProjectUpdateRemediationAttachment.objects.create(
+                remediation=remediation,
+                file=stored_name,
+                title=draft_attachment.title,
+                uploaded_by=actor,
+            )
+            log_create(actor, attachment, _('Adjunto de remediación agregado.'))
+            return attachment
+    except Exception:
+        _compensate_stored_upload(storage, stored_name)
+        raise
 
 
 def delete_project_update_remediation_attachment(*, attachment_id, actor):
