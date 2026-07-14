@@ -1,16 +1,17 @@
 import base64
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 import json
 from pathlib import Path
 from queue import Queue
 import re
-from threading import Barrier, Thread
+from threading import Barrier, Event, Thread
 from types import SimpleNamespace
 from unittest import skipUnless
 from unittest.mock import patch
+import uuid
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -160,15 +161,48 @@ class StubAttachmentClient:
     def __init__(self, outcomes):
         self.outcomes = list(outcomes)
         self.calls = []
+        self.in_atomic_flags = []
 
     def download_attachment(self, url):
         # PRE: a pending attachment supplies its source URL.
         # POST: records the URL and returns or raises the next configured outcome.
         self.calls.append(url)
+        self.in_atomic_flags.append(connection.in_atomic_block)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+
+class RecordingAttachmentStorage(InMemoryStorage):
+    def __init__(self, *, fail_delete=False):
+        super().__init__()
+        self.fail_delete = fail_delete
+        self.saved = []
+        self.deleted = []
+
+    def save(self, name, content, max_length=None):
+        self.saved.append((name, connection.in_atomic_block))
+        return super().save(name, content, max_length)
+
+    def delete(self, name):
+        self.deleted.append((name, connection.in_atomic_block))
+        if self.fail_delete:
+            raise OSError("storage delete failed")
+        return super().delete(name)
+
+
+class PausingAttachmentStorage(RecordingAttachmentStorage):
+    def __init__(self):
+        super().__init__()
+        self.saved_file = Event()
+        self.resume = Event()
+
+    def save(self, name, content, max_length=None):
+        stored_name = super().save(name, content, max_length)
+        self.saved_file.set()
+        self.resume.wait(timeout=10)
+        return stored_name
 
 
 class SequenceHttpTransport:
@@ -1952,7 +1986,7 @@ class KoboAttachmentProcessorTests(TestCase):
         )
 
     def setUp(self):
-        self.storage = InMemoryStorage()
+        self.storage = RecordingAttachmentStorage()
         self.submission = KoboSubmission.objects.create(
             form_definition=self.form_definition,
             external_id="attachment-submission",
@@ -1976,14 +2010,21 @@ class KoboAttachmentProcessorTests(TestCase):
         values.update(overrides)
         return KoboAttachment.objects.create(**values)
 
-    def process(self, attachment, outcome, *, max_bytes=1024):
+    def process(self, attachment, outcome, *, max_bytes=1024, storage=None):
         # PRE: attachment is persisted and outcome configures a fake download.
         # POST: runs storage processing without a real network request.
         return download_and_store_attachment(
             attachment,
             client=StubAttachmentClient([outcome]),
-            storage=self.storage,
+            storage=storage or self.storage,
             max_bytes=max_bytes,
+        )
+
+    def successful_download(self):
+        return DownloadedContent(
+            self.JPEG_CONTENT,
+            "image/jpeg; charset=binary",
+            len(self.JPEG_CONTENT),
         )
 
     def test_rejects_disallowed_mime_type(self):
@@ -1997,6 +2038,8 @@ class KoboAttachmentProcessorTests(TestCase):
 
         self.assertEqual(outcome.final_status, KoboAttachment.Status.INVALID)
         self.assertEqual(attachment.status, KoboAttachment.Status.INVALID)
+        self.assertIsNone(attachment.processing_token)
+        self.assertIsNone(attachment.processing_started_at)
 
     def test_rejects_false_binary_signature(self):
         attachment = self.create_attachment()
@@ -2031,17 +2074,138 @@ class KoboAttachmentProcessorTests(TestCase):
         self.assertNotIn("remote", filename)
         self.assertTrue(filename.endswith(".jpg"))
 
+    def test_pending_is_claimed_and_processed(self):
+        attachment = self.create_attachment()
+
+        outcome = self.process(attachment, self.successful_download())
+        attachment.refresh_from_db()
+
+        self.assertTrue(outcome.processed)
+        self.assertEqual(outcome.previous_status, KoboAttachment.Status.PENDING)
+        self.assertEqual(outcome.final_status, KoboAttachment.Status.DOWNLOADED)
+        self.assertEqual(attachment.status, KoboAttachment.Status.DOWNLOADED)
+        self.assertTrue(attachment.file.name)
+        self.assertIsNone(attachment.processing_token)
+        self.assertIsNone(attachment.processing_started_at)
+        self.assertEqual(attachment.error_message, "")
+
+    def test_failed_attachment_can_be_retried(self):
+        attachment = self.create_attachment(
+            status=KoboAttachment.Status.FAILED,
+            error_message="Attachment download or storage failed.",
+        )
+
+        outcome = self.process(attachment, self.successful_download())
+        attachment.refresh_from_db()
+
+        self.assertTrue(outcome.processed)
+        self.assertEqual(outcome.previous_status, KoboAttachment.Status.FAILED)
+        self.assertEqual(attachment.status, KoboAttachment.Status.DOWNLOADED)
+        self.assertEqual(attachment.error_message, "")
+
+    def test_downloaded_and_invalid_are_skipped(self):
+        downloaded = self.create_attachment(
+            external_id="already-downloaded",
+            status=KoboAttachment.Status.DOWNLOADED,
+        )
+        invalid = self.create_attachment(
+            external_id="already-invalid",
+            status=KoboAttachment.Status.INVALID,
+            source_url="https://kf.example.test/api/attachment/invalid",
+        )
+        client = StubAttachmentClient([])
+
+        downloaded_outcome = download_and_store_attachment(
+            downloaded,
+            client=client,
+            storage=self.storage,
+            max_bytes=1024,
+        )
+        invalid_outcome = download_and_store_attachment(
+            invalid,
+            client=client,
+            storage=self.storage,
+            max_bytes=1024,
+        )
+
+        self.assertFalse(downloaded_outcome.processed)
+        self.assertFalse(invalid_outcome.processed)
+        self.assertEqual(client.calls, [])
+        self.assertEqual(self.storage.saved, [])
+
+    def test_active_processing_is_skipped_without_client_or_storage(self):
+        attachment = self.create_attachment(
+            status=KoboAttachment.Status.PROCESSING,
+            processing_token=uuid.uuid4(),
+            processing_started_at=django_timezone.now(),
+        )
+        client = StubAttachmentClient([self.successful_download()])
+
+        outcome = download_and_store_attachment(
+            attachment,
+            client=client,
+            storage=self.storage,
+            max_bytes=1024,
+        )
+        attachment.refresh_from_db()
+
+        self.assertFalse(outcome.processed)
+        self.assertEqual(attachment.status, KoboAttachment.Status.PROCESSING)
+        self.assertEqual(client.calls, [])
+        self.assertEqual(self.storage.saved, [])
+
+    @override_settings(KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS=60)
+    def test_expired_processing_can_be_recovered(self):
+        attachment = self.create_attachment(
+            status=KoboAttachment.Status.PROCESSING,
+            processing_token=uuid.uuid4(),
+            processing_started_at=django_timezone.now() - timedelta(seconds=120),
+        )
+
+        outcome = self.process(attachment, self.successful_download())
+        attachment.refresh_from_db()
+
+        self.assertTrue(outcome.processed)
+        self.assertEqual(attachment.status, KoboAttachment.Status.DOWNLOADED)
+        self.assertIsNone(attachment.processing_token)
+        self.assertIsNone(attachment.processing_started_at)
+
+    def test_download_and_storage_complete_successfully(self):
+        attachment = self.create_attachment()
+        client = StubAttachmentClient([self.successful_download()])
+
+        download_and_store_attachment(
+            attachment,
+            client=client,
+            storage=self.storage,
+            max_bytes=1024,
+        )
+        attachment.refresh_from_db()
+
+        self.assertEqual(attachment.status, KoboAttachment.Status.DOWNLOADED)
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(len(self.storage.saved), 1)
+
+    def test_success_clears_processing_token_and_timestamp(self):
+        attachment = self.create_attachment()
+
+        outcome = self.process(attachment, self.successful_download())
+        attachment.refresh_from_db()
+
+        self.assertEqual(outcome.final_status, KoboAttachment.Status.DOWNLOADED)
+        self.assertEqual(attachment.status, KoboAttachment.Status.DOWNLOADED)
+        self.assertTrue(attachment.file.name)
+        self.assertTrue(self.storage.exists(attachment.file.name))
+        self.assertEqual(attachment.size_bytes, len(self.JPEG_CONTENT))
+        self.assertEqual(attachment.content_type, "image/jpeg")
+        self.assertEqual(attachment.error_message, "")
+        self.assertIsNone(attachment.processing_token)
+        self.assertIsNone(attachment.processing_started_at)
+
     def test_success_stores_file_and_marks_downloaded(self):
         attachment = self.create_attachment()
 
-        outcome = self.process(
-            attachment,
-            DownloadedContent(
-                self.JPEG_CONTENT,
-                "image/jpeg; charset=binary",
-                len(self.JPEG_CONTENT),
-            ),
-        )
+        outcome = self.process(attachment, self.successful_download())
         attachment.refresh_from_db()
 
         self.assertEqual(outcome.final_status, KoboAttachment.Status.DOWNLOADED)
@@ -2064,7 +2228,103 @@ class KoboAttachmentProcessorTests(TestCase):
 
         self.assertEqual(outcome.final_status, KoboAttachment.Status.FAILED)
         self.assertEqual(attachment.status, KoboAttachment.Status.FAILED)
+        self.assertFalse(attachment.file)
+        self.assertIsNone(attachment.processing_token)
+        self.assertIsNone(attachment.processing_started_at)
         self.assertNotIn(sensitive_url, attachment.error_message)
+        self.assertEqual(self.storage.saved, [])
+
+    def test_invalid_content_marks_invalid_and_clears_processing(self):
+        attachment = self.create_attachment()
+
+        outcome = self.process(
+            attachment,
+            DownloadedContent(b"not-a-jpeg", "image/jpeg", 10),
+        )
+        attachment.refresh_from_db()
+
+        self.assertEqual(outcome.final_status, KoboAttachment.Status.INVALID)
+        self.assertEqual(attachment.status, KoboAttachment.Status.INVALID)
+        self.assertIsNone(attachment.processing_token)
+        self.assertIsNone(attachment.processing_started_at)
+        self.assertEqual(self.storage.saved, [])
+
+    def test_storage_success_then_db_failure_compensates_new_file(self):
+        attachment = self.create_attachment()
+        client = StubAttachmentClient([self.successful_download()])
+
+        with patch(
+            "apps.integrations.kobo.attachments._confirm_download_success",
+            side_effect=RuntimeError("db confirmation failed"),
+        ):
+            with self.assertRaisesMessage(RuntimeError, "db confirmation failed"):
+                download_and_store_attachment(
+                    attachment,
+                    client=client,
+                    storage=self.storage,
+                    max_bytes=1024,
+                )
+
+        attachment.refresh_from_db()
+        self.assertEqual(len(self.storage.saved), 1)
+        self.assertEqual(len(self.storage.deleted), 1)
+        self.assertEqual(self.storage.deleted[0][0], self.storage.saved[0][0])
+        self.assertEqual(attachment.status, KoboAttachment.Status.PROCESSING)
+        self.assertFalse(attachment.file)
+
+    def test_replaced_token_compensates_stale_worker_file(self):
+        attachment = self.create_attachment()
+        client = StubAttachmentClient([self.successful_download()])
+        winner_token = uuid.uuid4()
+        from apps.integrations.kobo import attachments as attachments_module
+
+        real_confirm = attachments_module._confirm_download_success
+
+        def steal_then_confirm(claim, **kwargs):
+            KoboAttachment.objects.filter(pk=claim.attachment_id).update(
+                processing_token=winner_token,
+                processing_started_at=django_timezone.now(),
+                status=KoboAttachment.Status.PROCESSING,
+            )
+            return real_confirm(claim, **kwargs)
+
+        with patch(
+            "apps.integrations.kobo.attachments._confirm_download_success",
+            side_effect=steal_then_confirm,
+        ):
+            outcome = download_and_store_attachment(
+                attachment,
+                client=client,
+                storage=self.storage,
+                max_bytes=1024,
+            )
+
+        attachment.refresh_from_db()
+        self.assertFalse(outcome.processed)
+        self.assertEqual(attachment.status, KoboAttachment.Status.PROCESSING)
+        self.assertEqual(attachment.processing_token, winner_token)
+        self.assertEqual(len(self.storage.saved), 1)
+        self.assertEqual(len(self.storage.deleted), 1)
+        self.assertEqual(self.storage.deleted[0][0], self.storage.saved[0][0])
+
+    def test_compensation_failure_does_not_replace_original_exception(self):
+        attachment = self.create_attachment()
+        storage = RecordingAttachmentStorage(fail_delete=True)
+        client = StubAttachmentClient([self.successful_download()])
+
+        with patch(
+            "apps.integrations.kobo.attachments._confirm_download_success",
+            side_effect=RuntimeError("original db failure"),
+        ):
+            with self.assertRaisesMessage(RuntimeError, "original db failure"):
+                download_and_store_attachment(
+                    attachment,
+                    client=client,
+                    storage=storage,
+                    max_bytes=1024,
+                )
+
+        self.assertEqual(len(storage.deleted), 1)
 
     def test_one_failed_attachment_does_not_block_another(self):
         first = self.create_attachment(external_id="first")
@@ -2097,6 +2357,36 @@ class KoboAttachmentProcessorTests(TestCase):
         self.assertEqual(first.status, KoboAttachment.Status.FAILED)
         self.assertEqual(second.status, KoboAttachment.Status.DOWNLOADED)
 
+    def test_batch_skips_active_processing_without_counting_failure(self):
+        active = self.create_attachment(
+            external_id="active",
+            status=KoboAttachment.Status.PROCESSING,
+            processing_token=uuid.uuid4(),
+            processing_started_at=django_timezone.now(),
+        )
+        pending = self.create_attachment(
+            external_id="pending",
+            source_url="https://kf.example.test/api/attachment/2",
+        )
+        client = StubAttachmentClient([self.successful_download()])
+
+        result = process_pending_attachments(
+            self.submission,
+            client=client,
+            storage=self.storage,
+            max_bytes=1024,
+        )
+        active.refresh_from_db()
+        pending.refresh_from_db()
+
+        self.assertEqual(result.selected, 2)
+        self.assertEqual(result.skipped, 1)
+        self.assertEqual(result.failed, 0)
+        self.assertEqual(result.downloaded, 1)
+        self.assertEqual(active.status, KoboAttachment.Status.PROCESSING)
+        self.assertEqual(pending.status, KoboAttachment.Status.DOWNLOADED)
+        self.assertEqual(len(client.calls), 1)
+
     def test_reprocessing_downloaded_attachment_is_skipped(self):
         attachment = self.create_attachment(status=KoboAttachment.Status.DOWNLOADED)
         client = StubAttachmentClient([])
@@ -2111,6 +2401,22 @@ class KoboAttachmentProcessorTests(TestCase):
         self.assertFalse(outcome.processed)
         self.assertEqual(outcome.final_status, KoboAttachment.Status.DOWNLOADED)
         self.assertEqual(client.calls, [])
+
+    def test_no_duplicate_confirmed_files_or_events_on_repeat(self):
+        attachment = self.create_attachment()
+        first = self.process(attachment, self.successful_download())
+        attachment.refresh_from_db()
+        confirmed_name = attachment.file.name
+        event_count = self.submission.processing_events.count()
+
+        second = self.process(attachment, self.successful_download())
+        attachment.refresh_from_db()
+
+        self.assertTrue(first.processed)
+        self.assertFalse(second.processed)
+        self.assertEqual(attachment.file.name, confirmed_name)
+        self.assertEqual(len(self.storage.saved), 1)
+        self.assertEqual(self.submission.processing_events.count(), event_count)
 
     def test_attachment_failure_does_not_change_submission_status(self):
         attachment = self.create_attachment()
@@ -2248,6 +2554,193 @@ class KoboAttachmentProcessorTests(TestCase):
         self.assertIn("selected=1", with_flag_output.getvalue())
         self.assertIn("skipped=1", with_flag_output.getvalue())
         self.assertIn("attachments_downloaded=1", with_flag_output.getvalue())
+
+
+@skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row-level locking")
+@override_settings(KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS=60)
+class KoboAttachmentConcurrencyTests(TransactionTestCase):
+    JPEG_CONTENT = b"\xff\xd8\xffsafe-jpeg"
+
+    def setUp(self):
+        self.form_definition = KoboFormDefinition.objects.create(
+            form_id="ficha_01_territorio_concurrent",
+            title="Ficha concurrente",
+            version="20260710",
+        )
+        self.submission = KoboSubmission.objects.create(
+            form_definition=self.form_definition,
+            external_id="attachment-concurrent",
+            raw_payload={"_uuid": "attachment-concurrent"},
+            status=KoboSubmission.Status.READY_FOR_REVIEW,
+        )
+        self.attachment = KoboAttachment.objects.create(
+            submission=self.submission,
+            field_name="territorial_evidence/temple_photo",
+            external_id="concurrent-attachment",
+            source_url="https://kf.example.test/api/attachment/concurrent",
+            original_filename="photo.jpg",
+            content_type="image/jpeg",
+            privacy_level=KoboAttachment.PrivacyLevel.INTERNAL_REVIEW,
+            status=KoboAttachment.Status.PENDING,
+        )
+
+    def successful_download(self):
+        return DownloadedContent(
+            self.JPEG_CONTENT,
+            "image/jpeg",
+            len(self.JPEG_CONTENT),
+        )
+
+    def create_pending_attachment(self, *, external_id="boundary-attachment"):
+        return KoboAttachment.objects.create(
+            submission=self.submission,
+            field_name="territorial_evidence/temple_photo",
+            external_id=external_id,
+            source_url=f"https://kf.example.test/api/attachment/{external_id}",
+            original_filename="photo.jpg",
+            content_type="image/jpeg",
+            privacy_level=KoboAttachment.PrivacyLevel.INTERNAL_REVIEW,
+            status=KoboAttachment.Status.PENDING,
+        )
+
+    def run_in_thread(self, operation):
+        results = Queue()
+
+        def run():
+            close_old_connections()
+            try:
+                results.put(("ok", operation()))
+            except BaseException as exc:
+                results.put(("error", exc))
+            finally:
+                connections.close_all()
+
+        thread = Thread(target=run)
+        thread.start()
+        return thread, results
+
+    def test_download_and_storage_happen_outside_atomic_block(self):
+        attachment = self.create_pending_attachment()
+        storage = RecordingAttachmentStorage()
+        client = StubAttachmentClient([self.successful_download()])
+
+        download_and_store_attachment(
+            attachment,
+            client=client,
+            storage=storage,
+            max_bytes=1024,
+        )
+
+        self.assertEqual(client.in_atomic_flags, [False])
+        self.assertEqual(storage.saved[0][1], False)
+        self.assertEqual(storage.deleted, [])
+
+    def test_storage_success_then_db_failure_compensates_outside_atomic(self):
+        attachment = self.create_pending_attachment(external_id="compensate-boundary")
+        storage = RecordingAttachmentStorage()
+        client = StubAttachmentClient([self.successful_download()])
+
+        with patch(
+            "apps.integrations.kobo.attachments._confirm_download_success",
+            side_effect=RuntimeError("db confirmation failed"),
+        ):
+            with self.assertRaisesMessage(RuntimeError, "db confirmation failed"):
+                download_and_store_attachment(
+                    attachment,
+                    client=client,
+                    storage=storage,
+                    max_bytes=1024,
+                )
+
+        self.assertEqual(storage.saved[0][1], False)
+        self.assertEqual(storage.deleted[0][1], False)
+        self.assertEqual(storage.deleted[0][0], storage.saved[0][0])
+
+    def test_two_workers_only_one_claims_downloads_and_stores(self):
+        barrier = Barrier(2)
+        storage = RecordingAttachmentStorage()
+        client = StubAttachmentClient([self.successful_download()])
+        outcomes = Queue()
+
+        def worker():
+            close_old_connections()
+            try:
+                barrier.wait(timeout=10)
+                outcome = download_and_store_attachment(
+                    KoboAttachment.objects.get(pk=self.attachment.pk),
+                    client=client,
+                    storage=storage,
+                    max_bytes=1024,
+                )
+                outcomes.put(("ok", outcome))
+            except BaseException as exc:
+                outcomes.put(("error", exc))
+            finally:
+                connections.close_all()
+
+        threads = [Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+
+        results = [outcomes.get_nowait() for _ in threads]
+        self.assertTrue(all(kind == "ok" for kind, _ in results))
+        processed = [outcome for _, outcome in results if outcome.processed]
+        skipped = [outcome for _, outcome in results if not outcome.processed]
+        self.attachment.refresh_from_db()
+
+        self.assertEqual(len(processed), 1)
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(len(storage.saved), 1)
+        self.assertEqual(self.attachment.status, KoboAttachment.Status.DOWNLOADED)
+        self.assertTrue(self.attachment.file.name)
+        self.assertIsNone(self.attachment.processing_token)
+        self.assertFalse(
+            any(isinstance(payload, IntegrityError) for kind, payload in results)
+        )
+
+    def test_stale_worker_does_not_overwrite_recovered_claim(self):
+        storage = PausingAttachmentStorage()
+        client_a = StubAttachmentClient([self.successful_download()])
+        client_b = StubAttachmentClient([self.successful_download()])
+
+        thread, results = self.run_in_thread(
+            lambda: download_and_store_attachment(
+                KoboAttachment.objects.get(pk=self.attachment.pk),
+                client=client_a,
+                storage=storage,
+                max_bytes=1024,
+            )
+        )
+        self.assertTrue(storage.saved_file.wait(timeout=10))
+        stale_name = storage.saved[0][0]
+
+        KoboAttachment.objects.filter(pk=self.attachment.pk).update(
+            processing_started_at=django_timezone.now() - timedelta(seconds=120),
+        )
+        winner_storage = RecordingAttachmentStorage()
+        winner = download_and_store_attachment(
+            KoboAttachment.objects.get(pk=self.attachment.pk),
+            client=client_b,
+            storage=winner_storage,
+            max_bytes=1024,
+        )
+        storage.resume.set()
+        thread.join(timeout=15)
+        kind, payload = results.get_nowait()
+
+        self.attachment.refresh_from_db()
+        self.assertEqual(kind, "ok")
+        self.assertFalse(payload.processed)
+        self.assertTrue(winner.processed)
+        self.assertEqual(self.attachment.status, KoboAttachment.Status.DOWNLOADED)
+        self.assertEqual(self.attachment.file.name, winner_storage.saved[0][0])
+        self.assertNotEqual(self.attachment.file.name, stale_name)
+        self.assertIn(stale_name, [name for name, _ in storage.deleted])
+        self.assertEqual(len(client_a.calls), 1)
+        self.assertEqual(len(client_b.calls), 1)
 
 
 class KoboReviewPanelTests(TestCase):
@@ -3973,10 +4466,14 @@ class KoboGenericRoutingMigrationTests(TransactionTestCase):
         ("operations", "0015_projectupdatereviewdecision"),
         ("kobo", "0004_generic_project_binding_routing"),
     ]
-    migrate_latest = [
-        ("operations", "0015_projectupdatereviewdecision"),
-        ("kobo", "0005_kobodiscoveredasset"),
-    ]
+
+    def _restore_leaf_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(self._restore_leaf_migrations)
 
     def test_pastoral_binding_migrates_without_losing_asset_or_project(self):
         executor = MigrationExecutor(connection)
@@ -4018,10 +4515,6 @@ class KoboGenericRoutingMigrationTests(TransactionTestCase):
         self.assertEqual(migrated.routing_type, "field_value")
         self.assertEqual(migrated.source_field, "submission.pastoral_zone")
         self.assertEqual(migrated.source_value, "catia_la_mar")
-
-    def tearDown(self):
-        MigrationExecutor(connection).migrate(self.migrate_latest)
-        super().tearDown()
 
 
 class KoboAssetDiscoveryTests(TestCase):

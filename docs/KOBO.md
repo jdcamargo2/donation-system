@@ -42,6 +42,7 @@ KOBO_WEBHOOK_SECRET=
 KOBO_FICHA_01_ASSET_UID=
 KOBO_REQUEST_TIMEOUT_SECONDS=15
 KOBO_MAX_ATTACHMENT_BYTES=10485760
+KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS=900
 KOBO_WEBHOOK_MAX_BYTES=1048576
 ```
 
@@ -54,6 +55,7 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 * `KOBO_WEBHOOK_SECRET` contiene el secreto utilizado para autenticar solicitudes entrantes.
 * `KOBO_REQUEST_TIMEOUT_SECONDS` define el tiempo máximo de espera para solicitudes externas.
 * `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
+* `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900).
 * `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging.
 * `KOBO_FICHA_01_ASSET_UID` pertenece únicamente al flujo legado de la Ficha 1.
 
@@ -296,6 +298,10 @@ Los adjuntos Kobo:
 
 * se descargan utilizando autenticación contra KoboToolbox;
 * respetan el límite configurado en `KOBO_MAX_ATTACHMENT_BYTES`;
+* reservan el trabajo con estado `PROCESSING`, `processing_token` y `processing_started_at`;
+* recuperan reservas vencidas según `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` al reintentar el procesamiento;
+* descargan y guardan en storage fuera de transacciones abiertas;
+* compensan archivos huérfanos si la confirmación BD falla o el token ya no coincide;
 * conservan metadatos técnicos;
 * se asocian con su submission;
 * poseen una clasificación de privacidad;
@@ -311,6 +317,7 @@ Los adjuntos Kobo:
 * ruta o referencia local;
 * clasificación de privacidad;
 * estado de descarga;
+* metadata de reserva de procesamiento (`processing_token`, `processing_started_at`);
 * fecha de incorporación.
 
 Las firmas y otros archivos sensibles no pueden marcarse como candidatos públicos.

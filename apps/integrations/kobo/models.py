@@ -258,6 +258,7 @@ class KoboAttachment(models.Model):
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
         DOWNLOADED = "downloaded", "Downloaded"
         INVALID = "invalid", "Invalid"
         FAILED = "failed", "Failed"
@@ -289,6 +290,8 @@ class KoboAttachment(models.Model):
         default=Status.PENDING,
     )
     error_message = models.TextField(blank=True)
+    processing_started_at = models.DateTimeField(null=True, blank=True, editable=False)
+    processing_token = models.UUIDField(null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
