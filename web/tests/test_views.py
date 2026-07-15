@@ -120,8 +120,12 @@ class OperationalDetailViewTests(TestCase):
         self.assertContains(response, 'Este proyecto todavía no tiene documentos.')
 
     def test_authorized_user_sees_published_and_draft_updates(self):
-        draft = register_advance(self.project.pk, 'Borrador interno', 'Detalle', created_by=self.user)
-        published = register_advance(self.project.pk, 'Publicado operativo', 'Detalle', created_by=self.user)
+        draft = register_advance(
+            self.project.pk, 'Borrador interno', 'Detalle', created_by=self.user, reported_by=self.user
+        )
+        published = register_advance(
+            self.project.pk, 'Publicado operativo', 'Detalle', created_by=self.user, reported_by=self.user
+        )
         publish_project_update(published.pk, self.user)
 
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
@@ -130,8 +134,12 @@ class OperationalDetailViewTests(TestCase):
         self.assertContains(response, published.title)
 
     def test_user_without_update_view_permission_sees_only_published_updates(self):
-        draft = register_advance(self.project.pk, 'Borrador privado', 'Detalle', created_by=self.user)
-        published = register_advance(self.project.pk, 'Publicado visible', 'Detalle', created_by=self.user)
+        draft = register_advance(
+            self.project.pk, 'Borrador privado', 'Detalle', created_by=self.user, reported_by=self.user
+        )
+        published = register_advance(
+            self.project.pk, 'Publicado visible', 'Detalle', created_by=self.user, reported_by=self.user
+        )
         publish_project_update(published.pk, self.user)
         limited_user = get_user_model().objects.create_user('project-reader', password='pass-12345')
         limited_user.user_permissions.add(Permission.objects.get(codename='view_project'))
@@ -265,6 +273,8 @@ class CrudFlowTests(TestCase):
         self.client.force_login(self.user)
         self.donor = create_institution()
         self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
         self.donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
         self.allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('50.00'))
 

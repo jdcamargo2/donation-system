@@ -17,6 +17,8 @@ class FormTests(TestCase):
         self.override.enable()
         self.donor = create_institution()
         self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
         self.donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
 
     def tearDown(self):
