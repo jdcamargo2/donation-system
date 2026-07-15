@@ -25,6 +25,7 @@ from .models import (
     SupportingDocument,
     ZERO_MONEY,
 )
+from .project_update_responsibles import validate_project_update_reporter
 
 
 class ExpenseFinalizedError(ValidationError):
@@ -924,6 +925,7 @@ def register_advance(
     with transaction.atomic():
         project = Project.objects.select_for_update().get(pk=project_id)
         _validate_project_is_active_for_execution_or_updates(project)
+        validate_project_update_reporter(reported_by)
         project_update = ProjectUpdate(
             project=project,
             title=title,
@@ -936,7 +938,11 @@ def register_advance(
         )
         project_update.full_clean()
         project_update.save()
-        log_create(created_by, project_update, _('Avance de proyecto creado como borrador.'))
+        log_create(
+            created_by,
+            project_update,
+            _('Avance de proyecto creado como borrador con persona responsable asignada.'),
+        )
     _create_project_update_attachments(project_update, attachments, created_by)
     return project_update
 
@@ -952,6 +958,8 @@ def update_project_update(
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
         ensure_project_update_is_editable(project_update)
+        validate_project_update_reporter(reported_by)
+        reported_by_changed = project_update.reported_by_id != reported_by.pk
         locked_project = Project.objects.select_for_update().get(pk=project.pk)
         _validate_project_is_active_for_execution_or_updates(locked_project)
         project_update.project = locked_project
@@ -962,7 +970,12 @@ def update_project_update(
         project_update.reported_by = reported_by
         project_update.full_clean()
         project_update.save()
-        log_update(actor, project_update, _('Borrador de avance actualizado.'))
+        summary = (
+            _('Atribución de la persona responsable del avance actualizada.')
+            if reported_by_changed
+            else _('Borrador de avance actualizado.')
+        )
+        log_update(actor, project_update, summary)
     _create_project_update_attachments(project_update, attachments, actor)
     return project_update
 
@@ -1166,6 +1179,7 @@ def publish_project_update(update_id: int, actor) -> ProjectUpdate:
             raise ValidationError(
                 {'status': _('Solo un avance en borrador puede publicarse.')}
             )
+        validate_project_update_reporter(project_update.reported_by)
         project_update.status = ProjectUpdate.Status.PUBLISHED
         project_update.full_clean()
         project_update.save(update_fields=('status', 'updated_at'))

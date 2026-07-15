@@ -11,6 +11,7 @@ from .models import (
     ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
     ProjectUpdateRemediation, SupportingDocument,
 )
+from .project_update_responsibles import eligible_project_update_reporters
 
 
 SELECT_PLACEHOLDER = _('Seleccione una opción')
@@ -246,7 +247,14 @@ class ProjectForm(BootstrapFormMixin, forms.ModelForm):
         return self.cleaned_data.get('estimated_budget') or Project._meta.get_field('estimated_budget').default
 
 
-class ProjectUpdateForm(BootstrapFormMixin, forms.ModelForm):
+class ProjectUpdateResponsibleFormMixin:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['reported_by'].required = True
+        self.fields['reported_by'].queryset = eligible_project_update_reporters()
+
+
+class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, forms.ModelForm):
     attachments = MultipleFileField(
         label=_('Adjuntos'),
         required=False,
@@ -269,12 +277,12 @@ class ProjectUpdateForm(BootstrapFormMixin, forms.ModelForm):
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
             'progress_percentage': _('Porcentaje de progreso'),
-            'reported_by': _('Responsable institucional'),
+            'reported_by': _('Persona responsable del avance'),
         }
         widgets = {'update_date': build_date_widget()}
 
 
-class ProjectUpdateForProjectForm(BootstrapFormMixin, forms.ModelForm):
+class ProjectUpdateForProjectForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, forms.ModelForm):
     attachments = MultipleFileField(
         label=_('Adjuntos'),
         required=False,
@@ -295,7 +303,7 @@ class ProjectUpdateForProjectForm(BootstrapFormMixin, forms.ModelForm):
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
             'progress_percentage': _('Porcentaje de progreso'),
-            'reported_by': _('Responsable institucional'),
+            'reported_by': _('Persona responsable del avance'),
         }
         widgets = {'update_date': build_date_widget()}
 

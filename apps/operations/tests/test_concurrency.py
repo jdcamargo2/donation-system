@@ -22,6 +22,7 @@ from apps.operations.models import (
     ZERO_MONEY,
     OPERATIONAL_CODE_PREFIXES,
 )
+from apps.operations.project_update_responsibles import eligible_project_update_reporters
 from apps.operations.services import (
     ExpenseFinalizedError,
     annul_expense,
@@ -389,11 +390,17 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         project.save(update_fields=('status', 'updated_at'))
         reviewers = (create_user(username='reviewer-a'), create_user(username='reviewer-b'))
         reviewer_ids = (reviewers[0].pk, reviewers[1].pk)
+        reported_by = reviewers[0]
+        self.assertTrue(
+            eligible_project_update_reporters().filter(pk=reported_by.pk).exists(),
+            'El responsable del avance debe ser activo y elegible antes de publicar.',
+        )
         project_update = ProjectUpdate.objects.create(
             project=project,
             title='Avance concurrente',
             description='Pendiente de dos revisores.',
             status=ProjectUpdate.Status.DRAFT,
+            reported_by=reported_by,
         )
         project_update_id = project_update.pk
 

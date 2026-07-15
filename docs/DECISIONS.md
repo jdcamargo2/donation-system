@@ -209,7 +209,7 @@ El avance constituye un registro institucional original que debe permanecer inmu
 
 ---
 
-## 2026-07-12 — Creador técnico y responsable institucional separados
+## 2026-07-12 — Creador técnico y persona responsable del avance separados
 
 ### Decisión
 
@@ -220,19 +220,19 @@ created_by
 → usuario autenticado que registra el avance
 
 reported_by
-→ responsable institucional al que se atribuye
+→ persona responsable del contenido del avance
 ```
 
 ### Motivo
 
-La persona que introduce la información en el sistema no necesariamente es la responsable institucional del avance reportado.
+La persona que introduce la información en el sistema no necesariamente es la responsable del contenido del avance reportado.
 
 ### Consecuencias
 
 * `created_by` se asigna automáticamente desde `request.user`.
 * `reported_by` se selecciona explícitamente.
 * La auditoría puede identificar al operador técnico.
-* La atribución institucional se conserva de forma independiente.
+* La atribución de la persona responsable se conserva de forma independiente.
 * No deben utilizarse ambos campos como si representaran la misma responsabilidad.
 
 ---

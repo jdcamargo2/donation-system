@@ -178,7 +178,7 @@ Incluye:
 * fecha real;
 * porcentaje de progreso;
 * creador técnico;
-* responsable institucional;
+* persona responsable del contenido del avance;
 * evidencias;
 * publicación.
 

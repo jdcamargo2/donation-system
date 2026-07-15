@@ -1,6 +1,8 @@
 from datetime import date
 
 from django.contrib import admin
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
@@ -36,6 +38,7 @@ class ProjectUpdateTests(TestCase):
             update_date=date(2026, 7, 12),
             progress_percentage=progress_percentage,
             created_by=self.user,
+            reported_by=self.reported_by,
         )
 
     def test_new_project_update_is_draft(self):
@@ -62,11 +65,14 @@ class ProjectUpdateTests(TestCase):
             entity_id=str(update.pk), action=AuditLog.Action.CREATED, user=self.user
         ).exists())
 
-    def test_register_advance_does_not_assign_creator_as_reporter(self):
-        update = self.create_draft()
-
-        self.assertEqual(update.created_by, self.user)
-        self.assertIsNone(update.reported_by)
+    def test_register_advance_requires_explicit_responsible_person(self):
+        with self.assertRaisesMessage(ValidationError, 'Debe seleccionar una persona responsable'):
+            register_advance(
+                project_id=self.project.pk,
+                title='Avance sin responsable',
+                description='No debe crear un avance nuevo sin atribución.',
+                created_by=self.user,
+            )
 
     def test_register_advance_rejects_non_active_project(self):
         rejected_statuses = (
@@ -97,7 +103,8 @@ class ProjectUpdateTests(TestCase):
                 form = form_class()
 
                 self.assertIn('reported_by', form.fields)
-                self.assertEqual(form.fields['reported_by'].label, 'Responsable institucional')
+                self.assertEqual(form.fields['reported_by'].label, 'Persona responsable del avance')
+                self.assertTrue(form.fields['reported_by'].required)
                 self.assertNotIn('created_by', form.fields)
 
     def test_create_for_project_view_keeps_creator_and_reporter_separate(self):
@@ -120,12 +127,16 @@ class ProjectUpdateTests(TestCase):
         self.assertEqual(update.reported_by, self.reported_by)
 
     def test_detail_shows_reporter_or_neutral_value(self):
-        update = self.create_draft()
+        update = ProjectUpdate.objects.create(
+            project=self.project,
+            title='Avance histórico sin responsable',
+            description='Registro anterior que permanece editable.',
+        )
         self.client.force_login(self.user)
 
         response_without_reporter = self.client.get(reverse('project_update_detail', args=[update.pk]))
 
-        self.assertContains(response_without_reporter, 'Responsable institucional')
+        self.assertContains(response_without_reporter, 'Persona responsable del avance')
         self.assertContains(response_without_reporter, '—')
 
         update.reported_by = self.reported_by
@@ -134,7 +145,7 @@ class ProjectUpdateTests(TestCase):
         project_response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
         self.assertContains(response_with_reporter, self.reported_by.get_username())
-        self.assertContains(project_response, f'Responsable institucional: {self.reported_by.get_username()}')
+        self.assertContains(project_response, f'Persona responsable del avance: {self.reported_by.get_username()}')
 
     def test_draft_can_be_edited(self):
         update = self.create_draft()
@@ -217,6 +228,76 @@ class ProjectUpdateTests(TestCase):
             entity_id=str(update.pk), action=AuditLog.Action.PUBLISHED, user=self.user
         ).exists())
 
+    def test_form_excludes_inactive_and_users_without_project_update_permissions(self):
+        User = get_user_model()
+        inactive = User.objects.create_user(username='inactive-reporter', password='pass-12345', is_active=False)
+        no_permission = User.objects.create_user(username='no-update-permission', password='pass-12345')
+        direct_permission = User.objects.create_user(username='direct-update-permission', password='pass-12345')
+        direct_permission.user_permissions.add(Permission.objects.get(
+            content_type__app_label='operations', codename='add_projectupdate'
+        ))
+
+        form = ProjectUpdateForm()
+
+        self.assertNotIn(inactive, form.fields['reported_by'].queryset)
+        self.assertNotIn(no_permission, form.fields['reported_by'].queryset)
+        self.assertIn(direct_permission, form.fields['reported_by'].queryset)
+
+    def test_service_rejects_inactive_or_ineligible_responsible_person(self):
+        User = get_user_model()
+        inactive = User.objects.create_user(username='inactive-service-reporter', password='pass-12345', is_active=False)
+        no_permission = User.objects.create_user(username='ineligible-service-reporter', password='pass-12345')
+
+        for reporter in (inactive, no_permission):
+            with self.subTest(reporter=reporter.username):
+                with self.assertRaisesMessage(ValidationError, 'permisos operativos sobre avances'):
+                    register_advance(
+                        project_id=self.project.pk,
+                        title='Avance con responsable no elegible',
+                        description='La validación de servicio evita el bypass del formulario.',
+                        created_by=self.user,
+                        reported_by=reporter,
+                    )
+
+    def test_historical_draft_without_responsible_person_cannot_publish_or_audit(self):
+        update = ProjectUpdate.objects.create(
+            project=self.project,
+            title='Avance histórico sin responsable para publicar',
+            description='Debe exigir atribución antes de publicar.',
+            created_by=self.user,
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'Debe seleccionar una persona responsable'):
+            publish_project_update(update.pk, self.user)
+
+        update.refresh_from_db()
+        self.assertEqual(update.status, ProjectUpdate.Status.DRAFT)
+        self.assertFalse(AuditLog.objects.filter(
+            entity_id=str(update.pk), action=AuditLog.Action.PUBLISHED
+        ).exists())
+
+    def test_changing_responsible_person_creates_safe_audit_summary(self):
+        update = self.create_draft()
+        replacement = create_user('replacement-reporter')
+        replacement.email = 'replacement@example.com'
+        replacement.save(update_fields=('email',))
+
+        update_project_update(
+            update_id=update.pk,
+            project=self.project,
+            title=update.title,
+            description=update.description,
+            update_date=update.update_date,
+            progress_percentage=update.progress_percentage,
+            reported_by=replacement,
+            actor=self.editor,
+        )
+
+        audit = AuditLog.objects.filter(entity_id=str(update.pk), action=AuditLog.Action.UPDATED).latest('created_at')
+        self.assertIn('Atribución de la persona responsable', audit.summary)
+        self.assertNotIn(replacement.username, audit.summary)
+        self.assertNotIn(replacement.email, audit.summary)
+
     def test_publish_rejects_project_no_longer_active(self):
         rejected_statuses = (
             Project.Status.SUSPENDED,
@@ -276,6 +357,7 @@ class ProjectUpdateTests(TestCase):
             project=self.project,
             title='Avance creado desde administración',
             description='Debe conservar la atribución técnica.',
+            reported_by=self.reported_by,
         )
 
         model_admin.save_model(request, update, form=None, change=False)

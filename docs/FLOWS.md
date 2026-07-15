@@ -133,7 +133,7 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 * El proyecto se encuentra en estado `ACTIVE`.
 * La fecha del avance es válida.
 * El porcentaje de progreso se encuentra entre 0 y 100.
-* Se ha seleccionado un responsable institucional.
+* Se ha seleccionado una persona responsable del avance, activa y con permisos operativos sobre avances.
 * El usuario posee permisos para registrar el avance.
 
 ### Pasos
@@ -144,10 +144,10 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
    * descripción;
    * fecha real;
    * porcentaje de progreso;
-   * responsable institucional.
+   * persona responsable del avance.
 2. El usuario puede adjuntar evidencias durante el registro.
 3. `created_by` se asigna automáticamente desde el usuario autenticado.
-4. `reported_by` conserva el responsable institucional al que se atribuye el avance.
+4. `reported_by` conserva la persona responsable del contenido del avance.
 5. El avance se guarda en estado `DRAFT`.
 6. Un usuario con el permiso `change_projectupdate` puede iniciar la publicación.
 7. El sistema valida nuevamente las condiciones de publicación.
@@ -158,7 +158,7 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 ### POST
 
 * El avance publicado es inmutable.
-* El creador técnico y el responsable institucional quedan diferenciados.
+* El creador técnico y la persona responsable del avance quedan diferenciados.
 * El avance puede ser revisado institucionalmente.
 * El avance puede aparecer en el portal público cuando cumpla las reglas de publicación.
 

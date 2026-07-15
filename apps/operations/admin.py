@@ -19,6 +19,7 @@ from .services import (
     log_update,
     ensure_operational_entity_is_editable,
 )
+from .project_update_responsibles import eligible_project_update_reporters, validate_project_update_reporter
 
 
 class FundAllocationAdminForm(forms.ModelForm):
@@ -60,6 +61,19 @@ class ExpenseAdminForm(forms.ModelForm):
         return cleaned_data
 
 
+class ProjectUpdateAdminForm(forms.ModelForm):
+    class Meta:
+        model = ProjectUpdate
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if 'reported_by' in self.fields:
+            self.fields['reported_by'].label = _('Persona responsable del avance')
+            self.fields['reported_by'].required = True
+            self.fields['reported_by'].queryset = eligible_project_update_reporters()
+
+
 @admin.register(Institution)
 class InstitutionAdmin(admin.ModelAdmin):
     list_display = ('name', 'role', 'country', 'status')
@@ -98,6 +112,7 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(ProjectUpdate)
 class ProjectUpdateAdmin(admin.ModelAdmin):
+    form = ProjectUpdateAdminForm
     list_display = (
         'project', 'title', 'reported_by', 'update_date', 'progress_percentage',
         'status', 'created_at', 'created_by',
@@ -155,16 +170,27 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
         if change:
             persisted = ProjectUpdate.objects.get(pk=obj.pk)
             ensure_project_update_is_editable(persisted)
+            validate_project_update_reporter(obj.reported_by)
+            reported_by_changed = persisted.reported_by_id != obj.reported_by_id
             obj.status = persisted.status
             obj.created_by = persisted.created_by
         else:
+            validate_project_update_reporter(obj.reported_by)
             obj.status = ProjectUpdate.Status.DRAFT
             obj.created_by = request.user if request.user.is_authenticated else None
         super().save_model(request, obj, form, change)
         if change:
-            log_update(request.user, obj, _('Borrador de avance actualizado desde administración.'))
+            summary = (
+                _('Atribución de la persona responsable del avance actualizada desde administración.')
+                if reported_by_changed else _('Borrador de avance actualizado desde administración.')
+            )
+            log_update(request.user, obj, summary)
         else:
-            log_create(request.user, obj, _('Avance de proyecto creado como borrador desde administración.'))
+            log_create(
+                request.user,
+                obj,
+                _('Avance de proyecto creado como borrador con persona responsable asignada desde administración.'),
+            )
 
 
 @admin.register(ProjectUpdateReview)

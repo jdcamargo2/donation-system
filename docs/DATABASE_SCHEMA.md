@@ -485,7 +485,7 @@ created_by_id
 → Usuario que realizó técnicamente el registro
 
 reported_by_id
-→ Responsable institucional al que se atribuye el avance
+→ Persona responsable del contenido del avance
 ```
 
 ---

@@ -152,7 +152,7 @@ PUBLISHED
 ### Actores
 
 * `created_by`: usuario autenticado que registró técnicamente el avance.
-* `reported_by`: responsable institucional al que se atribuye el avance.
+* `reported_by`: persona responsable del contenido al que se atribuye el avance.
 
 ### Reglas
 
@@ -160,7 +160,7 @@ PUBLISHED
 * El porcentaje de progreso debe estar entre 0 y 100.
 * La publicación constituye una transición explícita.
 * Un avance publicado es inmutable.
-* El creador técnico y el responsable institucional representan responsabilidades diferentes.
+* El creador técnico y la persona responsable del avance representan responsabilidades diferentes.
 * La revisión institucional no altera el estado del avance.
 
 ## 8. `ProjectDocument`

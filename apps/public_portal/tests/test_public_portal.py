@@ -14,6 +14,7 @@ class PublicPortalTests(TestCase):
     def setUp(self):
         cache.clear()
         self.user = create_user()
+        self.reporter = create_user('public-update-reporter')
         self.institution = create_institution()
         self.institution.contact_email = 'privado@example.com'
         self.institution.contact_phone = '+58-000-privado'
@@ -30,6 +31,7 @@ class PublicPortalTests(TestCase):
             title='Avance aprobado',
             description='Descripción pública aprobada.',
             created_by=self.user,
+            reported_by=self.reporter,
         )
         publish_project_update(self.approved_update.pk, self.user)
         self.pending_update = register_advance(
@@ -37,6 +39,7 @@ class PublicPortalTests(TestCase):
             title='Avance pendiente privado',
             description='Pendiente de revisión.',
             created_by=self.user,
+            reported_by=self.reporter,
         )
         self.rejected_update = ProjectUpdate.objects.create(
             project=self.project,
@@ -60,6 +63,7 @@ class PublicPortalTests(TestCase):
             title=f'Avance aprobado {project_status}',
             description='Avance que no debe permanecer publicado.',
             created_by=self.user,
+            reported_by=self.reporter,
         )
         publish_project_update(update.pk, self.user)
         project.status = project_status
@@ -76,6 +80,7 @@ class PublicPortalTests(TestCase):
         self.assertNotContains(response, 'privado@example.com')
         self.assertNotContains(response, '+58-000-privado')
         self.assertNotContains(response, self.user.username)
+        self.assertNotContains(response, self.reporter.username)
         self.assertNotContains(response, 'Nota interna de revisión.')
 
     def test_public_home_returns_200_without_login(self):
@@ -184,6 +189,7 @@ class PublicPortalTests(TestCase):
             title='Avance aprobado que dejo de ser público',
             description='No debe aparecer cuando el proyecto deja de estar activo.',
             created_by=self.user,
+            reported_by=self.reporter,
         )
         publish_project_update(private_update.pk, self.user)
         private_project.status = Project.Status.SUSPENDED
@@ -378,6 +384,8 @@ class PublicPortalTests(TestCase):
                 project_id=project.pk,
                 title=f'Avance aprobado {index}',
                 description='Avance aprobado para paginación.',
+                created_by=self.user,
+                reported_by=self.reporter,
             )
             publish_project_update(update.pk, self.user)
 
