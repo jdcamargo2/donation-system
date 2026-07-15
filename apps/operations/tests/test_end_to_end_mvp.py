@@ -163,6 +163,7 @@ class EndToEndMVPFlowTests(TestCase):
                 'description': 'Se completó una entrega verificable.',
                 'update_date': '2026-07-12',
                 'progress_percentage': '60',
+                'reported_by': self.user.pk,
             },
         )
         self.assertRedirects(approved_update_response, reverse('project_detail', args=[project.pk]))
@@ -173,6 +174,7 @@ class EndToEndMVPFlowTests(TestCase):
             data={
                 'title': 'Entrega pendiente E2E',
                 'description': 'Aún no debe publicarse.',
+                'reported_by': self.user.pk,
                 'update_date': '2026-07-12',
                 'progress_percentage': '45',
             },

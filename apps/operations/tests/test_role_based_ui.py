@@ -11,6 +11,8 @@ from apps.operations.roles import (
     ROLE_EXTERNAL_AUDITOR,
     ROLE_FIELD_OPERATOR,
     ROLE_PROJECT_COMMITTEE,
+    ROLE_PROJECT_UPDATE_DECIDER,
+    ROLE_PROJECT_UPDATE_REVIEWER,
     ROLE_SIGEDON_ADMIN,
 )
 from apps.operations.services import (
@@ -29,10 +31,12 @@ class RoleBasedUITests(TestCase):
         self.project = create_project()
         self.project.status = Project.Status.ACTIVE
         self.project.save()
+        self.reporter = self.create_user_for_role('ui-update-reporter', ROLE_SIGEDON_ADMIN)
         self.project_update = register_advance(
             project_id=self.project.pk,
             title='Avance visible por rol',
             description='Pendiente de revisión.',
+            reported_by=self.reporter,
         )
         self.institution = create_institution()
         self.donation = create_donation(donor=self.institution)
@@ -200,36 +204,38 @@ class RoleBasedUITests(TestCase):
         self.assertNotContains(update_response, reverse('project_update_delete', args=[self.project_update.pk]))
         self.assertNotContains(update_response, reverse('project_update_publish', args=[self.project_update.pk]))
 
-    def test_project_committee_sees_review_action_for_published_update(self):
+    def test_reviewer_sees_review_action_for_published_update(self):
         publisher = self.create_user_for_role('ui-review-publisher', ROLE_SIGEDON_ADMIN)
         published_update = register_advance(
             project_id=self.project.pk,
             title='Avance publicado para Comité',
             description='Listo para revisión documental.',
+            reported_by=publisher,
         )
         publish_project_update(published_update.pk, publisher)
-        self.client.force_login(self.create_user_for_role('ui-review-committee', ROLE_PROJECT_COMMITTEE))
+        self.client.force_login(self.create_user_for_role('ui-reviewer', ROLE_PROJECT_UPDATE_REVIEWER))
 
         response = self.client.get(reverse('project_update_detail', args=[published_update.pk]))
 
         self.assertContains(response, reverse('project_update_review_create', args=[published_update.pk]))
         self.assertNotContains(response, reverse('project_update_publish', args=[published_update.pk]))
 
-    def test_project_committee_sees_decision_action_for_reviewed_update(self):
+    def test_decider_sees_decision_action_for_reviewed_update(self):
         publisher = self.create_user_for_role('ui-decision-publisher', ROLE_SIGEDON_ADMIN)
         published_update = register_advance(
             project_id=self.project.pk,
             title='Avance revisado para Comité',
             description='Listo para resultado institucional.',
+            reported_by=publisher,
         )
         publish_project_update(published_update.pk, publisher)
-        committee_member = self.create_user_for_role('ui-decision-committee', ROLE_PROJECT_COMMITTEE)
+        reviewer = self.create_user_for_role('ui-decision-reviewer', ROLE_PROJECT_UPDATE_REVIEWER)
         review = create_project_update_review(
             update_id=published_update.pk,
             observations='Revisión documental disponible.',
-            actor=committee_member,
+            actor=reviewer,
         )
-        self.client.force_login(committee_member)
+        self.client.force_login(self.create_user_for_role('ui-decision-decider', ROLE_PROJECT_UPDATE_DECIDER))
 
         response = self.client.get(reverse('project_update_review_detail', args=[review.pk]))
 
@@ -237,51 +243,55 @@ class RoleBasedUITests(TestCase):
 
     def test_review_and_decision_routes_activate_update_navigation(self):
         publisher = self.create_user_for_role('ui-review-navigation-publisher', ROLE_SIGEDON_ADMIN)
-        committee_member = self.create_user_for_role('ui-review-navigation-committee', ROLE_PROJECT_COMMITTEE)
+        reviewer = self.create_user_for_role('ui-review-navigation-reviewer', ROLE_PROJECT_UPDATE_REVIEWER)
+        decider = self.create_user_for_role('ui-review-navigation-decider', ROLE_PROJECT_UPDATE_DECIDER)
         unreviewed_update = register_advance(
             project_id=self.project.pk,
             title='Avance sin revisión para navegación',
             description='Debe activar el enlace Avances.',
+            reported_by=publisher,
         )
         publish_project_update(unreviewed_update.pk, publisher)
         reviewable_update = register_advance(
             project_id=self.project.pk,
             title='Avance para rutas de revisión',
             description='Debe activar el enlace Avances.',
+            reported_by=publisher,
         )
         publish_project_update(reviewable_update.pk, publisher)
         review = create_project_update_review(
             update_id=reviewable_update.pk,
             observations='Revisión para navegación.',
-            actor=committee_member,
+            actor=reviewer,
         )
         decided_update = register_advance(
             project_id=self.project.pk,
             title='Avance para detalle de resultado',
             description='Debe activar el enlace Avances.',
+            reported_by=publisher,
         )
         publish_project_update(decided_update.pk, publisher)
         decided_review = create_project_update_review(
             update_id=decided_update.pk,
             observations='Revisión con resultado.',
-            actor=committee_member,
+            actor=reviewer,
         )
         decision = create_project_update_review_decision(
             review_id=decided_review.pk,
             outcome='conforming',
             rationale='Resultado para navegación.',
-            actor=committee_member,
+            actor=decider,
         )
-        self.client.force_login(committee_member)
 
         cases = [
-            reverse('project_update_review_create', args=[unreviewed_update.pk]),
-            reverse('project_update_review_detail', args=[review.pk]),
-            reverse('project_update_review_decision_create', args=[review.pk]),
-            reverse('project_update_review_decision_detail', args=[decision.pk]),
+            (reviewer, reverse('project_update_review_create', args=[unreviewed_update.pk])),
+            (reviewer, reverse('project_update_review_detail', args=[review.pk])),
+            (decider, reverse('project_update_review_decision_create', args=[review.pk])),
+            (decider, reverse('project_update_review_decision_detail', args=[decision.pk])),
         ]
-        for url in cases:
+        for user, url in cases:
             with self.subTest(url=url):
+                self.client.force_login(user)
                 response = self.client.get(url)
 
                 self.assert_navigation_activity(response, 'Proyectos', reverse('project_list'), is_active=False)

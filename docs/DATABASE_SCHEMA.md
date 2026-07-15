@@ -134,6 +134,10 @@ kobo_ficha01territorio
         └──< kobo_ficha01coveredcommunity
 ```
 
+Las dos tablas Ficha01 del diagrama describen schema legado. No tienen
+escritores activos conocidos, no participan en el pipeline vigente y no son la
+fuente de verdad del staging genérico basado en `kobo_kobosubmission`.
+
 Convenciones utilizadas:
 
 ```text
@@ -252,7 +256,7 @@ Representa una donación monetaria.
 | `donor_id`          | `ForeignKey`    | Referencia a `operations_institution` |
 | `donation_type`     | `CharField`     | Obligatorio                           |
 | `amount`            | `DecimalField`  | Mayor que cero                        |
-| `currency`          | `CharField`     | USD como moneda operativa             |
+| `currency`          | `CharField`     | USD obligatorio por constraint         |
 | `objective`         | `TextField`     | Obligatorio                           |
 | `restrictions`      | `TextField`     | Opcional                              |
 | `commitment_date`   | `DateField`     | Opcional                              |
@@ -354,7 +358,7 @@ Representa un gasto registrado contra una asignación.
 | `expense_date`          | `DateField`     | Obligatorio                              |
 | `category`              | `CharField`     | Obligatorio                              |
 | `amount`                | `DecimalField`  | Mayor que cero                           |
-| `currency`              | `CharField`     | Obligatorio                              |
+| `currency`              | `CharField`     | USD obligatorio por constraint            |
 | `reason`                | `CharField`     | Obligatorio                              |
 | `provider_or_recipient` | `CharField`     | Obligatorio                              |
 | `payment_method`        | `CharField`     | Obligatorio                              |
@@ -485,7 +489,7 @@ created_by_id
 → Usuario que realizó técnicamente el registro
 
 reported_by_id
-→ Responsable institucional al que se atribuye el avance
+→ Persona responsable del contenido del avance
 ```
 
 ---
@@ -895,7 +899,9 @@ Tabla heredada de la primera integración de la Ficha 1.
 | `territory_type`       | `JSONField`    | Obligatorio    |
 | `kobo_uuid`            | `UUIDField`    | Único          |
 
-Se conserva por compatibilidad con el flujo histórico.
+Se conserva temporalmente como schema legado por compatibilidad histórica. No
+tiene escritores activos conocidos, no es utilizado por el pipeline vigente y
+no debe recibir nuevas escrituras sin una decisión arquitectónica explícita.
 
 ---
 
@@ -917,6 +923,10 @@ Representa las comunidades cubiertas dentro de la Ficha 1 heredada.
 ```text
 Ficha01Territorio 1 ──< Ficha01CoveredCommunity
 ```
+
+Esta relación permanece en el schema, pero no constituye la fuente de verdad
+activa. Su eliminación futura, junto con la tabla territorial, requiere una
+decisión de producto y una migración específica.
 
 ## 7. Tablas de autenticación y permisos
 

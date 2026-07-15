@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
+from apps.operations.choices import OPERATING_CURRENCY_CHOICES
 from apps.operations.forms import DonationForm, ExpenseForm, FundAllocationForm, InstitutionForm, ProjectForm
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, SupportingDocument
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_expense, create_institution, create_project
@@ -17,6 +18,8 @@ class FormTests(TestCase):
         self.override.enable()
         self.donor = create_institution()
         self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
         self.donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
 
     def tearDown(self):
@@ -64,6 +67,7 @@ class FormTests(TestCase):
         self.assertNotIn('code', project_form.fields)
         self.assertEqual(donation_form.fields['donation_type'].widget.__class__.__name__, 'Select')
         self.assertNotIn('currency', donation_form.fields)
+        self.assertEqual(OPERATING_CURRENCY_CHOICES, (('USD', 'USD'),))
         self.assertEqual(donation_form.fields['amount'].widget.input_type, 'text')
         self.assertIn('money-input', donation_form.fields['amount'].widget.attrs['class'])
         self.assertIn('js-money-input', donation_form.fields['amount'].widget.attrs['class'])
@@ -172,6 +176,7 @@ class FormTests(TestCase):
                 'received_date': '',
                 'status': Donation.Status.RECEIVED,
                 'support_reference': '',
+                'currency': 'EUR',
             }
         )
 
@@ -436,12 +441,14 @@ class FormTests(TestCase):
                 'description': '',
                 'observations': '',
                 'support_title': 'Receipt',
+                'currency': 'EUR',
             },
             files={'support_file': upload},
         )
 
         self.assertTrue(form.is_valid(), form.errors)
         expense = form.save()
+        self.assertEqual(expense.currency, 'USD')
         self.assertEqual(SupportingDocument.objects.filter(expense=expense).count(), 1)
 
     def test_project_form_rejects_negative_budget(self):

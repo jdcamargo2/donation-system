@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Remediación - SIGEDON{% endblock %}
+{% block content %}
+<h1>Remediación</h1><p><strong>Estado:</strong> {{ object.get_status_display }}</p><p>{{ object.response }}</p>
+{% if object.resolution_notes %}<p><strong>Resolución:</strong> {{ object.resolution_notes }}</p>{% endif %}
+{% if object.status == 'draft' and perms.operations.change_projectupdateremediation %}<a href="{% url 'project_update_remediation_update' object.pk %}">Editar</a>{% endif %}
+{% if object.status == 'draft' and perms.operations.add_projectupdateremediationattachment %}<a href="{% url 'project_update_remediation_attachment_create' object.pk %}">Agregar adjunto</a>{% endif %}
+{% if object.status == 'draft' and perms.operations.submit_projectupdateremediation %}<form method="post" action="{% url 'project_update_remediation_submit' object.pk %}">{% csrf_token %}<button>Enviar remediación</button></form>{% endif %}
+{% if object.status == 'submitted' and perms.operations.resolve_projectupdateremediation %}<a href="{% url 'project_update_remediation_resolve' object.pk %}">Resolver</a>{% endif %}
+<ul>{% for attachment in object.attachments.all %}<li>{{ attachment.title|default:attachment }} {% if perms.operations.view_projectupdateremediationattachment %}<a href="{% url 'project_update_remediation_attachment_download' attachment.pk %}">Descargar</a>{% endif %}{% if object.status == 'draft' and perms.operations.delete_projectupdateremediationattachment %}<form method="post" action="{% url 'project_update_remediation_attachment_delete' attachment.pk %}">{% csrf_token %}<button>Eliminar</button></form>{% endif %}</li>{% endfor %}</ul>
+{% endblock %}

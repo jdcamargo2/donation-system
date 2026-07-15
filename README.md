@@ -25,11 +25,14 @@ El MVP se encuentra funcional y cubierto por pruebas automatizadas.
 
 | Indicador                             | Estado          |
 | ------------------------------------- | --------------- |
-| Pruebas automatizadas                 | 620             |
+| Pruebas automatizadas                 | 791             |
 | Estado de la suite                    | OK              |
 | Migraciones pendientes                | Ninguna         |
 | Django system check                   | Sin incidencias |
 | Base de datos soportada en producción | PostgreSQL      |
+
+La cifra de pruebas representa el estado de referencia actual de esta rama y
+debe actualizarse cuando el total cambie de forma estable.
 
 ## Stack tecnológico
 
@@ -197,8 +200,17 @@ python manage.py reconcile_kobo_submissions
 python manage.py sync_kobo_ficha_01
 ```
 
+> [!WARNING]
+> `seed_sigedon_demo` es exclusivamente local: usa ORM directo, ofrece
+> idempotencia parcial y no reproduce toda la trazabilidad ni las reglas del
+> flujo operativo. Nunca debe ejecutarse sobre una base de producción. Consulte
+> [Operación y mantenimiento](docs/OPERATIONS.md#2-datos-de-demostración).
+
 > [!NOTE]
-> El comando `sync_kobo_ficha_01` pertenece al flujo legado de compatibilidad de la Ficha 1. El procesamiento ordinario debe utilizar los activos configurados y el pipeline general de Kobo.
+> El comando `sync_kobo_ficha_01` es una entrada de compatibilidad para Ficha 1:
+> registra el payload en el staging genérico `KoboSubmission`; no escribe en los
+> modelos específicos Ficha01. El procesamiento ordinario debe utilizar activos
+> configurados y el pipeline general de Kobo.
 
 ## Verificación
 

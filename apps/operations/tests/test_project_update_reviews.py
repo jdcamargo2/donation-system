@@ -9,7 +9,12 @@ from apps.operations.admin import ProjectUpdateReviewAdmin
 from apps.operations.forms import ProjectUpdateReviewForm
 from apps.operations.models import AuditLog, Project, ProjectUpdate, ProjectUpdateReview
 from apps.operations.role_services import sync_operation_roles
-from apps.operations.roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_PROJECT_COMMITTEE
+from apps.operations.roles import (
+    ROLE_EXTERNAL_AUDITOR,
+    ROLE_FIELD_OPERATOR,
+    ROLE_PROJECT_UPDATE_REVIEWER,
+    ROLE_SIGEDON_ADMIN,
+)
 from apps.operations.services import (
     ProjectUpdateReviewError,
     create_project_update_review,
@@ -25,7 +30,7 @@ class ProjectUpdateReviewTests(TestCase):
         self.committee_member = get_user_model().objects.create_user(
             username='committee-reviewer', password='pass-12345'
         )
-        self.committee_member.groups.add(Group.objects.get(name=ROLE_PROJECT_COMMITTEE))
+        self.committee_member.groups.add(Group.objects.get(name=ROLE_PROJECT_UPDATE_REVIEWER))
         self.field_operator = get_user_model().objects.create_user(
             username='field-reviewer', password='pass-12345'
         )
@@ -42,6 +47,7 @@ class ProjectUpdateReviewTests(TestCase):
             title='Avance para revisión documental',
             description='Contenido que debe permanecer inalterado al revisar.',
             created_by=self.field_operator,
+            reported_by=self.field_operator,
         )
 
     def create_published_update(self):
@@ -173,12 +179,28 @@ class ProjectUpdateReviewTests(TestCase):
         published_update = self.create_published_update()
         user = get_user_model().objects.create_user(username='ordinary-reviewer', password='pass-12345')
         self.assertFalse(user.is_superuser)
-        self.assertFalse(user.has_perm('operations.add_projectupdatereview'))
+        self.assertFalse(user.has_perm('operations.review_projectupdate'))
         self.client.force_login(user)
 
         response = self.client.post(
             reverse('project_update_review_create', args=[published_update.pk]),
             {'observations': 'Intento no autorizado.'},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ProjectUpdateReview.objects.filter(project_update=published_update).exists())
+
+    def test_sigedon_admin_cannot_create_review(self):
+        published_update = self.create_published_update()
+        administrator = get_user_model().objects.create_user(
+            username='admin-reviewer', password='pass-12345'
+        )
+        administrator.groups.add(Group.objects.get(name=ROLE_SIGEDON_ADMIN))
+        self.client.force_login(administrator)
+
+        response = self.client.post(
+            reverse('project_update_review_create', args=[published_update.pk]),
+            {'observations': 'Intento administrativo no autorizado.'},
         )
 
         self.assertEqual(response.status_code, 403)
@@ -198,14 +220,14 @@ class ProjectUpdateReviewTests(TestCase):
 
                 self.assertEqual(response.status_code, 403)
 
-    def test_review_action_is_hidden_without_add_permission(self):
+    def test_review_action_is_hidden_without_functional_permission(self):
         published_update = self.create_published_update()
         user = get_user_model().objects.create_user(username='ordinary-detail-viewer', password='pass-12345')
         user.user_permissions.add(Permission.objects.get(
             content_type__app_label='operations', codename='view_projectupdate'
         ))
         self.assertFalse(user.is_superuser)
-        self.assertFalse(user.has_perm('operations.add_projectupdatereview'))
+        self.assertFalse(user.has_perm('operations.review_projectupdate'))
         self.client.force_login(user)
 
         response = self.client.get(reverse('project_update_detail', args=[published_update.pk]))
@@ -213,17 +235,20 @@ class ProjectUpdateReviewTests(TestCase):
         self.assertNotContains(response, reverse('project_update_review_create', args=[published_update.pk]))
         self.assertNotContains(response, 'Registrar revisión')
 
-    def test_review_permission_matrix_keeps_mutation_with_committee_only(self):
+    def test_review_permission_matrix_is_limited_to_reviewer_role(self):
         auditor = get_user_model().objects.create_user(username='auditor-reviewer', password='pass-12345')
         auditor.groups.add(Group.objects.get(name=ROLE_EXTERNAL_AUDITOR))
         ordinary_user = get_user_model().objects.create_user(username='ordinary-permissions', password='pass-12345')
-        administrator = create_user('review-permissions-admin')
+        administrator = get_user_model().objects.create_user(
+            username='review-permissions-admin', password='pass-12345'
+        )
+        administrator.groups.add(Group.objects.get(name=ROLE_SIGEDON_ADMIN))
 
-        self.assertTrue(self.committee_member.has_perm('operations.add_projectupdatereview'))
-        self.assertFalse(self.field_operator.has_perm('operations.add_projectupdatereview'))
-        self.assertFalse(auditor.has_perm('operations.add_projectupdatereview'))
-        self.assertFalse(ordinary_user.has_perm('operations.add_projectupdatereview'))
-        self.assertTrue(administrator.has_perm('operations.add_projectupdatereview'))
+        self.assertTrue(self.committee_member.has_perm('operations.review_projectupdate'))
+        self.assertFalse(self.field_operator.has_perm('operations.review_projectupdate'))
+        self.assertFalse(auditor.has_perm('operations.review_projectupdate'))
+        self.assertFalse(ordinary_user.has_perm('operations.review_projectupdate'))
+        self.assertFalse(administrator.has_perm('operations.review_projectupdate'))
 
     def test_review_interface_only_offers_creation_for_unreviewed_published_updates(self):
         published_update = self.create_published_update()

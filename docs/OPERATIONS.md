@@ -51,7 +51,16 @@ python manage.py runserver
 
 ## 2. Datos de demostración
 
-Los datos de demostración pueden cargarse mediante:
+`seed_sigedon_demo` genera datos locales para explorar la interfaz, realizar
+revisiones manuales y preparar capturas de pantalla. No representa una carga
+productiva ni una verificación integral de las reglas operativas.
+
+### Precondición
+
+* Ejecutar únicamente en un entorno local o efímero.
+* Utilizar una base de datos no productiva donde se acepten datos de demostración.
+
+Comando:
 
 ```bash
 python manage.py seed_sigedon_demo
@@ -66,10 +75,20 @@ python manage.py seed_sigedon_demo
 
 ### Reglas
 
-* Los datos de demostración no deben ejecutarse en producción sin validación previa.
-* Debe verificarse qué registros serán creados o actualizados.
+* **No debe ejecutarse en producción.**
+* Usa ORM directo intencionalmente y no pasa por todos los services de dominio.
+* No genera trazabilidad completa en `AuditLog`.
+* Puede crear gastos sin `SupportingDocument`, aunque el flujo UI operativo lo exige.
+* Usa códigos explícitos reservados para demostración.
+* Su idempotencia es parcial: actualiza entidades clave, pero no garantiza que
+  una base previamente modificada vuelva a un estado canónico.
 * Las credenciales demo no deben reutilizarse en entornos reales.
-* La ejecución repetida debe realizarse únicamente cuando el comando lo permita de forma segura.
+
+### Postcondición
+
+* Quedan disponibles las entidades mínimas para navegar y revisar la interfaz.
+* Los datos resultantes no deben considerarse evidencia de cumplimiento de
+  todas las reglas, auditorías o invariantes del flujo operativo.
 
 ## 3. Sincronización de roles
 
@@ -232,31 +251,69 @@ python manage.py check
 
 Antes de despliegues, migraciones relevantes o cambios de infraestructura, debe existir una copia de seguridad verificable.
 
-Los respaldos deben incluir, según corresponda:
+Los scripts manuales viven en `deploy/backups/` (ver `deploy/backups/README.md`). Esta fase **no** automatiza frecuencia ni retención con cron/systemd.
 
-* base de datos;
-* archivos privados;
-* archivos públicos necesarios;
-* configuración de infraestructura;
-* variables de entorno almacenadas de forma segura.
+### Ventana de mantenimiento
+
+La consistencia del backup exige una **ventana de mantenimiento obligatoria**:
+
+* detener web, workers, comandos de procesamiento Kobo y uploads;
+* exportar `SIGEDON_MAINTENANCE_CONFIRMED=YES`;
+* exportar `SIGEDON_BACKUP_ROOT` (se crea automáticamente con permisos `0700` si no existe) y `SIGEDON_MEDIA_ROOT` (debe existir; no se crea);
+* ejecutar `deploy/backups/backup_sigedon.sh`.
+
+El script no puede comprobar por sí solo que esos procesos estén detenidos.
+
+### Contenido del respaldo
+
+Cada backup publicado es un directorio:
+
+```text
+<backup_id>/
+  database.dump    # pg_dump --format=custom
+  media.tar.gz
+  manifest.json
+```
+
+Incluye PostgreSQL + `MEDIA_ROOT`. La configuración crítica y los secretos deben respaldarse fuera de estos scripts, en un sistema seguro.
+
+### Verificación y restore aislado
+
+```bash
+./deploy/backups/verify_backup.sh /ruta/al/<backup_id>
+```
+
+La restauración solo está permitida hacia bases con prefijo seguro (`test_restore_` / `staging_restore_`), distintas de `POSTGRES_DB`, con `SIGEDON_RESTORE_CONFIRM=YES` y un directorio de media nuevo/vacío. Nunca sobreescribir el `MEDIA_ROOT` activo ni modificar `.env`.
+
+### Post-restore
+
+Con el entorno apuntando a la base y media restauradas:
+
+```bash
+python manage.py migrate --check
+python manage.py check
+python manage.py verify_postgres_security
+python manage.py reconcile_operational_code_sequences
+python manage.py verify_restored_data
+python manage.py sync_sigedon_roles
+```
+
+`reconcile_operational_code_sequences` funciona en modo detect-only y es de
+solo lectura: no crea ni ajusta secuencias. El comando falla ante una secuencia
+ausente (`MISSING_SEQUENCE`), atrasada (`LAGGING_SEQUENCE`) o inválida
+(`INVALID_SEQUENCE`). No existe reparación automática; cualquier corrección
+debe revisarse y ejecutarse manualmente. Una secuencia adelantada es válida.
 
 ### Reglas
 
 * Los respaldos no deben versionarse.
 * Deben almacenarse fuera del repositorio.
 * Deben protegerse mediante controles de acceso.
-* Las restauraciones deben probarse periódicamente.
+* Preferir `~/.pgpass` frente a `PGPASSWORD` en los scripts.
+* Las restauraciones deben probarse periódicamente (al menos trimestral).
 * Un respaldo no se considera válido hasta comprobar que puede restaurarse.
-
-Después de una restauración debe ejecutarse:
-
-```bash
-python manage.py migrate
-python manage.py sync_sigedon_roles
-python manage.py check
-```
-
-También debe verificarse la consistencia de archivos, secuencias y permisos.
+* Cifrado y copia off-site son requisitos de infraestructura (aún no implementados en scripts).
+* **RPO/RTO no están definidos** hasta medir restauraciones reales.
 
 ## 10. Auditoría
 
@@ -377,7 +434,7 @@ La ausencia de un botón en la interfaz no demuestra que el permiso esté correc
 * fechas y estados operativos;
 * selectores utilizados por el dashboard o portal.
 
-Los datos anulados y los registros históricos en monedas no operativas pueden quedar excluidos deliberadamente.
+Los datos anulados quedan excluidos deliberadamente; toda operación monetaria válida está expresada en USD.
 
 ---
 

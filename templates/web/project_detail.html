@@ -32,12 +32,11 @@
 {% endif %}
 
 <div class="row g-3 mb-4">
-    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Presupuesto</div><div class="ops-metric-value">{{ project_financial_summary.estimated_budget|money_es }}</div></div></div></div>
-    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Financiado</div><div class="ops-metric-value">{{ project_financial_summary.funded_amount|money_es }}</div></div></div></div>
-    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Ejecutado</div><div class="ops-metric-value">{{ project_financial_summary.executed_amount|money_es }}</div></div></div></div>
-    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body"><div class="ops-metric-label">Disponible</div><div class="ops-metric-value">{{ project_financial_summary.available_amount|money_es }}</div><div class="small text-muted">Ejecución {{ execution_percentage|floatformat:1 }}%</div></div></div></div>
+    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Presupuesto USD</div><div class="ops-metric-value">{{ project_financial_summary.estimated_budget|money_es }} USD</div></div></div></div>
+    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Financiado USD</div><div class="ops-metric-value">{{ project_financial_summary.funded_amount|money_es }} USD</div></div></div></div>
+    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Ejecutado USD</div><div class="ops-metric-value">{{ project_financial_summary.executed_amount|money_es }} USD</div></div></div></div>
+    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body"><div class="ops-metric-label">Disponible USD</div><div class="ops-metric-value">{{ project_financial_summary.available_amount|money_es }} USD</div><div class="small text-muted">Ejecución {{ execution_percentage|floatformat:1 }}%</div></div></div></div>
 </div>
-
 <div class="row g-4">
     <div class="col-lg-7">
         <div class="card border-0 h-100 ops-detail-card">
@@ -93,7 +92,7 @@
                                 {{ update.title }}
                             </a>
                             <div class="small text-muted">
-                                {{ update.update_date }} · {{ update.progress_percentage }}% · Responsable institucional: {{ update.reported_by|default:"—" }}
+                                {{ update.update_date }} · {{ update.progress_percentage }}% · Persona responsable del avance: {{ update.reported_by|default:"—" }}
                             </div>
                         </div>
                         <span class="badge ops-status-badge">{{ update.get_status_display }}</span>
@@ -104,6 +103,8 @@
                         {% if update.status == 'draft' %}
                             {% if perms.operations.change_projectupdate %}
                                 <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_update' update.pk %}">Editar</a>
+                            {% endif %}
+                            {% if perms.operations.publish_projectupdate %}
                                 <form method="post" action="{% url 'project_update_publish' update.pk %}">
                                     {% csrf_token %}
                                     <button class="btn btn-sm btn-outline-primary" type="submit">Publicar</button>

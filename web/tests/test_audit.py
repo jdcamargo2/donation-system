@@ -4,7 +4,7 @@ from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 
-from apps.operations.models import AuditLog, Donation, Expense, FundAllocation
+from apps.operations.models import AuditLog, Donation, Expense, FundAllocation, Project
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_expense, create_institution, create_project, create_user
 
 
@@ -14,6 +14,8 @@ class AuditTests(TestCase):
         self.client.force_login(self.user)
         self.donor = create_institution()
         self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
         self.donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
         self.allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('50.00'))
         self.expense = create_expense(allocation=self.allocation, amount=Decimal('10.00'))

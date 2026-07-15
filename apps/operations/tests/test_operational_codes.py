@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase
 
@@ -26,9 +26,16 @@ class OperationalCodeTests(TestCase):
         self.donor = create_institution()
 
     def test_all_entities_receive_unique_six_digit_codes(self):
-        projects = [Project.objects.create(name=f'Proyecto {index}') for index in range(2)]
+        projects = [
+            Project.objects.create(name=f'Proyecto {index}', status=Project.Status.ACTIVE)
+            for index in range(2)
+        ]
         donations = [
-            Donation.objects.create(donor=self.donor, amount=Decimal('100.00'))
+            Donation.objects.create(
+                donor=self.donor,
+                amount=Decimal('100.00'),
+                status=Donation.Status.RECEIVED,
+            )
             for _index in range(2)
         ]
         allocations = [
@@ -107,6 +114,93 @@ class OperationalCodeTests(TestCase):
             before,
         )
 
+    def test_project_creation_rollback_reuses_the_reserved_code(self):
+        before = OperationalCodeSequence.objects.get(namespace='project').next_value
+
+        with self.assertRaises(RuntimeError):
+            with transaction.atomic():
+                Project.objects.create(name='Proyecto revertido')
+                raise RuntimeError('Fallo posterior a la creación.')
+
+        self.assertFalse(Project.objects.filter(name='Proyecto revertido').exists())
+        self.assertEqual(
+            OperationalCodeSequence.objects.get(namespace='project').next_value,
+            before,
+        )
+        project = Project.objects.create(name='Proyecto posterior al rollback')
+        self.assertEqual(project.code, f'PRJ-{before:06d}')
+
+    def test_post_commit_deletion_does_not_reuse_a_project_code(self):
+        first = Project.objects.create(name='Proyecto eliminado después de confirmar')
+        first_number = int(first.code.removeprefix('PRJ-'))
+        first.delete()
+
+        second = Project.objects.create(name='Proyecto posterior a eliminación')
+
+        self.assertEqual(second.code, f'PRJ-{first_number + 1:06d}')
+
+    def test_six_digit_padding_is_not_a_code_limit(self):
+        sequence = OperationalCodeSequence.objects.get(namespace='project')
+        sequence.next_value = 999999
+        sequence.save(update_fields=('next_value',))
+
+        with transaction.atomic():
+            padded_code = reserve_operational_code(namespace='project', prefix='PRJ')
+            expanded_code = reserve_operational_code(namespace='project', prefix='PRJ')
+
+        self.assertEqual(padded_code, 'PRJ-999999')
+        self.assertEqual(expanded_code, 'PRJ-1000000')
+
+    def test_manual_codes_bypass_generation_but_not_uniqueness_or_model_immutability(self):
+        before = OperationalCodeSequence.objects.get(namespace='project').next_value
+        project = Project.objects.create(code='PRJ-MANUAL-SEED', name='Proyecto manual controlado')
+
+        self.assertEqual(
+            OperationalCodeSequence.objects.get(namespace='project').next_value,
+            before,
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Project.objects.create(
+                    code='PRJ-MANUAL-SEED', name='Proyecto manual duplicado'
+                )
+
+        project.code = 'PRJ-MANUAL-CHANGED'
+        with self.assertRaises(ValidationError):
+            project.save()
+        # QuerySet.update() bypasses model save() and its immutability check.
+        Project.objects.filter(pk=project.pk).update(code='PRJ-QUERYSET-BYPASS')
+        project.refresh_from_db()
+        self.assertEqual(project.code, 'PRJ-QUERYSET-BYPASS')
+
+    def test_entity_namespaces_advance_independently(self):
+        before = {
+            namespace: OperationalCodeSequence.objects.get(namespace=namespace).next_value
+            for namespace in ('project', 'donation', 'expense')
+        }
+
+        project = Project.objects.create(name='Proyecto namespace independiente')
+        donation = Donation.objects.create(
+            donor=self.donor,
+            amount=Decimal('100.00'),
+            status=Donation.Status.RECEIVED,
+        )
+
+        self.assertEqual(project.code, f"PRJ-{before['project']:06d}")
+        self.assertEqual(donation.code, f"DON-{before['donation']:06d}")
+        self.assertEqual(
+            OperationalCodeSequence.objects.get(namespace='project').next_value,
+            before['project'] + 1,
+        )
+        self.assertEqual(
+            OperationalCodeSequence.objects.get(namespace='donation').next_value,
+            before['donation'] + 1,
+        )
+        self.assertEqual(
+            OperationalCodeSequence.objects.get(namespace='expense').next_value,
+            before['expense'],
+        )
+
     def test_reservation_rejects_invalid_namespace_and_prefix(self):
         with transaction.atomic(), self.assertRaises(ValidationError):
             reserve_operational_code(namespace='unknown', prefix='UNK')
@@ -118,8 +212,14 @@ class OperationalCodeMigrationTests(TransactionTestCase):
     migrate_from = ('operations', '0006_monetary_row_constraints')
     migrate_to = ('operations', '0007_operational_codes')
 
+    def _restore_leaf_migrations(self):
+        executor = MigrationExecutor(transaction.get_connection())
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
     def setUp(self):
         super().setUp()
+        # Restaura hojas aunque setUp/test fallen a mitad de camino.
+        self.addCleanup(self._restore_leaf_migrations)
         executor = MigrationExecutor(transaction.get_connection())
         executor.migrate([self.migrate_from])
         old_apps = executor.loader.project_state([self.migrate_from]).apps
@@ -164,10 +264,6 @@ class OperationalCodeMigrationTests(TransactionTestCase):
         executor = MigrationExecutor(transaction.get_connection())
         executor.migrate([self.migrate_to])
         self.apps = executor.loader.project_state([self.migrate_to]).apps
-
-    def tearDown(self):
-        MigrationExecutor(transaction.get_connection()).migrate([self.migrate_to])
-        super().tearDown()
 
     def test_migration_preserves_and_backfills_codes_and_sequences(self):
         MigratedProject = self.apps.get_model('operations', 'Project')

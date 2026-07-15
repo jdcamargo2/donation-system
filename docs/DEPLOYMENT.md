@@ -90,6 +90,8 @@ KOBO_WEBHOOK_USERNAME=
 KOBO_WEBHOOK_SECRET=
 KOBO_REQUEST_TIMEOUT_SECONDS=15
 KOBO_MAX_ATTACHMENT_BYTES=10485760
+KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS=900
+KOBO_WEBHOOK_MAX_BYTES=1048576
 ```
 
 ### Reglas
@@ -98,6 +100,8 @@ KOBO_MAX_ATTACHMENT_BYTES=10485760
 * El webhook debe publicarse únicamente mediante HTTPS.
 * Las credenciales deben rotarse cuando exista sospecha de exposición.
 * El tamaño máximo de adjuntos debe ajustarse a la capacidad del servidor.
+* `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` controla la recuperación de reservas `PROCESSING` atascadas; no requiere una tarea periódica adicional.
+* `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo entrante antes de deserializarlo.
 * Los secretos no deben aparecer en logs.
 * La activación de Kobo requiere activos, definiciones y bindings correctamente configurados.
 
@@ -260,6 +264,45 @@ python manage.py showmigrations
 python manage.py migrate --plan
 ```
 
+### 9.1. Separación de roles PostgreSQL
+
+SIGEDON distingue dos roles conceptuales:
+
+* `sigedon_owner`: propietario del esquema, ejecuta migraciones.
+* `sigedon_app`: rol runtime utilizado por web, workers y comandos ordinarios.
+
+El script `deploy/postgresql/harden_runtime_role.sql` es una plantilla comentada que:
+
+* crea o ajusta ambos roles;
+* revoca `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` y `BYPASSRLS` de `sigedon_app`;
+* otorga `CONNECT`, `USAGE` sobre el esquema y privilegios mínimos (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) sobre tablas operativas, y `USAGE`/`SELECT` sobre secuencias;
+* limita `sigedon_app` sobre `operations_auditlog` a `SELECT` e `INSERT`, revocando explícitamente `UPDATE`, `DELETE`, `TRUNCATE`, `TRIGGER` y `REFERENCES`;
+* define `ALTER DEFAULT PRIVILEGES` para que las tablas y secuencias futuras hereden el mismo alcance mínimo.
+
+Debe ejecutarse conectado como `sigedon_owner` o un administrador equivalente, nunca con `sigedon_app`, y sus nombres de base/rol deben adaptarse a cada entorno.
+
+### Dos modos de credenciales
+
+**Migraciones.** Ejecutar temporalmente con las credenciales de `sigedon_owner`:
+
+```bash
+python manage.py migrate
+```
+
+**Runtime.** Ejecutar web, workers y comandos ordinarios con `sigedon_app`. Después de aplicar migraciones, las variables `POSTGRES_USER`/`POSTGRES_PASSWORD` del servicio deben cambiarse de vuelta a `sigedon_app` antes de servir tráfico.
+
+### Reglas
+
+* Nunca usar `postgres` como usuario runtime en producción.
+* No almacenar credenciales de `sigedon_owner` en el servicio web ni en los workers.
+* El trigger append-only instalado en `operations_auditlog` (migración `0018_auditlog_append_only_trigger`) es una defensa adicional, no un sustituto de la separación de roles.
+* Un superusuario de PostgreSQL puede administrar o desactivar el trigger o los privilegios; esa capacidad se reserva para administración técnica explícita.
+* Verificar la configuración runtime con:
+
+```bash
+python manage.py verify_postgres_security
+```
+
 ## 10. Proxy inverso
 
 El proxy HTTPS debe encargarse de:
@@ -300,13 +343,15 @@ Después de iniciar o actualizar la aplicación:
 12. ejecutar smoke tests;
 13. revisar logs;
 14. confirmar que no se expongan secretos;
-15. verificar que no existan migraciones pendientes.
+15. verificar que no existan migraciones pendientes;
+16. ejecutar `python manage.py verify_postgres_security` y confirmar código de salida 0.
 
 Comandos útiles:
 
 ```bash
 python manage.py check --deploy
 python manage.py makemigrations --check --dry-run
+python manage.py verify_postgres_security
 ```
 
 ## 12. Smoke tests
@@ -353,36 +398,55 @@ Debe existir una política de rotación y retención.
 
 ## 14. Copias de seguridad
 
-Debe definirse una política que incluya:
+Scripts manuales: `deploy/backups/` (`backup_sigedon.sh`, `verify_backup.sh`, `restore_sigedon.sh`). Detalle operativo en `deploy/backups/README.md` y `docs/OPERATIONS.md`.
 
-* frecuencia;
-* cifrado;
-* retención;
-* almacenamiento externo;
+Esta fase entrega el procedimiento verificable; **no** fija todavía frecuencia ni retención automatizadas (sin cron/systemd).
+
+Debe definirse a nivel de infraestructura una política que incluya:
+
+* frecuencia (pendiente de automatizar);
+* cifrado (requisito de infraestructura; no implementado en scripts);
+* retención (pendiente);
+* almacenamiento externo / off-site (requisito de infraestructura);
 * responsables;
-* restauración probada;
+* restauración probada (trimestral como mínimo);
 * protección de acceso;
 * eliminación segura.
 
-Los respaldos deben cubrir:
+Los respaldos de aplicación cubren:
 
-* PostgreSQL;
-* archivos privados;
-* archivos públicos necesarios;
-* configuración crítica;
-* secretos almacenados mediante un sistema seguro.
+* PostgreSQL (`pg_dump --format=custom`);
+* `MEDIA_ROOT` (`media.tar.gz`);
+* manifiesto con checksums (`manifest.json`).
 
-Un respaldo no se considera válido hasta verificar que puede restaurarse.
+La configuración crítica y los secretos deben respaldarse mediante un sistema seguro aparte. Preferir `~/.pgpass` para autenticación de cliente.
+
+Consistencia: **ventana de mantenimiento** con `SIGEDON_MAINTENANCE_CONFIRMED=YES`.
+
+Un respaldo no se considera válido hasta pasar `verify_backup.sh` y una restauración aislada de prueba.
+
+**RPO/RTO no están definidos** hasta medir una restauración real.
 
 ## 15. Restauración
 
-Después de restaurar un entorno:
+Restaurar solo a entornos aislados (`SIGEDON_RESTORE_DB` con prefijo `test_restore_` o `staging_restore_`), nunca sobre la base activa (`POSTGRES_DB`) ni sobre un `MEDIA_ROOT` no vacío. No modificar `.env`.
+
+Después de restaurar un entorno aislado:
 
 ```bash
-python manage.py migrate
-python manage.py sync_sigedon_roles
+python manage.py migrate --check
 python manage.py check
+python manage.py verify_postgres_security
+python manage.py reconcile_operational_code_sequences
+python manage.py verify_restored_data
+python manage.py sync_sigedon_roles
 ```
+
+`reconcile_operational_code_sequences` funciona en modo detect-only y es de
+solo lectura: no crea ni ajusta secuencias. El comando falla ante una secuencia
+ausente (`MISSING_SEQUENCE`), atrasada (`LAGGING_SEQUENCE`) o inválida
+(`INVALID_SEQUENCE`). No existe reparación automática; cualquier corrección
+debe revisarse y ejecutarse manualmente.
 
 También debe verificarse:
 

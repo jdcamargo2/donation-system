@@ -178,7 +178,7 @@ Incluye:
 * fecha real;
 * porcentaje de progreso;
 * creador técnico;
-* responsable institucional;
+* persona responsable del contenido del avance;
 * evidencias;
 * publicación.
 
@@ -366,7 +366,7 @@ Gastos no anulados
 * Las reservas concurrentes utilizan bloqueos de filas en PostgreSQL.
 * Los registros anulados no cuentan en métricas ni saldos.
 * USD es la moneda operativa del MVP.
-* Los registros históricos en monedas distintas de USD se excluyen de las métricas.
+* SIGEDON admite exclusivamente USD; PostgreSQL rechaza cualquier otra moneda.
 
 ## 6. Códigos operativos
 

@@ -15,6 +15,7 @@ from .choices import (
     DONATION_TYPE_CHOICES,
     EXPENSE_CATEGORY_CHOICES,
     INSTITUTION_TYPE_CHOICES,
+    OPERATING_CURRENCY,
     PAYMENT_METHOD_CHOICES,
 )
 
@@ -175,14 +176,35 @@ class Project(models.Model):
 
     @property
     def funded_amount(self):
-        return self.allocations.exclude(status=FundAllocation.Status.ANNULLED).aggregate(
+        return self.operating_allocations().aggregate(
             total=Sum('amount')
         )['total'] or ZERO_MONEY
 
     @property
     def executed_amount(self):
-        return sum((allocation.executed_amount for allocation in self.allocations.all()), ZERO_MONEY)
+        return self.operating_expenses().aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
 
+    def operating_allocations(self):
+        """
+        PRE: self is a persisted Project with related allocations and donations.
+        POST: returns only non-annulled allocations funded by the operating currency.
+        """
+        return self.allocations.filter(
+            donation__currency=OPERATING_CURRENCY,
+        ).exclude(status=FundAllocation.Status.ANNULLED)
+
+    def operating_expenses(self):
+        """
+        PRE: self is a persisted Project with related allocations, donations, and expenses.
+        POST: returns only effective expenses whose own and funding currencies are operating currency.
+        """
+        return Expense.objects.filter(
+            allocation__project=self,
+            currency=OPERATING_CURRENCY,
+            allocation__donation__currency=OPERATING_CURRENCY,
+        ).exclude(
+            allocation__status=FundAllocation.Status.ANNULLED,
+        ).exclude(status__in=Expense.non_executing_statuses())
 
 class ProjectUpdate(models.Model):
     class Status(models.TextChoices):
@@ -221,6 +243,9 @@ class ProjectUpdate(models.Model):
         ordering = ['-created_at']
         verbose_name = _('avance de proyecto')
         verbose_name_plural = _('avances de proyecto')
+        permissions = [
+            ('publish_projectupdate', _('Puede publicar avances de proyecto')),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(progress_percentage__gte=0, progress_percentage__lte=100),
@@ -242,13 +267,50 @@ class ProjectUpdate(models.Model):
             errors['status'] = _('El estado del avance no es válido.')
         if (
             self.project_id
-            and not self.pk
             and hasattr(self.project, 'status')
             and self.project.status != Project.Status.ACTIVE
         ):
-            errors['project'] = _('Solo se pueden crear avances para proyectos activos.')
+            errors['project'] = _('Solo los proyectos activos admiten avances.')
         if errors:
             raise ValidationError(errors)
+
+
+class ProjectUpdateImmutableError(ValidationError):
+    """Raised when ordinary mutation targets a published project update or attachment."""
+
+
+class ProjectUpdateAttachmentQuerySet(models.QuerySet):
+    # PRE: queryset targets persisted project-update attachments.
+    # POST: returns only when no selected attachment belongs to a PUBLISHED update.
+    def _ensure_no_published_attachments(self):
+        if self.filter(project_update__status=ProjectUpdate.Status.PUBLISHED).exists():
+            raise ProjectUpdateImmutableError(
+                _('Los adjuntos de avances publicados no se pueden modificar ni eliminar.')
+            )
+
+    # PRE: queryset targets attachments and kwargs do not move them to a PUBLISHED update.
+    # POST: updates only attachments belonging to DRAFT updates; published attachments remain unchanged.
+    def update(self, **kwargs):
+        self._ensure_no_published_attachments()
+        target_project = kwargs.get('project_update', kwargs.get('project_update_id'))
+        target_project_id = getattr(target_project, 'pk', target_project)
+        if (
+            target_project_id is not None
+            and ProjectUpdate.objects.filter(
+                pk=target_project_id,
+                status=ProjectUpdate.Status.PUBLISHED,
+            ).exists()
+        ):
+            raise ProjectUpdateImmutableError(
+                _('No se pueden asociar adjuntos a avances publicados.')
+            )
+        return super().update(**kwargs)
+
+    # PRE: queryset targets persisted project-update attachments.
+    # POST: deletes only attachments belonging to DRAFT updates; published attachments remain unchanged.
+    def delete(self):
+        self._ensure_no_published_attachments()
+        return super().delete()
 
 
 class ProjectUpdateReview(models.Model):
@@ -274,6 +336,9 @@ class ProjectUpdateReview(models.Model):
         ordering = ['-reviewed_at']
         verbose_name = _('revisión documental de avance')
         verbose_name_plural = _('revisiones documentales de avances')
+        permissions = [
+            ('review_projectupdate', _('Puede registrar revisiones de avances')),
+        ]
 
     def __str__(self):
         return f'Revisión de {self.project_update}'
@@ -316,6 +381,9 @@ class ProjectUpdateReviewDecision(models.Model):
         ordering = ['-decided_at']
         verbose_name = _('resultado de revisión del Comité')
         verbose_name_plural = _('resultados de revisiones del Comité')
+        permissions = [
+            ('decide_projectupdate', _('Puede registrar decisiones institucionales de avances')),
+        ]
 
     def __str__(self):
         return f'{self.get_outcome_display()} · {self.review}'
@@ -378,6 +446,8 @@ class ProjectUpdateAttachment(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = ProjectUpdateAttachmentQuerySet.as_manager()
+
     class Meta:
         ordering = ['created_at']
         verbose_name = _('adjunto de avance')
@@ -385,6 +455,177 @@ class ProjectUpdateAttachment(models.Model):
 
     def __str__(self):
         return self.title or self.file.name.rsplit('/', 1)[-1]
+
+    # PRE: instance refers to a persisted attachment or a valid target ProjectUpdate.
+    # POST: returns only when neither its persisted nor proposed parent is PUBLISHED.
+    def _ensure_parent_update_is_editable(self):
+        if self.pk and self.__class__.objects.filter(
+            pk=self.pk,
+            project_update__status=ProjectUpdate.Status.PUBLISHED,
+        ).exists():
+            raise ProjectUpdateImmutableError(
+                _('Los adjuntos de avances publicados no se pueden modificar ni eliminar.')
+            )
+        if ProjectUpdate.objects.filter(
+            pk=self.project_update_id,
+            status=ProjectUpdate.Status.PUBLISHED,
+        ).exists():
+            raise ProjectUpdateImmutableError(
+                _('No se pueden asociar adjuntos a avances publicados.')
+            )
+
+    def save(self, *args, **kwargs):
+        """
+        PRE: the attachment has a valid parent update and ordinary mutation is requested.
+        POST: persists only an attachment associated with a DRAFT update.
+        """
+        self._ensure_parent_update_is_editable()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """
+        PRE: the attachment is persisted and ordinary deletion is requested.
+        POST: deletes only an attachment whose parent update remains DRAFT.
+        """
+        self._ensure_parent_update_is_editable()
+        return super().delete(*args, **kwargs)
+
+
+class ProjectUpdateRemediationError(ValidationError):
+    """Raised when a remediation or its attachments violate their explicit lifecycle."""
+
+
+class ProjectUpdateRemediationQuerySet(models.QuerySet):
+    def _ensure_draft_only(self):
+        if self.exclude(status=ProjectUpdateRemediation.Status.DRAFT).exists():
+            raise ProjectUpdateRemediationError(_('Solo las remediaciones en borrador admiten esta operación.'))
+
+    def update(self, **kwargs):
+        self._ensure_draft_only()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_draft_only()
+        return super().delete()
+
+
+class ProjectUpdateRemediation(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = 'draft', _('Borrador')
+        SUBMITTED = 'submitted', _('Enviada')
+        ACCEPTED = 'accepted', _('Aceptada')
+        REJECTED = 'rejected', _('Rechazada')
+
+    decision = models.OneToOneField(
+        ProjectUpdateReviewDecision,
+        on_delete=models.PROTECT,
+        related_name='remediation',
+    )
+    response = models.TextField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='created_project_update_remediations')
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='submitted_project_update_remediations')
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='resolved_project_update_remediations')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ProjectUpdateRemediationQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = _('remediación de avance')
+        verbose_name_plural = _('remediaciones de avances')
+        permissions = [
+            ('submit_projectupdateremediation', _('Puede enviar remediaciones de avances')),
+            ('resolve_projectupdateremediation', _('Puede resolver remediaciones de avances')),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.decision_id and self.decision.outcome != ProjectUpdateReviewDecision.Outcome.OBSERVED:
+            errors['decision'] = _('Solo las decisiones observadas admiten remediación.')
+        if not (self.response or '').strip():
+            errors['response'] = _('La respuesta de remediación es obligatoria.')
+        submitted = self.submitted_by_id is not None and self.submitted_at is not None
+        resolved = self.resolved_by_id is not None and self.resolved_at is not None
+        if self.status == self.Status.DRAFT and (submitted or resolved):
+            errors['status'] = _('Una remediación en borrador no puede tener metadatos de envío o resolución.')
+        if self.status == self.Status.SUBMITTED and (not submitted or resolved):
+            errors['status'] = _('Una remediación enviada exige datos de envío y no admite resolución todavía.')
+        if self.status in {self.Status.ACCEPTED, self.Status.REJECTED}:
+            if not submitted or not resolved:
+                errors['status'] = _('Una remediación resuelta exige datos de envío y resolución.')
+            if not (self.resolution_notes or '').strip():
+                errors['resolution_notes'] = _('Las notas de resolución son obligatorias.')
+        if errors:
+            raise ValidationError(errors)
+
+    def _ensure_draft_mutation(self):
+        if self.pk and self.__class__.objects.exclude(status=self.Status.DRAFT).filter(pk=self.pk).exists():
+            raise ProjectUpdateRemediationError(_('Las remediaciones enviadas o resueltas son inmutables.'))
+        if self.decision_id and ProjectUpdateReviewDecision.objects.filter(
+            pk=self.decision_id,
+            outcome=ProjectUpdateReviewDecision.Outcome.CONFORMING,
+        ).exists():
+            raise ProjectUpdateRemediationError(_('Solo las decisiones observadas admiten remediación.'))
+
+    def save(self, *args, **kwargs):
+        if not getattr(self, '_allow_lifecycle_transition', False):
+            self._ensure_draft_mutation()
+        try:
+            return super().save(*args, **kwargs)
+        finally:
+            self._allow_lifecycle_transition = False
+
+    def delete(self, *args, **kwargs):
+        self._ensure_draft_mutation()
+        return super().delete(*args, **kwargs)
+
+
+class ProjectUpdateRemediationAttachmentQuerySet(models.QuerySet):
+    def _ensure_draft_only(self):
+        if self.exclude(remediation__status=ProjectUpdateRemediation.Status.DRAFT).exists():
+            raise ProjectUpdateRemediationError(_('Los adjuntos solo se pueden modificar en remediaciones en borrador.'))
+
+    def update(self, **kwargs):
+        self._ensure_draft_only()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_draft_only()
+        return super().delete()
+
+
+class ProjectUpdateRemediationAttachment(models.Model):
+    remediation = models.ForeignKey(ProjectUpdateRemediation, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='project_update_remediation_attachments/%Y/%m/')
+    title = models.CharField(max_length=200, blank=True)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='uploaded_project_update_remediation_attachments')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ProjectUpdateRemediationAttachmentQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['created_at']
+        verbose_name = _('adjunto de remediación')
+        verbose_name_plural = _('adjuntos de remediaciones')
+
+    def _ensure_draft_mutation(self):
+        if self.pk and self.__class__.objects.exclude(remediation__status=ProjectUpdateRemediation.Status.DRAFT).filter(pk=self.pk).exists():
+            raise ProjectUpdateRemediationError(_('Los adjuntos solo se pueden modificar en remediaciones en borrador.'))
+        if ProjectUpdateRemediation.objects.exclude(status=ProjectUpdateRemediation.Status.DRAFT).filter(pk=self.remediation_id).exists():
+            raise ProjectUpdateRemediationError(_('Los adjuntos solo se pueden crear en remediaciones en borrador.'))
+
+    def save(self, *args, **kwargs):
+        self._ensure_draft_mutation()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_draft_mutation()
+        return super().delete(*args, **kwargs)
 
 
 class DonationAllocationProgress(models.TextChoices):
@@ -409,7 +650,13 @@ class Donation(models.Model):
     donor = models.ForeignKey(Institution, on_delete=models.PROTECT, related_name='donations')
     donation_type = models.CharField(max_length=20, choices=DONATION_TYPE_CHOICES, default='goods')
     amount = models.DecimalField(max_digits=14, decimal_places=2)
-    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default=OPERATING_CURRENCY,
+        null=False,
+        blank=False,
+    )
     objective = models.TextField()
     restrictions = models.TextField(blank=True)
     commitment_date = models.DateField(null=True, blank=True)
@@ -438,6 +685,10 @@ class Donation(models.Model):
                 condition=models.Q(amount__gt=ZERO_MONEY),
                 name='operations_donation_amount_gt_zero',
             ),
+            models.CheckConstraint(
+                condition=models.Q(currency=OPERATING_CURRENCY),
+                name='operations_donation_currency_is_usd',
+            ),
         ]
 
     def __str__(self):
@@ -461,12 +712,16 @@ class Donation(models.Model):
 
     @property
     def total_assigned(self):
+        if hasattr(self, 'annotated_total_assigned'):
+            return self.annotated_total_assigned
         return self.allocations.exclude(status=FundAllocation.Status.ANNULLED).aggregate(
             total=Sum('amount')
         )['total'] or ZERO_MONEY
 
     @property
     def available_balance(self):
+        if hasattr(self, 'annotated_available_balance'):
+            return self.annotated_available_balance
         balance = self.amount - self.total_assigned
         return max(balance, ZERO_MONEY)
 
@@ -569,12 +824,16 @@ class FundAllocation(models.Model):
 
     @property
     def executed_amount(self):
+        if hasattr(self, 'annotated_executed_amount'):
+            return self.annotated_executed_amount
         return self.expenses.exclude(
             status__in=Expense.non_executing_statuses()
         ).aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
 
     @property
     def available_balance(self):
+        if hasattr(self, 'annotated_available_balance'):
+            return self.annotated_available_balance
         balance = self.amount - self.executed_amount
         return max(balance, ZERO_MONEY)
 
@@ -610,7 +869,13 @@ class Expense(models.Model):
     expense_date = models.DateField()
     category = models.CharField(max_length=40, choices=EXPENSE_CATEGORY_CHOICES)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
-    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default=OPERATING_CURRENCY,
+        null=False,
+        blank=False,
+    )
     reason = models.CharField(max_length=220)
     provider_or_recipient = models.CharField(max_length=160)
     payment_method = models.CharField(max_length=40, choices=PAYMENT_METHOD_CHOICES)
@@ -638,6 +903,10 @@ class Expense(models.Model):
             models.CheckConstraint(
                 condition=models.Q(amount__gt=ZERO_MONEY),
                 name='operations_expense_amount_gt_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(currency=OPERATING_CURRENCY),
+                name='operations_expense_currency_is_usd',
             ),
         ]
 

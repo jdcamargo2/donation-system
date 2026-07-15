@@ -8,8 +8,10 @@ from django.utils.translation import gettext_lazy as _
 from .choices import OPERATING_CURRENCY
 from .models import (
     Donation, Expense, FundAllocation, Institution, Project, ProjectDocument,
-    ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
+    ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
+    ProjectUpdateRemediation, SupportingDocument,
 )
+from .project_update_responsibles import eligible_project_update_reporters
 
 
 SELECT_PLACEHOLDER = _('Seleccione una opción')
@@ -151,6 +153,26 @@ class BootstrapFormMixin:
                 field.widget.attrs['rows'] = 3
 
 
+class ProjectUpdateRemediationForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectUpdateRemediation
+        fields = ['response']
+        widgets = {'response': forms.Textarea(attrs={'rows': 5})}
+
+
+class ProjectUpdateRemediationResolveForm(BootstrapFormMixin, forms.Form):
+    status = forms.ChoiceField(choices=[
+        (ProjectUpdateRemediation.Status.ACCEPTED, _('Aceptar')),
+        (ProjectUpdateRemediation.Status.REJECTED, _('Rechazar')),
+    ])
+    resolution_notes = forms.CharField(widget=forms.Textarea(attrs={'rows': 4}))
+
+
+class ProjectUpdateRemediationAttachmentForm(BootstrapFormMixin, forms.Form):
+    title = forms.CharField(required=False, max_length=200)
+    file = forms.FileField()
+
+
 class InstitutionForm(BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = Institution
@@ -225,7 +247,14 @@ class ProjectForm(BootstrapFormMixin, forms.ModelForm):
         return self.cleaned_data.get('estimated_budget') or Project._meta.get_field('estimated_budget').default
 
 
-class ProjectUpdateForm(BootstrapFormMixin, forms.ModelForm):
+class ProjectUpdateResponsibleFormMixin:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['reported_by'].required = True
+        self.fields['reported_by'].queryset = eligible_project_update_reporters()
+
+
+class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, forms.ModelForm):
     attachments = MultipleFileField(
         label=_('Adjuntos'),
         required=False,
@@ -248,12 +277,12 @@ class ProjectUpdateForm(BootstrapFormMixin, forms.ModelForm):
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
             'progress_percentage': _('Porcentaje de progreso'),
-            'reported_by': _('Responsable institucional'),
+            'reported_by': _('Persona responsable del avance'),
         }
         widgets = {'update_date': build_date_widget()}
 
 
-class ProjectUpdateForProjectForm(BootstrapFormMixin, forms.ModelForm):
+class ProjectUpdateForProjectForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, forms.ModelForm):
     attachments = MultipleFileField(
         label=_('Adjuntos'),
         required=False,
@@ -274,7 +303,7 @@ class ProjectUpdateForProjectForm(BootstrapFormMixin, forms.ModelForm):
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
             'progress_percentage': _('Porcentaje de progreso'),
-            'reported_by': _('Responsable institucional'),
+            'reported_by': _('Persona responsable del avance'),
         }
         widgets = {'update_date': build_date_widget()}
 
@@ -380,15 +409,6 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
             'commitment_date': build_date_widget(),
             'received_date': build_date_widget(),
         }
-
-    def save(self, commit=True):
-        donation = super().save(commit=False)
-        donation.currency = OPERATING_CURRENCY
-        if commit:
-            donation.save()
-            self.save_m2m()
-        return donation
-
 
 class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
     donation = DonationWithBalanceChoiceField(
@@ -588,7 +608,6 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
     # POST: returns an unsaved instance for commit=False, otherwise persists through transactional expense services.
     def save(self, commit=True):
         expense = super().save(commit=False)
-        expense.currency = OPERATING_CURRENCY
         if not commit:
             return expense
         from .services import create_expense, update_expense

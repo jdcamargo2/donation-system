@@ -91,7 +91,7 @@ Las métricas públicas:
 * utilizan únicamente agregados autorizados;
 * no exponen registros financieros individuales.
 
-Los registros históricos en monedas distintas de USD se excluyen de las métricas públicas.
+Las métricas públicas se expresan exclusivamente en USD.
 
 ## 6. Datos publicados
 
