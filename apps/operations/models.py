@@ -712,12 +712,16 @@ class Donation(models.Model):
 
     @property
     def total_assigned(self):
+        if hasattr(self, 'annotated_total_assigned'):
+            return self.annotated_total_assigned
         return self.allocations.exclude(status=FundAllocation.Status.ANNULLED).aggregate(
             total=Sum('amount')
         )['total'] or ZERO_MONEY
 
     @property
     def available_balance(self):
+        if hasattr(self, 'annotated_available_balance'):
+            return self.annotated_available_balance
         balance = self.amount - self.total_assigned
         return max(balance, ZERO_MONEY)
 
@@ -820,12 +824,16 @@ class FundAllocation(models.Model):
 
     @property
     def executed_amount(self):
+        if hasattr(self, 'annotated_executed_amount'):
+            return self.annotated_executed_amount
         return self.expenses.exclude(
             status__in=Expense.non_executing_statuses()
         ).aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
 
     @property
     def available_balance(self):
+        if hasattr(self, 'annotated_available_balance'):
+            return self.annotated_available_balance
         balance = self.amount - self.executed_amount
         return max(balance, ZERO_MONEY)
 

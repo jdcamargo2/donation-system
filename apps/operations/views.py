@@ -44,6 +44,12 @@ from .models import (
     ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
     ProjectUpdateRemediation, ProjectUpdateRemediationAttachment, SupportingDocument,
 )
+from .selectors import (
+    with_allocation_list_metrics,
+    with_donation_list_metrics,
+    with_expense_list_support,
+    with_project_update_attachment_count,
+)
 from .services import (
     create_expense,
     create_fund_allocation,
@@ -798,7 +804,9 @@ class ProjectUpdateListView(OperationsPermissionRequiredMixin, RouteContextMixin
     page_title = _('Avances de proyecto')
 
     def get_queryset(self):
-        return ProjectUpdate.objects.select_related('project', 'created_by', 'reported_by')
+        return with_project_update_attachment_count(
+            ProjectUpdate.objects.select_related('project', 'created_by', 'reported_by')
+        )
 
 
 class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailView):
@@ -1287,7 +1295,8 @@ class DonationListView(OperationsPermissionRequiredMixin, FilteredListContextMix
 
     def get_queryset(self):
         return apply_list_filters(
-            Donation.objects.select_related('donor'), self.request.GET,
+            with_donation_list_metrics(Donation.objects.select_related('donor')),
+            self.request.GET,
             text_fields=('code', 'donor__name'), date_field='received_date',
             institution_field='donor_id',
         )
@@ -1389,7 +1398,10 @@ class FundAllocationListView(OperationsPermissionRequiredMixin, FilteredListCont
 
     def get_queryset(self):
         return apply_list_filters(
-            FundAllocation.objects.select_related('donation__donor', 'project'), self.request.GET,
+            with_allocation_list_metrics(
+                FundAllocation.objects.select_related('donation__donor', 'project')
+            ),
+            self.request.GET,
             text_fields=('code', 'donation__code', 'project__code', 'project__name'),
             date_field='allocation_date', institution_field='donation__donor_id',
             project_field='project_id',
@@ -1533,9 +1545,11 @@ class ExpenseListView(OperationsPermissionRequiredMixin, FilteredListContextMixi
     export_url_name = 'expense_export_csv'
 
     def get_queryset(self):
-        queryset = Expense.objects.select_related(
-            'allocation__donation__donor',
-            'allocation__project',
+        queryset = with_expense_list_support(
+            Expense.objects.select_related(
+                'allocation__donation__donor',
+                'allocation__project',
+            )
         )
         return apply_list_filters(
             queryset, self.request.GET,

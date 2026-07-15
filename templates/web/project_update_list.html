@@ -37,7 +37,7 @@
                         <td><span class="badge ops-status-badge">{{ update.get_status_display }}</span></td>
                         <td>{{ update.update_date }} / {{ update.progress_percentage }}%</td>
                         <td>
-                            {{ update.attachments.count }}
+                            {{ update.annotated_attachment_count }}
                         </td>
                         <td class="text-end ops-row-actions">
                             {% if update.status == 'draft' %}
