@@ -206,19 +206,6 @@ class Project(models.Model):
             allocation__status=FundAllocation.Status.ANNULLED,
         ).exclude(status__in=Expense.non_executing_statuses())
 
-    def has_excluded_currency_movements(self):
-        """
-        PRE: self is a persisted Project with any historical financial relations queryable.
-        POST: returns whether non-operating-currency allocations or expenses are excluded from its USD summary.
-        """
-        return self.allocations.exclude(donation__currency=OPERATING_CURRENCY).exists() or Expense.objects.filter(
-            allocation__project=self,
-        ).exclude(
-            currency=OPERATING_CURRENCY,
-            allocation__donation__currency=OPERATING_CURRENCY,
-        ).exists()
-
-
 class ProjectUpdate(models.Model):
     class Status(models.TextChoices):
         DRAFT = 'draft', _('Borrador')
@@ -663,7 +650,13 @@ class Donation(models.Model):
     donor = models.ForeignKey(Institution, on_delete=models.PROTECT, related_name='donations')
     donation_type = models.CharField(max_length=20, choices=DONATION_TYPE_CHOICES, default='goods')
     amount = models.DecimalField(max_digits=14, decimal_places=2)
-    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default=OPERATING_CURRENCY,
+        null=False,
+        blank=False,
+    )
     objective = models.TextField()
     restrictions = models.TextField(blank=True)
     commitment_date = models.DateField(null=True, blank=True)
@@ -691,6 +684,10 @@ class Donation(models.Model):
             models.CheckConstraint(
                 condition=models.Q(amount__gt=ZERO_MONEY),
                 name='operations_donation_amount_gt_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(currency=OPERATING_CURRENCY),
+                name='operations_donation_currency_is_usd',
             ),
         ]
 
@@ -864,7 +861,13 @@ class Expense(models.Model):
     expense_date = models.DateField()
     category = models.CharField(max_length=40, choices=EXPENSE_CATEGORY_CHOICES)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
-    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default=OPERATING_CURRENCY,
+        null=False,
+        blank=False,
+    )
     reason = models.CharField(max_length=220)
     provider_or_recipient = models.CharField(max_length=160)
     payment_method = models.CharField(max_length=40, choices=PAYMENT_METHOD_CHOICES)
@@ -892,6 +895,10 @@ class Expense(models.Model):
             models.CheckConstraint(
                 condition=models.Q(amount__gt=ZERO_MONEY),
                 name='operations_expense_amount_gt_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(currency=OPERATING_CURRENCY),
+                name='operations_expense_currency_is_usd',
             ),
         ]
 

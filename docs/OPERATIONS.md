@@ -408,7 +408,7 @@ La ausencia de un botón en la interfaz no demuestra que el permiso esté correc
 * fechas y estados operativos;
 * selectores utilizados por el dashboard o portal.
 
-Los datos anulados y los registros históricos en monedas no operativas pueden quedar excluidos deliberadamente.
+Los datos anulados quedan excluidos deliberadamente; toda operación monetaria válida está expresada en USD.
 
 ---
 

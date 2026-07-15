@@ -51,7 +51,7 @@ AuditLog --SET_NULL--> User; referencia objetos por model_name/entity_id, sin FK
 | Paso | Implementación real | Clasificación | Evidencia/riesgo principal |
 |---|---|---|---|
 | Institution | CRUD, admin, permisos, auditoría en vistas | Completo con riesgo | No valida rol donante al crear Donation; documento legal no usa descarga autorizada |
-| Donation | CRUD, saldo calculado, USD forzado por form | Parcial | Estados arbitrarios; modelo aún admite otras monedas; sin constraint positivo en DB |
+| Donation | CRUD, saldo calculado, USD forzado por form | Parcial | Hallazgo histórico sustituido el 2026-07-15: PostgreSQL ahora impide monedas distintas de USD. |
 | Project | CRUD, presupuesto y fechas en `clean()` | Parcial | Sin institución responsable; código secuencial sujeto a carrera |
 | FundAllocation | CRUD UI llama servicios con `atomic` y locks | Completo en ruta web | Admin/ORM y concurrencia SQLite no garantizan saldo |
 | Expense | CRUD UI llama servicios; soporte opcional transaccional | Completo en ruta web | Estados reversibles; validación mezclada con edición |

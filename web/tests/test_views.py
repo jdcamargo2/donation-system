@@ -313,7 +313,7 @@ class CrudFlowTests(TestCase):
                 'donor': self.donor.pk,
                 'donation_type': 'goods',
                 'amount': '200.00',
-                'currency': 'USD',
+                'currency': 'EUR',
                 'objective': 'Apoyar atención de emergencia',
                 'restrictions': '',
                 'commitment_date': '',
@@ -342,7 +342,7 @@ class CrudFlowTests(TestCase):
                 'expense_date': TEST_DATE,
                 'category': 'food',
                 'amount': '10.00',
-                'currency': 'USD',
+                'currency': 'EUR',
                 'reason': 'Purchase',
                 'provider_or_recipient': 'Provider A',
                 'payment_method': 'bank_transfer',
@@ -368,8 +368,10 @@ class CrudFlowTests(TestCase):
         self.assertNotEqual(created_donation.code, self.donation.code)
         self.assertEqual(Project.objects.filter(code=created_project.code).count(), 1)
         self.assertEqual(Donation.objects.filter(code=created_donation.code).count(), 1)
+        self.assertEqual(created_donation.currency, 'USD')
         self.assertTrue(FundAllocation.objects.filter(budget_category='health_psychosocial').exists())
-        self.assertTrue(Expense.objects.filter(reason='Purchase').exists())
+        created_expense = Expense.objects.get(reason='Purchase')
+        self.assertEqual(created_expense.currency, 'USD')
 
     def test_invalid_create_data_shows_errors_without_creating_invalid_object(self):
         response = self.client.post(

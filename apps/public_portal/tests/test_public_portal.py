@@ -88,6 +88,7 @@ class PublicPortalTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'public_portal/public_base.html')
+        self.assertContains(response, 'USD')
         self.assertContains(response, 'SIGEDON Transparencia')
         self.assertContains(response, 'Transparencia pública para seguir proyectos y avances')
         self.assertContains(response, 'public-metrics-overlap')
@@ -138,6 +139,7 @@ class PublicPortalTests(TestCase):
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'USD')
         self.assertTemplateUsed(response, 'public_portal/public_base.html')
         self.assertContains(response, self.project.name)
         self.assertContains(response, 'public-notice-inline')

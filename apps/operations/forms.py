@@ -410,15 +410,6 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
             'received_date': build_date_widget(),
         }
 
-    def save(self, commit=True):
-        donation = super().save(commit=False)
-        donation.currency = OPERATING_CURRENCY
-        if commit:
-            donation.save()
-            self.save_m2m()
-        return donation
-
-
 class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
     donation = DonationWithBalanceChoiceField(
         queryset=Donation.objects.none(),
@@ -617,7 +608,6 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
     # POST: returns an unsaved instance for commit=False, otherwise persists through transactional expense services.
     def save(self, commit=True):
         expense = super().save(commit=False)
-        expense.currency = OPERATING_CURRENCY
         if not commit:
             return expense
         from .services import create_expense, update_expense

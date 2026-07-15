@@ -252,7 +252,7 @@ Representa una donación monetaria.
 | `donor_id`          | `ForeignKey`    | Referencia a `operations_institution` |
 | `donation_type`     | `CharField`     | Obligatorio                           |
 | `amount`            | `DecimalField`  | Mayor que cero                        |
-| `currency`          | `CharField`     | USD como moneda operativa             |
+| `currency`          | `CharField`     | USD obligatorio por constraint         |
 | `objective`         | `TextField`     | Obligatorio                           |
 | `restrictions`      | `TextField`     | Opcional                              |
 | `commitment_date`   | `DateField`     | Opcional                              |
@@ -354,7 +354,7 @@ Representa un gasto registrado contra una asignación.
 | `expense_date`          | `DateField`     | Obligatorio                              |
 | `category`              | `CharField`     | Obligatorio                              |
 | `amount`                | `DecimalField`  | Mayor que cero                           |
-| `currency`              | `CharField`     | Obligatorio                              |
+| `currency`              | `CharField`     | USD obligatorio por constraint            |
 | `reason`                | `CharField`     | Obligatorio                              |
 | `provider_or_recipient` | `CharField`     | Obligatorio                              |
 | `payment_method`        | `CharField`     | Obligatorio                              |

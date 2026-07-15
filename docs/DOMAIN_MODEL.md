@@ -52,7 +52,7 @@ ANNULLED
 * El código operativo es único e inmutable.
 * El monto financiado se deriva únicamente de las asignaciones no anuladas financiadas en USD.
 * El monto ejecutado se deriva únicamente de gastos efectivos en USD sobre donaciones USD.
-* Los movimientos históricos en otras monedas se conservan, pero se excluyen de los resúmenes USD sin conversión.
+* PostgreSQL impide monedas distintas de USD en donaciones y gastos.
 * Los proyectos cerrados o anulados no deben recibir nuevas operaciones incompatibles con su estado.
 
 ## 3. `Donation`
@@ -70,8 +70,9 @@ ANNULLED
 ### Reglas
 
 * El monto debe ser positivo.
-* La moneda operativa del MVP es USD.
+* La moneda es estrictamente USD; no existe conversión monetaria.
 * El código operativo es único e inmutable.
+* PostgreSQL impide monedas distintas de USD.
 * Las asignaciones no anuladas no pueden exceder el monto disponible.
 * Una donación anulada queda excluida de métricas y saldos operativos.
 * El nivel de asignación se calcula a partir de sus asignaciones y no se almacena como estado editable.

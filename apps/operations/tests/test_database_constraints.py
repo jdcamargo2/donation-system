@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase
 
 from apps.operations.models import Donation, Expense, FundAllocation, Project
@@ -115,3 +115,58 @@ class MonetaryRowConstraintTests(TestCase):
         self.assertEqual(donation.amount, Decimal('10.00'))
         self.assertEqual(allocation.amount, Decimal('5.00'))
         self.assertEqual(expense.amount, Decimal('1.00'))
+
+    def test_usd_currency_rows_remain_valid(self):
+        donation = self.create_donation_with_amount(Decimal('10.00'))
+        expense = self.create_expense_with_amount(Decimal('1.00'))
+
+        self.assertEqual(donation.currency, 'USD')
+        self.assertEqual(expense.currency, 'USD')
+
+    def test_donation_rejects_non_usd_currency_on_insert_and_update(self):
+        self.assert_integrity_error(
+            lambda: Donation.objects.create(
+                code='DON-CONSTRAINT-EUR',
+                donor=create_institution(name='Donante EUR'),
+                amount=Decimal('10.00'),
+                currency='EUR',
+                objective='Prueba de constraint',
+                status=Donation.Status.RECEIVED,
+            )
+        )
+        donation = self.create_donation_with_amount(Decimal('10.00'))
+
+        self.assert_integrity_error(
+            lambda: Donation.objects.filter(pk=donation.pk).update(currency='EUR')
+        )
+
+    def test_expense_rejects_non_usd_currency_on_insert_and_update(self):
+        self.assert_integrity_error(
+            lambda: Expense.objects.create(
+                allocation=create_allocation(),
+                expense_date=TEST_DATE,
+                category='food',
+                amount=Decimal('1.00'),
+                currency='EUR',
+                reason='Prueba de constraint',
+                provider_or_recipient='Proveedor',
+                payment_method='bank_transfer',
+                status=Expense.Status.REGISTERED,
+            )
+        )
+        expense = self.create_expense_with_amount(Decimal('1.00'))
+
+        self.assert_integrity_error(
+            lambda: Expense.objects.filter(pk=expense.pk).update(currency='EUR')
+        )
+
+    def test_currency_constraints_are_installed(self):
+        donation_constraints = connection.introspection.get_constraints(
+            connection.cursor(), Donation._meta.db_table
+        )
+        expense_constraints = connection.introspection.get_constraints(
+            connection.cursor(), Expense._meta.db_table
+        )
+
+        self.assertIn('operations_donation_currency_is_usd', donation_constraints)
+        self.assertIn('operations_expense_currency_is_usd', expense_constraints)

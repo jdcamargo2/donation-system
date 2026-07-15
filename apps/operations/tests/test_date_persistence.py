@@ -177,6 +177,7 @@ class DatePersistenceViewTests(TestCase):
         donation.refresh_from_db()
         self.assertEqual(donation.received_date, UPDATED_DATE)
         self.assertEqual(donation.status, Donation.Status.RECEIVED)
+        self.assertEqual(donation.currency, 'USD')
 
     def test_allocation_create_update_and_missing_date_behave_correctly(self):
         data = self._allocation_data(INITIAL_DATE, amount='25.00')
@@ -204,6 +205,7 @@ class DatePersistenceViewTests(TestCase):
         self.assertRedirects(response, reverse('expense_list'))
         expense.refresh_from_db()
         self.assertEqual(expense.expense_date, UPDATED_DATE)
+        self.assertEqual(expense.currency, 'USD')
 
         invalid_response = self.client.post(reverse('expense_create'), self._expense_data(''))
         self.assertEqual(invalid_response.status_code, 200)
@@ -231,6 +233,7 @@ class DatePersistenceViewTests(TestCase):
             'commitment_date': commitment_date,
             'received_date': received_date,
             'support_reference': '',
+            'currency': 'EUR',
         }
 
     def _allocation_data(self, allocation_date, *, amount):
@@ -257,4 +260,5 @@ class DatePersistenceViewTests(TestCase):
             'observations': '',
             'support_title': 'Soporte de fecha',
             'support_file': SimpleUploadedFile('fecha.pdf', b'%PDF soporte'),
+            'currency': 'EUR',
         }

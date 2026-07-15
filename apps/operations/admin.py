@@ -3,7 +3,7 @@ from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
-from .choices import OPERATING_CURRENCY, OPERATING_CURRENCY_CHOICES
+from .choices import OPERATING_CURRENCY
 from .models import (
     AuditLog, Donation, Expense, FundAllocation, Institution, Project,
     ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
@@ -41,20 +41,16 @@ class FundAllocationAdminForm(forms.ModelForm):
 class ExpenseAdminForm(forms.ModelForm):
     class Meta:
         model = Expense
-        fields = '__all__'
+        exclude = ('currency',)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['currency'].choices = OPERATING_CURRENCY_CHOICES
         self.fields['allocation'].queryset = FundAllocation.objects.filter(
             donation__currency=OPERATING_CURRENCY
         )
 
     def clean(self):
         cleaned_data = super().clean()
-        currency = cleaned_data.get('currency', self.instance.currency or OPERATING_CURRENCY)
-        if currency != OPERATING_CURRENCY:
-            raise ValidationError(_('SIGEDON solo permite operaciones financieras en USD.'))
         allocation = cleaned_data.get('allocation')
         if allocation and allocation.donation.currency != OPERATING_CURRENCY:
             raise ValidationError(_('La asignación seleccionada no corresponde a una donación en USD.'))
@@ -318,7 +314,7 @@ class ProjectUpdateRemediationAttachmentAdmin(admin.ModelAdmin):
 class DonationAdmin(admin.ModelAdmin):
     list_display = ('code', 'donor', 'amount', 'currency', 'status', 'allocation_progress_display', 'received_date')
     search_fields = ('code', 'donor__name')
-    list_filter = ('status', 'currency')
+    list_filter = ('status',)
     readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
 
     def get_readonly_fields(self, request, obj=None):
@@ -340,6 +336,7 @@ class DonationAdmin(admin.ModelAdmin):
             obj.status = persisted.status
         else:
             obj.status = Donation.Status.REGISTERED
+            obj.currency = OPERATING_CURRENCY
         super().save_model(request, obj, form, change)
 
     @admin.display(description=_('Asignación'))
@@ -395,7 +392,7 @@ class ExpenseAdmin(admin.ModelAdmin):
     form = ExpenseAdminForm
     list_display = ('code', 'reason', 'allocation', 'amount', 'currency', 'status', 'expense_date')
     search_fields = ('code', 'reason', 'provider_or_recipient', 'allocation__project__name')
-    list_filter = ('status', 'currency', 'expense_date')
+    list_filter = ('status', 'expense_date')
     readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
     inlines = [SupportingDocumentInline]
 

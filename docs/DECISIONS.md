@@ -56,6 +56,8 @@ El uso de una única moneda operativa evita introducir conversiones, tasas de ca
 * Los registros no expresados en USD se excluyen de métricas agregadas cuando corresponda.
 * La conversión multimoneda queda fuera del MVP.
 
+> Sustituida por la decisión de 2026-07-15: SIGEDON ya no conserva monedas históricas distintas de USD.
+
 ---
 
 ## 2026-07-11 — PostgreSQL obligatorio en producción
@@ -350,3 +352,25 @@ El flujo histórico continúa siendo necesario para compatibilidad y pruebas exi
 * Los nuevos activos deben utilizar el pipeline general de KoboToolbox.
 * Las nuevas fichas no deben replicar automáticamente el patrón de modelos específicos del flujo legado.
 * La deuda técnica queda documentada y controlada.
+
+---
+
+## 2026-07-15 — USD estricto con integridad en PostgreSQL
+
+### Decisión
+
+SIGEDON admite exclusivamente USD. Las columnas `Donation.currency` y
+`Expense.currency` se conservan como unidad explícita, pero PostgreSQL impide
+cualquier valor distinto de `USD`.
+
+### Motivo
+
+Una única unidad monetaria elimina reglas de conversión y evita que datos
+financieros incompatibles alcancen los agregados, servicios o exportaciones.
+
+### Consecuencias
+
+* No existe multimoneda, tasas de cambio ni conversión de importes.
+* Los formularios y el admin no permiten elegir moneda.
+* Los servicios rechazan moneda distinta de USD antes de persistir.
+* Los constraints de PostgreSQL son la garantía final de integridad.

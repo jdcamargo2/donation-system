@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from itertools import count
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -10,6 +11,7 @@ from django.contrib.auth.models import Permission
 
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ZERO_MONEY
 from apps.operations.services import (
+    _validate_operating_currency,
     create_expense as create_expense_service,
     create_fund_allocation,
     get_allocation_financial_summary,
@@ -26,6 +28,9 @@ TEST_DATE = date(2026, 7, 9)
 
 
 class OperationServiceTests(TestCase):
+    def setUp(self):
+        self._donation_code_seq = count(1)
+
     def create_institution(self, name='Donante de prueba'):
         return Institution.objects.create(
             name=name,
@@ -47,7 +52,9 @@ class OperationServiceTests(TestCase):
             status=status,
         )
 
-    def create_donation(self, code='DON-SVC-001', amount=Decimal('100.00'), currency='USD'):
+    def create_donation(self, code=None, amount=Decimal('100.00'), currency='USD'):
+        if code is None:
+            code = f'DON-SVC-{next(self._donation_code_seq):03d}'
         return Donation.objects.create(
             code=code,
             donor=self.create_institution(),
@@ -147,48 +154,20 @@ class OperationServiceTests(TestCase):
         self.assertEqual(summary['executed_amount'], Decimal('40.00'))
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
 
-    def test_project_financial_summary_excludes_historical_non_usd_movements(self):
-        project = self.create_project(code='PRJ-SVC-CURRENCY')
-        usd_donation = self.create_donation(code='DON-SVC-USD', amount=Decimal('200.00'))
-        eur_donation = self.create_donation(
-            code='DON-SVC-EUR', amount=Decimal('500.00'), currency='EUR'
-        )
-        usd_allocation = self.create_allocation(
-            donation=usd_donation, project=project, amount=Decimal('100.00')
-        )
-        self.create_allocation(donation=eur_donation, project=project, amount=Decimal('300.00'))
-        cancelled_allocation = self.create_allocation(
-            donation=usd_donation, project=project, amount=Decimal('50.00')
-        )
-        self.create_expense(allocation=cancelled_allocation, amount=Decimal('15.00'))
-        FundAllocation.objects.filter(pk=cancelled_allocation.pk).update(
+    def test_project_financial_summary_excludes_annulled_movements(self):
+        project = self.create_project(code='PRJ-SVC-USD-ONLY')
+        allocation = self.create_allocation(project=project, amount=Decimal('100.00'))
+        self.create_expense(allocation=allocation, amount=Decimal('40.00'))
+        annulled_allocation = self.create_allocation(project=project, amount=Decimal('20.00'))
+        FundAllocation.objects.filter(pk=annulled_allocation.pk).update(
             status=FundAllocation.Status.ANNULLED
-        )
-        self.create_expense(allocation=usd_allocation, amount=Decimal('40.00'))
-        self.create_expense(allocation=usd_allocation, amount=Decimal('20.00'), currency='EUR')
-        eur_allocation = FundAllocation.objects.get(donation=eur_donation)
-        self.create_expense(allocation=eur_allocation, amount=Decimal('30.00'))
-        self.create_expense(
-            allocation=usd_allocation,
-            amount=Decimal('10.00'),
-            status=Expense.Status.ANNULLED,
         )
 
         summary = get_project_financial_summary(project)
 
-        self.assertEqual(project.funded_amount, Decimal('100.00'))
-        self.assertEqual(project.executed_amount, Decimal('40.00'))
         self.assertEqual(summary['funded_amount'], Decimal('100.00'))
         self.assertEqual(summary['executed_amount'], Decimal('40.00'))
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
-        self.assertTrue(summary['has_excluded_currency_movements'])
-
-    def test_project_financial_summary_has_no_historical_currency_warning_for_usd_only_data(self):
-        project = self.create_project(code='PRJ-SVC-USD-ONLY')
-        allocation = self.create_allocation(project=project, amount=Decimal('100.00'))
-        self.create_expense(allocation=allocation, amount=Decimal('40.00'))
-
-        self.assertFalse(get_project_financial_summary(project)['has_excluded_currency_movements'])
 
     def test_get_dashboard_metrics_returns_expected_keys_with_empty_database(self):
         user = get_user_model().objects.create_user(
@@ -243,16 +222,9 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(donation.allocations.count(), 1)
 
-    def test_create_fund_allocation_rejects_non_usd_donation(self):
-        donation = self.create_donation(amount=Decimal('100.00'))
-        donation.currency = 'EUR'
-        donation.save(update_fields=['currency'])
-        project = self.create_project()
-
+    def test_operating_currency_validator_rejects_non_usd_donation(self):
         with self.assertRaisesMessage(ValidationError, 'solo permite operaciones financieras en USD'):
-            create_fund_allocation(**self.allocation_service_data(donation, project, Decimal('20.00')))
-
-        self.assertFalse(donation.allocations.exists())
+            _validate_operating_currency('EUR', 'donation')
 
     def test_create_fund_allocation_rejects_registered_donation(self):
         donation = self.create_donation(amount=Decimal('100.00'))

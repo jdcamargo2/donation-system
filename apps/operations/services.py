@@ -644,6 +644,7 @@ def create_expense(
     support_title='',
     support_file=None,
 ):
+    _validate_operating_currency(currency)
     if not support_file:
         raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
     support_document = SupportingDocument(title=support_title or support_file.name)
@@ -654,7 +655,6 @@ def create_expense(
         locked_project = Project.objects.select_for_update().get(pk=locked_allocation.project_id)
         ensure_operational_entity_is_editable(locked_allocation)
         _validate_project_is_active_for_execution_or_updates(locked_project)
-        _validate_operating_currency(currency)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
         _validate_expense_balance(locked_allocation, amount)
         expense = Expense(
@@ -705,6 +705,7 @@ def update_expense(
     support_title='',
     support_file=None,
 ):
+    _validate_operating_currency(currency)
     support_document = (
         SupportingDocument(title=support_title or support_file.name)
         if support_file else None
@@ -727,7 +728,6 @@ def update_expense(
         locked_allocation = locked_allocations[allocation.pk]
         locked_project = Project.objects.select_for_update().get(pk=locked_allocation.project_id)
         _validate_project_is_active_for_execution_or_updates(locked_project)
-        _validate_operating_currency(currency)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
         exclude_pk = locked_expense.pk if locked_expense.allocation_id == locked_allocation.pk else None
         _validate_expense_balance(locked_allocation, amount, exclude_pk=exclude_pk)
@@ -881,7 +881,6 @@ def get_project_financial_summary(project: Project) -> dict:
         'funded_amount': funded_amount,
         'executed_amount': executed_amount,
         'available_amount': max(funded_amount - executed_amount, ZERO_MONEY),
-        'has_excluded_currency_movements': project.has_excluded_currency_movements(),
     }
 
 
