@@ -881,6 +881,7 @@ def get_project_financial_summary(project: Project) -> dict:
         'funded_amount': funded_amount,
         'executed_amount': executed_amount,
         'available_amount': max(funded_amount - executed_amount, ZERO_MONEY),
+        'has_excluded_currency_movements': project.has_excluded_currency_movements(),
     }
 
 

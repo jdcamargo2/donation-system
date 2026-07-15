@@ -15,6 +15,7 @@ from .choices import (
     DONATION_TYPE_CHOICES,
     EXPENSE_CATEGORY_CHOICES,
     INSTITUTION_TYPE_CHOICES,
+    OPERATING_CURRENCY,
     PAYMENT_METHOD_CHOICES,
 )
 
@@ -175,13 +176,47 @@ class Project(models.Model):
 
     @property
     def funded_amount(self):
-        return self.allocations.exclude(status=FundAllocation.Status.ANNULLED).aggregate(
+        return self.operating_allocations().aggregate(
             total=Sum('amount')
         )['total'] or ZERO_MONEY
 
     @property
     def executed_amount(self):
-        return sum((allocation.executed_amount for allocation in self.allocations.all()), ZERO_MONEY)
+        return self.operating_expenses().aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
+
+    def operating_allocations(self):
+        """
+        PRE: self is a persisted Project with related allocations and donations.
+        POST: returns only non-annulled allocations funded by the operating currency.
+        """
+        return self.allocations.filter(
+            donation__currency=OPERATING_CURRENCY,
+        ).exclude(status=FundAllocation.Status.ANNULLED)
+
+    def operating_expenses(self):
+        """
+        PRE: self is a persisted Project with related allocations, donations, and expenses.
+        POST: returns only effective expenses whose own and funding currencies are operating currency.
+        """
+        return Expense.objects.filter(
+            allocation__project=self,
+            currency=OPERATING_CURRENCY,
+            allocation__donation__currency=OPERATING_CURRENCY,
+        ).exclude(
+            allocation__status=FundAllocation.Status.ANNULLED,
+        ).exclude(status__in=Expense.non_executing_statuses())
+
+    def has_excluded_currency_movements(self):
+        """
+        PRE: self is a persisted Project with any historical financial relations queryable.
+        POST: returns whether non-operating-currency allocations or expenses are excluded from its USD summary.
+        """
+        return self.allocations.exclude(donation__currency=OPERATING_CURRENCY).exists() or Expense.objects.filter(
+            allocation__project=self,
+        ).exclude(
+            currency=OPERATING_CURRENCY,
+            allocation__donation__currency=OPERATING_CURRENCY,
+        ).exists()
 
 
 class ProjectUpdate(models.Model):

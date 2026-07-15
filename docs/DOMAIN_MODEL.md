@@ -50,8 +50,9 @@ ANNULLED
 * El presupuesto estimado no puede ser negativo.
 * La fecha final no puede ser anterior a la fecha inicial.
 * El código operativo es único e inmutable.
-* El monto financiado se deriva de las asignaciones no anuladas.
-* El monto ejecutado se deriva de los gastos no anulados.
+* El monto financiado se deriva únicamente de las asignaciones no anuladas financiadas en USD.
+* El monto ejecutado se deriva únicamente de gastos efectivos en USD sobre donaciones USD.
+* Los movimientos históricos en otras monedas se conservan, pero se excluyen de los resúmenes USD sin conversión.
 * Los proyectos cerrados o anulados no deben recibir nuevas operaciones incompatibles con su estado.
 
 ## 3. `Donation`

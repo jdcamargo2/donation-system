@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.operations.models import Project
+from apps.operations.models import Donation, FundAllocation, Project
 from apps.operations.services import register_advance
 from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project
 
@@ -96,6 +96,44 @@ class InternalExperienceTemplateTests(TestCase):
                 self.assertTemplateUsed(response, template_name)
                 for text in expected_texts:
                     self.assertContains(response, text)
+
+    def test_project_detail_shows_usd_summary_and_historical_currency_warning(self):
+        historical_donation = Donation.objects.create(
+            code='DON-OPS-EUR',
+            donor=self.institution,
+            amount='200.00',
+            currency='EUR',
+            status=Donation.Status.RECEIVED,
+        )
+        FundAllocation.objects.create(
+            donation=historical_donation,
+            project=self.project,
+            budget_category='health_psychosocial',
+            amount='150.00',
+            allocation_date='2026-07-08',
+            status=FundAllocation.Status.ACTIVE,
+        )
+
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['project_financial_summary']['funded_amount'], self.allocation.amount)
+        self.assertContains(response, 'Presupuesto USD')
+        self.assertContains(response, 'Financiado USD')
+        self.assertContains(response, 'Ejecutado USD')
+        self.assertContains(response, 'Disponible USD')
+        self.assertContains(
+            response,
+            'Existen movimientos históricos en otras monedas excluidos de este resumen.',
+        )
+
+    def test_project_detail_hides_historical_currency_warning_for_usd_only_data(self):
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+
+        self.assertNotContains(
+            response,
+            'Existen movimientos históricos en otras monedas excluidos de este resumen.',
+        )
 
     def test_user_without_permissions_still_gets_403_on_specific_internal_template_view(self):
         limited_user = get_user_model().objects.create_user(username='limited', password='pass-12345')
