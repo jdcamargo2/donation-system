@@ -379,21 +379,29 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 
 ---
 
-## 12. Flujo legado de Ficha 1
+## 12. Entrada de compatibilidad de Ficha 1
 
-El flujo legado se conserva por compatibilidad y pruebas.
+El mapping `ficha_01` y el comando legado se conservan como compatibilidad de
+entrada al staging genérico. El orden vigente es:
 
 ```text
 sync_kobo_ficha_01
-→ Obtención del payload
-→ Normalización heredada
-→ Ficha01Territorio
-→ Ficha01CoveredCommunity
+→ obtención y validación del payload Ficha 1
+→ receive_api_submission
+→ KoboSubmission (received, payload crudo)
+→ procesamiento y normalización ficha_01
+→ routing, revisión e importación mediante el pipeline genérico
 ```
 
 ### Reglas
 
 * No representa el flujo recomendado para nuevas integraciones.
 * No sustituye al pipeline ordinario basado en activos configurados.
-* Debe utilizarse únicamente cuando se requiera compatibilidad con el procesamiento histórico de la Ficha 1.
+* `Ficha01Territorio` y `Ficha01CoveredCommunity` pertenecen al schema legado,
+  no tienen escritores activos conocidos y no son utilizados por el pipeline
+  vigente.
+* `KoboSubmission` es la fuente de staging activa; recibido, procesado e
+  importado representan etapas diferentes.
 * Su conservación no implica que nuevas fichas deban implementar modelos específicos equivalentes.
+* La eliminación futura de los modelos específicos requiere una decisión de
+  producto y una migración dedicada.

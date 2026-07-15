@@ -134,6 +134,10 @@ kobo_ficha01territorio
         └──< kobo_ficha01coveredcommunity
 ```
 
+Las dos tablas Ficha01 del diagrama describen schema legado. No tienen
+escritores activos conocidos, no participan en el pipeline vigente y no son la
+fuente de verdad del staging genérico basado en `kobo_kobosubmission`.
+
 Convenciones utilizadas:
 
 ```text
@@ -895,7 +899,9 @@ Tabla heredada de la primera integración de la Ficha 1.
 | `territory_type`       | `JSONField`    | Obligatorio    |
 | `kobo_uuid`            | `UUIDField`    | Único          |
 
-Se conserva por compatibilidad con el flujo histórico.
+Se conserva temporalmente como schema legado por compatibilidad histórica. No
+tiene escritores activos conocidos, no es utilizado por el pipeline vigente y
+no debe recibir nuevas escrituras sin una decisión arquitectónica explícita.
 
 ---
 
@@ -917,6 +923,10 @@ Representa las comunidades cubiertas dentro de la Ficha 1 heredada.
 ```text
 Ficha01Territorio 1 ──< Ficha01CoveredCommunity
 ```
+
+Esta relación permanece en el schema, pero no constituye la fuente de verdad
+activa. Su eliminación futura, junto con la tabla territorial, requiere una
+decisión de producto y una migración específica.
 
 ## 7. Tablas de autenticación y permisos
 

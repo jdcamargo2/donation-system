@@ -51,7 +51,16 @@ python manage.py runserver
 
 ## 2. Datos de demostración
 
-Los datos de demostración pueden cargarse mediante:
+`seed_sigedon_demo` genera datos locales para explorar la interfaz, realizar
+revisiones manuales y preparar capturas de pantalla. No representa una carga
+productiva ni una verificación integral de las reglas operativas.
+
+### Precondición
+
+* Ejecutar únicamente en un entorno local o efímero.
+* Utilizar una base de datos no productiva donde se acepten datos de demostración.
+
+Comando:
 
 ```bash
 python manage.py seed_sigedon_demo
@@ -66,10 +75,20 @@ python manage.py seed_sigedon_demo
 
 ### Reglas
 
-* Los datos de demostración no deben ejecutarse en producción sin validación previa.
-* Debe verificarse qué registros serán creados o actualizados.
+* **No debe ejecutarse en producción.**
+* Usa ORM directo intencionalmente y no pasa por todos los services de dominio.
+* No genera trazabilidad completa en `AuditLog`.
+* Puede crear gastos sin `SupportingDocument`, aunque el flujo UI operativo lo exige.
+* Usa códigos explícitos reservados para demostración.
+* Su idempotencia es parcial: actualiza entidades clave, pero no garantiza que
+  una base previamente modificada vuelva a un estado canónico.
 * Las credenciales demo no deben reutilizarse en entornos reales.
-* La ejecución repetida debe realizarse únicamente cuando el comando lo permita de forma segura.
+
+### Postcondición
+
+* Quedan disponibles las entidades mínimas para navegar y revisar la interfaz.
+* Los datos resultantes no deben considerarse evidencia de cumplimiento de
+  todas las reglas, auditorías o invariantes del flujo operativo.
 
 ## 3. Sincronización de roles
 

@@ -425,9 +425,10 @@ Requiere permisos `kobo.*`.
 * El acceso técnico no implica permiso para modificar información financiera.
 * Los datos sensibles deben mantenerse protegidos.
 
-## 16. Flujo legado de Ficha 1
+## 16. Entrada de compatibilidad de Ficha 1
 
-El flujo histórico de compatibilidad se ejecuta mediante:
+El mapping `ficha_01` y el comando histórico continúan activos como entrada al
+staging genérico:
 
 ```bash
 python manage.py sync_kobo_ficha_01
@@ -444,18 +445,25 @@ python manage.py sync_kobo_ficha_01
 
 ```text
 sync_kobo_ficha_01
-→ Obtención del payload
-→ Normalización heredada
-→ Ficha01Territorio
-→ Ficha01CoveredCommunity
+→ obtención y validación del payload Ficha 1
+→ receive_api_submission
+→ KoboSubmission (received, payload crudo)
+→ process_submission y normalización ficha_01
+→ routing, revisión e importación mediante el pipeline genérico
 ```
 
 Este flujo:
 
 * se conserva por compatibilidad;
-* pertenece al primer modelo de integración de la Ficha 1;
+* persiste en `KoboSubmission` y no escribe en los modelos específicos Ficha01;
 * no representa el patrón recomendado para nuevas fichas;
 * no sustituye el pipeline ordinario basado en activos configurados.
+
+`Ficha01Territorio` y `Ficha01CoveredCommunity` permanecen en el schema legado,
+no tienen escritores activos conocidos y no son utilizados por el pipeline
+vigente. No son la fuente de verdad activa. Su eventual eliminación requiere
+una decisión de producto y una migración específica; ninguna integración nueva
+debe escribir en ellos sin una decisión arquitectónica explícita.
 
 ## 17. Privacidad
 
@@ -526,4 +534,6 @@ python manage.py reconcile_kobo_submissions
 python manage.py sync_kobo_ficha_01
 ```
 
-El comando `sync_kobo_ficha_01` pertenece al flujo legado. La operación ordinaria debe utilizar los activos configurados y el pipeline general de KoboToolbox.
+El comando `sync_kobo_ficha_01` es una entrada de compatibilidad hacia
+`KoboSubmission`. La operación ordinaria debe utilizar los activos configurados
+y el pipeline general de KoboToolbox.

@@ -5,13 +5,14 @@ Este documento describe el estado de referencia de la suite automatizada, las á
 ## 1. Estado de referencia
 
 ```text
-763 tests
-763 aprobados
+791 tests
+791 aprobados
 ```
 
 Este número representa el estado de referencia actual de esta rama.
 
-Debe actualizarse cuando la cantidad total de pruebas cambie de forma estable.
+Debe revisarse cuando la cantidad total de pruebas cambie de forma estable en
+la rama principal.
 
 ## 2. Ejecución completa
 

@@ -404,8 +404,13 @@ Representa comunidades cubiertas asociadas al flujo legado de la Ficha 1.
 
 Ambos modelos:
 
-* pertenecen al primer flujo de integración de la Ficha 1;
-* se conservan por compatibilidad;
-* permanecen cubiertos por pruebas;
-* no representan el patrón recomendado para nuevas fichas;
-* podrán revisarse durante una futura consolidación del modelo Kobo.
+* forman parte del schema legado del primer flujo de Ficha 1;
+* se conservan temporalmente por compatibilidad histórica;
+* no tienen escritores activos conocidos y no son utilizados por el pipeline
+  vigente;
+* no son la fuente de verdad activa: el staging vigente reside en
+  `KoboSubmission`;
+* no deben recibir nuevas integraciones sin una decisión arquitectónica
+  explícita;
+* solo podrán eliminarse tras una decisión de producto y una migración
+  específica.
