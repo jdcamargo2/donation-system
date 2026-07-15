@@ -24,6 +24,7 @@ from apps.integrations.kobo.models import (
 )
 from apps.operations.models import (
     AuditLog,
+    OPERATIONAL_CODE_PREFIXES,
     OperationalCodeSequence,
     ProjectDocument,
     SupportingDocument,
@@ -60,15 +61,17 @@ class VerifyRestoredDataCommandTests(TestCase):
         self.addCleanup(self.media_override.disable)
 
         # Las secuencias se siembran en migraciones; asegurar presencia sin duplicar.
-        if not OperationalCodeSequence.objects.exists():
-            OperationalCodeSequence.objects.create(
-                namespace='donation',
-                prefix='DON',
-                next_value=1,
+        for namespace, prefix in OPERATIONAL_CODE_PREFIXES.items():
+            OperationalCodeSequence.objects.get_or_create(
+                namespace=namespace,
+                defaults={'prefix': prefix, 'next_value': 1},
             )
         self.institution = create_institution()
         self.project = create_project()
         create_donation(donor=self.institution)
+        OperationalCodeSequence.objects.filter(namespace__in=('project', 'donation')).update(
+            next_value=2
+        )
         AuditLog.objects.create(
             user=None,
             action=AuditLog.Action.CREATED,
@@ -162,3 +165,11 @@ class VerifyRestoredDataCommandTests(TestCase):
             self._run(trigger_installed=False)
 
         self.assertIn('trigger append-only ausente', str(ctx.exception))
+
+    def test_lagging_operational_sequence_fails(self):
+        OperationalCodeSequence.objects.filter(namespace='project').update(next_value=1)
+
+        with self.assertRaises(CommandError) as ctx:
+            self._run()
+
+        self.assertIn('secuencia project: LAGGING_SEQUENCE', str(ctx.exception))

@@ -12,6 +12,11 @@ from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
+from apps.operations.operational_code_sequences import (
+    UNSAFE_SEQUENCE_STATUSES,
+    inspect_operational_code_sequences,
+)
+
 AUDITLOG_SCHEMA = 'public'
 AUDITLOG_TABLE = 'operations_auditlog'
 AUDITLOG_QUALIFIED_NAME = f'{AUDITLOG_SCHEMA}.{AUDITLOG_TABLE}'
@@ -56,7 +61,7 @@ class Command(BaseCommand):
             'tables': {},
             'auditlog_count': None,
             'trigger_installed': None,
-            'sequences_count': None,
+            'operational_code_sequences': (),
             'file_refs_checked': 0,
             'file_refs_missing': 0,
             'kobo_downloaded_checked': 0,
@@ -129,15 +134,20 @@ class Command(BaseCommand):
         return issues
 
     def _check_sequences(self, report):
+        # PRE: OperationalCodeSequence and operational models are readable from default.
+        # POST: reports every namespace without repairing or creating any sequence row.
         issues = []
         try:
-            Sequence = apps.get_model('operations', 'OperationalCodeSequence')
-            count = Sequence.objects.count()
-            report['sequences_count'] = count
-            if count < 1:
-                issues.append('no hay secuencias operativas')
+            reports = inspect_operational_code_sequences()
+            report['operational_code_sequences'] = reports
+            for sequence_report in reports:
+                if sequence_report.status in UNSAFE_SEQUENCE_STATUSES:
+                    issues.append(
+                        f'secuencia {sequence_report.namespace}: '
+                        f'{sequence_report.status}'
+                    )
         except Exception:  # noqa: BLE001
-            report['sequences_count'] = None
+            report['operational_code_sequences'] = None
             issues.append('OperationalCodeSequence inaccesible')
         return issues
 
@@ -198,7 +208,14 @@ class Command(BaseCommand):
             self.stdout.write(f'  tabla {label}: {value}')
         self.stdout.write(f"  AuditLog count: {report['auditlog_count']}")
         self.stdout.write(f"  trigger append-only: {report['trigger_installed']}")
-        self.stdout.write(f"  secuencias operativas: {report['sequences_count']}")
+        self.stdout.write('  secuencias operativas:')
+        for sequence_report in report['operational_code_sequences'] or ():
+            self.stdout.write(
+                f'    {sequence_report.namespace}: {sequence_report.status} | '
+                f'max={sequence_report.maximum} | next={sequence_report.next_value} | '
+                f'canonical={sequence_report.canonical} | '
+                f'noncanonical={sequence_report.noncanonical}'
+            )
         self.stdout.write(
             f"  FileField comprobados: {report['file_refs_checked']}; "
             f"faltantes: {report['file_refs_missing']}"

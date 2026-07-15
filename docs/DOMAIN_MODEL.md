@@ -292,6 +292,9 @@ GAS
 * El padding de seis dígitos es un mínimo, no un límite máximo.
 * Los códigos manuales se reservan para seeds o migraciones controladas;
   `QuerySet.update()` y SQL directo omiten la inmutabilidad del modelo.
+* Tras restaurar un backup, `reconcile_operational_code_sequences` verifica sin
+  reparar que cada `next_value` sea mayor al máximo canónico persistido.
+  Una secuencia adelantada es válida; una ausente, igual o menor es insegura.
 
 ## 14. Modelos de integración con KoboToolbox
 
