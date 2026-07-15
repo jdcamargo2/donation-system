@@ -287,6 +287,11 @@ GAS
 * La generación no depende del conteo de filas.
 * Los códigos resultantes son únicos e inmutables.
 * Las secuencias deben encontrarse correctamente inicializadas.
+* Un rollback reutiliza el número reservado; una eliminación posterior al commit
+  puede dejar huecos.
+* El padding de seis dígitos es un mínimo, no un límite máximo.
+* Los códigos manuales se reservan para seeds o migraciones controladas;
+  `QuerySet.update()` y SQL directo omiten la inmutabilidad del modelo.
 
 ## 14. Modelos de integración con KoboToolbox
 

@@ -124,6 +124,71 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         allocation.project.save(update_fields=('status', 'updated_at'))
         return allocation
 
+    def assert_ten_distinct_concurrent_codes(self, results, *, model, prefix, namespace, before):
+        """
+        PRE: results contains ten concurrent creation outcomes for one code namespace.
+        POST: verifies ten persisted, unique, gap-free codes and no worker error.
+        """
+        outcomes = [outcome for outcome, _value in results]
+        self.assertEqual(outcomes.count('success'), 10, results)
+        self.assertNotIn('error', outcomes, results)
+        codes = [value for outcome, value in results if outcome == 'success']
+        self.assertEqual(len(codes), len(set(codes)))
+        self.assertEqual(model.objects.filter(code__in=codes).count(), 10)
+        for code in codes:
+            self.assertRegex(code, rf'^{prefix}-\d{{6,}}$')
+        self.assertEqual(
+            sorted(int(code.removeprefix(f'{prefix}-')) for code in codes),
+            list(range(before, before + 10)),
+        )
+        self.assertEqual(
+            OperationalCodeSequence.objects.get(namespace=namespace).next_value,
+            before + 10,
+        )
+
+    def test_concurrent_project_creations_reserve_ten_distinct_codes(self):
+        before = OperationalCodeSequence.objects.get(namespace='project').next_value
+
+        def create_project_with_thread_local_connection(index):
+            return Project.objects.create(name=f'Proyecto concurrente {index}').code
+
+        results = self.run_concurrently(
+            [lambda index=index: create_project_with_thread_local_connection(index) for index in range(10)]
+        )
+
+        self.assert_ten_distinct_concurrent_codes(
+            results,
+            model=Project,
+            prefix='PRJ',
+            namespace='project',
+            before=before,
+        )
+
+    def test_concurrent_donation_creations_reserve_ten_distinct_codes(self):
+        donor = create_donation().donor
+        donor_id = donor.pk
+        before = OperationalCodeSequence.objects.get(namespace='donation').next_value
+
+        def create_donation_with_thread_local_connection(index):
+            return Donation.objects.create(
+                donor_id=donor_id,
+                amount=Decimal('100.00'),
+                status=Donation.Status.RECEIVED,
+                objective=f'Donación concurrente {index}',
+            ).code
+
+        results = self.run_concurrently(
+            [lambda index=index: create_donation_with_thread_local_connection(index) for index in range(10)]
+        )
+
+        self.assert_ten_distinct_concurrent_codes(
+            results,
+            model=Donation,
+            prefix='DON',
+            namespace='donation',
+            before=before,
+        )
+
     def test_concurrent_allocations_preserve_donation_balance(self):
         donation = create_donation(amount=Decimal('100.00'))
         donation_id = donation.pk
