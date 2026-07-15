@@ -107,8 +107,15 @@ producción):
 python manage.py migrate --check
 python manage.py check
 python manage.py verify_postgres_security
+python manage.py reconcile_operational_code_sequences
 python manage.py verify_restored_data
 ```
+
+`reconcile_operational_code_sequences` funciona en modo detect-only y es de
+solo lectura: no crea ni ajusta secuencias. El comando falla ante los estados
+`MISSING_SEQUENCE`, `LAGGING_SEQUENCE` e `INVALID_SEQUENCE`, correspondientes a
+una secuencia ausente, atrasada o inválida. No existe reparación automática;
+cualquier corrección debe revisarse y ejecutarse manualmente.
 
 ## Pruebas trimestrales
 

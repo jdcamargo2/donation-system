@@ -437,9 +437,16 @@ Después de restaurar un entorno aislado:
 python manage.py migrate --check
 python manage.py check
 python manage.py verify_postgres_security
+python manage.py reconcile_operational_code_sequences
 python manage.py verify_restored_data
 python manage.py sync_sigedon_roles
 ```
+
+`reconcile_operational_code_sequences` funciona en modo detect-only y es de
+solo lectura: no crea ni ajusta secuencias. El comando falla ante una secuencia
+ausente (`MISSING_SEQUENCE`), atrasada (`LAGGING_SEQUENCE`) o inválida
+(`INVALID_SEQUENCE`). No existe reparación automática; cualquier corrección
+debe revisarse y ejecutarse manualmente.
 
 También debe verificarse:
 

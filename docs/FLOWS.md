@@ -38,7 +38,7 @@ Este documento describe los principales flujos operativos de SIGEDON, incluyendo
 
 * Existe una institución con rol de donante.
 * El monto es positivo.
-* La moneda y las fechas son válidas.
+* La moneda es USD y las fechas son válidas.
 
 ### Pasos
 
@@ -56,6 +56,14 @@ Este documento describe los principales flujos operativos de SIGEDON, incluyendo
 * La donación conserva un código único e inmutable.
 * El saldo disponible se deriva de las asignaciones no anuladas.
 * Una donación anulada queda excluida de las métricas operativas.
+
+### Regla monetaria
+
+SIGEDON opera exclusivamente en USD. `Donation.currency` y `Expense.currency`
+solo admiten `USD`, y PostgreSQL impone esta restricción. El sistema no realiza
+conversiones ni utiliza tasas de cambio. `EUR`, `VES` y `COP` solo pueden
+aparecer en migraciones históricas o en pruebas negativas que verifican su
+rechazo.
 
 ---
 
@@ -242,7 +250,7 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 2. Se seleccionan proyectos autorizados para publicación.
 3. Solo se incluyen avances en estado `PUBLISHED`.
 4. Se excluyen entidades anuladas.
-5. Se excluyen registros en monedas no operativas de las métricas.
+5. Todas las operaciones monetarias publicables ya están expresadas en USD.
 6. Se eliminan campos privados o internos.
 7. Las respuestas autorizadas pueden almacenarse temporalmente en caché.
 8. El portal presenta páginas o respuestas JSON públicas.
