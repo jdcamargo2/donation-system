@@ -32,6 +32,10 @@ class ExpenseFinalizedError(ValidationError):
     """Raised when ordinary mutation targets an annulled expense."""
 
 
+class SupportingDocumentError(ValidationError):
+    """Raised when a supporting-document mutation violates an expense invariant."""
+
+
 EXPENSE_FINAL_STATUSES = frozenset({Expense.Status.ANNULLED})
 PROJECT_UPDATE_FINAL_STATUSES = frozenset({ProjectUpdate.Status.PUBLISHED})
 
@@ -762,6 +766,60 @@ def update_expense(
                 % {'code': locked_expense.code, 'before': before, 'after': after},
             )
         return locked_expense
+
+
+def create_supporting_document(
+    *, expense_id: int, title: str, file, notes: str, actor
+) -> SupportingDocument:
+    """
+    PRE: expense_id exists and title/file/notes already passed structural form validation.
+    POST: stores the private file outside the transaction, then creates and audits one document atomically.
+    """
+    expense = Expense.objects.get(pk=expense_id)
+    draft_document = SupportingDocument(
+        expense=expense,
+        title=title,
+        document=file,
+        notes=notes,
+    )
+    draft_document.full_clean()
+    with _stored_upload(draft_document, 'document', file) as stored_name, transaction.atomic():
+        locked_expense = Expense.objects.select_for_update().get(pk=expense_id)
+        document = SupportingDocument.objects.create(
+            expense=locked_expense,
+            title=title,
+            document=stored_name,
+            notes=notes,
+        )
+        log_action(
+            actor,
+            AuditLog.Action.CREATED,
+            document,
+            _('Documento soporte adjuntado.'),
+        )
+        return document
+
+
+def delete_supporting_document(*, document_id: int, actor) -> int:
+    """
+    PRE: document_id identifies a supporting document proposed for deletion.
+    POST: locks and revalidates its expense, then atomically audits and deletes only a redundant document.
+    """
+    document_reference = SupportingDocument.objects.only('expense_id').get(pk=document_id)
+    with transaction.atomic():
+        expense = Expense.objects.select_for_update().get(pk=document_reference.expense_id)
+        document = SupportingDocument.objects.select_for_update().get(pk=document_id)
+        if (
+            expense.status == Expense.Status.ANNULLED
+            or expense.supporting_documents.count() <= 1
+        ):
+            raise SupportingDocumentError(
+                _('El gasto debe conservar su documento soporte.')
+            )
+        expense_id = expense.pk
+        log_delete(actor, document, _('Documento soporte eliminado.'))
+        document.delete()
+        return expense_id
 
 
 def annul_expense(expense_id: int, *, actor, reason: str) -> Expense:

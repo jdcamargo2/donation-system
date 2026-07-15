@@ -23,6 +23,7 @@ from apps.operations.models import (
 from apps.operations.services import (
     add_project_update_attachment,
     add_project_update_remediation_attachment,
+    create_supporting_document,
     create_expense,
     create_project_update_remediation,
     create_project_update_review,
@@ -145,6 +146,40 @@ class UploadTransactionBoundaryTests(TransactionTestCase):
         self.assertEqual(storage.saved[0][1], False)
         self.assertEqual(expense.supporting_documents.count(), 1)
         self.assertTrue(AuditLog.objects.filter(entity_id=str(expense.pk)).exists())
+
+    def test_standalone_support_storage_is_outside_transaction_and_compensates_audit_failure(self):
+        allocation = create_allocation(project=self.project, amount=Decimal('100.00'))
+        expense = create_expense(
+            allocation=allocation, expense_date=TEST_DATE, category='food', amount=Decimal('10.00'),
+            reason='Compra', provider_or_recipient='Proveedor', payment_method='cash',
+            description='', observations='', actor=self.actor,
+            support_file=SimpleUploadedFile('initial.pdf', b'initial'),
+        )
+        storage, storage_patch = self.storage_for(SupportingDocument, 'document')
+        audit_count = AuditLog.objects.count()
+
+        with storage_patch, patch('apps.operations.services.log_action', side_effect=RuntimeError('audit failed')):
+            with self.assertRaises(RuntimeError):
+                create_supporting_document(
+                    expense_id=expense.pk,
+                    title='Factura adicional',
+                    file=SimpleUploadedFile('additional.pdf', b'additional'),
+                    notes='',
+                    actor=self.actor,
+                )
+
+        self.assertEqual(storage.saved[0][1], False)
+        self.assertEqual(
+            storage.deleted,
+            [(
+                storage.saved[0][0].replace(
+                    'supporting_documents/', 'stored/supporting_documents/'
+                ),
+                False,
+            )],
+        )
+        self.assertFalse(expense.supporting_documents.filter(title='Factura adicional').exists())
+        self.assertEqual(AuditLog.objects.count(), audit_count)
 
 
 @skipUnless(connection.vendor == 'postgresql', 'Requires PostgreSQL row-level locking')

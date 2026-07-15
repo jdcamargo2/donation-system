@@ -47,12 +47,14 @@ from .models import (
 from .services import (
     create_expense,
     create_fund_allocation,
+    create_supporting_document,
     create_project_update_review,
     create_project_update_review_decision,
     create_project_update_remediation,
     update_project_update_remediation,
     add_project_update_remediation_attachment,
     delete_project_update_remediation_attachment,
+    delete_supporting_document,
     submit_project_update_remediation,
     resolve_project_update_remediation,
     get_allocation_financial_summary,
@@ -69,6 +71,7 @@ from .services import (
     ProjectUpdateReviewError,
     ProjectUpdateReviewDecisionError,
     ProjectUpdateRemediationError,
+    SupportingDocumentError,
     OperationalEntityFinalizedError,
     allocation_has_effective_expenses,
     add_project_update_attachment,
@@ -1724,16 +1727,22 @@ class SupportingDocumentCreateForExpenseView(OperationsPermissionRequiredMixin, 
         return context
 
     def form_valid(self, form):
-        form.instance.expense = self.expense
-        response = super().form_valid(form)
-        log_action(
-            self.request.user,
-            AuditLog.Action.CREATED,
-            self.object,
-            _('Documento soporte adjuntado.'),
-        )
+        # PRE: the form is valid and the request user may add supporting documents.
+        # POST: delegates persistence and audit to the service, preserving the existing redirect.
+        try:
+            self.object = create_supporting_document(
+                expense_id=self.expense.pk,
+                title=form.cleaned_data['title'],
+                file=form.cleaned_data['document'],
+                notes=form.cleaned_data['notes'],
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        form.instance = self.object
         messages.success(self.request, _('Documento soporte adjuntado.'))
-        return response
+        return HttpResponseRedirect(self.get_success_url())
 
     def get_success_url(self):
         return reverse('expense_detail', args=[self.expense.pk])
@@ -1769,21 +1778,20 @@ class SupportingDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView
         return reverse('expense_detail', args=[self.object.expense_id])
 
     # PRE: self.object identifies a support document the user is allowed to delete.
-    # POST: deletes it atomically unless the expense is annulled or it is the last required support.
+    # POST: delegates the locked mutation and translates its domain outcome to the existing messages.
     def form_valid(self, form):
-        with transaction.atomic():
-            expense = Expense.objects.select_for_update().get(pk=self.object.expense_id)
-            document = SupportingDocument.objects.select_for_update().get(pk=self.object.pk)
-            if expense.status == Expense.Status.ANNULLED or expense.supporting_documents.count() <= 1:
-                messages.error(
-                    self.request,
-                    _('El gasto debe conservar su documento soporte.'),
-                )
-                return HttpResponseRedirect(reverse('expense_detail', args=[expense.pk]))
-            log_delete(self.request.user, document, _('Documento soporte eliminado.'))
-            document.delete()
+        try:
+            expense_id = delete_supporting_document(
+                document_id=self.object.pk,
+                actor=self.request.user,
+            )
+        except SupportingDocumentError as error:
+            messages.error(self.request, error.messages[0])
+            return HttpResponseRedirect(
+                reverse('expense_detail', args=[self.object.expense_id])
+            )
         messages.success(self.request, _('Documento soporte eliminado.'))
-        return HttpResponseRedirect(reverse('expense_detail', args=[expense.pk]))
+        return HttpResponseRedirect(reverse('expense_detail', args=[expense_id]))
 
 
 class AuditLogListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, ListView):
