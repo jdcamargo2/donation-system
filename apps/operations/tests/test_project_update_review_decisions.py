@@ -56,6 +56,7 @@ class ProjectUpdateReviewDecisionTests(TestCase):
             title='Avance con resultado institucional',
             description='El avance no debe cambiar al registrar el resultado.',
             created_by=self.field_operator,
+            reported_by=self.field_operator,
         )
         published_update = publish_project_update(project_update.pk, self.field_operator)
         return create_project_update_review(

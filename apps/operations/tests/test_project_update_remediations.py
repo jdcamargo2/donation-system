@@ -35,7 +35,9 @@ class ProjectUpdateRemediationTests(TestCase):
         self.project.save(update_fields=('status',))
 
     def decision(self, outcome='observed'):
-        update = register_advance(self.project.pk, 'Avance observado', 'Contenido.', created_by=self.author)
+        update = register_advance(
+            self.project.pk, 'Avance observado', 'Contenido.', created_by=self.author, reported_by=self.author
+        )
         publish_project_update(update.pk, self.author)
         review = create_project_update_review(update_id=update.pk, observations='Revisión.', actor=self.reviewer)
         return create_project_update_review_decision(

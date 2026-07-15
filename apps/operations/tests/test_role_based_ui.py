@@ -31,10 +31,12 @@ class RoleBasedUITests(TestCase):
         self.project = create_project()
         self.project.status = Project.Status.ACTIVE
         self.project.save()
+        self.reporter = self.create_user_for_role('ui-update-reporter', ROLE_SIGEDON_ADMIN)
         self.project_update = register_advance(
             project_id=self.project.pk,
             title='Avance visible por rol',
             description='Pendiente de revisión.',
+            reported_by=self.reporter,
         )
         self.institution = create_institution()
         self.donation = create_donation(donor=self.institution)
@@ -208,6 +210,7 @@ class RoleBasedUITests(TestCase):
             project_id=self.project.pk,
             title='Avance publicado para Comité',
             description='Listo para revisión documental.',
+            reported_by=publisher,
         )
         publish_project_update(published_update.pk, publisher)
         self.client.force_login(self.create_user_for_role('ui-reviewer', ROLE_PROJECT_UPDATE_REVIEWER))
@@ -223,6 +226,7 @@ class RoleBasedUITests(TestCase):
             project_id=self.project.pk,
             title='Avance revisado para Comité',
             description='Listo para resultado institucional.',
+            reported_by=publisher,
         )
         publish_project_update(published_update.pk, publisher)
         reviewer = self.create_user_for_role('ui-decision-reviewer', ROLE_PROJECT_UPDATE_REVIEWER)
@@ -245,12 +249,14 @@ class RoleBasedUITests(TestCase):
             project_id=self.project.pk,
             title='Avance sin revisión para navegación',
             description='Debe activar el enlace Avances.',
+            reported_by=publisher,
         )
         publish_project_update(unreviewed_update.pk, publisher)
         reviewable_update = register_advance(
             project_id=self.project.pk,
             title='Avance para rutas de revisión',
             description='Debe activar el enlace Avances.',
+            reported_by=publisher,
         )
         publish_project_update(reviewable_update.pk, publisher)
         review = create_project_update_review(
@@ -262,6 +268,7 @@ class RoleBasedUITests(TestCase):
             project_id=self.project.pk,
             title='Avance para detalle de resultado',
             description='Debe activar el enlace Avances.',
+            reported_by=publisher,
         )
         publish_project_update(decided_update.pk, publisher)
         decided_review = create_project_update_review(

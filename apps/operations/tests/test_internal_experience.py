@@ -22,6 +22,7 @@ class InternalExperienceTemplateTests(TestCase):
             project_id=self.project.pk,
             title='Avance operativo',
             description='Evidencia interna del avance.',
+            reported_by=self.user,
             created_by=self.user,
         )
 

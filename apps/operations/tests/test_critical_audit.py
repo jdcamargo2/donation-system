@@ -86,7 +86,12 @@ class CriticalAuditTests(TestCase):
         project = create_project(code='PRJ-REV-001', name='Proyecto revisión')
         project.status = Project.Status.ACTIVE
         project.save()
-        update = register_advance(project_id=project.pk, title='Avance aprobado', description='Listo.')
+        update = register_advance(
+            project_id=project.pk,
+            title='Avance aprobado',
+            description='Listo.',
+            reported_by=self.user,
+        )
         response = self.client.post(reverse('project_update_publish', args=[update.pk]))
 
         self.assertRedirects(response, reverse('project_update_detail', args=[update.pk]))

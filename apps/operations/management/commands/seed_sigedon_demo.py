@@ -518,6 +518,7 @@ class Command(BaseCommand):
                     "progress_percentage": data["progress_percentage"],
                     "status": data["status"],
                     "created_by": operator,
+                    "reported_by": reviewer,
                 },
             )
 

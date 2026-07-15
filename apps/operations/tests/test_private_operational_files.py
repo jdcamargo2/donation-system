@@ -21,7 +21,9 @@ class PrivateOperationalFileDownloadTests(TestCase):
         self.project = create_project()
         self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=('status',))
-        self.update = register_advance(self.project.pk, 'Avance', 'Detalle', created_by=self.user)
+        self.update = register_advance(
+            self.project.pk, 'Avance', 'Detalle', created_by=self.user, reported_by=self.user
+        )
         self.attachment = ProjectUpdateAttachment.objects.create(
             project_update=self.update,
             file=SimpleUploadedFile('evidence.pdf', b'evidence'),

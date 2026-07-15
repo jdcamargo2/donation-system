@@ -45,6 +45,7 @@ class ProjectUpdateAttachmentImmutabilityTests(TestCase):
             title=title,
             description='Evidencia operativa del avance.',
             created_by=self.user,
+            reported_by=self.user,
         )
 
     def add_draft_attachment(self, update, title='Soporte inicial'):

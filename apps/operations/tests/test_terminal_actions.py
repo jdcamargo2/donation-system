@@ -79,6 +79,7 @@ class TerminalActionServiceTests(TestCase):
             title='Avance pendiente',
             description='Debe resolverse antes de anular el proyecto.',
             created_by=self.actor,
+            reported_by=self.actor,
         )
 
         with self.assertRaisesMessage(InvalidStateTransitionError, 'mantiene avances en borrador'):
@@ -105,6 +106,7 @@ class TerminalActionServiceTests(TestCase):
             title='Avance histórico',
             description='La publicación conserva la evidencia histórica.',
             created_by=self.actor,
+            reported_by=self.actor,
         )
         publish_project_update(update.pk, self.actor)
 

@@ -26,10 +26,12 @@ class OperationRoleTests(TestCase):
         self.project = create_project()
         self.project.status = Project.Status.ACTIVE
         self.project.save()
+        self.reporter = self.create_user_for_role('role-update-reporter', ROLE_SIGEDON_ADMIN)
         self.project_update = register_advance(
             project_id=self.project.pk,
             title='Avance para roles',
             description='Pendiente de revisión.',
+            reported_by=self.reporter,
         )
 
     def create_user_for_role(self, username, role_name):

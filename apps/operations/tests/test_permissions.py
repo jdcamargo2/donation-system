@@ -27,10 +27,14 @@ class OperationsPermissionTests(TestCase):
         self.project = create_project()
         self.project.status = Project.Status.ACTIVE
         self.project.save()
+        self.reporter = create_user_with_permissions(
+            'permission-update-reporter', 'add_projectupdate'
+        )
         self.project_update = register_advance(
             project_id=self.project.pk,
             title='Avance pendiente',
             description='Listo para revisión.',
+            reported_by=self.reporter,
         )
 
     def test_anonymous_user_is_redirected_from_dashboard(self):

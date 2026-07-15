@@ -86,7 +86,9 @@ class UploadTransactionBoundaryTests(TransactionTestCase):
         self.project.save(update_fields=('status',))
 
     def draft(self):
-        return register_advance(self.project.pk, 'Borrador', 'Contenido', created_by=self.actor)
+        return register_advance(
+            self.project.pk, 'Borrador', 'Contenido', created_by=self.actor, reported_by=self.actor
+        )
 
     def storage_for(self, model, field):
         storage = RecordingStorage()
@@ -124,6 +126,7 @@ class UploadTransactionBoundaryTests(TransactionTestCase):
                     self.project.pk, 'Con varios archivos', 'Contenido',
                     attachments=(SimpleUploadedFile('one.pdf', b'1'), SimpleUploadedFile('two.pdf', b'2')),
                     created_by=self.actor,
+                    reported_by=self.actor,
                 )
         update = self.project.updates.get(title='Con varios archivos')
         self.assertEqual(update.attachments.count(), 1)

@@ -47,6 +47,7 @@ class ProjectUpdateReviewTests(TestCase):
             title='Avance para revisión documental',
             description='Contenido que debe permanecer inalterado al revisar.',
             created_by=self.field_operator,
+            reported_by=self.field_operator,
         )
 
     def create_published_update(self):
