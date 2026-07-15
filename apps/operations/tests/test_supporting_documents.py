@@ -66,7 +66,7 @@ class SupportingDocumentWorkflowTests(TestCase):
         self.client.force_login(self.user)
 
         with patch(
-            'apps.operations.views.create_supporting_document',
+            'apps.operations.views.supporting_documents.create_supporting_document',
             wraps=create_supporting_document,
         ) as service:
             response = self.client.post(
