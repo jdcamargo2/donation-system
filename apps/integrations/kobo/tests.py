@@ -89,7 +89,6 @@ from apps.integrations.kobo.services import (
     get_project_imported_submissions,
     get_project_pending_submissions,
     get_project_submission_history,
-    _lock_submission_for_operational_import,
     import_kobo_submission,
     reject_kobo_submission,
     restore_kobo_submission_to_review,
@@ -103,6 +102,9 @@ from apps.integrations.kobo.services import (
     sync_registered_forms,
     unlink_asset_from_project,
     validate_routing_source_field,
+)
+from apps.integrations.kobo.services.importers import (
+    _lock_submission_for_operational_import,
 )
 from apps.operations.models import AuditLog, Project, ProjectUpdate
 
