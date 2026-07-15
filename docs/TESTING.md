@@ -5,13 +5,14 @@ Este documento describe el estado de referencia de la suite automatizada, las á
 ## 1. Estado de referencia
 
 ```text
-620 tests
-620 aprobados
+791 tests
+791 aprobados
 ```
 
-Este número representa el estado de la suite al cerrar la fase de saneamiento previa a la documentación.
+Este número representa el estado de referencia actual de esta rama.
 
-Debe actualizarse cuando la cantidad total de pruebas cambie de forma estable en la rama principal del proyecto.
+Debe revisarse cuando la cantidad total de pruebas cambie de forma estable en
+la rama principal.
 
 ## 2. Ejecución completa
 
@@ -108,6 +109,12 @@ La suite cubre:
 ## 4. Pruebas sobre PostgreSQL
 
 Las pruebas concurrentes requieren PostgreSQL.
+
+SIGEDON opera exclusivamente en USD. `Donation.currency` y `Expense.currency`
+solo admiten `USD`, y las pruebas de constraints comprueban que PostgreSQL
+impone esta restricción. No existen conversiones ni tasas de cambio. `EUR`, `VES`
+y `COP` solo deben aparecer en migraciones históricas o en pruebas negativas
+que verifican su rechazo.
 
 Validan:
 
@@ -292,7 +299,7 @@ El portal debe comprobar:
 * inclusión únicamente de avances publicados;
 * exclusión de entidades anuladas;
 * exclusión de datos privados;
-* exclusión de monedas no operativas en métricas;
+* persistencia exclusiva de operaciones monetarias en USD;
 * ausencia de payloads Kobo;
 * ausencia de firmas y documentos privados;
 * consistencia entre páginas y respuestas JSON.

@@ -49,7 +49,7 @@
                         <td>{{ expense.get_category_display }}</td>
                         <td><span class="badge ops-status-badge">{{ expense.get_status_display }}</span></td>
                         <td>
-                            {% if expense.supporting_documents.exists %}
+                            {% if expense.annotated_has_support %}
                                 Con soporte
                             {% else %}
                                 Sin soporte

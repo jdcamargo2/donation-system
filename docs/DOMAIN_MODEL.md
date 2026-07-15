@@ -50,8 +50,9 @@ ANNULLED
 * El presupuesto estimado no puede ser negativo.
 * La fecha final no puede ser anterior a la fecha inicial.
 * El código operativo es único e inmutable.
-* El monto financiado se deriva de las asignaciones no anuladas.
-* El monto ejecutado se deriva de los gastos no anulados.
+* El monto financiado se deriva únicamente de las asignaciones no anuladas financiadas en USD.
+* El monto ejecutado se deriva únicamente de gastos efectivos en USD sobre donaciones USD.
+* PostgreSQL impide monedas distintas de USD en donaciones y gastos.
 * Los proyectos cerrados o anulados no deben recibir nuevas operaciones incompatibles con su estado.
 
 ## 3. `Donation`
@@ -69,8 +70,9 @@ ANNULLED
 ### Reglas
 
 * El monto debe ser positivo.
-* La moneda operativa del MVP es USD.
+* La moneda es estrictamente USD; no existe conversión monetaria.
 * El código operativo es único e inmutable.
+* PostgreSQL impide monedas distintas de USD.
 * Las asignaciones no anuladas no pueden exceder el monto disponible.
 * Una donación anulada queda excluida de métricas y saldos operativos.
 * El nivel de asignación se calcula a partir de sus asignaciones y no se almacena como estado editable.
@@ -152,7 +154,7 @@ PUBLISHED
 ### Actores
 
 * `created_by`: usuario autenticado que registró técnicamente el avance.
-* `reported_by`: responsable institucional al que se atribuye el avance.
+* `reported_by`: persona responsable del contenido al que se atribuye el avance.
 
 ### Reglas
 
@@ -160,7 +162,7 @@ PUBLISHED
 * El porcentaje de progreso debe estar entre 0 y 100.
 * La publicación constituye una transición explícita.
 * Un avance publicado es inmutable.
-* El creador técnico y el responsable institucional representan responsabilidades diferentes.
+* El creador técnico y la persona responsable del avance representan responsabilidades diferentes.
 * La revisión institucional no altera el estado del avance.
 
 ## 8. `ProjectDocument`
@@ -285,6 +287,14 @@ GAS
 * La generación no depende del conteo de filas.
 * Los códigos resultantes son únicos e inmutables.
 * Las secuencias deben encontrarse correctamente inicializadas.
+* Un rollback reutiliza el número reservado; una eliminación posterior al commit
+  puede dejar huecos.
+* El padding de seis dígitos es un mínimo, no un límite máximo.
+* Los códigos manuales se reservan para seeds o migraciones controladas;
+  `QuerySet.update()` y SQL directo omiten la inmutabilidad del modelo.
+* Tras restaurar un backup, `reconcile_operational_code_sequences` verifica sin
+  reparar que cada `next_value` sea mayor al máximo canónico persistido.
+  Una secuencia adelantada es válida; una ausente, igual o menor es insegura.
 
 ## 14. Modelos de integración con KoboToolbox
 
@@ -394,8 +404,13 @@ Representa comunidades cubiertas asociadas al flujo legado de la Ficha 1.
 
 Ambos modelos:
 
-* pertenecen al primer flujo de integración de la Ficha 1;
-* se conservan por compatibilidad;
-* permanecen cubiertos por pruebas;
-* no representan el patrón recomendado para nuevas fichas;
-* podrán revisarse durante una futura consolidación del modelo Kobo.
+* forman parte del schema legado del primer flujo de Ficha 1;
+* se conservan temporalmente por compatibilidad histórica;
+* no tienen escritores activos conocidos y no son utilizados por el pipeline
+  vigente;
+* no son la fuente de verdad activa: el staging vigente reside en
+  `KoboSubmission`;
+* no deben recibir nuevas integraciones sin una decisión arquitectónica
+  explícita;
+* solo podrán eliminarse tras una decisión de producto y una migración
+  específica.

@@ -22,6 +22,7 @@ from apps.operations.models import (
     ZERO_MONEY,
     OPERATIONAL_CODE_PREFIXES,
 )
+from apps.operations.project_update_responsibles import eligible_project_update_reporters
 from apps.operations.services import (
     ExpenseFinalizedError,
     annul_expense,
@@ -114,6 +115,79 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         errors = [value for outcome, value in results if outcome == 'error']
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], (ValidationError, ExpenseFinalizedError))
+
+    def create_active_allocation(self, **kwargs):
+        # PRE: kwargs describe a valid allocation fixture for a concurrent expense operation.
+        # POST: returns an allocation whose persisted project status is ACTIVE before threads start.
+        allocation = create_allocation(**kwargs)
+        allocation.project.status = Project.Status.ACTIVE
+        allocation.project.save(update_fields=('status', 'updated_at'))
+        return allocation
+
+    def assert_ten_distinct_concurrent_codes(self, results, *, model, prefix, namespace, before):
+        """
+        PRE: results contains ten concurrent creation outcomes for one code namespace.
+        POST: verifies ten persisted, unique, gap-free codes and no worker error.
+        """
+        outcomes = [outcome for outcome, _value in results]
+        self.assertEqual(outcomes.count('success'), 10, results)
+        self.assertNotIn('error', outcomes, results)
+        codes = [value for outcome, value in results if outcome == 'success']
+        self.assertEqual(len(codes), len(set(codes)))
+        self.assertEqual(model.objects.filter(code__in=codes).count(), 10)
+        for code in codes:
+            self.assertRegex(code, rf'^{prefix}-\d{{6,}}$')
+        self.assertEqual(
+            sorted(int(code.removeprefix(f'{prefix}-')) for code in codes),
+            list(range(before, before + 10)),
+        )
+        self.assertEqual(
+            OperationalCodeSequence.objects.get(namespace=namespace).next_value,
+            before + 10,
+        )
+
+    def test_concurrent_project_creations_reserve_ten_distinct_codes(self):
+        before = OperationalCodeSequence.objects.get(namespace='project').next_value
+
+        def create_project_with_thread_local_connection(index):
+            return Project.objects.create(name=f'Proyecto concurrente {index}').code
+
+        results = self.run_concurrently(
+            [lambda index=index: create_project_with_thread_local_connection(index) for index in range(10)]
+        )
+
+        self.assert_ten_distinct_concurrent_codes(
+            results,
+            model=Project,
+            prefix='PRJ',
+            namespace='project',
+            before=before,
+        )
+
+    def test_concurrent_donation_creations_reserve_ten_distinct_codes(self):
+        donor = create_donation().donor
+        donor_id = donor.pk
+        before = OperationalCodeSequence.objects.get(namespace='donation').next_value
+
+        def create_donation_with_thread_local_connection(index):
+            return Donation.objects.create(
+                donor_id=donor_id,
+                amount=Decimal('100.00'),
+                status=Donation.Status.RECEIVED,
+                objective=f'Donación concurrente {index}',
+            ).code
+
+        results = self.run_concurrently(
+            [lambda index=index: create_donation_with_thread_local_connection(index) for index in range(10)]
+        )
+
+        self.assert_ten_distinct_concurrent_codes(
+            results,
+            model=Donation,
+            prefix='DON',
+            namespace='donation',
+            before=before,
+        )
 
     def test_concurrent_allocations_preserve_donation_balance(self):
         donation = create_donation(amount=Decimal('100.00'))
@@ -215,7 +289,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
 
     def test_concurrent_expenses_preserve_allocation_balance(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         allocation_id = allocation.pk
         allocation_amount = allocation.amount
         Expense.objects.create(
@@ -255,7 +329,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(SupportingDocument.objects.count(), 1)
 
     def test_concurrent_expense_creations_reserve_distinct_codes(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         before = OperationalCodeSequence.objects.get(namespace='expense').next_value
 
         def spend(label):
@@ -328,7 +402,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(FundAllocation.objects.get(pk=failed_id).amount, Decimal('20.00'))
 
     def test_concurrent_expense_updates_preserve_allocation_balance(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         allocation_id = allocation.pk
         allocation_amount = allocation.amount
         expense_ids = (
@@ -381,11 +455,17 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         project.save(update_fields=('status', 'updated_at'))
         reviewers = (create_user(username='reviewer-a'), create_user(username='reviewer-b'))
         reviewer_ids = (reviewers[0].pk, reviewers[1].pk)
+        reported_by = reviewers[0]
+        self.assertTrue(
+            eligible_project_update_reporters().filter(pk=reported_by.pk).exists(),
+            'El responsable del avance debe ser activo y elegible antes de publicar.',
+        )
         project_update = ProjectUpdate.objects.create(
             project=project,
             title='Avance concurrente',
             description='Pendiente de dos revisores.',
             status=ProjectUpdate.Status.DRAFT,
+            reported_by=reported_by,
         )
         project_update_id = project_update.pk
 
@@ -413,7 +493,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
 
     def test_concurrent_expense_annulment_creates_one_event(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         expense = create_expense_fixture(allocation=allocation, amount=Decimal('80.00'))
         expense_id = expense.pk
         allocation_amount = allocation.amount
@@ -449,7 +529,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
 
     def test_concurrent_expense_update_and_annulment_keep_serializable_balance(self):
-        allocation = create_allocation(amount=Decimal('100.00'))
+        allocation = self.create_active_allocation(amount=Decimal('100.00'))
         expense = create_expense_fixture(allocation=allocation, amount=Decimal('30.00'))
         SupportingDocument.objects.create(
             expense=expense,

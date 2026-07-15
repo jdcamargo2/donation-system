@@ -56,6 +56,8 @@ El uso de una única moneda operativa evita introducir conversiones, tasas de ca
 * Los registros no expresados en USD se excluyen de métricas agregadas cuando corresponda.
 * La conversión multimoneda queda fuera del MVP.
 
+> Sustituida por la decisión de 2026-07-15: SIGEDON ya no conserva monedas históricas distintas de USD.
+
 ---
 
 ## 2026-07-11 — PostgreSQL obligatorio en producción
@@ -209,7 +211,7 @@ El avance constituye un registro institucional original que debe permanecer inmu
 
 ---
 
-## 2026-07-12 — Creador técnico y responsable institucional separados
+## 2026-07-12 — Creador técnico y persona responsable del avance separados
 
 ### Decisión
 
@@ -220,19 +222,19 @@ created_by
 → usuario autenticado que registra el avance
 
 reported_by
-→ responsable institucional al que se atribuye
+→ persona responsable del contenido del avance
 ```
 
 ### Motivo
 
-La persona que introduce la información en el sistema no necesariamente es la responsable institucional del avance reportado.
+La persona que introduce la información en el sistema no necesariamente es la responsable del contenido del avance reportado.
 
 ### Consecuencias
 
 * `created_by` se asigna automáticamente desde `request.user`.
 * `reported_by` se selecciona explícitamente.
 * La auditoría puede identificar al operador técnico.
-* La atribución institucional se conserva de forma independiente.
+* La atribución de la persona responsable se conserva de forma independiente.
 * No deben utilizarse ambos campos como si representaran la misma responsabilidad.
 
 ---
@@ -326,6 +328,12 @@ No contenían implementación funcional y mantenían una estructura que podía s
 
 ## 2026-07-13 — Conservación del flujo legado de Ficha 1
 
+### Estado actual
+
+Sustituida por la decisión del 2026-07-15 sobre convergencia al staging
+genérico. El flujo siguiente documenta la interpretación histórica de esta
+decisión y no describe el runtime vigente.
+
 ### Decisión
 
 La sincronización histórica de la Ficha 1 permanece disponible por compatibilidad, pero no constituye el camino recomendado para nuevos activos.
@@ -350,3 +358,62 @@ El flujo histórico continúa siendo necesario para compatibilidad y pruebas exi
 * Los nuevos activos deben utilizar el pipeline general de KoboToolbox.
 * Las nuevas fichas no deben replicar automáticamente el patrón de modelos específicos del flujo legado.
 * La deuda técnica queda documentada y controlada.
+
+---
+
+## 2026-07-15 — Convergencia de Ficha 1 al staging genérico
+
+### Decisión
+
+El pipeline vigente de Ficha 1 utiliza `KoboSubmission` como staging y fuente de
+verdad activa. El mapping `ficha_01` y `sync_kobo_ficha_01` se conservan como
+compatibilidad de entrada, pero no escriben en los modelos específicos Ficha01.
+
+```text
+sync_kobo_ficha_01
+→ validación del payload Ficha 1
+→ receive_api_submission
+→ KoboSubmission
+→ procesamiento y normalización ficha_01
+→ routing, revisión e importación mediante el pipeline genérico
+```
+
+### Motivo
+
+El runtime actual ya converge recepción, estados, eventos, routing y revisión en
+el staging genérico. Mantener dos destinos activos introduciría fuentes de
+verdad divergentes.
+
+### Consecuencias
+
+* `Ficha01Territorio` y `Ficha01CoveredCommunity` permanecen temporalmente como
+  schema legado, sin escritores activos conocidos.
+* Los modelos específicos no son utilizados por el pipeline vigente.
+* No se eliminarán hasta que exista una decisión de producto y una migración
+  específica.
+* Ninguna integración nueva debe escribir en esos modelos sin una ADR o
+  decisión arquitectónica explícita.
+* La decisión histórica del 2026-07-13 se conserva como antecedente, pero queda
+  sustituida en lo referente al destino activo de los datos.
+
+---
+
+## 2026-07-15 — USD estricto con integridad en PostgreSQL
+
+### Decisión
+
+SIGEDON admite exclusivamente USD. Las columnas `Donation.currency` y
+`Expense.currency` se conservan como unidad explícita, pero PostgreSQL impide
+cualquier valor distinto de `USD`.
+
+### Motivo
+
+Una única unidad monetaria elimina reglas de conversión y evita que datos
+financieros incompatibles alcancen los agregados, servicios o exportaciones.
+
+### Consecuencias
+
+* No existe multimoneda, tasas de cambio ni conversión de importes.
+* Los formularios y el admin no permiten elegir moneda.
+* Los servicios rechazan moneda distinta de USD antes de persistir.
+* Los constraints de PostgreSQL son la garantía final de integridad.

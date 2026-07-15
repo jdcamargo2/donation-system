@@ -27,15 +27,10 @@ DONATION_TYPE_CHOICES = [
     ('materials', _('Materiales')),
 ]
 
-OPERATING_CURRENCY_CHOICES = [
-    (OPERATING_CURRENCY, _('Dólar estadounidense')),
-]
+OPERATING_CURRENCY_CHOICES = ((OPERATING_CURRENCY, OPERATING_CURRENCY),)
 
-CURRENCY_CHOICES = OPERATING_CURRENCY_CHOICES + [
-    ('EUR', _('Euro')),
-    ('VES', _('Bolívar venezolano')),
-    ('COP', _('Peso colombiano')),
-]
+# Compatibility alias: financial models share the single USD source of truth.
+CURRENCY_CHOICES = OPERATING_CURRENCY_CHOICES
 
 BUDGET_CATEGORY_CHOICES = [
     ('infrastructure_supply', _('Infraestructura y Abasto local')),

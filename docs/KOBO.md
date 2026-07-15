@@ -42,6 +42,8 @@ KOBO_WEBHOOK_SECRET=
 KOBO_FICHA_01_ASSET_UID=
 KOBO_REQUEST_TIMEOUT_SECONDS=15
 KOBO_MAX_ATTACHMENT_BYTES=10485760
+KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS=900
+KOBO_WEBHOOK_MAX_BYTES=1048576
 ```
 
 ### Consideraciones
@@ -53,6 +55,8 @@ KOBO_MAX_ATTACHMENT_BYTES=10485760
 * `KOBO_WEBHOOK_SECRET` contiene el secreto utilizado para autenticar solicitudes entrantes.
 * `KOBO_REQUEST_TIMEOUT_SECONDS` define el tiempo máximo de espera para solicitudes externas.
 * `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
+* `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900).
+* `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging.
 * `KOBO_FICHA_01_ASSET_UID` pertenece únicamente al flujo legado de la Ficha 1.
 
 Los valores secretos no deben versionarse ni registrarse en logs.
@@ -294,6 +298,10 @@ Los adjuntos Kobo:
 
 * se descargan utilizando autenticación contra KoboToolbox;
 * respetan el límite configurado en `KOBO_MAX_ATTACHMENT_BYTES`;
+* reservan el trabajo con estado `PROCESSING`, `processing_token` y `processing_started_at`;
+* recuperan reservas vencidas según `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` al reintentar el procesamiento;
+* descargan y guardan en storage fuera de transacciones abiertas;
+* compensan archivos huérfanos si la confirmación BD falla o el token ya no coincide;
 * conservan metadatos técnicos;
 * se asocian con su submission;
 * poseen una clasificación de privacidad;
@@ -309,6 +317,7 @@ Los adjuntos Kobo:
 * ruta o referencia local;
 * clasificación de privacidad;
 * estado de descarga;
+* metadata de reserva de procesamiento (`processing_token`, `processing_started_at`);
 * fecha de incorporación.
 
 Las firmas y otros archivos sensibles no pueden marcarse como candidatos públicos.
@@ -416,9 +425,10 @@ Requiere permisos `kobo.*`.
 * El acceso técnico no implica permiso para modificar información financiera.
 * Los datos sensibles deben mantenerse protegidos.
 
-## 16. Flujo legado de Ficha 1
+## 16. Entrada de compatibilidad de Ficha 1
 
-El flujo histórico de compatibilidad se ejecuta mediante:
+El mapping `ficha_01` y el comando histórico continúan activos como entrada al
+staging genérico:
 
 ```bash
 python manage.py sync_kobo_ficha_01
@@ -435,18 +445,25 @@ python manage.py sync_kobo_ficha_01
 
 ```text
 sync_kobo_ficha_01
-→ Obtención del payload
-→ Normalización heredada
-→ Ficha01Territorio
-→ Ficha01CoveredCommunity
+→ obtención y validación del payload Ficha 1
+→ receive_api_submission
+→ KoboSubmission (received, payload crudo)
+→ process_submission y normalización ficha_01
+→ routing, revisión e importación mediante el pipeline genérico
 ```
 
 Este flujo:
 
 * se conserva por compatibilidad;
-* pertenece al primer modelo de integración de la Ficha 1;
+* persiste en `KoboSubmission` y no escribe en los modelos específicos Ficha01;
 * no representa el patrón recomendado para nuevas fichas;
 * no sustituye el pipeline ordinario basado en activos configurados.
+
+`Ficha01Territorio` y `Ficha01CoveredCommunity` permanecen en el schema legado,
+no tienen escritores activos conocidos y no son utilizados por el pipeline
+vigente. No son la fuente de verdad activa. Su eventual eliminación requiere
+una decisión de producto y una migración específica; ninguna integración nueva
+debe escribir en ellos sin una decisión arquitectónica explícita.
 
 ## 17. Privacidad
 
@@ -517,4 +534,6 @@ python manage.py reconcile_kobo_submissions
 python manage.py sync_kobo_ficha_01
 ```
 
-El comando `sync_kobo_ficha_01` pertenece al flujo legado. La operación ordinaria debe utilizar los activos configurados y el pipeline general de KoboToolbox.
+El comando `sync_kobo_ficha_01` es una entrada de compatibilidad hacia
+`KoboSubmission`. La operación ordinaria debe utilizar los activos configurados
+y el pipeline general de KoboToolbox.

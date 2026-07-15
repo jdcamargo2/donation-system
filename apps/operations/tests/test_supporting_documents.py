@@ -1,5 +1,6 @@
 import shutil
 import tempfile
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
@@ -7,7 +8,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from apps.operations.models import Expense, SupportingDocument
+from apps.operations.models import Expense, Project, SupportingDocument
+from apps.operations.services import create_supporting_document
 from apps.operations.role_services import sync_operation_roles
 from apps.operations.roles import ROLE_EXTERNAL_AUDITOR
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_expense
@@ -26,6 +28,8 @@ class SupportingDocumentWorkflowTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_superuser(username='support-admin', password='pass-12345')
         self.expense = create_expense(reason='Compra con soporte')
+        self.expense.allocation.project.status = Project.Status.ACTIVE
+        self.expense.allocation.project.save(update_fields=('status', 'updated_at'))
 
     def uploaded_file(self, name='support.pdf', content=b'file-content'):
         return SimpleUploadedFile(name, content, content_type='application/pdf')
@@ -61,16 +65,21 @@ class SupportingDocumentWorkflowTests(TestCase):
     def test_post_creates_supporting_document_for_the_expected_expense(self):
         self.client.force_login(self.user)
 
-        response = self.client.post(
-            reverse('supporting_document_create_for_expense', args=[self.expense.pk]),
-            data={
-                'title': 'Factura principal',
-                'document': self.uploaded_file(),
-                'notes': 'Soporte cargado después del gasto.',
-            },
-        )
+        with patch(
+            'apps.operations.views.supporting_documents.create_supporting_document',
+            wraps=create_supporting_document,
+        ) as service:
+            response = self.client.post(
+                reverse('supporting_document_create_for_expense', args=[self.expense.pk]),
+                data={
+                    'title': 'Factura principal',
+                    'document': self.uploaded_file(),
+                    'notes': 'Soporte cargado después del gasto.',
+                },
+            )
 
         document = SupportingDocument.objects.get(title='Factura principal')
+        service.assert_called_once()
         self.assertEqual(document.expense, self.expense)
         self.assertEqual(document.notes, 'Soporte cargado después del gasto.')
         self.assertRedirects(response, reverse('expense_detail', args=[self.expense.pk]))

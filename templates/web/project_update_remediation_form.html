@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block title %}Remediación - SIGEDON{% endblock %}
+{% block content %}<h1>Responder observación</h1><form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Guardar</button></form>{% endblock %}

@@ -3,10 +3,11 @@ from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
-from .choices import OPERATING_CURRENCY, OPERATING_CURRENCY_CHOICES
+from .choices import OPERATING_CURRENCY
 from .models import (
     AuditLog, Donation, Expense, FundAllocation, Institution, Project,
-    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision, SupportingDocument,
+    ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
+    ProjectUpdateRemediation, ProjectUpdateRemediationAttachment, SupportingDocument,
 )
 from .services import (
     ExpenseFinalizedError,
@@ -18,6 +19,7 @@ from .services import (
     log_update,
     ensure_operational_entity_is_editable,
 )
+from .project_update_responsibles import eligible_project_update_reporters, validate_project_update_reporter
 
 
 class FundAllocationAdminForm(forms.ModelForm):
@@ -39,24 +41,33 @@ class FundAllocationAdminForm(forms.ModelForm):
 class ExpenseAdminForm(forms.ModelForm):
     class Meta:
         model = Expense
-        fields = '__all__'
+        exclude = ('currency',)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['currency'].choices = OPERATING_CURRENCY_CHOICES
         self.fields['allocation'].queryset = FundAllocation.objects.filter(
             donation__currency=OPERATING_CURRENCY
         )
 
     def clean(self):
         cleaned_data = super().clean()
-        currency = cleaned_data.get('currency', self.instance.currency or OPERATING_CURRENCY)
-        if currency != OPERATING_CURRENCY:
-            raise ValidationError(_('SIGEDON solo permite operaciones financieras en USD.'))
         allocation = cleaned_data.get('allocation')
         if allocation and allocation.donation.currency != OPERATING_CURRENCY:
             raise ValidationError(_('La asignación seleccionada no corresponde a una donación en USD.'))
         return cleaned_data
+
+
+class ProjectUpdateAdminForm(forms.ModelForm):
+    class Meta:
+        model = ProjectUpdate
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if 'reported_by' in self.fields:
+            self.fields['reported_by'].label = _('Persona responsable del avance')
+            self.fields['reported_by'].required = True
+            self.fields['reported_by'].queryset = eligible_project_update_reporters()
 
 
 @admin.register(Institution)
@@ -97,6 +108,7 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(ProjectUpdate)
 class ProjectUpdateAdmin(admin.ModelAdmin):
+    form = ProjectUpdateAdminForm
     list_display = (
         'project', 'title', 'reported_by', 'update_date', 'progress_percentage',
         'status', 'created_at', 'created_by',
@@ -154,16 +166,27 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
         if change:
             persisted = ProjectUpdate.objects.get(pk=obj.pk)
             ensure_project_update_is_editable(persisted)
+            validate_project_update_reporter(obj.reported_by)
+            reported_by_changed = persisted.reported_by_id != obj.reported_by_id
             obj.status = persisted.status
             obj.created_by = persisted.created_by
         else:
+            validate_project_update_reporter(obj.reported_by)
             obj.status = ProjectUpdate.Status.DRAFT
             obj.created_by = request.user if request.user.is_authenticated else None
         super().save_model(request, obj, form, change)
         if change:
-            log_update(request.user, obj, _('Borrador de avance actualizado desde administración.'))
+            summary = (
+                _('Atribución de la persona responsable del avance actualizada desde administración.')
+                if reported_by_changed else _('Borrador de avance actualizado desde administración.')
+            )
+            log_update(request.user, obj, summary)
         else:
-            log_create(request.user, obj, _('Avance de proyecto creado como borrador desde administración.'))
+            log_create(
+                request.user,
+                obj,
+                _('Avance de proyecto creado como borrador con persona responsable asignada desde administración.'),
+            )
 
 
 @admin.register(ProjectUpdateReview)
@@ -221,6 +244,11 @@ class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
         ensure_project_update_is_editable(project_update)
         super().save_model(request, obj, form, change)
 
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'project_update':
+            kwargs['queryset'] = ProjectUpdate.objects.filter(status=ProjectUpdate.Status.DRAFT)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
     def has_change_permission(self, request, obj=None):
         if obj and obj.project_update.status == ProjectUpdate.Status.PUBLISHED:
             return False
@@ -231,12 +259,62 @@ class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
             return False
         return super().has_delete_permission(request, obj)
 
+    def delete_model(self, request, obj):
+        # PRE: obj is an attachment selected for ordinary admin deletion.
+        # POST: deletes only an attachment whose parent update remains DRAFT.
+        ensure_project_update_is_editable(obj.project_update)
+        return super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        # PRE: queryset contains attachments selected by the admin bulk delete action.
+        # POST: deletes the batch only when every parent update remains DRAFT.
+        for attachment in queryset.select_related('project_update'):
+            ensure_project_update_is_editable(attachment.project_update)
+        return super().delete_queryset(request, queryset)
+
+
+@admin.register(ProjectUpdateRemediation)
+class ProjectUpdateRemediationAdmin(admin.ModelAdmin):
+    list_display = ('decision', 'status', 'created_by', 'submitted_by', 'resolved_by')
+    readonly_fields = ('decision', 'created_by', 'submitted_by', 'submitted_at', 'resolved_by', 'resolved_at', 'created_at', 'updated_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and obj.status != ProjectUpdateRemediation.Status.DRAFT:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.status != ProjectUpdateRemediation.Status.DRAFT:
+            return False
+        return super().has_delete_permission(request, obj)
+
+
+@admin.register(ProjectUpdateRemediationAttachment)
+class ProjectUpdateRemediationAttachmentAdmin(admin.ModelAdmin):
+    list_display = ('remediation', 'title', 'created_at', 'uploaded_by')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and obj.remediation.status != ProjectUpdateRemediation.Status.DRAFT:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.remediation.status != ProjectUpdateRemediation.Status.DRAFT:
+            return False
+        return super().has_delete_permission(request, obj)
+
 
 @admin.register(Donation)
 class DonationAdmin(admin.ModelAdmin):
     list_display = ('code', 'donor', 'amount', 'currency', 'status', 'allocation_progress_display', 'received_date')
     search_fields = ('code', 'donor__name')
-    list_filter = ('status', 'currency')
+    list_filter = ('status',)
     readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
 
     def get_readonly_fields(self, request, obj=None):
@@ -258,6 +336,7 @@ class DonationAdmin(admin.ModelAdmin):
             obj.status = persisted.status
         else:
             obj.status = Donation.Status.REGISTERED
+            obj.currency = OPERATING_CURRENCY
         super().save_model(request, obj, form, change)
 
     @admin.display(description=_('Asignación'))
@@ -313,7 +392,7 @@ class ExpenseAdmin(admin.ModelAdmin):
     form = ExpenseAdminForm
     list_display = ('code', 'reason', 'allocation', 'amount', 'currency', 'status', 'expense_date')
     search_fields = ('code', 'reason', 'provider_or_recipient', 'allocation__project__name')
-    list_filter = ('status', 'currency', 'expense_date')
+    list_filter = ('status', 'expense_date')
     readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
     inlines = [SupportingDocumentInline]
 

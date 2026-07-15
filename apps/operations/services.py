@@ -1,3 +1,5 @@
+from contextlib import contextmanager, nullcontext
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
@@ -14,23 +16,64 @@ from .models import (
     Project,
     ProjectUpdate,
     ProjectUpdateAttachment,
+    ProjectUpdateImmutableError,
     ProjectUpdateReview,
     ProjectUpdateReviewDecision,
+    ProjectUpdateRemediation,
+    ProjectUpdateRemediationAttachment,
+    ProjectUpdateRemediationError,
     SupportingDocument,
     ZERO_MONEY,
 )
+from .project_update_responsibles import validate_project_update_reporter
 
 
 class ExpenseFinalizedError(ValidationError):
     """Raised when ordinary mutation targets an annulled expense."""
 
 
+class SupportingDocumentError(ValidationError):
+    """Raised when a supporting-document mutation violates an expense invariant."""
+
+
 EXPENSE_FINAL_STATUSES = frozenset({Expense.Status.ANNULLED})
 PROJECT_UPDATE_FINAL_STATUSES = frozenset({ProjectUpdate.Status.PUBLISHED})
 
 
-class ProjectUpdateImmutableError(ValidationError):
-    """Raised when ordinary mutation targets a non-draft project update."""
+def _store_upload_for_field(instance, field_name, uploaded_file):
+    """
+    PRE: uploaded_file is validated and instance supplies the target FileField metadata.
+    POST: stores the bytes outside any service transaction and returns its storage and name.
+    """
+    field = instance._meta.get_field(field_name)
+    storage = field.storage
+    generated_name = field.generate_filename(instance, uploaded_file.name)
+    return storage, storage.save(generated_name, uploaded_file)
+
+
+def _compensate_stored_upload(storage, stored_name):
+    """
+    PRE: stored_name was created by this request and its relational confirmation failed.
+    POST: attempts only its compensating delete and never masks the original exception.
+    """
+    try:
+        storage.delete(stored_name)
+    except Exception:
+        pass
+
+
+@contextmanager
+def _stored_upload(instance, field_name, uploaded_file):
+    """PRE: uploaded_file may be absent or valid. POST: compensates its new file if the caller raises."""
+    if not uploaded_file:
+        yield None
+        return
+    storage, stored_name = _store_upload_for_field(instance, field_name, uploaded_file)
+    try:
+        yield stored_name
+    except Exception:
+        _compensate_stored_upload(storage, stored_name)
+        raise
 
 
 class ProjectUpdateReviewError(ValidationError):
@@ -274,7 +317,7 @@ def finish_project(project_id: int, *, actor) -> Project:
 def annul_project(project_id: int, *, actor, reason) -> Project:
     """
     PRE: actor is authenticated, reason is valid, and project can transition to ANNULLED.
-    POST: annuls only a project without non-annulled allocations and audits atomically.
+    POST: annuls only a project without non-annulled allocations or draft updates and audits atomically.
     """
     _require_transition_actor(actor)
     clean_reason = validate_terminal_reason(reason)
@@ -288,6 +331,10 @@ def annul_project(project_id: int, *, actor, reason) -> Project:
         if project.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists():
             raise InvalidStateTransitionError(
                 {'allocations': _('El proyecto mantiene asignaciones no anuladas.')}
+            )
+        if project.updates.filter(status=ProjectUpdate.Status.DRAFT).exists():
+            raise InvalidStateTransitionError(
+                {'updates': _('El proyecto mantiene avances en borrador que deben resolverse antes de anularse.')}
             )
         return _finalize_operational_entity(
             entity=project,
@@ -439,6 +486,33 @@ def _validate_operating_currency(currency, field_name='currency'):
         raise ValidationError({field_name: _('SIGEDON solo permite operaciones financieras en USD.')})
 
 
+# PRE: donation is locked for update before funds are evaluated or reserved.
+# POST: returns only when the donation is RECEIVED; otherwise raises a domain validation error.
+def _validate_donation_can_fund_allocations(donation):
+    if donation.status != Donation.Status.RECEIVED:
+        raise ValidationError(
+            {'donation': _('Solo las donaciones recibidas pueden financiar asignaciones.')}
+        )
+
+
+# PRE: project is locked for update before an allocation is created or reassigned.
+# POST: returns only when the project is PLANNED or ACTIVE; otherwise raises a domain validation error.
+def _validate_project_accepts_allocations(project):
+    if project.status not in {Project.Status.PLANNED, Project.Status.ACTIVE}:
+        raise ValidationError(
+            {'project': _('Solo los proyectos planificados o activos admiten asignaciones.')}
+        )
+
+
+# PRE: project is locked for update before an expense or project update is written or published.
+# POST: returns only when the project is ACTIVE; otherwise raises a domain validation error.
+def _validate_project_is_active_for_execution_or_updates(project):
+    if project.status != Project.Status.ACTIVE:
+        raise ValidationError(
+            {'project': _('Solo los proyectos activos admiten gastos y avances.')}
+        )
+
+
 # PRE: donation is locked for update and amount is the complete proposed allocation amount.
 # POST: raises ValidationError unless amount is positive and fits the donation balance excluding exclude_pk.
 def _validate_allocation_balance(donation, amount, exclude_pk=None):
@@ -494,11 +568,14 @@ def create_fund_allocation(
 ):
     with transaction.atomic():
         locked_donation = Donation.objects.select_for_update().get(pk=donation.pk)
+        locked_project = Project.objects.select_for_update().get(pk=project.pk)
+        _validate_donation_can_fund_allocations(locked_donation)
+        _validate_project_accepts_allocations(locked_project)
         _validate_operating_currency(locked_donation.currency, 'donation')
         _validate_allocation_balance(locked_donation, amount)
         allocation = FundAllocation(
             donation=locked_donation,
-            project=project,
+            project=locked_project,
             budget_category=budget_category,
             amount=amount,
             responsible_person=responsible_person,
@@ -534,11 +611,14 @@ def update_fund_allocation(
             for item in Donation.objects.select_for_update().filter(pk__in=donation_ids).order_by('pk')
         }
         locked_donation = locked_donations[donation.pk]
+        locked_project = Project.objects.select_for_update().get(pk=project.pk)
+        _validate_donation_can_fund_allocations(locked_donation)
+        _validate_project_accepts_allocations(locked_project)
         _validate_operating_currency(locked_donation.currency, 'donation')
         _validate_allocation_balance(locked_donation, amount, exclude_pk=locked_allocation.pk)
         _validate_allocation_execution(locked_allocation, amount)
         locked_allocation.donation = locked_donation
-        locked_allocation.project = project
+        locked_allocation.project = locked_project
         locked_allocation.budget_category = budget_category
         locked_allocation.amount = amount
         locked_allocation.responsible_person = responsible_person
@@ -568,16 +648,19 @@ def create_expense(
     support_title='',
     support_file=None,
 ):
-    with transaction.atomic():
+    _validate_operating_currency(currency)
+    if not support_file:
+        raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
+    support_document = SupportingDocument(title=support_title or support_file.name)
+    with _stored_upload(support_document, 'document', support_file) as stored_name, transaction.atomic():
         allocation_reference = FundAllocation.objects.only('donation_id').get(pk=allocation.pk)
         Donation.objects.select_for_update().get(pk=allocation_reference.donation_id)
         locked_allocation = FundAllocation.objects.select_for_update().get(pk=allocation.pk)
+        locked_project = Project.objects.select_for_update().get(pk=locked_allocation.project_id)
         ensure_operational_entity_is_editable(locked_allocation)
-        _validate_operating_currency(currency)
+        _validate_project_is_active_for_execution_or_updates(locked_project)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
         _validate_expense_balance(locked_allocation, amount)
-        if not support_file:
-            raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
         expense = Expense(
             allocation=locked_allocation,
             expense_date=expense_date,
@@ -596,7 +679,7 @@ def create_expense(
         SupportingDocument.objects.create(
             expense=expense,
             title=support_title or support_file.name,
-            document=support_file,
+            document=stored_name,
         )
         if getattr(actor, 'is_authenticated', False):
             log_action(
@@ -626,7 +709,16 @@ def update_expense(
     support_title='',
     support_file=None,
 ):
-    with transaction.atomic():
+    _validate_operating_currency(currency)
+    support_document = (
+        SupportingDocument(title=support_title or support_file.name)
+        if support_file else None
+    )
+    upload_context = (
+        _stored_upload(support_document, 'document', support_file)
+        if support_file else nullcontext(None)
+    )
+    with upload_context as stored_name, transaction.atomic():
         expense_reference = Expense.objects.only('allocation_id').get(pk=expense.pk)
         allocation_ids = {expense_reference.allocation_id, allocation.pk}
         donation_ids = FundAllocation.objects.filter(pk__in=allocation_ids).values_list('donation_id', flat=True)
@@ -638,7 +730,8 @@ def update_expense(
         locked_expense = Expense.objects.select_for_update().get(pk=expense.pk)
         ensure_expense_is_editable(locked_expense)
         locked_allocation = locked_allocations[allocation.pk]
-        _validate_operating_currency(currency)
+        locked_project = Project.objects.select_for_update().get(pk=locked_allocation.project_id)
+        _validate_project_is_active_for_execution_or_updates(locked_project)
         _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
         exclude_pk = locked_expense.pk if locked_expense.allocation_id == locked_allocation.pk else None
         _validate_expense_balance(locked_allocation, amount, exclude_pk=exclude_pk)
@@ -663,7 +756,7 @@ def update_expense(
             SupportingDocument.objects.create(
                 expense=locked_expense,
                 title=support_title or support_file.name,
-                document=support_file,
+                document=stored_name,
             )
         if getattr(actor, 'is_authenticated', False):
             after = {'allocation': locked_expense.allocation_id, 'amount': str(locked_expense.amount)}
@@ -673,6 +766,60 @@ def update_expense(
                 % {'code': locked_expense.code, 'before': before, 'after': after},
             )
         return locked_expense
+
+
+def create_supporting_document(
+    *, expense_id: int, title: str, file, notes: str, actor
+) -> SupportingDocument:
+    """
+    PRE: expense_id exists and title/file/notes already passed structural form validation.
+    POST: stores the private file outside the transaction, then creates and audits one document atomically.
+    """
+    expense = Expense.objects.get(pk=expense_id)
+    draft_document = SupportingDocument(
+        expense=expense,
+        title=title,
+        document=file,
+        notes=notes,
+    )
+    draft_document.full_clean()
+    with _stored_upload(draft_document, 'document', file) as stored_name, transaction.atomic():
+        locked_expense = Expense.objects.select_for_update().get(pk=expense_id)
+        document = SupportingDocument.objects.create(
+            expense=locked_expense,
+            title=title,
+            document=stored_name,
+            notes=notes,
+        )
+        log_action(
+            actor,
+            AuditLog.Action.CREATED,
+            document,
+            _('Documento soporte adjuntado.'),
+        )
+        return document
+
+
+def delete_supporting_document(*, document_id: int, actor) -> int:
+    """
+    PRE: document_id identifies a supporting document proposed for deletion.
+    POST: locks and revalidates its expense, then atomically audits and deletes only a redundant document.
+    """
+    document_reference = SupportingDocument.objects.only('expense_id').get(pk=document_id)
+    with transaction.atomic():
+        expense = Expense.objects.select_for_update().get(pk=document_reference.expense_id)
+        document = SupportingDocument.objects.select_for_update().get(pk=document_id)
+        if (
+            expense.status == Expense.Status.ANNULLED
+            or expense.supporting_documents.count() <= 1
+        ):
+            raise SupportingDocumentError(
+                _('El gasto debe conservar su documento soporte.')
+            )
+        expense_id = expense.pk
+        log_delete(actor, document, _('Documento soporte eliminado.'))
+        document.delete()
+        return expense_id
 
 
 def annul_expense(expense_id: int, *, actor, reason: str) -> Expense:
@@ -833,22 +980,28 @@ def register_advance(
     PRE: project_id debe corresponder a un Project existente y apto para recibir avances.
     POST: crea un avance DRAFT validado y deja una auditoría de creación.
     """
-    project = Project.objects.get(pk=project_id)
-    project_update = ProjectUpdate(
-        project=project,
-        title=title,
-        description=description,
-        update_date=update_date or timezone.localdate(),
-        progress_percentage=progress_percentage,
-        created_by=created_by,
-        reported_by=reported_by,
-        status=ProjectUpdate.Status.DRAFT,
-    )
     with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_id)
+        _validate_project_is_active_for_execution_or_updates(project)
+        validate_project_update_reporter(reported_by)
+        project_update = ProjectUpdate(
+            project=project,
+            title=title,
+            description=description,
+            update_date=update_date or timezone.localdate(),
+            progress_percentage=progress_percentage,
+            created_by=created_by,
+            reported_by=reported_by,
+            status=ProjectUpdate.Status.DRAFT,
+        )
         project_update.full_clean()
         project_update.save()
-        _create_project_update_attachments(project_update, attachments, created_by)
-        log_create(created_by, project_update, _('Avance de proyecto creado como borrador.'))
+        log_create(
+            created_by,
+            project_update,
+            _('Avance de proyecto creado como borrador con persona responsable asignada.'),
+        )
+    _create_project_update_attachments(project_update, attachments, created_by)
     return project_update
 
 
@@ -863,7 +1016,11 @@ def update_project_update(
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
         ensure_project_update_is_editable(project_update)
-        project_update.project = project
+        validate_project_update_reporter(reported_by)
+        reported_by_changed = project_update.reported_by_id != reported_by.pk
+        locked_project = Project.objects.select_for_update().get(pk=project.pk)
+        _validate_project_is_active_for_execution_or_updates(locked_project)
+        project_update.project = locked_project
         project_update.title = title
         project_update.description = description
         project_update.update_date = update_date
@@ -871,9 +1028,14 @@ def update_project_update(
         project_update.reported_by = reported_by
         project_update.full_clean()
         project_update.save()
-        _create_project_update_attachments(project_update, attachments, actor)
-        log_update(actor, project_update, _('Borrador de avance actualizado.'))
-        return project_update
+        summary = (
+            _('Atribución de la persona responsable del avance actualizada.')
+            if reported_by_changed
+            else _('Borrador de avance actualizado.')
+        )
+        log_update(actor, project_update, summary)
+    _create_project_update_attachments(project_update, attachments, actor)
+    return project_update
 
 
 def _create_project_update_attachments(project_update, files, actor) -> list[ProjectUpdateAttachment]:
@@ -883,10 +1045,11 @@ def _create_project_update_attachments(project_update, files, actor) -> list[Pro
     """
     assert project_update.status == ProjectUpdate.Status.DRAFT
     return [
-        ProjectUpdateAttachment.objects.create(
-            project_update=project_update,
+        add_project_update_attachment(
+            update_id=project_update.pk,
             file=file,
-            uploaded_by=actor if getattr(actor, 'is_authenticated', False) else None,
+            title='',
+            actor=actor,
         )
         for file in files
     ]
@@ -900,14 +1063,27 @@ def add_project_update_attachment(*, update_id: int, file, title: str, actor) ->
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
         ensure_project_update_is_editable(project_update)
-        attachment = ProjectUpdateAttachment.objects.create(
+        draft_attachment = ProjectUpdateAttachment(
             project_update=project_update,
-            file=file,
             title=(title or '').strip(),
             uploaded_by=actor if getattr(actor, 'is_authenticated', False) else None,
         )
-        log_create(actor, attachment, _('Adjunto de avance agregado.'))
-        return attachment
+    storage, stored_name = _store_upload_for_field(draft_attachment, 'file', file)
+    try:
+        with transaction.atomic():
+            project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
+            ensure_project_update_is_editable(project_update)
+            attachment = ProjectUpdateAttachment.objects.create(
+                project_update=project_update,
+                file=stored_name,
+                title=draft_attachment.title,
+                uploaded_by=draft_attachment.uploaded_by,
+            )
+            log_create(actor, attachment, _('Adjunto de avance agregado.'))
+            return attachment
+    except Exception:
+        _compensate_stored_upload(storage, stored_name)
+        raise
 
 
 def delete_project_update_attachment(*, attachment_id: int, actor) -> int:
@@ -925,6 +1101,127 @@ def delete_project_update_attachment(*, attachment_id: int, actor) -> int:
         return update_id
 
 
+def _require_remediation_actor(actor):
+    if not getattr(actor, 'is_authenticated', False):
+        raise ProjectUpdateRemediationError(_('La remediación exige un usuario autenticado.'))
+
+
+def _require_draft_remediation(remediation):
+    if remediation.status != ProjectUpdateRemediation.Status.DRAFT:
+        raise ProjectUpdateRemediationError(_('Solo las remediaciones en borrador admiten esta operación.'))
+
+
+def create_project_update_remediation(*, decision_id, response, actor):
+    """PRE: decision_id identifies an OBSERVED decision and actor is authenticated. POST: creates one audited DRAFT remediation."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        decision = ProjectUpdateReviewDecision.objects.select_for_update().get(pk=decision_id)
+        if decision.outcome != ProjectUpdateReviewDecision.Outcome.OBSERVED:
+            raise ProjectUpdateRemediationError(_('Solo las decisiones observadas admiten remediación.'))
+        if hasattr(decision, 'remediation'):
+            raise ProjectUpdateRemediationError(_('La decisión ya tiene una remediación registrada.'))
+        remediation = ProjectUpdateRemediation(
+            decision=decision,
+            response=(response or '').strip(),
+            created_by=actor,
+        )
+        remediation.full_clean()
+        remediation.save()
+        log_create(actor, remediation, _('Remediación creada como borrador.'))
+        return remediation
+
+
+def update_project_update_remediation(*, remediation_id, response, actor):
+    """PRE: remediation_id is DRAFT and actor is authenticated. POST: updates only response and audits once."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        _require_draft_remediation(remediation)
+        remediation.response = (response or '').strip()
+        remediation.full_clean()
+        remediation.save()
+        log_update(actor, remediation, _('Borrador de remediación actualizado.'))
+        return remediation
+
+
+def add_project_update_remediation_attachment(*, remediation_id, file, title, actor):
+    """PRE: remediation_id is DRAFT, file is valid, and actor is authenticated. POST: creates one audited attachment."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        _require_draft_remediation(remediation)
+        draft_attachment = ProjectUpdateRemediationAttachment(
+            remediation=remediation,
+            title=(title or '').strip(),
+            uploaded_by=actor,
+        )
+    storage, stored_name = _store_upload_for_field(draft_attachment, 'file', file)
+    try:
+        with transaction.atomic():
+            remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+            _require_draft_remediation(remediation)
+            attachment = ProjectUpdateRemediationAttachment.objects.create(
+                remediation=remediation,
+                file=stored_name,
+                title=draft_attachment.title,
+                uploaded_by=actor,
+            )
+            log_create(actor, attachment, _('Adjunto de remediación agregado.'))
+            return attachment
+    except Exception:
+        _compensate_stored_upload(storage, stored_name)
+        raise
+
+
+def delete_project_update_remediation_attachment(*, attachment_id, actor):
+    """PRE: attachment_id exists and actor is authenticated. POST: deletes only DRAFT attachment and audits once."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        attachment = ProjectUpdateRemediationAttachment.objects.select_related('remediation').get(pk=attachment_id)
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=attachment.remediation_id)
+        _require_draft_remediation(remediation)
+        log_delete(actor, attachment, _('Adjunto de remediación eliminado.'))
+        attachment.delete()
+        return remediation.pk
+
+
+def submit_project_update_remediation(*, remediation_id, actor):
+    """PRE: remediation_id is DRAFT and actor authenticated. POST: locks decision/remediation and records submission metadata."""
+    _require_remediation_actor(actor)
+    with transaction.atomic():
+        remediation_ref = ProjectUpdateRemediation.objects.only('decision_id').get(pk=remediation_id)
+        ProjectUpdateReviewDecision.objects.select_for_update().get(pk=remediation_ref.decision_id)
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        _require_draft_remediation(remediation)
+        remediation.status = ProjectUpdateRemediation.Status.SUBMITTED
+        remediation.submitted_by = actor
+        remediation.submitted_at = timezone.now()
+        remediation.full_clean()
+        remediation.save()
+        log_action(actor, AuditLog.Action.UPDATED, remediation, _('Remediación enviada.'))
+        return remediation
+
+
+def resolve_project_update_remediation(*, remediation_id, status, resolution_notes, actor):
+    """PRE: remediation_id is SUBMITTED, status terminal, notes valid, actor authenticated. POST: resolves and audits once."""
+    _require_remediation_actor(actor)
+    if status not in {ProjectUpdateRemediation.Status.ACCEPTED, ProjectUpdateRemediation.Status.REJECTED}:
+        raise ProjectUpdateRemediationError(_('La resolución debe ser aceptada o rechazada.'))
+    with transaction.atomic():
+        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        if remediation.status != ProjectUpdateRemediation.Status.SUBMITTED:
+            raise ProjectUpdateRemediationError(_('Solo las remediaciones enviadas pueden resolverse.'))
+        remediation.status = status
+        remediation.resolution_notes = (resolution_notes or '').strip()
+        remediation.resolved_by = actor
+        remediation.resolved_at = timezone.now()
+        remediation.full_clean()
+        remediation._allow_lifecycle_transition = True
+        remediation.save()
+        log_action(actor, AuditLog.Action.UPDATED, remediation, _('Remediación resuelta.'))
+        return remediation
+
+
 def publish_project_update(update_id: int, actor) -> ProjectUpdate:
     """
     PRE: update_id identifica un avance DRAFT y actor es un usuario autenticado.
@@ -934,10 +1231,13 @@ def publish_project_update(update_id: int, actor) -> ProjectUpdate:
         raise ValidationError({'actor': _('La publicación exige un usuario autenticado.')})
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
+        project = Project.objects.select_for_update().get(pk=project_update.project_id)
+        _validate_project_is_active_for_execution_or_updates(project)
         if project_update.status != ProjectUpdate.Status.DRAFT:
             raise ValidationError(
                 {'status': _('Solo un avance en borrador puede publicarse.')}
             )
+        validate_project_update_reporter(project_update.reported_by)
         project_update.status = ProjectUpdate.Status.PUBLISHED
         project_update.full_clean()
         project_update.save(update_fields=('status', 'updated_at'))

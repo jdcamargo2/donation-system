@@ -5,6 +5,8 @@ from .roles import (
     ROLE_FIELD_OPERATOR,
     ROLE_PERMISSION_CODENAMES,
     ROLE_PROJECT_COMMITTEE,
+    ROLE_PROJECT_UPDATE_DECIDER,
+    ROLE_PROJECT_UPDATE_REVIEWER,
     ROLE_SIGEDON_ADMIN,
 )
 
@@ -12,10 +14,27 @@ from .roles import (
 AUDIT_MUTATION_PERMISSION_CODENAMES = frozenset(
     {'add_auditlog', 'change_auditlog', 'delete_auditlog'}
 )
+REVIEW_AND_DECISION_MUTATION_PERMISSION_CODENAMES = frozenset(
+    {
+        'add_projectupdatereview',
+        'change_projectupdatereview',
+        'delete_projectupdatereview',
+        'add_projectupdatereviewdecision',
+        'change_projectupdatereviewdecision',
+        'delete_projectupdatereviewdecision',
+        'review_projectupdate',
+        'decide_projectupdate',
+        'resolve_projectupdateremediation',
+    }
+)
+ADMIN_EXCLUDED_PERMISSION_CODENAMES = (
+    AUDIT_MUTATION_PERMISSION_CODENAMES
+    | REVIEW_AND_DECISION_MUTATION_PERMISSION_CODENAMES
+)
 
 
 # PRE: Django auth permissions for apps.operations have been created by migrations.
-# POST: creates or updates all SIGEDON groups, removing audit mutation permissions idempotently.
+# POST: creates or updates all SIGEDON groups, removing excluded and legacy mutation permissions idempotently.
 def sync_operation_roles():
     operations_permissions = Permission.objects.filter(content_type__app_label='operations')
     permissions_by_codename = {permission.codename: permission for permission in operations_permissions}
@@ -23,7 +42,7 @@ def sync_operation_roles():
 
     admin_group, _ = Group.objects.get_or_create(name=ROLE_SIGEDON_ADMIN)
     admin_group.permissions.set(
-        operations_permissions.exclude(codename__in=AUDIT_MUTATION_PERMISSION_CODENAMES)
+        operations_permissions.exclude(codename__in=ADMIN_EXCLUDED_PERMISSION_CODENAMES)
     )
     synced_groups[ROLE_SIGEDON_ADMIN] = admin_group
 
@@ -40,4 +59,11 @@ def sync_operation_roles():
 
 
 def operation_role_names():
-    return [ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR, ROLE_PROJECT_COMMITTEE]
+    return [
+        ROLE_SIGEDON_ADMIN,
+        ROLE_FIELD_OPERATOR,
+        ROLE_EXTERNAL_AUDITOR,
+        ROLE_PROJECT_COMMITTEE,
+        ROLE_PROJECT_UPDATE_REVIEWER,
+        ROLE_PROJECT_UPDATE_DECIDER,
+    ]

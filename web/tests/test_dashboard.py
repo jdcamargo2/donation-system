@@ -132,7 +132,7 @@ class DashboardTests(TestCase):
         self.assertEqual(response.context['total_executed'], Decimal('15.00'))
         self.assertEqual(response.context['available_balance'], Decimal('40.00'))
 
-    def test_dashboard_excludes_legacy_non_usd_records(self):
+    def test_dashboard_uses_usd_financial_records(self):
         usd_donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
         usd_allocation = create_allocation(
             donation=usd_donation,
@@ -140,21 +140,6 @@ class DashboardTests(TestCase):
             amount=Decimal('60.00'),
         )
         create_expense(allocation=usd_allocation, amount=Decimal('15.00'))
-        legacy_donation = create_donation(
-            code='DON-EUR-LEGACY',
-            donor=self.donor,
-            amount=Decimal('900.00'),
-        )
-        legacy_donation.currency = 'EUR'
-        legacy_donation.save(update_fields=['currency'])
-        legacy_allocation = create_allocation(
-            donation=legacy_donation,
-            project=self.project,
-            amount=Decimal('500.00'),
-        )
-        legacy_expense = create_expense(allocation=legacy_allocation, amount=Decimal('200.00'))
-        legacy_expense.currency = 'EUR'
-        legacy_expense.save(update_fields=['currency'])
         self.grant_permissions(
             'view_donation',
             'view_fundallocation',
@@ -212,4 +197,3 @@ class DashboardTests(TestCase):
         self.assertNotContains(response, donation.code)
         self.assertNotContains(response, 'Gastos recientes')
         self.assertNotContains(response, 'Acciones recientes de auditoría')
-

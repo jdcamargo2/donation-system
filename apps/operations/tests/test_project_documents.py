@@ -44,6 +44,7 @@ class ProjectDocumentTests(TestCase):
             update_date=date(2026, 7, 12),
             progress_percentage=30,
             created_by=self.user,
+            reported_by=self.user,
         )
 
     def test_create_project_document(self):
@@ -84,6 +85,7 @@ class ProjectDocumentTests(TestCase):
                 'description': 'Incluye dos archivos.',
                 'update_date': '2026-07-12',
                 'progress_percentage': '45',
+                'reported_by': self.user.pk,
                 'attachments': [
                     SimpleUploadedFile('foto.jpg', b'photo'),
                     SimpleUploadedFile('reporte.pdf', b'report'),

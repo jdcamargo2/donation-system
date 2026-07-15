@@ -2,6 +2,22 @@ ROLE_SIGEDON_ADMIN = 'Administrador SIGEDON'
 ROLE_FIELD_OPERATOR = 'Operador de campo'
 ROLE_EXTERNAL_AUDITOR = 'Auditor externo'
 ROLE_PROJECT_COMMITTEE = 'Comité de proyectos'
+ROLE_PROJECT_UPDATE_REVIEWER = 'Revisor del Comité'
+ROLE_PROJECT_UPDATE_DECIDER = 'Decisor del Comité'
+
+
+# El grupo legado se conserva para no alterar membresías existentes; la sincronización
+# lo deja en solo lectura. La asignación a los roles funcionales nuevos es explícita.
+COMMITTEE_READ_PERMISSION_CODENAMES = {
+    'view_project',
+    'view_projectupdate',
+    'view_projectdocument',
+    'view_projectupdateattachment',
+    'view_projectupdatereview',
+    'view_projectupdatereviewdecision',
+    'view_projectupdateremediation',
+    'view_projectupdateremediationattachment',
+}
 
 
 ROLE_PERMISSION_CODENAMES = {
@@ -11,6 +27,13 @@ ROLE_PERMISSION_CODENAMES = {
         'add_projectupdate',
         'view_supportingdocument',
         'add_supportingdocument',
+        'view_projectupdateremediation',
+        'view_projectupdateremediationattachment',
+        'add_projectupdateremediation',
+        'change_projectupdateremediation',
+        'add_projectupdateremediationattachment',
+        'delete_projectupdateremediationattachment',
+        'submit_projectupdateremediation',
     },
     ROLE_EXTERNAL_AUDITOR: {
         'view_institution',
@@ -23,13 +46,15 @@ ROLE_PERMISSION_CODENAMES = {
         'view_auditlog',
     },
     ROLE_PROJECT_COMMITTEE: {
-        'view_project',
-        'view_projectupdate',
-        'view_projectdocument',
-        'view_projectupdateattachment',
-        'view_projectupdatereview',
-        'add_projectupdatereview',
-        'view_projectupdatereviewdecision',
-        'add_projectupdatereviewdecision',
+        *COMMITTEE_READ_PERMISSION_CODENAMES,
+    },
+    ROLE_PROJECT_UPDATE_REVIEWER: {
+        *COMMITTEE_READ_PERMISSION_CODENAMES,
+        'review_projectupdate',
+        'resolve_projectupdateremediation',
+    },
+    ROLE_PROJECT_UPDATE_DECIDER: {
+        *COMMITTEE_READ_PERMISSION_CODENAMES,
+        'decide_projectupdate',
     },
 }

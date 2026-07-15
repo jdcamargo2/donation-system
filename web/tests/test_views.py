@@ -120,8 +120,12 @@ class OperationalDetailViewTests(TestCase):
         self.assertContains(response, 'Este proyecto todavía no tiene documentos.')
 
     def test_authorized_user_sees_published_and_draft_updates(self):
-        draft = register_advance(self.project.pk, 'Borrador interno', 'Detalle', created_by=self.user)
-        published = register_advance(self.project.pk, 'Publicado operativo', 'Detalle', created_by=self.user)
+        draft = register_advance(
+            self.project.pk, 'Borrador interno', 'Detalle', created_by=self.user, reported_by=self.user
+        )
+        published = register_advance(
+            self.project.pk, 'Publicado operativo', 'Detalle', created_by=self.user, reported_by=self.user
+        )
         publish_project_update(published.pk, self.user)
 
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
@@ -130,8 +134,12 @@ class OperationalDetailViewTests(TestCase):
         self.assertContains(response, published.title)
 
     def test_user_without_update_view_permission_sees_only_published_updates(self):
-        draft = register_advance(self.project.pk, 'Borrador privado', 'Detalle', created_by=self.user)
-        published = register_advance(self.project.pk, 'Publicado visible', 'Detalle', created_by=self.user)
+        draft = register_advance(
+            self.project.pk, 'Borrador privado', 'Detalle', created_by=self.user, reported_by=self.user
+        )
+        published = register_advance(
+            self.project.pk, 'Publicado visible', 'Detalle', created_by=self.user, reported_by=self.user
+        )
         publish_project_update(published.pk, self.user)
         limited_user = get_user_model().objects.create_user('project-reader', password='pass-12345')
         limited_user.user_permissions.add(Permission.objects.get(codename='view_project'))
@@ -265,6 +273,8 @@ class CrudFlowTests(TestCase):
         self.client.force_login(self.user)
         self.donor = create_institution()
         self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
         self.donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
         self.allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('50.00'))
 
@@ -303,7 +313,7 @@ class CrudFlowTests(TestCase):
                 'donor': self.donor.pk,
                 'donation_type': 'goods',
                 'amount': '200.00',
-                'currency': 'USD',
+                'currency': 'EUR',
                 'objective': 'Apoyar atención de emergencia',
                 'restrictions': '',
                 'commitment_date': '',
@@ -332,7 +342,7 @@ class CrudFlowTests(TestCase):
                 'expense_date': TEST_DATE,
                 'category': 'food',
                 'amount': '10.00',
-                'currency': 'USD',
+                'currency': 'EUR',
                 'reason': 'Purchase',
                 'provider_or_recipient': 'Provider A',
                 'payment_method': 'bank_transfer',
@@ -358,8 +368,10 @@ class CrudFlowTests(TestCase):
         self.assertNotEqual(created_donation.code, self.donation.code)
         self.assertEqual(Project.objects.filter(code=created_project.code).count(), 1)
         self.assertEqual(Donation.objects.filter(code=created_donation.code).count(), 1)
+        self.assertEqual(created_donation.currency, 'USD')
         self.assertTrue(FundAllocation.objects.filter(budget_category='health_psychosocial').exists())
-        self.assertTrue(Expense.objects.filter(reason='Purchase').exists())
+        created_expense = Expense.objects.get(reason='Purchase')
+        self.assertEqual(created_expense.currency, 'USD')
 
     def test_invalid_create_data_shows_errors_without_creating_invalid_object(self):
         response = self.client.post(

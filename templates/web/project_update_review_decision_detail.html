@@ -30,4 +30,9 @@
         </dl>
     </div>
 </div>
+{% if object.outcome == 'observed' %}
+<section class="mt-4"><h2 class="h5">Remediación</h2>
+{% if object.remediation %}<a class="btn btn-outline-secondary" href="{% url 'project_update_remediation_detail' object.remediation.pk %}">Ver remediación</a>
+{% elif perms.operations.submit_projectupdateremediation %}<a class="btn btn-primary" href="{% url 'project_update_remediation_create' object.pk %}">Responder observación</a>{% endif %}
+</section>{% endif %}
 {% endblock %}

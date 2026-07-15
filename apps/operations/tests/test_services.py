@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from itertools import count
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -10,6 +11,7 @@ from django.contrib.auth.models import Permission
 
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ZERO_MONEY
 from apps.operations.services import (
+    _validate_operating_currency,
     create_expense as create_expense_service,
     create_fund_allocation,
     get_allocation_financial_summary,
@@ -26,6 +28,9 @@ TEST_DATE = date(2026, 7, 9)
 
 
 class OperationServiceTests(TestCase):
+    def setUp(self):
+        self._donation_code_seq = count(1)
+
     def create_institution(self, name='Donante de prueba'):
         return Institution.objects.create(
             name=name,
@@ -34,15 +39,27 @@ class OperationServiceTests(TestCase):
             country='VE',
         )
 
-    def create_project(self, code='PRJ-SVC-001', name='Proyecto de prueba'):
-        return Project.objects.create(code=code, name=name, estimated_budget=Decimal('1000.00'))
+    def create_project(
+        self,
+        code='PRJ-SVC-001',
+        name='Proyecto de prueba',
+        status=Project.Status.ACTIVE,
+    ):
+        return Project.objects.create(
+            code=code,
+            name=name,
+            estimated_budget=Decimal('1000.00'),
+            status=status,
+        )
 
-    def create_donation(self, code='DON-SVC-001', amount=Decimal('100.00')):
+    def create_donation(self, code=None, amount=Decimal('100.00'), currency='USD'):
+        if code is None:
+            code = f'DON-SVC-{next(self._donation_code_seq):03d}'
         return Donation.objects.create(
             code=code,
             donor=self.create_institution(),
             amount=amount,
-            currency='USD',
+            currency=currency,
             objective='Atención operativa',
             status=Donation.Status.RECEIVED,
         )
@@ -57,17 +74,17 @@ class OperationServiceTests(TestCase):
             status=FundAllocation.Status.ACTIVE,
         )
 
-    def create_expense(self, allocation=None, amount=Decimal('20.00')):
+    def create_expense(self, allocation=None, amount=Decimal('20.00'), currency='USD', status=Expense.Status.REGISTERED):
         return Expense.objects.create(
             allocation=allocation or self.create_allocation(),
             expense_date=TEST_DATE,
             category='food',
             amount=amount,
-            currency='USD',
+            currency=currency,
             reason='Compra operativa',
             provider_or_recipient='Proveedor A',
             payment_method='bank_transfer',
-            status=Expense.Status.REGISTERED,
+            status=status,
         )
 
     def allocation_service_data(self, donation, project, amount):
@@ -137,6 +154,21 @@ class OperationServiceTests(TestCase):
         self.assertEqual(summary['executed_amount'], Decimal('40.00'))
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
 
+    def test_project_financial_summary_excludes_annulled_movements(self):
+        project = self.create_project(code='PRJ-SVC-USD-ONLY')
+        allocation = self.create_allocation(project=project, amount=Decimal('100.00'))
+        self.create_expense(allocation=allocation, amount=Decimal('40.00'))
+        annulled_allocation = self.create_allocation(project=project, amount=Decimal('20.00'))
+        FundAllocation.objects.filter(pk=annulled_allocation.pk).update(
+            status=FundAllocation.Status.ANNULLED
+        )
+
+        summary = get_project_financial_summary(project)
+
+        self.assertEqual(summary['funded_amount'], Decimal('100.00'))
+        self.assertEqual(summary['executed_amount'], Decimal('40.00'))
+        self.assertEqual(summary['available_amount'], Decimal('60.00'))
+
     def test_get_dashboard_metrics_returns_expected_keys_with_empty_database(self):
         user = get_user_model().objects.create_user(
             username='dashboard-service-user',
@@ -190,16 +222,72 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(donation.allocations.count(), 1)
 
-    def test_create_fund_allocation_rejects_non_usd_donation(self):
+    def test_operating_currency_validator_rejects_non_usd_donation(self):
+        with self.assertRaisesMessage(ValidationError, 'solo permite operaciones financieras en USD'):
+            _validate_operating_currency('EUR', 'donation')
+
+    def test_create_fund_allocation_rejects_registered_donation(self):
         donation = self.create_donation(amount=Decimal('100.00'))
-        donation.currency = 'EUR'
-        donation.save(update_fields=['currency'])
+        donation.status = Donation.Status.REGISTERED
+        donation.save(update_fields=['status'])
         project = self.create_project()
 
-        with self.assertRaisesMessage(ValidationError, 'solo permite operaciones financieras en USD'):
+        with self.assertRaisesMessage(ValidationError, 'Solo las donaciones recibidas pueden financiar asignaciones'):
             create_fund_allocation(**self.allocation_service_data(donation, project, Decimal('20.00')))
 
         self.assertFalse(donation.allocations.exists())
+
+    def test_create_fund_allocation_rejects_annulled_donation(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        donation.status = Donation.Status.ANNULLED
+        donation.save(update_fields=['status'])
+        project = self.create_project()
+
+        with self.assertRaisesMessage(ValidationError, 'Solo las donaciones recibidas pueden financiar asignaciones'):
+            create_fund_allocation(**self.allocation_service_data(donation, project, Decimal('20.00')))
+
+        self.assertFalse(donation.allocations.exists())
+
+    def test_create_fund_allocation_accepts_received_donation(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        project = self.create_project()
+
+        allocation = create_fund_allocation(
+            **self.allocation_service_data(donation, project, Decimal('20.00'))
+        )
+
+        self.assertEqual(allocation.donation, donation)
+        self.assertEqual(allocation.amount, Decimal('20.00'))
+
+    def test_create_fund_allocation_accepts_planned_or_active_project(self):
+        for status in (Project.Status.PLANNED, Project.Status.ACTIVE):
+            with self.subTest(status=status):
+                donation = self.create_donation(code=f'DON-ALLOC-{status}', amount=Decimal('100.00'))
+                project = self.create_project(code=f'PRJ-ALLOC-{status}', status=status)
+
+                allocation = create_fund_allocation(
+                    **self.allocation_service_data(donation, project, Decimal('20.00'))
+                )
+
+                self.assertEqual(allocation.project, project)
+
+    def test_create_fund_allocation_rejects_non_operational_project(self):
+        rejected_statuses = (
+            Project.Status.SUSPENDED,
+            Project.Status.CLOSED,
+            Project.Status.ANNULLED,
+        )
+        for status in rejected_statuses:
+            with self.subTest(status=status):
+                donation = self.create_donation(code=f'DON-ALLOC-{status}', amount=Decimal('100.00'))
+                project = self.create_project(code=f'PRJ-ALLOC-{status}', status=status)
+
+                with self.assertRaisesMessage(ValidationError, 'admiten asignaciones'):
+                    create_fund_allocation(
+                        **self.allocation_service_data(donation, project, Decimal('20.00'))
+                    )
+
+                self.assertFalse(donation.allocations.exists())
 
     def test_update_fund_allocation_excludes_its_previous_amount(self):
         donation = self.create_donation(amount=Decimal('100.00'))
@@ -213,6 +301,48 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(updated.amount, Decimal('100.00'))
         self.assertEqual(donation.available_balance, ZERO_MONEY)
+
+    def test_update_fund_allocation_rejects_reassignment_to_non_operational_project(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        original_project = self.create_project(code='PRJ-ORIGINAL')
+        target_project = self.create_project(code='PRJ-SUSPENDED', status=Project.Status.SUSPENDED)
+        allocation = self.create_allocation(
+            donation=donation,
+            project=original_project,
+            amount=Decimal('60.00'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'admiten asignaciones'):
+            update_fund_allocation(
+                allocation=allocation,
+                **self.allocation_service_data(donation, target_project, Decimal('20.00')),
+            )
+
+        allocation.refresh_from_db()
+        self.assertEqual(allocation.project, original_project)
+        self.assertEqual(allocation.amount, Decimal('60.00'))
+
+    def test_update_fund_allocation_rejects_reassociation_to_non_received_donation(self):
+        original_donation = self.create_donation(code='DON-ORIGINAL', amount=Decimal('100.00'))
+        target_donation = self.create_donation(code='DON-TARGET', amount=Decimal('100.00'))
+        target_donation.status = Donation.Status.REGISTERED
+        target_donation.save(update_fields=['status'])
+        project = self.create_project()
+        allocation = self.create_allocation(
+            donation=original_donation,
+            project=project,
+            amount=Decimal('60.00'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'Solo las donaciones recibidas pueden financiar asignaciones'):
+            update_fund_allocation(
+                allocation=allocation,
+                **self.allocation_service_data(target_donation, project, Decimal('20.00')),
+            )
+
+        allocation.refresh_from_db()
+        self.assertEqual(allocation.donation, original_donation)
+        self.assertEqual(allocation.amount, Decimal('60.00'))
 
     def test_update_fund_allocation_rechecks_balance_when_donation_changes(self):
         original_donation = self.create_donation(code='DON-ORIGINAL', amount=Decimal('100.00'))
@@ -263,6 +393,38 @@ class OperationServiceTests(TestCase):
 
         self.assertFalse(allocation.expenses.exists())
 
+    def test_create_expense_service_accepts_active_project(self):
+        allocation = self.create_allocation(amount=Decimal('60.00'))
+
+        expense = create_expense_service(**self.expense_service_data(allocation, Decimal('20.00')))
+
+        self.assertEqual(expense.allocation, allocation)
+        self.assertEqual(expense.amount, Decimal('20.00'))
+
+    def test_create_expense_service_rejects_non_active_project(self):
+        rejected_statuses = (
+            Project.Status.PLANNED,
+            Project.Status.SUSPENDED,
+            Project.Status.CLOSED,
+            Project.Status.ANNULLED,
+        )
+        for status in rejected_statuses:
+            with self.subTest(status=status):
+                project = self.create_project(code=f'PRJ-EXP-{status}', status=status)
+                donation = self.create_donation(code=f'DON-EXP-{status}', amount=Decimal('100.00'))
+                allocation = self.create_allocation(
+                    donation=donation,
+                    project=project,
+                    amount=Decimal('60.00'),
+                )
+
+                with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+                    create_expense_service(
+                        **self.expense_service_data(allocation, Decimal('20.00'))
+                    )
+
+                self.assertFalse(allocation.expenses.exists())
+
     def test_update_expense_excludes_its_previous_amount(self):
         allocation = self.create_allocation(amount=Decimal('60.00'))
         expense = self.create_expense(allocation=allocation, amount=Decimal('20.00'))
@@ -287,6 +449,27 @@ class OperationServiceTests(TestCase):
         expense.refresh_from_db()
         self.assertEqual(expense.amount, Decimal('20.00'))
         self.assertEqual(expense.currency, 'USD')
+
+    def test_update_expense_rejects_reassignment_to_non_active_project(self):
+        original_allocation = self.create_allocation(amount=Decimal('70.00'))
+        expense = self.create_expense(allocation=original_allocation, amount=Decimal('30.00'))
+        target_project = self.create_project(code='PRJ-EXP-SUSPENDED', status=Project.Status.SUSPENDED)
+        target_donation = self.create_donation(code='DON-EXP-SUSPENDED', amount=Decimal('100.00'))
+        target_allocation = self.create_allocation(
+            donation=target_donation,
+            project=target_project,
+            amount=Decimal('70.00'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+            update_expense_service(
+                expense=expense,
+                **self.expense_service_data(target_allocation, Decimal('20.00')),
+            )
+
+        expense.refresh_from_db()
+        self.assertEqual(expense.allocation, original_allocation)
+        self.assertEqual(expense.amount, Decimal('30.00'))
 
     def test_update_expense_rechecks_balance_when_allocation_changes(self):
         original_allocation = self.create_allocation(amount=Decimal('70.00'))

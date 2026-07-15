@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.operations.models import Project
+from apps.operations.models import Donation, FundAllocation, Project
 from apps.operations.services import register_advance
 from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project
 
@@ -22,6 +22,7 @@ class InternalExperienceTemplateTests(TestCase):
             project_id=self.project.pk,
             title='Avance operativo',
             description='Evidencia interna del avance.',
+            reported_by=self.user,
             created_by=self.user,
         )
 
@@ -95,6 +96,19 @@ class InternalExperienceTemplateTests(TestCase):
                 self.assertTemplateUsed(response, template_name)
                 for text in expected_texts:
                     self.assertContains(response, text)
+
+    def test_project_detail_shows_usd_summary_without_historical_currency_warning(self):
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Presupuesto USD')
+        self.assertContains(response, 'Financiado USD')
+        self.assertContains(response, 'Ejecutado USD')
+        self.assertContains(response, 'Disponible USD')
+        self.assertNotContains(
+            response,
+            'Existen movimientos históricos en otras monedas excluidos de este resumen.',
+        )
 
     def test_user_without_permissions_still_gets_403_on_specific_internal_template_view(self):
         limited_user = get_user_model().objects.create_user(username='limited', password='pass-12345')

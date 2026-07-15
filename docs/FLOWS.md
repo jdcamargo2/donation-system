@@ -38,7 +38,7 @@ Este documento describe los principales flujos operativos de SIGEDON, incluyendo
 
 * Existe una institución con rol de donante.
 * El monto es positivo.
-* La moneda y las fechas son válidas.
+* La moneda es USD y las fechas son válidas.
 
 ### Pasos
 
@@ -56,6 +56,14 @@ Este documento describe los principales flujos operativos de SIGEDON, incluyendo
 * La donación conserva un código único e inmutable.
 * El saldo disponible se deriva de las asignaciones no anuladas.
 * Una donación anulada queda excluida de las métricas operativas.
+
+### Regla monetaria
+
+SIGEDON opera exclusivamente en USD. `Donation.currency` y `Expense.currency`
+solo admiten `USD`, y PostgreSQL impone esta restricción. El sistema no realiza
+conversiones ni utiliza tasas de cambio. `EUR`, `VES` y `COP` solo pueden
+aparecer en migraciones históricas o en pruebas negativas que verifican su
+rechazo.
 
 ---
 
@@ -133,7 +141,7 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 * El proyecto se encuentra en estado `ACTIVE`.
 * La fecha del avance es válida.
 * El porcentaje de progreso se encuentra entre 0 y 100.
-* Se ha seleccionado un responsable institucional.
+* Se ha seleccionado una persona responsable del avance, activa y con permisos operativos sobre avances.
 * El usuario posee permisos para registrar el avance.
 
 ### Pasos
@@ -144,10 +152,10 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
    * descripción;
    * fecha real;
    * porcentaje de progreso;
-   * responsable institucional.
+   * persona responsable del avance.
 2. El usuario puede adjuntar evidencias durante el registro.
 3. `created_by` se asigna automáticamente desde el usuario autenticado.
-4. `reported_by` conserva el responsable institucional al que se atribuye el avance.
+4. `reported_by` conserva la persona responsable del contenido del avance.
 5. El avance se guarda en estado `DRAFT`.
 6. Un usuario con el permiso `change_projectupdate` puede iniciar la publicación.
 7. El sistema valida nuevamente las condiciones de publicación.
@@ -158,7 +166,7 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 ### POST
 
 * El avance publicado es inmutable.
-* El creador técnico y el responsable institucional quedan diferenciados.
+* El creador técnico y la persona responsable del avance quedan diferenciados.
 * El avance puede ser revisado institucionalmente.
 * El avance puede aparecer en el portal público cuando cumpla las reglas de publicación.
 
@@ -242,7 +250,7 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 2. Se seleccionan proyectos autorizados para publicación.
 3. Solo se incluyen avances en estado `PUBLISHED`.
 4. Se excluyen entidades anuladas.
-5. Se excluyen registros en monedas no operativas de las métricas.
+5. Todas las operaciones monetarias publicables ya están expresadas en USD.
 6. Se eliminan campos privados o internos.
 7. Las respuestas autorizadas pueden almacenarse temporalmente en caché.
 8. El portal presenta páginas o respuestas JSON públicas.
@@ -371,21 +379,29 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 
 ---
 
-## 12. Flujo legado de Ficha 1
+## 12. Entrada de compatibilidad de Ficha 1
 
-El flujo legado se conserva por compatibilidad y pruebas.
+El mapping `ficha_01` y el comando legado se conservan como compatibilidad de
+entrada al staging genérico. El orden vigente es:
 
 ```text
 sync_kobo_ficha_01
-→ Obtención del payload
-→ Normalización heredada
-→ Ficha01Territorio
-→ Ficha01CoveredCommunity
+→ obtención y validación del payload Ficha 1
+→ receive_api_submission
+→ KoboSubmission (received, payload crudo)
+→ procesamiento y normalización ficha_01
+→ routing, revisión e importación mediante el pipeline genérico
 ```
 
 ### Reglas
 
 * No representa el flujo recomendado para nuevas integraciones.
 * No sustituye al pipeline ordinario basado en activos configurados.
-* Debe utilizarse únicamente cuando se requiera compatibilidad con el procesamiento histórico de la Ficha 1.
+* `Ficha01Territorio` y `Ficha01CoveredCommunity` pertenecen al schema legado,
+  no tienen escritores activos conocidos y no son utilizados por el pipeline
+  vigente.
+* `KoboSubmission` es la fuente de staging activa; recibido, procesado e
+  importado representan etapas diferentes.
 * Su conservación no implica que nuevas fichas deban implementar modelos específicos equivalentes.
+* La eliminación futura de los modelos específicos requiere una decisión de
+  producto y una migración dedicada.

@@ -9,6 +9,8 @@
         <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Volver al proyecto</a>
         {% if object.status == 'draft' and perms.operations.change_projectupdate %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+        {% if object.status == 'draft' and perms.operations.publish_projectupdate %}
             <form class="d-inline" method="post" action="{% url 'project_update_publish' object.pk %}">
                 {% csrf_token %}
                 <button class="btn btn-outline-primary" type="submit">Publicar</button>
@@ -39,7 +41,7 @@
             <dd class="col-sm-8">{{ object.created_at }}</dd>
             <dt class="col-sm-4">Creado por</dt>
             <dd class="col-sm-8">{{ object.created_by|default:"-" }}</dd>
-            <dt class="col-sm-4">Responsable institucional</dt>
+            <dt class="col-sm-4">Persona responsable del avance</dt>
             <dd class="col-sm-8">{{ object.reported_by|default:"—" }}</dd>
         </dl>
     </div>
@@ -48,7 +50,7 @@
 <section class="mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="h5 mb-0">Revisión documental del Comité</h2>
-        {% if not object.committee_review and object.status == 'published' and perms.operations.add_projectupdatereview %}
+        {% if not object.committee_review and object.status == 'published' and perms.operations.review_projectupdate %}
             <a class="btn btn-sm btn-primary" href="{% url 'project_update_review_create' object.pk %}">Registrar revisión</a>
         {% endif %}
     </div>
@@ -62,6 +64,7 @@
                 {% if perms.operations.view_projectupdatereview %}
                     <a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_review_detail' object.committee_review.pk %}">Ver revisión</a>
                 {% endif %}
+                {% if object.committee_review.decision.remediation %}<a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_remediation_detail' object.committee_review.decision.remediation.pk %}">Ver remediación</a>{% endif %}
             </div>
         </div>
     {% else %}

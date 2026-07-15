@@ -34,8 +34,15 @@ private_media/
 .DS_Store
 Thumbs.db
 
+/backups/
 backups/*.sqlite3*
 
 docs/sondeos/
 
 sondeo_*.txt
+
+.cursorignore
+
+*.sql
+!deploy/postgresql/
+!deploy/postgresql/*.sql
