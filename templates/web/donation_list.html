@@ -18,47 +18,62 @@
 
 <div class="card border-0 ops-table-card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-hover align-middle mb-0 ops-donation-table">
             <thead>
                 <tr>
-                    <th>Código</th>
+                    <th>Donación</th>
                     <th>Donante</th>
                     <th>Monto</th>
-                    <th>Asignado</th>
-                    <th>Disponible</th>
-                    <th>Ciclo</th>
-                    <th>Asignación</th>
-                    <th>Fecha</th>
+                    <th>Estado</th>
                     <th class="text-end">Acciones</th>
                 </tr>
             </thead>
             <tbody>
                 {% for donation in objects %}
                     <tr>
-                        <td><a class="fw-semibold text-decoration-none" href="{% url detail_url_name donation.pk %}">{{ donation.code }}</a></td>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url detail_url_name donation.pk %}">{{ donation.code }}</a>
+                            <span class="small text-muted d-block">
+                                {{ donation.received_date|default:donation.commitment_date|default:"-" }}
+                            </span>
+                        </td>
                         <td>{{ donation.donor }}</td>
-                        <td class="ops-money">{{ donation.amount|money_es }} {{ donation.currency }}</td>
-                        <td class="ops-money">{{ donation.total_assigned|money_es }} {{ donation.currency }}</td>
-                        <td class="ops-money">{{ donation.available_balance|money_es }} {{ donation.currency }}</td>
+                        <td class="ops-money text-nowrap">{{ donation.amount|money_es }} {{ donation.currency }}</td>
                         <td><span class="badge ops-status-badge">{{ donation.get_status_display }}</span></td>
-                        <td><span class="badge text-bg-light">{{ donation.allocation_progress_label }}</span></td>
-                        <td>{{ donation.received_date|default:donation.commitment_date|default:"-" }}</td>
-                        <td class="text-end ops-row-actions">
-                            {% if perms.operations.change_donation %}
-                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name donation.pk %}">Editar</a>
-                            {% endif %}
-                            {% if perms.operations.delete_donation %}
-                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name donation.pk %}">Eliminar</a>
+                        <td class="text-end">
+                            {% if perms.operations.change_donation or perms.operations.delete_donation %}
+                                <div class="dropdown">
+                                    <button
+                                        class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                                        type="button"
+                                        id="donation-actions-{{ donation.pk }}"
+                                        data-bs-toggle="dropdown"
+                                        data-bs-boundary="viewport"
+                                        aria-expanded="false"
+                                        aria-label="Acciones para {{ donation.code }}"
+                                    >
+                                        Más
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="donation-actions-{{ donation.pk }}">
+                                        {% if perms.operations.change_donation %}
+                                            <li><a class="dropdown-item" href="{% url update_url_name donation.pk %}">Editar</a></li>
+                                        {% endif %}
+                                        {% if perms.operations.delete_donation %}
+                                            <li><a class="dropdown-item text-danger" href="{% url delete_url_name donation.pk %}">Eliminar</a></li>
+                                        {% endif %}
+                                    </ul>
+                                </div>
                             {% endif %}
                         </td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="9" class="text-muted">No hay donaciones registradas.</td>
+                        <td colspan="5" class="text-muted">No hay donaciones registradas.</td>
                     </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 </div>
+{% include "web/includes/pagination.html" %}
 {% endblock %}

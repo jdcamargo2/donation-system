@@ -93,6 +93,102 @@ class AuthenticatedViewTests(TestCase):
                 self.assertContains(response, 'class="table-responsive"')
 
 
+class AuthenticationLayoutTests(TestCase):
+    def setUp(self):
+        self.user = create_user(username='login-user')
+
+    def test_anonymous_login_uses_standalone_auth_layout(self):
+        response = self.client.get(reverse('login'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'registration/login.html')
+        self.assertTemplateUsed(response, 'registration/auth_base.html')
+        self.assertContains(response, 'web/css/auth.css')
+        self.assertContains(response, 'login-screen')
+        self.assertContains(response, 'login-card')
+        self.assertContains(response, 'name="username"')
+        self.assertContains(response, 'name="password"')
+        self.assertContains(response, 'Iniciar sesión')
+        self.assertNotContains(response, 'class="sigedon-sidebar"')
+        self.assertNotContains(response, 'class="ops-topbar"')
+        self.assertNotContains(response, 'class="sigedon-main-wrapper"')
+        self.assertNotContains(response, 'web/css/sigedon.css')
+        self.assertNotContains(response, 'web/js/ops_forms.js')
+        self.assertNotContains(response, 'flatpickr')
+        self.assertNotContains(response, 'autoNumeric')
+
+    def test_invalid_credentials_preserve_form_and_show_authentication_error(self):
+        response = self.client.post(
+            reverse('login'),
+            data={'username': self.user.username, 'password': 'incorrecta'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['form'].non_field_errors())
+        self.assertContains(response, 'alert alert-danger')
+        self.assertContains(response, 'name="username"')
+        self.assertContains(response, 'name="password"')
+
+    def test_authenticated_user_sees_configured_login_view(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('login'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'registration/auth_base.html')
+        self.assertContains(response, 'Iniciar sesión')
+        self.assertNotContains(response, 'class="sigedon-sidebar"')
+
+    def test_valid_credentials_redirect_to_dashboard(self):
+        response = self.client.post(
+            reverse('login'),
+            data={'username': self.user.username, 'password': 'pass-12345'},
+        )
+
+        self.assertRedirects(response, reverse('dashboard'))
+
+    def test_valid_credentials_preserve_next_redirect(self):
+        destination = reverse('project_list')
+        response = self.client.post(
+            f"{reverse('login')}?next={destination}",
+            data={'username': self.user.username, 'password': 'pass-12345'},
+        )
+
+        self.assertRedirects(response, destination)
+
+    def test_auth_base_is_independent_and_loads_only_login_assets(self):
+        source = Path('templates/registration/auth_base.html').read_text()
+
+        self.assertNotIn('{% extends "base.html" %}', source)
+        self.assertNotIn('user.is_authenticated', source)
+        self.assertNotIn('sigedon-sidebar', source)
+        self.assertNotIn('ops-topbar', source)
+        self.assertNotIn('sigedon-main-wrapper', source)
+        self.assertNotIn('flatpickr', source)
+        self.assertNotIn('autoNumeric', source)
+        self.assertNotIn('ops_forms.js', source)
+        self.assertIn("web/css/auth.css", source)
+        self.assertIn('{% block title %}', source)
+        self.assertIn('{% block extra_css %}', source)
+        self.assertIn('{% block content %}', source)
+        self.assertIn('{% block extra_js %}', source)
+
+    def test_login_styles_are_isolated_from_internal_and_public_styles(self):
+        auth_source = Path('static/web/css/auth.css').read_text()
+        internal_source = Path('static/web/css/sigedon.css').read_text()
+        public_source = Path('templates/public_portal/public_base.html').read_text()
+
+        self.assertIn('.auth-main', auth_source)
+        self.assertIn('min-height: 100vh;', auth_source)
+        self.assertIn('.login-screen', auth_source)
+        self.assertIn('.login-card', auth_source)
+        self.assertIn('.login-brand-panel', auth_source)
+        self.assertNotIn('.login-screen', internal_source)
+        self.assertNotIn('.login-card', internal_source)
+        self.assertNotIn('login-screen', public_source)
+        self.assertNotIn('login-card', public_source)
+
+
 class OperationalDetailViewTests(TestCase):
     def setUp(self):
         self.user = create_user()
@@ -176,40 +272,6 @@ class OperationalDetailViewTests(TestCase):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
         self.assertNotContains(response, 'Levantamientos de campo')
-
-    def test_login_uses_refined_internal_visual_system(self):
-        response = self.client.get(reverse('login'))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'registration/login.html')
-        self.assertContains(response, 'login-screen')
-        self.assertContains(response, 'login-card')
-        self.assertContains(response, 'ops-login-shell')
-        self.assertContains(response, 'SIGEDON')
-        self.assertContains(response, 'Iniciar sesión')
-        self.assertContains(response, 'Panel operativo interno')
-        self.assertContains(response, 'Acceso exclusivo para personal autorizado.')
-        self.assertContains(response, 'required-mark')
-        self.assertNotContains(response, 'public_portal/css/public_portal.css')
-
-    def test_login_authentication_still_works(self):
-        response = self.client.post(
-            reverse('login'),
-            data={'username': self.user.username, 'password': 'pass-12345'},
-        )
-
-        self.assertRedirects(response, reverse('dashboard'))
-
-    def test_login_styles_are_defined_only_in_internal_stylesheet(self):
-        source = Path('static/web/css/sigedon.css').read_text()
-        public_source = Path('templates/public_portal/public_base.html').read_text()
-
-        self.assertIn('.login-screen', source)
-        self.assertIn('min-height: 100vh;', source)
-        self.assertIn('.login-card', source)
-        self.assertIn('.login-brand-panel', source)
-        self.assertNotIn('login-screen', public_source)
-        self.assertNotIn('login-card', public_source)
 
     def test_internal_base_does_not_load_public_assets(self):
         source = Path('templates/base.html').read_text()

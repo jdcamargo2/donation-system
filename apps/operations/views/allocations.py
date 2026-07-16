@@ -49,6 +49,7 @@ from .common import (
     DetailMetricsMixin,
     FilteredListContextMixin,
     OperationsPermissionRequiredMixin,
+    PaginatedListMixin,
     RouteContextMixin,
     StateTransitionContextMixin,
     StateTransitionView,
@@ -72,7 +73,13 @@ class FundAllocationAnnulView(TerminalActionView):
     success_message = _('Asignación anulada.')
 
 
-class FundAllocationListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, RouteContextMixin, ListView):
+class FundAllocationListView(
+    OperationsPermissionRequiredMixin,
+    FilteredListContextMixin,
+    RouteContextMixin,
+    PaginatedListMixin,
+    ListView,
+):
     permission_required = 'operations.view_fundallocation'
     model = FundAllocation
     template_name = 'web/allocation_list.html'
@@ -93,8 +100,7 @@ class FundAllocationListView(OperationsPermissionRequiredMixin, FilteredListCont
             text_fields=('code', 'donation__code', 'project__code', 'project__name'),
             date_field='allocation_date', institution_field='donation__donor_id',
             project_field='project_id',
-        )
-
+        ).order_by('-allocation_date', '-created_at', '-pk')
 
 class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_fundallocation'

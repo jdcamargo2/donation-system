@@ -18,16 +18,13 @@
 
 <div class="card border-0 ops-table-card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-hover align-middle mb-0 ops-expense-table">
             <thead>
                 <tr>
                     <th>Gasto</th>
                     <th>Proyecto</th>
                     <th>Monto</th>
-                    <th>Categoría</th>
                     <th>Estado</th>
-                    <th>Soporte</th>
-                    <th>Fecha</th>
                     <th class="text-end">Acciones</th>
                 </tr>
             </thead>
@@ -38,40 +35,51 @@
                             <a class="fw-semibold text-decoration-none" href="{% url 'expense_detail' expense.pk %}">
                                 {{ expense.code }}
                             </a>
-                            <div>{{ expense.reason|default:expense.provider_or_recipient }}</div>
-                            <div class="small text-muted">{{ expense.provider_or_recipient }} · {{ expense.allocation.donation.code }}</div>
+                            <span class="ops-expense-secondary d-block">{{ expense.reason }}</span>
+                            <span class="small text-muted ops-expense-secondary d-block">{{ expense.expense_date }}</span>
                         </td>
                         <td>
                             {{ expense.allocation.project.name }}
-                            <div class="small text-muted">{{ expense.allocation.project.code }} · {{ expense.allocation.code }}</div>
+                            <span class="small text-muted ops-expense-secondary d-block">{{ expense.allocation.project.code }} · {{ expense.allocation.code }}</span>
                         </td>
-                        <td class="ops-money">{{ expense.amount|money_es }} {{ expense.currency }}</td>
-                        <td>{{ expense.get_category_display }}</td>
+                        <td class="ops-money text-nowrap">{{ expense.amount|money_es }} {{ expense.currency }}</td>
                         <td><span class="badge ops-status-badge">{{ expense.get_status_display }}</span></td>
-                        <td>
-                            {% if expense.annotated_has_support %}
-                                Con soporte
-                            {% else %}
-                                Sin soporte
-                            {% endif %}
-                        </td>
-                        <td>{{ expense.expense_date }}</td>
-                        <td class="text-end ops-row-actions">
-                            {% if perms.operations.change_expense and expense.status != 'annulled' %}
-                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name expense.pk %}">Editar</a>
-                            {% endif %}
-                            {% if perms.operations.delete_expense and expense.status != 'annulled' %}
-                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name expense.pk %}">Eliminar</a>
+                        <td class="text-end">
+                            {% if expense.status != 'annulled' %}
+                                {% if perms.operations.change_expense or perms.operations.delete_expense %}
+                                    <div class="dropdown">
+                                        <button
+                                            class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                                            type="button"
+                                            id="expense-actions-{{ expense.pk }}"
+                                            data-bs-toggle="dropdown"
+                                            data-bs-boundary="viewport"
+                                            aria-expanded="false"
+                                            aria-label="Acciones para {{ expense.code }}"
+                                        >
+                                            Más
+                                        </button>
+                                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="expense-actions-{{ expense.pk }}">
+                                            {% if perms.operations.change_expense %}
+                                                <li><a class="dropdown-item" href="{% url update_url_name expense.pk %}">Editar</a></li>
+                                            {% endif %}
+                                            {% if perms.operations.delete_expense %}
+                                                <li><a class="dropdown-item text-danger" href="{% url delete_url_name expense.pk %}">Eliminar</a></li>
+                                            {% endif %}
+                                        </ul>
+                                    </div>
+                                {% endif %}
                             {% endif %}
                         </td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="8" class="text-muted">No hay gastos registrados.</td>
+                        <td colspan="5" class="text-muted">No hay gastos registrados.</td>
                     </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 </div>
+{% include "web/includes/pagination.html" %}
 {% endblock %}

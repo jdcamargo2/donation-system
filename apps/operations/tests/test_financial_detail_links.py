@@ -76,7 +76,7 @@ class FinancialDetailLinkTests(TestCase):
         self.assertContains(response, self.first_expense.code)
         self.assertContains(response, self.second_expense.code)
         self.assertContains(response, self.first_expense.reason)
-        self.assertContains(response, self.first_expense.provider_or_recipient)
+        self.assertNotContains(response, self.first_expense.provider_or_recipient)
         self.assertContains(response, self.project.name)
 
     def test_allocation_detail_links_related_entities(self):

@@ -14,34 +14,54 @@
 
 <div class="card border-0 ops-table-card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-hover align-middle mb-0 ops-audit-table">
             <thead>
                 <tr>
-                    <th>Fecha</th>
-                    <th>Acción</th>
-                    <th>Modelo</th>
-                    <th>Objeto</th>
+                    <th>Fecha y hora</th>
                     <th>Usuario</th>
-                    <th>Descripción</th>
+                    <th>Acción</th>
+                    <th>Objeto</th>
+                    <th>Detalle</th>
                 </tr>
             </thead>
             <tbody>
                 {% for log in logs %}
                     <tr>
-                        <td>{{ log.created_at }}</td>
-                        <td>{{ log.get_action_display }}</td>
-                        <td>{{ log.display_model_name }}</td>
-                        <td>{{ log.entity_label }}</td>
-                        <td>{{ log.user|default:"Sistema" }}</td>
-                        <td>{{ log.display_summary }}</td>
+                        <td class="ops-audit-datetime">
+                            <span class="ops-audit-date">{{ log.created_at|date:"d/m/Y" }}</span>
+                            <span class="ops-audit-time">{{ log.created_at|date:"H:i" }}</span>
+                        </td>
+                        <td>
+                            <span class="ops-audit-user">{{ log.user|default:"Sistema" }}</span>
+                            {% if log.user and log.user.get_username and log.user.get_full_name %}
+                                <span class="ops-audit-user-meta">{{ log.user.get_username }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge ops-audit-action ops-audit-action-{{ log.action }}">{{ log.get_action_display }}</span>
+                        </td>
+                        <td class="ops-audit-object">
+                            <span class="ops-audit-object-label">{{ log.entity_label }}</span>
+                            <span class="ops-audit-object-model">{{ log.display_model_name }}</span>
+                        </td>
+                        <td class="ops-audit-detail">
+                            <span
+                                class="ops-audit-detail-text"
+                                title="{{ log.display_summary }}"
+                            >{{ log.display_summary }}</span>
+                        </td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="6" class="text-muted">Todavía no hay registros de auditoría.</td>
+                        <td colspan="5" class="ops-audit-empty text-muted">
+                            Todavía no hay registros de auditoría.
+                        </td>
                     </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 </div>
+
+{% include "web/includes/pagination.html" %}
 {% endblock %}

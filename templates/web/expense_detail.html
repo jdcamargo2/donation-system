@@ -49,6 +49,8 @@
                     <dd class="col-sm-8">{{ object.expense_date }}</dd>
                     <dt class="col-sm-4">Monto</dt>
                     <dd class="col-sm-8 ops-money">{{ object.amount|money_es }} {{ object.currency }}</dd>
+                    <dt class="col-sm-4">Categoría</dt>
+                    <dd class="col-sm-8">{{ object.get_category_display }}</dd>
                     <dt class="col-sm-4">Proveedor o destinatario</dt>
                     <dd class="col-sm-8">{{ object.provider_or_recipient }}</dd>
                     <dt class="col-sm-4">Estado</dt>
