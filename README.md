@@ -25,7 +25,7 @@ El MVP se encuentra funcional y cubierto por pruebas automatizadas.
 
 | Indicador                             | Estado          |
 | ------------------------------------- | --------------- |
-| Pruebas automatizadas                 | 791             |
+| Pruebas automatizadas                 | 880             |
 | Estado de la suite                    | OK              |
 | Migraciones pendientes                | Ninguna         |
 | Django system check                   | Sin incidencias |
@@ -43,6 +43,7 @@ debe actualizarse cuando el total cambie de forma estable.
 * Django Templates
 * Bootstrap 5
 * `django-bootstrap5`
+* HTMX 2.0.10 vendorizado, limitado al componente interno de hitos
 * `django-countries`
 * `python-dotenv`
 * HTML, CSS y JavaScript sin proceso de compilación con Node.js

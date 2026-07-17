@@ -89,6 +89,54 @@ class OperationRoleTests(TestCase):
         self.assert_has_perm(user, 'view_auditlog')
         self.assert_has_perm(user, 'publish_projectupdate')
 
+    def test_sigedon_admin_receives_all_milestone_permissions(self):
+        user = self.create_user_for_role('admin-milestones', ROLE_SIGEDON_ADMIN)
+        milestone_codenames = {
+            'view_projectmilestone',
+            'add_projectmilestone',
+            'change_projectmilestone',
+            'delete_projectmilestone',
+            'complete_projectmilestone',
+            'reorder_projectmilestone',
+        }
+
+        self.assertEqual(
+            set(
+                Permission.objects.filter(
+                    content_type__app_label='operations',
+                    codename__in=milestone_codenames,
+                ).values_list('codename', flat=True)
+            ),
+            milestone_codenames,
+        )
+        for codename in milestone_codenames:
+            with self.subTest(codename=codename):
+                self.assert_has_perm(user, codename)
+
+    def test_non_admin_roles_do_not_receive_milestone_permissions(self):
+        milestone_codenames = {
+            'view_projectmilestone',
+            'add_projectmilestone',
+            'change_projectmilestone',
+            'delete_projectmilestone',
+            'complete_projectmilestone',
+            'reorder_projectmilestone',
+        }
+
+        for role_name in {
+            ROLE_FIELD_OPERATOR,
+            ROLE_EXTERNAL_AUDITOR,
+            ROLE_PROJECT_COMMITTEE,
+            ROLE_PROJECT_UPDATE_REVIEWER,
+            ROLE_PROJECT_UPDATE_DECIDER,
+        }:
+            with self.subTest(role=role_name):
+                self.assertFalse(
+                    Group.objects.get(name=role_name).permissions.filter(
+                        codename__in=milestone_codenames
+                    ).exists()
+                )
+
     def test_field_operator_permission_matrix(self):
         user = self.create_user_for_role('field-role', ROLE_FIELD_OPERATOR)
 

@@ -1,0 +1,36 @@
+<section
+    id="project-milestones"
+    class="card ops-detail-card ops-milestones mb-4"
+    aria-labelledby="project-milestones-title"
+    data-milestone-panel
+>
+    <div class="card-body">
+        <div class="ops-milestones-header">
+            <div class="ops-milestones-heading-row">
+                <h2 id="project-milestones-title" class="h5 mb-0">Hitos del proyecto</h2>
+                {% if milestone_mutations_allowed and can_add_project_milestone %}
+                    <a class="btn btn-sm btn-primary" href="{% url 'project_milestone_add' object.pk %}">Nuevo hito</a>
+                {% endif %}
+            </div>
+            {% include "web/includes/project_milestone_progress.html" %}
+        </div>
+
+        <div class="htmx-indicator ops-milestone-loading" role="status">
+            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            <span>Actualizando hitos…</span>
+        </div>
+        <div class="visually-hidden" data-milestone-feedback></div>
+
+        {% if object.status == 'closed' %}
+            <div class="ops-milestones-terminal" role="status">
+                Este proyecto está cerrado. Sus hitos se conservan como registro histórico.
+            </div>
+        {% elif object.status == 'annulled' %}
+            <div class="ops-milestones-terminal" role="status">
+                Este proyecto está anulado. Sus hitos no pueden modificarse.
+            </div>
+        {% endif %}
+
+        {% include "web/includes/project_milestone_list.html" %}
+    </div>
+</section>

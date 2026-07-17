@@ -16,6 +16,7 @@ delete_auditlog
 
 * instituciones;
 * proyectos;
+* hitos verificables de proyectos, incluidos completar, reabrir y reordenar;
 * donaciones;
 * asignaciones de fondos;
 * gastos;

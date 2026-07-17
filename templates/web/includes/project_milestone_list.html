@@ -1,0 +1,17 @@
+<div id="project-milestone-list"{% if milestone_list_oob %} hx-swap-oob="outerHTML"{% endif %}>
+    {% if milestone_progress.total %}
+        <ul class="ops-milestone-list">
+            {% for milestone in project_milestones %}
+                {% include "web/includes/project_milestone_item.html" with milestone_is_first=forloop.first milestone_is_last=forloop.last %}
+            {% endfor %}
+        </ul>
+    {% else %}
+        <div class="ops-milestones-empty">
+            <span class="ops-milestones-empty-icon" aria-hidden="true">✓</span>
+            <div>
+                <strong>Sin hitos definidos</strong>
+                <p class="mb-0">Agregue hitos verificables para mostrar el avance operativo de este proyecto.</p>
+            </div>
+        </div>
+    {% endif %}
+</div>

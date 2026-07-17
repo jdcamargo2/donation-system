@@ -1,5 +1,6 @@
 from contextlib import contextmanager, nullcontext
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
@@ -8,12 +9,14 @@ from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy as _
 
 from .choices import OPERATING_CURRENCY
+from .milestones import get_milestone_progress
 from .models import (
     AuditLog,
     Donation,
     Expense,
     FundAllocation,
     Project,
+    ProjectMilestone,
     ProjectUpdate,
     ProjectUpdateAttachment,
     ProjectUpdateImmutableError,
@@ -453,15 +456,22 @@ def ensure_expense_is_deletable(expense: Expense) -> None:
         )
 
 
-# PRE: instance is saved or still readable before deletion; summary is a concise,
-# non-secret description rather than a serialized payload.
+# PRE: instance is saved or still readable after deletion; summary and optional identity
+# overrides are concise, non-secret values captured by the domain service.
 # POST: creates and returns one append-only AuditLog event through the authorized helper.
-def log_action(user, action: str, instance, summary: str, entity_label: str | None = None):
+def log_action(
+    user,
+    action: str,
+    instance,
+    summary: str,
+    entity_label: str | None = None,
+    entity_id: int | str | None = None,
+):
     return AuditLog.objects.create(
         user=user if getattr(user, 'is_authenticated', False) else None,
         action=action,
         model_name=capfirst(instance._meta.verbose_name),
-        entity_id=str(instance.pk),
+        entity_id=str(instance.pk if entity_id is None else entity_id),
         entity_label=entity_label or str(instance),
         summary=summary,
     )
@@ -477,6 +487,320 @@ def log_update(user, instance, summary: str | None = None):
 
 def log_delete(user, instance, summary: str | None = None):
     return log_action(user, AuditLog.Action.ANNULLED, instance, summary or _('Registro eliminado.'), str(instance))
+
+
+class ProjectMilestoneError(ValidationError):
+    """Raised when a project milestone mutation violates a domain invariant."""
+
+
+# PRE: actor is the proposed technical author of a milestone mutation.
+# POST: returns the persisted authenticated user or raises a domain validation error.
+def _require_project_milestone_actor(actor):
+    user_model = get_user_model()
+    if (
+        not isinstance(actor, user_model)
+        or not getattr(actor, 'is_authenticated', False)
+        or actor.pk is None
+    ):
+        raise ProjectMilestoneError({'actor': _('La operación exige un usuario autenticado.')})
+    try:
+        return user_model._default_manager.get(pk=actor.pk)
+    except user_model.DoesNotExist as exc:
+        raise ProjectMilestoneError(
+            {'actor': _('El usuario responsable ya no existe en el sistema.')}
+        ) from exc
+
+
+# PRE: project is locked and belongs to the milestone collection being mutated.
+# POST: raises only when the project is terminal and therefore immutable for milestones.
+def _ensure_project_accepts_milestone_mutations(project):
+    if project.status in PROJECT_TERMINAL_STATUSES:
+        raise ProjectMilestoneError(
+            {'project': _('Los proyectos cerrados o anulados no admiten cambios en sus hitos.')}
+        )
+
+
+# PRE: caller is inside transaction.atomic() and project_id identifies a persisted project.
+# POST: returns the locked editable project and all its milestones locked in stable order.
+def _lock_project_milestones(project_id):
+    assert transaction.get_connection().in_atomic_block
+    project = Project.objects.select_for_update().get(pk=project_id)
+    _ensure_project_accepts_milestone_mutations(project)
+    milestones = list(
+        ProjectMilestone.objects.select_for_update()
+        .filter(project_id=project.pk)
+        .order_by('position', 'pk')
+    )
+    return project, milestones
+
+
+# PRE: caller is inside transaction.atomic() and milestone_id identifies a persisted milestone.
+# POST: locks its project first, then every project milestone, and returns the requested locked row.
+def _lock_project_milestones_for_id(milestone_id):
+    assert transaction.get_connection().in_atomic_block
+    reference = ProjectMilestone.objects.only('project_id').get(pk=milestone_id)
+    project, milestones = _lock_project_milestones(reference.project_id)
+    try:
+        milestone = next(item for item in milestones if item.pk == milestone_id)
+    except StopIteration as exc:
+        raise ProjectMilestone.DoesNotExist from exc
+    return project, milestones, milestone
+
+
+# PRE: milestones is a locked collection expected to be managed exclusively by these services.
+# POST: returns only when positions are exactly 1..N; otherwise raises without mutation.
+def _ensure_consecutive_milestone_positions(milestones):
+    actual_positions = [milestone.position for milestone in milestones]
+    expected_positions = list(range(1, len(milestones) + 1))
+    if actual_positions != expected_positions:
+        raise ProjectMilestoneError(
+            {'position': _('Las posiciones de los hitos no son consecutivas y deben repararse.')}
+        )
+
+
+# PRE: before and after are derived from locked milestone collections in the same transaction.
+# POST: writes exactly one project audit event only when derived 100 percent completion changes.
+def _audit_project_milestone_completion_crossing(*, project, before, after, actor):
+    if before.is_completed == after.is_completed:
+        return None
+    if after.is_completed:
+        summary = _('El proyecto alcanzó el 100 % de sus hitos.')
+    else:
+        summary = _('El proyecto dejó de estar al 100 % de sus hitos.')
+    return log_action(actor, AuditLog.Action.UPDATED, project, summary)
+
+
+def create_project_milestone(*, project_id: int, title: str, description: str = '', actor):
+    """
+    PRE: project_id exists, actor is authenticated, and title/description are proposed content.
+    POST: atomically appends one pending milestone, audits it, and records any 100 percent exit.
+    """
+    with transaction.atomic():
+        persisted_actor = _require_project_milestone_actor(actor)
+        project, milestones = _lock_project_milestones(project_id)
+        _ensure_consecutive_milestone_positions(milestones)
+        before = get_milestone_progress(milestones)
+        milestone = ProjectMilestone(
+            project=project,
+            title=(title or '').strip(),
+            description=description or '',
+            position=len(milestones) + 1,
+            is_completed=False,
+            completed_at=None,
+            completed_by=None,
+            created_by=persisted_actor,
+        )
+        milestone.full_clean()
+        milestone.save()
+        log_action(
+            persisted_actor,
+            AuditLog.Action.CREATED,
+            milestone,
+            _('Hito de proyecto creado.'),
+        )
+        after = get_milestone_progress([*milestones, milestone])
+        _audit_project_milestone_completion_crossing(
+            project=project,
+            before=before,
+            after=after,
+            actor=persisted_actor,
+        )
+        return milestone
+
+
+def update_project_milestone(
+    milestone_id: int,
+    *,
+    title: str,
+    description: str = '',
+    actor,
+):
+    """
+    PRE: milestone_id exists and actor proposes only editable descriptive fields.
+    POST: atomically persists and audits effective descriptive changes, or returns an unaudited no-op.
+    """
+    with transaction.atomic():
+        persisted_actor = _require_project_milestone_actor(actor)
+        _project, _milestones, milestone = _lock_project_milestones_for_id(milestone_id)
+        clean_title = (title or '').strip()
+        clean_description = description or ''
+        changed_fields = []
+        if milestone.title != clean_title:
+            milestone.title = clean_title
+            changed_fields.append('title')
+        if milestone.description != clean_description:
+            milestone.description = clean_description
+            changed_fields.append('description')
+        if not changed_fields:
+            return milestone
+        milestone.full_clean()
+        milestone.save(update_fields=(*changed_fields, 'updated_at'))
+        log_action(
+            persisted_actor,
+            AuditLog.Action.UPDATED,
+            milestone,
+            _('Contenido del hito de proyecto actualizado.'),
+        )
+        return milestone
+
+
+def complete_project_milestone(milestone_id: int, *, actor):
+    """
+    PRE: milestone_id exists and actor is authenticated; client completion metadata is ignored.
+    POST: atomically completes once, audits once, and records a crossing into 100 percent.
+    """
+    with transaction.atomic():
+        persisted_actor = _require_project_milestone_actor(actor)
+        project, milestones, milestone = _lock_project_milestones_for_id(milestone_id)
+        if milestone.is_completed:
+            return milestone
+        before = get_milestone_progress(milestones)
+        milestone.is_completed = True
+        milestone.completed_at = timezone.now()
+        milestone.completed_by = persisted_actor
+        milestone.full_clean()
+        milestone.save(
+            update_fields=('is_completed', 'completed_at', 'completed_by', 'updated_at')
+        )
+        log_action(
+            persisted_actor,
+            AuditLog.Action.COMPLETED,
+            milestone,
+            _('Hito de proyecto completado.'),
+        )
+        after = get_milestone_progress(milestones)
+        _audit_project_milestone_completion_crossing(
+            project=project,
+            before=before,
+            after=after,
+            actor=persisted_actor,
+        )
+        return milestone
+
+
+def reopen_project_milestone(milestone_id: int, *, actor):
+    """
+    PRE: milestone_id exists and actor is authenticated.
+    POST: atomically reopens once, clears completion metadata, audits, and records any 100 percent exit.
+    """
+    with transaction.atomic():
+        persisted_actor = _require_project_milestone_actor(actor)
+        project, milestones, milestone = _lock_project_milestones_for_id(milestone_id)
+        if not milestone.is_completed:
+            return milestone
+        before = get_milestone_progress(milestones)
+        milestone.is_completed = False
+        milestone.completed_at = None
+        milestone.completed_by = None
+        milestone.full_clean()
+        milestone.save(
+            update_fields=('is_completed', 'completed_at', 'completed_by', 'updated_at')
+        )
+        log_action(
+            persisted_actor,
+            AuditLog.Action.REOPENED,
+            milestone,
+            _('Hito de proyecto reabierto.'),
+        )
+        after = get_milestone_progress(milestones)
+        _audit_project_milestone_completion_crossing(
+            project=project,
+            before=before,
+            after=after,
+            actor=persisted_actor,
+        )
+        return milestone
+
+
+def delete_project_milestone(milestone_id: int, *, actor):
+    """
+    PRE: milestone_id exists and actor is authenticated.
+    POST: atomically deletes it, compacts positions, audits deletion, and records any 100 percent crossing.
+    """
+    with transaction.atomic():
+        persisted_actor = _require_project_milestone_actor(actor)
+        project, milestones, milestone = _lock_project_milestones_for_id(milestone_id)
+        _ensure_consecutive_milestone_positions(milestones)
+        before = get_milestone_progress(milestones)
+        deleted_id = milestone.pk
+        deleted_label = str(milestone)
+        remaining = [item for item in milestones if item.pk != deleted_id]
+        milestone.delete()
+        for new_position, remaining_milestone in enumerate(remaining, start=1):
+            if remaining_milestone.position == new_position:
+                continue
+            remaining_milestone.position = new_position
+            remaining_milestone.full_clean()
+            remaining_milestone.save(update_fields=('position', 'updated_at'))
+        log_action(
+            persisted_actor,
+            AuditLog.Action.DELETED,
+            milestone,
+            _('Hito de proyecto eliminado definitivamente.'),
+            entity_label=deleted_label,
+            entity_id=deleted_id,
+        )
+        after = get_milestone_progress(remaining)
+        _audit_project_milestone_completion_crossing(
+            project=project,
+            before=before,
+            after=after,
+            actor=persisted_actor,
+        )
+        return None
+
+
+# PRE: milestone_id exists, actor is authenticated, and direction is -1 or 1.
+# POST: locks the project and milestones, swaps through free position N+1, and audits real movement.
+def _move_project_milestone(milestone_id: int, *, actor, direction: int):
+    if direction not in {-1, 1}:
+        raise AssertionError('La dirección interna del movimiento debe ser -1 o 1.')
+    with transaction.atomic():
+        persisted_actor = _require_project_milestone_actor(actor)
+        _project, milestones, milestone = _lock_project_milestones_for_id(milestone_id)
+        _ensure_consecutive_milestone_positions(milestones)
+        current_index = milestones.index(milestone)
+        destination_index = current_index + direction
+        if destination_index < 0 or destination_index >= len(milestones):
+            return milestone
+        adjacent = milestones[destination_index]
+        original_position = milestone.position
+        destination_position = adjacent.position
+        temporary_position = len(milestones) + 1
+
+        milestone.position = temporary_position
+        milestone.full_clean()
+        milestone.save(update_fields=('position', 'updated_at'))
+        adjacent.position = original_position
+        adjacent.full_clean()
+        adjacent.save(update_fields=('position', 'updated_at'))
+        milestone.position = destination_position
+        milestone.full_clean()
+        milestone.save(update_fields=('position', 'updated_at'))
+        log_action(
+            persisted_actor,
+            AuditLog.Action.REORDERED,
+            milestone,
+            _('Hito de proyecto movido de la posición %(before)s a la %(after)s.')
+            % {'before': original_position, 'after': destination_position},
+        )
+        return milestone
+
+
+def move_project_milestone_up(milestone_id: int, *, actor):
+    """
+    PRE: milestone_id exists and actor is authenticated.
+    POST: moves it one position upward atomically, or returns an unaudited boundary no-op.
+    """
+    return _move_project_milestone(milestone_id, actor=actor, direction=-1)
+
+
+def move_project_milestone_down(milestone_id: int, *, actor):
+    """
+    PRE: milestone_id exists and actor is authenticated.
+    POST: moves it one position downward atomically, or returns an unaudited boundary no-op.
+    """
+    return _move_project_milestone(milestone_id, actor=actor, direction=1)
 
 
 # PRE: currency is the ISO code proposed for an operational financial record.

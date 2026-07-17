@@ -206,6 +206,107 @@ class Project(models.Model):
             allocation__status=FundAllocation.Status.ANNULLED,
         ).exclude(status__in=Expense.non_executing_statuses())
 
+
+class ProjectMilestone(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='milestones')
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    position = models.PositiveIntegerField()
+    is_completed = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='completed_project_milestones',
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_project_milestones',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('position', 'pk')
+        verbose_name = _('hito de proyecto')
+        verbose_name_plural = _('hitos de proyecto')
+        permissions = (
+            (
+                'complete_projectmilestone',
+                _('Puede completar o reabrir hitos de proyecto'),
+            ),
+            ('reorder_projectmilestone', _('Puede reordenar hitos de proyecto')),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=('project', 'position'),
+                name='unique_project_milestone_position',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(position__gte=1),
+                name='project_milestone_position_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        is_completed=False,
+                        completed_at__isnull=True,
+                        completed_by__isnull=True,
+                    )
+                    | models.Q(is_completed=True, completed_at__isnull=False)
+                ),
+                name='project_milestone_completion_consistency',
+            ),
+        )
+
+    def __str__(self):
+        return f'{self.project.code} - {self.title}'
+
+    def clean(self):
+        """
+        PRE: milestone fields represent a proposed pending or completed state.
+        POST: rejects invalid titles, positions, completion metadata, and actor-less new completions.
+        """
+        errors = {}
+        if not self.title or not self.title.strip():
+            errors['title'] = _('El título del hito no puede estar vacío.')
+        if self.position is not None and self.position < 1:
+            errors['position'] = _('La posición del hito debe comenzar en 1.')
+
+        if self.is_completed:
+            if self.completed_at is None:
+                errors['completed_at'] = _('Un hito completado debe conservar su fecha de completitud.')
+            if self.completed_by_id is None and not self._has_historically_removed_completer():
+                errors['completed_by'] = _('Se requiere un usuario para completar el hito.')
+        else:
+            if self.completed_at is not None:
+                errors['completed_at'] = _('Un hito pendiente no puede tener fecha de completitud.')
+            if self.completed_by_id is not None:
+                errors['completed_by'] = _('Un hito pendiente no puede tener usuario de completitud.')
+
+        if errors:
+            raise ValidationError(errors)
+
+    def _has_historically_removed_completer(self):
+        """
+        PRE: self is proposed as completed without a current completed_by actor.
+        POST: returns whether the persisted row already represents that valid historical state.
+        """
+        if not self.pk:
+            return False
+        return type(self).objects.filter(
+            pk=self.pk,
+            is_completed=True,
+            completed_at__isnull=False,
+            completed_by__isnull=True,
+        ).exists()
+
+
 class ProjectUpdate(models.Model):
     class Status(models.TextChoices):
         DRAFT = 'draft', _('Borrador')
@@ -1026,6 +1127,10 @@ class AuditLog(models.Model):
         CLOSED = 'closed', _('Cerrada')
         EXPENSE_CANCELLED = 'expense_cancelled', _('Gasto anulado')
         PUBLISHED = 'published', _('Publicada')
+        COMPLETED = 'completed', _('Completada')
+        REOPENED = 'reopened', _('Reabierta')
+        REORDERED = 'reordered', _('Reordenada')
+        DELETED = 'deleted', _('Eliminada')
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

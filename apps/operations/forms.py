@@ -8,6 +8,7 @@ from django.utils.translation import gettext_lazy as _
 from .choices import OPERATING_CURRENCY
 from .models import (
     Donation, Expense, FundAllocation, Institution, Project, ProjectDocument,
+    ProjectMilestone,
     ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
     ProjectUpdateRemediation, SupportingDocument,
 )
@@ -245,6 +246,17 @@ class ProjectForm(BootstrapFormMixin, forms.ModelForm):
 
     def clean_estimated_budget(self):
         return self.cleaned_data.get('estimated_budget') or Project._meta.get_field('estimated_budget').default
+
+
+class ProjectMilestoneForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectMilestone
+        fields = ['title', 'description']
+        labels = {
+            'title': _('Título'),
+            'description': _('Descripción'),
+        }
+        widgets = {'description': forms.Textarea(attrs={'rows': 4})}
 
 
 class ProjectUpdateResponsibleFormMixin:

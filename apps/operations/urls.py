@@ -24,6 +24,41 @@ urlpatterns = [
     path('projects/<int:pk>/annul/', views.ProjectAnnulView.as_view(), name='project_annul'),
     path('projects/<int:pk>/status/<str:target_status>/', views.ProjectStatusTransitionView.as_view(), name='project_status_transition'),
     path(
+        'projects/<int:project_pk>/milestones/add/',
+        views.ProjectMilestoneAddView.as_view(),
+        name='project_milestone_add',
+    ),
+    path(
+        'milestones/<int:pk>/edit/',
+        views.ProjectMilestoneEditView.as_view(),
+        name='project_milestone_edit',
+    ),
+    path(
+        'milestones/<int:pk>/complete/',
+        views.ProjectMilestoneCompleteView.as_view(),
+        name='project_milestone_complete',
+    ),
+    path(
+        'milestones/<int:pk>/reopen/',
+        views.ProjectMilestoneReopenView.as_view(),
+        name='project_milestone_reopen',
+    ),
+    path(
+        'milestones/<int:pk>/delete/',
+        views.ProjectMilestoneDeleteView.as_view(),
+        name='project_milestone_delete',
+    ),
+    path(
+        'milestones/<int:pk>/move-up/',
+        views.ProjectMilestoneMoveUpView.as_view(),
+        name='project_milestone_move_up',
+    ),
+    path(
+        'milestones/<int:pk>/move-down/',
+        views.ProjectMilestoneMoveDownView.as_view(),
+        name='project_milestone_move_down',
+    ),
+    path(
         'projects/<int:project_pk>/updates/create/',
         views.ProjectUpdateCreateForProjectView.as_view(),
         name='project_update_create_for_project',
