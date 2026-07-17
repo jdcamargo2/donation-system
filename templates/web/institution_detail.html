@@ -1,65 +1,116 @@
 {% extends "base.html" %}
-{% load operations_format %}
+{% load operations_format static %}
 
 {% block title %}Institución - SIGEDON{% endblock %}
 
 {% block content %}
-<div class="ops-page-header ops-page-header-row">
-    <div>
+{# DEUDA TÉCNICA: DetailMetricsMixin aún entrega metrics, pero este detalle usa contexto específico. #}
+<div class="ops-page-header ops-page-header-row ops-institution-detail-header">
+    <div class="ops-institution-detail-identity">
         <div class="ops-kicker">Ficha institucional</div>
         <h1>{{ object.name }}</h1>
-        <p>{{ object.get_role_display }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+        <div class="ops-institution-detail-primary-meta">
+            <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+        </div>
+        <div class="ops-institution-detail-secondary-meta">
+            <span><strong>Rol:</strong> {{ object.get_role_display }}</span>
+            <span><strong>País:</strong> {{ object.country.name }}</span>
+            <span><strong>Tipo:</strong> {{ object.get_institution_type_display }}</span>
+        </div>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
         {% if perms.operations.change_institution %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
+        {% if perms.operations.delete_institution %}
+            <div class="dropdown">
+                <button
+                    class="btn btn-outline-secondary dropdown-toggle"
+                    type="button"
+                    id="institution-actions-{{ object.pk }}"
+                    data-bs-toggle="dropdown"
+                    data-bs-boundary="viewport"
+                    aria-expanded="false"
+                    aria-label="Más acciones para {{ object.name }}"
+                >Más</button>
+                <ul class="dropdown-menu dropdown-menu-end ops-institution-detail-action-menu" aria-labelledby="institution-actions-{{ object.pk }}">
+                    <li>
+                        <a
+                            class="dropdown-item text-danger"
+                            href="{% url delete_url_name object.pk %}"
+                            data-confirm-action
+                            data-confirm-form="institution-delete-form"
+                            data-confirm-title="¿Eliminar esta institución?"
+                            data-confirm-text="Esta acción no se puede deshacer. Si la institución tiene donaciones asociadas, el sistema impedirá su eliminación."
+                            data-confirm-confirm-label="Sí, eliminar"
+                            data-confirm-variant="danger"
+                        >Eliminar institución</a>
+                    </li>
+                </ul>
+                <form id="institution-delete-form" method="post" action="{% url delete_url_name object.pk %}">
+                    {% csrf_token %}
+                </form>
+            </div>
+        {% endif %}
     </div>
 </div>
 
-<div class="row g-4">
-    <div class="col-lg-7">
-        <div class="card border-0 h-100 ops-detail-card">
-            <div class="card-body">
-                <h2 class="h5 mb-3">Datos de la institución</h2>
-                <dl class="row mb-0">
-                    <dt class="col-sm-4">Tipo</dt>
-                    <dd class="col-sm-8">{{ object.get_institution_type_display }}</dd>
-                    <dt class="col-sm-4">Rol</dt>
-                    <dd class="col-sm-8">{{ object.get_role_display }}</dd>
-                    <dt class="col-sm-4">País</dt>
-                    <dd class="col-sm-8">{{ object.country.name|default:"-" }}</dd>
-                    <dt class="col-sm-4">Correo de contacto</dt>
-                    <dd class="col-sm-8">{{ object.contact_email|default:"-" }}</dd>
-                    <dt class="col-sm-4">Teléfono de contacto</dt>
-                    <dd class="col-sm-8">{{ object.contact_phone|default:"-" }}</dd>
-                    <dt class="col-sm-4">Responsable institucional</dt>
-                    <dd class="col-sm-8">{{ object.responsible_person|default:"-" }}</dd>
-                    <dt class="col-sm-4">Documento legal</dt>
-                    <dd class="col-sm-8">
-                        {% if object.legal_document %}
-                            <a href="{% url 'institution_legal_document_download' object.pk %}">Ver documento</a>
-                        {% else %}
-                            -
-                        {% endif %}
-                    </dd>
-                </dl>
-            </div>
+<article class="ops-institution-detail-body">
+    {% if object.legal_document %}
+    <section class="ops-institution-detail-section" aria-labelledby="institution-information-title">
+        <h2 id="institution-information-title" class="h5">Información institucional</h2>
+        <div class="ops-institution-document">
+            <span>Documento legal</span>
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'institution_legal_document_download' object.pk %}">Descargar</a>
         </div>
-    </div>
-    <div class="col-lg-5">
-        <h2 class="h5">Donaciones asociadas</h2>
-        <div class="list-group">
-            {% for donation in object.donations.all %}
-                <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
-                    <div class="fw-semibold">{{ donation.code }}</div>
-                    <div class="small text-muted">{{ donation.amount|money_es }} {{ donation.currency }} · {{ donation.get_status_display }}</div>
-                </a>
-            {% empty %}
-                <div class="list-group-item text-muted">Esta institución todavía no tiene donaciones asociadas.</div>
-            {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if object.responsible_person or object.contact_email or object.contact_phone %}
+    <section class="ops-institution-detail-section" aria-labelledby="institution-contact-title">
+        <h2 id="institution-contact-title" class="h5">Contacto</h2>
+        <div class="ops-institution-contact-grid">
+            {% if object.responsible_person %}<div><span class="ops-detail-label">Responsable</span><span>{{ object.responsible_person }}</span></div>{% endif %}
+            {% if object.contact_email %}<div><span class="ops-detail-label">Correo</span><a href="mailto:{{ object.contact_email }}">{{ object.contact_email }}</a></div>{% endif %}
+            {% if object.contact_phone %}<div><span class="ops-detail-label">Teléfono</span><span>{{ object.contact_phone }}</span></div>{% endif %}
         </div>
-    </div>
-</div>
+    </section>
+    {% endif %}
+
+    <section class="ops-institution-detail-section" aria-labelledby="institution-donations-title">
+        <div class="ops-institution-donations-heading">
+            <h2 id="institution-donations-title" class="h5 mb-0">Donaciones asociadas</h2>
+            {% if has_more_institution_donations %}<span class="small text-muted">Mostrando 5 de {{ institution_donation_count }}</span>{% endif %}
+        </div>
+        {% if recent_institution_donations %}
+            <ul class="ops-institution-donation-list">
+                {% for donation in recent_institution_donations %}
+                <li>
+                    <a class="fw-semibold" href="{% url 'donation_detail' donation.pk %}">{{ donation.code }}</a>
+                    <span>{{ donation.received_date|default:donation.created_at }}</span>
+                    <span class="ops-money text-nowrap">{{ donation.amount|money_es }} {{ donation.currency }}</span>
+                    <span class="badge ops-status-badge">{{ donation.get_status_display }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% if has_more_institution_donations %}<a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'donation_list' %}?institution={{ object.pk }}">Ver todas las donaciones</a>{% endif %}
+        {% else %}
+            <p class="text-muted mb-0">Sin donaciones asociadas</p>
+        {% endif %}
+    </section>
+
+    <section class="ops-institution-detail-section ops-institution-detail-metadata" aria-labelledby="institution-metadata-title">
+        <h2 id="institution-metadata-title" class="h5">Información de registro</h2>
+        <div class="ops-institution-metadata-grid">
+            <div><span class="ops-detail-label">Creada</span><span>{{ object.created_at }}</span></div>
+            <div><span class="ops-detail-label">Actualizada</span><span>{{ object.updated_at }}</span></div>
+        </div>
+    </section>
+</article>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+{% if perms.operations.delete_institution %}<script src="{% static 'web/js/confirm_actions.js' %}" defer></script>{% endif %}
 {% endblock %}

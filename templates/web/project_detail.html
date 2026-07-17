@@ -4,125 +4,164 @@
 {% block title %}Proyecto - SIGEDON{% endblock %}
 
 {% block content %}
-<div class="ops-page-header ops-page-header-row">
-    <div>
+{# DEUDA TÉCNICA: DetailMetricsMixin aún entrega metrics, pero esta vista usa project_financial_summary. Retirar el contexto en una intervención posterior. #}
+<div class="ops-page-header ops-page-header-row ops-project-detail-header">
+    <div class="ops-project-detail-identity">
         <div class="ops-kicker">Proyecto operativo</div>
         <h1>{{ object.name }}</h1>
-        <p>{{ object.code }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+        <div class="ops-project-detail-primary-meta">
+            <span class="ops-project-detail-code">{{ object.code }}</span>
+            <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+        </div>
+        {% if object.location or object.responsible_unit %}
+        <div class="ops-project-detail-secondary-meta">
+            {% if object.location %}<span><strong>Ubicación:</strong> {{ object.location }}</span>{% endif %}
+            {% if object.responsible_unit %}<span><strong>Unidad responsable:</strong> {{ object.responsible_unit }}</span>{% endif %}
+        </div>
+        {% endif %}
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
         {% if perms.operations.change_project and object.status != 'closed' and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
+        {% if perms.operations.change_project and status_transitions %}
+        <div class="dropdown">
+            <button class="btn btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Cambiar estado del proyecto">
+                Estado
+            </button>
+            <div class="dropdown-menu dropdown-menu-end ops-project-detail-action-menu">
+                {% for transition in status_transitions %}
+                <form method="post" action="{% url transition_url_name object.pk transition.value %}">
+                    {% csrf_token %}
+                    <button class="dropdown-item" type="submit">Cambiar a {{ transition.label }}</button>
+                </form>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        {% if perms.operations.change_project and can_finish or perms.operations.change_project and can_annul %}
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Más acciones del proyecto">
+                Más
+            </button>
+            <div class="dropdown-menu dropdown-menu-end ops-project-detail-action-menu">
+                {% if can_finish %}
+                    <a
+                        class="dropdown-item"
+                        href="{% url 'project_finish' object.pk %}"
+                        data-confirm-action
+                        data-confirm-form="project-finish-form"
+                        data-confirm-title="¿Terminar este proyecto?"
+                        data-confirm-text="Después de terminarlo no podrá editarse ni reactivarse."
+                        data-confirm-confirm-label="Sí, terminar"
+                        data-confirm-variant="warning"
+                    >Terminar proyecto</a>
+                    <form id="project-finish-form" method="post" action="{% url 'project_finish' object.pk %}">
+                        {% csrf_token %}
+                    </form>
+                {% endif %}
+                {% if can_annul %}<a class="dropdown-item text-danger" href="{% url 'project_annul' object.pk %}">Anular proyecto</a>{% endif %}
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
-{% if perms.operations.change_project and status_transitions %}
-<div class="d-flex gap-2 mb-4">
-    {% for transition in status_transitions %}
-    <form method="post" action="{% url transition_url_name object.pk transition.value %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Cambiar a {{ transition.label }}</button></form>
-    {% endfor %}
-</div>
-{% endif %}
-{% if perms.operations.change_project and can_finish or perms.operations.change_project and can_annul %}
-<div class="d-flex gap-2 mb-4">
-    {% if can_finish %}<a class="btn btn-warning" href="{% url 'project_finish' object.pk %}">Terminar proyecto</a>{% endif %}
-    {% if can_annul %}<a class="btn btn-danger" href="{% url 'project_annul' object.pk %}">Anular proyecto</a>{% endif %}
-</div>
-{% endif %}
 
-<div class="row g-3 mb-4">
-    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Presupuesto USD</div><div class="ops-metric-value">{{ project_financial_summary.estimated_budget|money_es }} USD</div></div></div></div>
-    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Financiado USD</div><div class="ops-metric-value">{{ project_financial_summary.funded_amount|money_es }} USD</div></div></div></div>
-    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Ejecutado USD</div><div class="ops-metric-value">{{ project_financial_summary.executed_amount|money_es }} USD</div></div></div></div>
-    <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body"><div class="ops-metric-label">Disponible USD</div><div class="ops-metric-value">{{ project_financial_summary.available_amount|money_es }} USD</div><div class="small text-muted">Ejecución {{ execution_percentage|floatformat:1 }}%</div></div></div></div>
-</div>
+<section class="ops-project-financial-summary mb-4" aria-labelledby="project-financial-summary-title">
+    <div class="ops-project-financial-heading">
+        <h2 id="project-financial-summary-title" class="h5 mb-0">Resumen financiero</h2>
+        <div class="ops-project-financial-secondary">
+            <span><strong>Presupuesto estimado:</strong> <span class="ops-money text-nowrap">{{ project_financial_summary.estimated_budget|money_es }} USD</span></span>
+            <span><strong>Ejecución financiera:</strong> {{ execution_percentage|floatformat:1 }}%</span>
+        </div>
+    </div>
+    <div class="ops-project-financial-metrics">
+        <div class="ops-project-financial-metric">
+            <div class="ops-metric-label">Financiado</div>
+            <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.funded_amount|money_es }} USD</div>
+        </div>
+        <div class="ops-project-financial-metric">
+            <div class="ops-metric-label">Ejecutado</div>
+            <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.executed_amount|money_es }} USD</div>
+        </div>
+        <div class="ops-project-financial-metric ops-project-financial-metric-available">
+            <div class="ops-metric-label">Disponible</div>
+            <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.available_amount|money_es }} USD</div>
+        </div>
+    </div>
+</section>
 
 {% include "web/includes/project_milestones.html" %}
 
 <div class="row g-4">
     <div class="col-lg-7">
-        <div class="card border-0 h-100 ops-detail-card">
+        <section class="card border-0 h-100 ops-detail-card ops-project-general-info" aria-labelledby="project-general-info-title">
             <div class="card-body">
-                <h2 class="h5 mb-3">Información del proyecto</h2>
-                <dl class="row mb-0">
-                    <dt class="col-sm-4">Nombre</dt>
-                    <dd class="col-sm-8">{{ object.name }}</dd>
-                    <dt class="col-sm-4">Código</dt>
-                    <dd class="col-sm-8">{{ object.code }}</dd>
-                    <dt class="col-sm-4">Estado</dt>
-                    <dd class="col-sm-8">{{ object.get_status_display }}</dd>
-                    {% if object.terminal_at %}
-                        <dt class="col-sm-4">Motivo terminal</dt>
-                        <dd class="col-sm-8">{{ object.terminal_reason|default:"-" }}</dd>
-                        <dt class="col-sm-4">Procesado por</dt>
-                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
-                        <dt class="col-sm-4">Fecha terminal</dt>
-                        <dd class="col-sm-8">{{ object.terminal_at }}</dd>
+                <h2 id="project-general-info-title" class="h5 mb-3">Información general</h2>
+                {% if object.start_date or object.end_date or object.location or object.responsible_unit %}
+                <dl class="ops-project-general-grid">
+                    {% if object.start_date or object.end_date %}
+                    <div>
+                        <dt>Periodo</dt>
+                        <dd>{% if object.start_date %}{{ object.start_date }}{% endif %}{% if object.start_date and object.end_date %} — {% endif %}{% if object.end_date %}{{ object.end_date }}{% endif %}</dd>
+                    </div>
                     {% endif %}
-                    <dt class="col-sm-4">Descripción</dt>
-                    <dd class="col-sm-8">{{ object.description|default:"-" }}</dd>
-                    <dt class="col-sm-4">Objetivo</dt>
-                    <dd class="col-sm-8">{{ object.objective|default:"-" }}</dd>
-                    <dt class="col-sm-4">Unidad responsable</dt>
-                    <dd class="col-sm-8">{{ object.responsible_unit|default:"-" }}</dd>
-                    <dt class="col-sm-4">Ubicación</dt>
-                    <dd class="col-sm-8">{{ object.location|default:"No registrada" }}</dd>
-                    <dt class="col-sm-4">Beneficiarios</dt>
-                    <dd class="col-sm-8 text-muted">Sin información registrada en esta fase.</dd>
-                    <dt class="col-sm-4">Fecha de inicio</dt>
-                    <dd class="col-sm-8">{{ object.start_date|default:"-" }}</dd>
-                    <dt class="col-sm-4">Fecha de cierre</dt>
-                    <dd class="col-sm-8">{{ object.end_date|default:"-" }}</dd>
+                    {% if object.location %}
+                    <div>
+                        <dt>Ubicación</dt>
+                        <dd>{{ object.location }}</dd>
+                    </div>
+                    {% endif %}
+                    {% if object.responsible_unit %}
+                    <div>
+                        <dt>Unidad responsable</dt>
+                        <dd>{{ object.responsible_unit }}</dd>
+                    </div>
+                    {% endif %}
                 </dl>
+                {% endif %}
+                {% if object.objective %}
+                <div class="ops-project-general-text">
+                    <h3>Objetivo</h3>
+                    <p>{{ object.objective }}</p>
+                </div>
+                {% endif %}
+                {% if object.description %}
+                <div class="ops-project-general-text">
+                    <h3>Descripción</h3>
+                    <p>{{ object.description }}</p>
+                </div>
+                {% endif %}
+                {% if object.terminal_at %}
+                <div class="ops-project-terminal-history">
+                    <h3>Historial de cierre</h3>
+                    <dl>
+                        {% if object.terminal_reason %}<div><dt>Motivo</dt><dd>{{ object.terminal_reason }}</dd></div>{% endif %}
+                        {% if object.terminal_by %}<div><dt>Procesado por</dt><dd>{{ object.terminal_by }}</dd></div>{% endif %}
+                        <div><dt>Fecha</dt><dd>{{ object.terminal_at }}</dd></div>
+                    </dl>
+                </div>
+                {% endif %}
             </div>
-        </div>
+        </section>
     </div>
 
     <div class="col-lg-5">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h2 class="h5 mb-0">Avances del proyecto</h2>
-            {% if perms.operations.add_projectupdate %}
-                <a class="btn btn-sm btn-primary" href="{% url 'project_update_create_for_project' object.pk %}">Registrar avance</a>
-            {% endif %}
+        <div class="ops-project-updates-header mb-3">
+            <div>
+                <h2 id="project-updates-title" class="h5 mb-0">Avances del proyecto</h2>
+            </div>
+            <div class="ops-project-updates-header-actions">
+                {% if perms.operations.add_projectupdate %}
+                    <a class="btn btn-sm btn-primary" href="{% url 'project_update_create_for_project' object.pk %}">Registrar avance</a>
+                {% endif %}
+            </div>
         </div>
-        <div class="list-group">
-            {% for update in project_updates %}
-                <div class="list-group-item">
-                    <div class="d-flex justify-content-between align-items-start gap-3">
-                        <div>
-                            <a class="fw-semibold text-decoration-none" href="{% url 'project_update_detail' update.pk %}">
-                                {{ update.title }}
-                            </a>
-                            <div class="small text-muted">
-                                {{ update.update_date }} · {{ update.progress_percentage }}% · Persona responsable del avance: {{ update.reported_by|default:"—" }}
-                            </div>
-                        </div>
-                        <span class="badge ops-status-badge">{{ update.get_status_display }}</span>
-                    </div>
-                    <p class="mb-2 mt-2">{{ update.description|truncatewords:24 }}</p>
-                    <div class="d-flex gap-2">
-                        <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_detail' update.pk %}">Ver detalle</a>
-                        {% if update.status == 'draft' %}
-                            {% if perms.operations.change_projectupdate %}
-                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_update' update.pk %}">Editar</a>
-                            {% endif %}
-                            {% if perms.operations.publish_projectupdate %}
-                                <form method="post" action="{% url 'project_update_publish' update.pk %}">
-                                    {% csrf_token %}
-                                    <button class="btn btn-sm btn-outline-primary" type="submit">Publicar</button>
-                                </form>
-                            {% endif %}
-                            {% if perms.operations.delete_projectupdate %}
-                                <a class="btn btn-sm btn-outline-danger" href="{% url 'project_update_delete' update.pk %}">Eliminar</a>
-                            {% endif %}
-                        {% endif %}
-                    </div>
-                </div>
-            {% empty %}
-                <div class="list-group-item text-muted">No hay avances publicados{% if perms.operations.view_projectupdate %} ni borradores registrados{% endif %} para este proyecto.</div>
-            {% endfor %}
+        <div id="project-update-list" class="list-group ops-project-updates-list" aria-labelledby="project-updates-title" tabindex="0">
+            {% include "web/includes/project_update_items.html" with project_updates=recent_project_updates %}
         </div>
+        <div id="project-updates-live" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
     </div>
 </div>
 
@@ -146,7 +185,19 @@
                         <a class="btn btn-sm btn-outline-primary" href="{% url 'project_document_download' document.pk %}">Descargar</a>
                     {% endif %}
                     {% if perms.operations.delete_projectdocument %}
-                        <a class="btn btn-sm btn-outline-danger" href="{% url 'project_document_delete' document.pk %}">Eliminar</a>
+                        <a
+                            class="btn btn-sm btn-outline-danger"
+                            href="{% url 'project_document_delete' document.pk %}"
+                            data-confirm-action
+                            data-confirm-form="project-document-delete-form-{{ document.pk }}"
+                            data-confirm-title="¿Eliminar este documento?"
+                            data-confirm-text="El archivo dejará de estar disponible en el proyecto."
+                            data-confirm-confirm-label="Sí, eliminar"
+                            data-confirm-variant="danger"
+                        >Eliminar</a>
+                        <form id="project-document-delete-form-{{ document.pk }}" method="post" action="{% url 'project_document_delete' document.pk %}">
+                            {% csrf_token %}
+                        </form>
                     {% endif %}
                 </div>
             </div>
@@ -159,6 +210,8 @@
 
 {% block extra_js %}
 {{ block.super }}
+<script src="{% static 'web/js/confirm_actions.js' %}" defer></script>
 <script src="{% static 'vendor/htmx/htmx.min.js' %}" defer></script>
+<script src="{% static 'web/js/project_update_chunks.js' %}" defer></script>
 <script src="{% static 'web/js/project_milestones.js' %}" defer></script>
 {% endblock %}

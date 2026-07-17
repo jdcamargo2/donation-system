@@ -1,15 +1,19 @@
 from datetime import date
+from pathlib import Path
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.test import RequestFactory, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.operations.admin import ProjectUpdateAdmin
 from apps.operations.forms import ProjectUpdateForProjectForm, ProjectUpdateForm
-from apps.operations.models import AuditLog, Project, ProjectUpdate
+from apps.operations.models import AuditLog, Project, ProjectUpdate, ProjectUpdateAttachment
 from apps.operations.services import (
     ProjectUpdateImmutableError,
     publish_project_update,
@@ -136,7 +140,7 @@ class ProjectUpdateTests(TestCase):
 
         response_without_reporter = self.client.get(reverse('project_update_detail', args=[update.pk]))
 
-        self.assertContains(response_without_reporter, 'Persona responsable del avance')
+        self.assertContains(response_without_reporter, 'Información de registro')
         self.assertContains(response_without_reporter, '—')
 
         update.reported_by = self.reported_by
@@ -384,3 +388,299 @@ class ProjectUpdateTests(TestCase):
         response = self.client.get(reverse('admin:operations_projectupdate_change', args=[update.pk]))
 
         self.assertEqual(response.status_code, 200)
+
+
+class ProjectUpdateDetailTests(TestCase):
+    def setUp(self):
+        self.user = create_user('detail-update-manager')
+        self.reported_by = create_user('detail-update-reporter')
+        self.project = create_project(code='PRJ-UPDATE-DETAIL', name='Proyecto de detalle')
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
+        self.project_update = register_advance(
+            project_id=self.project.pk,
+            title='Avance compacto',
+            description='Descripción completa para verificar la composición del detalle.',
+            update_date=date(2026, 7, 17),
+            progress_percentage=73,
+            created_by=self.user,
+            reported_by=self.reported_by,
+        )
+        self.client.force_login(self.user)
+
+    def test_detail_compacts_identity_removes_progress_and_keeps_confirmed_post_actions(self):
+        attachment = ProjectUpdateAttachment.objects.create(
+            project_update=self.project_update,
+            title='Evidencia operativa',
+            file='project_update_attachments/evidencia.pdf',
+            uploaded_by=self.user,
+        )
+
+        response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
+        content = response.content.decode()
+
+        self.assertContains(response, 'Avance de proyecto')
+        self.assertContains(response, self.project_update.title)
+        self.assertContains(response, self.project_update.get_status_display())
+        self.assertContains(response, '17 de julio de 2026')
+        self.assertContains(response, self.reported_by.get_username())
+        self.assertContains(response, self.project.code)
+        self.assertContains(response, self.project.name)
+        self.assertContains(response, reverse('project_detail', args=[self.project.pk]))
+        self.assertContains(response, 'Descripción del avance')
+        self.assertContains(response, self.project_update.description)
+        self.assertContains(response, 'Información de registro')
+        self.assertNotContains(response, 'Progreso')
+        self.assertNotContains(response, f'>{self.project_update.progress_percentage}%<')
+        detail_template = Path('templates/web/project_update_detail.html').read_text()
+        self.assertNotIn('progress_percentage', detail_template)
+        self.assertEqual(detail_template.count('{{ object.title }}'), 1)
+        self.assertEqual(detail_template.count('{{ object.project.code }}'), 1)
+        self.assertEqual(detail_template.count('{{ object.get_status_display }}'), 1)
+
+        publish_url = reverse('project_update_publish', args=[self.project_update.pk])
+        delete_url = reverse('project_update_delete', args=[self.project_update.pk])
+        attachment_delete_url = reverse('project_update_attachment_delete', args=[attachment.pk])
+        self.assertIn(f'id="project-update-publish-form" method="post" action="{publish_url}"', content)
+        self.assertIn(f'id="project-update-delete-form" method="post" action="{delete_url}"', content)
+        self.assertIn(
+            f'id="project-update-attachment-delete-form-{attachment.pk}" method="post" action="{attachment_delete_url}"',
+            content,
+        )
+        self.assertContains(response, 'data-confirm-title="¿Publicar este avance?"')
+        self.assertContains(response, 'data-confirm-title="¿Eliminar este avance?"')
+        self.assertContains(response, 'data-confirm-title="¿Eliminar este archivo?"')
+        self.assertContains(response, 'web/js/confirm_actions.js')
+        self.assertGreaterEqual(content.count('name="csrfmiddlewaretoken"'), 3)
+
+    def test_detail_action_visibility_follows_status_and_permissions(self):
+        detail_url = reverse('project_update_detail', args=[self.project_update.pk])
+        edit_url = reverse('project_update_update', args=[self.project_update.pk])
+        attachment_url = reverse('project_update_attachment_create', args=[self.project_update.pk])
+        delete_url = reverse('project_update_delete', args=[self.project_update.pk])
+        publish_url = reverse('project_update_publish', args=[self.project_update.pk])
+
+        editor = get_user_model().objects.create_user(username='detail-editor', password='pass-12345')
+        editor.user_permissions.add(*Permission.objects.filter(codename__in=(
+            'view_projectupdate', 'change_projectupdate',
+        )))
+        self.client.force_login(editor)
+        editor_response = self.client.get(detail_url)
+        self.assertContains(editor_response, edit_url)
+        self.assertNotContains(editor_response, attachment_url)
+        self.assertNotContains(editor_response, delete_url)
+        self.assertNotContains(editor_response, publish_url)
+
+        self.client.force_login(self.user)
+        publish_project_update(self.project_update.pk, self.user)
+        published_response = self.client.get(detail_url)
+        self.assertNotContains(published_response, edit_url)
+        self.assertNotContains(published_response, attachment_url)
+        self.assertNotContains(published_response, delete_url)
+        self.assertNotContains(published_response, publish_url)
+        self.assertNotContains(published_response, 'Más acciones del avance')
+
+    def test_detail_body_uses_one_surface_with_four_integrated_sections(self):
+        response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
+        content = response.content.decode()
+
+        self.assertEqual(content.count('class="ops-project-update-body"'), 1)
+        body_start = content.index('<article class="ops-project-update-body">')
+        body_end = content.index('</article>', body_start) + len('</article>')
+        body = content[body_start:body_end]
+        self.assertEqual(body.count('ops-project-update-section'), 4)
+        self.assertIn(
+            'class="ops-project-update-section ops-project-update-metadata"',
+            body,
+        )
+
+        attachments_start = body.index('aria-labelledby="project-update-attachments-title"')
+        metadata_start = body.index('class="ops-project-update-section ops-project-update-metadata"')
+        attachments_section = body[attachments_start:metadata_start]
+        self.assertIn('Este avance no tiene adjuntos.', attachments_section)
+        self.assertNotIn('card', attachments_section)
+        self.assertNotIn('list-group', attachments_section)
+
+        stylesheet = Path('static/web/css/sigedon.css').read_text()
+        self.assertNotIn(
+            '.ops-project-update-detail-description,\n'
+            '.ops-project-update-detail-review {\n'
+            '    border: 1px solid var(--ops-border);',
+            stylesheet,
+        )
+        self.assertIn('.ops-project-update-body {', stylesheet)
+        self.assertIn('.ops-project-update-section + .ops-project-update-section {', stylesheet)
+
+    def test_detail_prefetches_attachments_without_per_attachment_queries(self):
+        projects = []
+        for attachment_count in (1, 5):
+            project = create_project(code=f'PRJ-UPDATE-DETAIL-QUERY-{attachment_count}')
+            update = ProjectUpdate.objects.create(
+                project=project,
+                title=f'Avance con {attachment_count} adjuntos',
+                description='Consulta de adjuntos en el detalle.',
+                created_by=self.user,
+                reported_by=self.user,
+            )
+            ProjectUpdateAttachment.objects.bulk_create([
+                ProjectUpdateAttachment(
+                    project_update=update,
+                    title=f'Adjunto {index}',
+                    file=f'project_update_attachments/query-{attachment_count}-{index}.pdf',
+                    uploaded_by=self.user,
+                )
+                for index in range(attachment_count)
+            ])
+            projects.append(update)
+
+        with CaptureQueriesContext(connection) as one_attachment_queries:
+            self.client.get(reverse('project_update_detail', args=[projects[0].pk]))
+        with CaptureQueriesContext(connection) as five_attachment_queries:
+            self.client.get(reverse('project_update_detail', args=[projects[1].pk]))
+
+        self.assertEqual(len(one_attachment_queries), len(five_attachment_queries))
+
+
+class ProjectUpdateChunkTests(TestCase):
+    def setUp(self):
+        self.user = create_user('chunk-manager')
+        self.project = create_project(code='PRJ-UPDATE-CHUNKS')
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
+        self.client.force_login(self.user)
+
+    def create_updates(self, count, *, project=None, status=ProjectUpdate.Status.DRAFT):
+        # PRE: count is non-negative and project is persisted when provided.
+        # POST: returns count updates whose created_at values are equal for pk tie-break tests.
+        target_project = project or self.project
+        updates = [
+            ProjectUpdate.objects.create(
+                project=target_project,
+                title=f'Avance por lote {status}-{target_project.pk}-{index}',
+                description='Contenido paginado sin cargar toda la colección.',
+                status=status,
+                created_by=self.user,
+                reported_by=self.user,
+            )
+            for index in range(count)
+        ]
+        if updates:
+            fixed_created_at = timezone.now()
+            ProjectUpdate.objects.filter(pk__in=[update.pk for update in updates]).update(
+                created_at=fixed_created_at
+            )
+            for update in updates:
+                update.created_at = fixed_created_at
+        return updates
+
+    def test_chunks_do_not_overlap_and_preserve_complete_stable_order(self):
+        updates = self.create_updates(11)
+        detail_response = self.client.get(
+            reverse('project_detail', args=[self.project.pk])
+        )
+        chunk_url = reverse('project_update_chunk', args=[self.project.pk])
+        second_response = self.client.get(f'{chunk_url}?page=2')
+        last_response = self.client.get(f'{chunk_url}?page=3')
+
+        first_ids = [
+            update.pk for update in detail_response.context['recent_project_updates']
+        ]
+        second_ids = [
+            update.pk for update in second_response.context['project_updates']
+        ]
+        last_ids = [
+            update.pk for update in last_response.context['project_updates']
+        ]
+
+        self.assertEqual(len(first_ids), 5)
+        self.assertEqual(len(second_ids), 5)
+        self.assertEqual(len(last_ids), 1)
+        self.assertFalse(set(first_ids) & set(second_ids))
+        self.assertFalse(set(second_ids) & set(last_ids))
+        self.assertEqual(
+            first_ids + second_ids + last_ids,
+            [update.pk for update in reversed(updates)],
+        )
+        self.assertContains(second_response, 'Ver más avances', count=1)
+        self.assertContains(second_response, 'hx-target="this"')
+        self.assertContains(second_response, 'hx-swap="outerHTML"')
+        self.assertNotContains(last_response, 'Ver más avances')
+
+    def test_chunk_is_partial_html_with_shared_items_and_fallback_link(self):
+        self.create_updates(6)
+        chunk_url = reverse('project_update_chunk', args=[self.project.pk])
+
+        response = self.client.get(chunk_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'web/includes/project_update_chunk.html')
+        self.assertTemplateUsed(response, 'web/includes/project_update_items.html')
+        self.assertTemplateUsed(response, 'web/includes/project_update_item.html')
+        self.assertNotContains(response, '<html')
+        self.assertNotContains(response, 'ops-page-header')
+        self.assertContains(response, f'href="{chunk_url}?page=2"')
+        self.assertContains(response, f'hx-get="{chunk_url}?page=2"')
+        self.assertContains(response, 'aria-controls="project-update-list"')
+        self.assertContains(response, 'Cargando avances…')
+
+    def test_chunk_uses_same_visibility_rules_as_project_detail(self):
+        published_updates = self.create_updates(
+            6,
+            status=ProjectUpdate.Status.PUBLISHED,
+        )
+        draft_updates = self.create_updates(3)
+        viewer = get_user_model().objects.create_user(
+            username='chunk-project-viewer',
+            password='pass-12345',
+        )
+        viewer.user_permissions.add(Permission.objects.get(codename='view_project'))
+        self.client.force_login(viewer)
+        chunk_url = reverse('project_update_chunk', args=[self.project.pk])
+
+        detail_response = self.client.get(
+            reverse('project_detail', args=[self.project.pk])
+        )
+        chunk_response = self.client.get(chunk_url)
+
+        detail_ids = [
+            update.pk for update in detail_response.context['recent_project_updates']
+        ]
+        chunk_ids = [
+            update.pk for update in chunk_response.context['project_updates']
+        ]
+        self.assertEqual(chunk_ids, detail_ids)
+        self.assertEqual(chunk_ids, [update.pk for update in reversed(published_updates[-5:])])
+        for draft in draft_updates:
+            self.assertNotContains(chunk_response, draft.title)
+
+    def test_chunk_requires_authentication_permission_and_existing_project(self):
+        chunk_url = reverse('project_update_chunk', args=[self.project.pk])
+        self.client.logout()
+
+        anonymous_response = self.client.get(chunk_url)
+
+        self.assertEqual(anonymous_response.status_code, 302)
+        no_permission = get_user_model().objects.create_user(
+            username='chunk-no-permission',
+            password='pass-12345',
+        )
+        self.client.force_login(no_permission)
+        self.assertEqual(self.client.get(chunk_url).status_code, 403)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.post(chunk_url).status_code, 405)
+        missing_url = reverse('project_update_chunk', args=[self.project.pk + 9999])
+        self.assertEqual(self.client.get(missing_url).status_code, 404)
+
+    def test_chunk_does_not_add_queries_per_update(self):
+        projects = []
+        for count in (1, 5):
+            project = create_project(code=f'PRJ-UPDATE-CHUNK-QUERY-{count}')
+            self.create_updates(count, project=project)
+            projects.append(project)
+
+        with CaptureQueriesContext(connection) as one_update_queries:
+            self.client.get(reverse('project_update_chunk', args=[projects[0].pk]))
+        with CaptureQueriesContext(connection) as five_update_queries:
+            self.client.get(reverse('project_update_chunk', args=[projects[1].pk]))
+
+        self.assertEqual(len(one_update_queries), len(five_update_queries))

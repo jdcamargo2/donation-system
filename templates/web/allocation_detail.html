@@ -1,127 +1,106 @@
 {% extends "base.html" %}
-{% load operations_format %}
+{% load operations_format static %}
 
 {% block title %}Asignación - SIGEDON{% endblock %}
 
 {% block content %}
-<div class="ops-page-header ops-page-header-row">
-    <div>
-        <div class="ops-kicker">Asignación presupuestaria</div>
+{# DEUDA TÉCNICA: DetailMetricsMixin aún entrega metrics, pero este detalle usa contexto financiero específico. #}
+{# DEUDA DE DOMINIO: finished no tiene un flujo web válido; no se expone una transición desde este detalle. #}
+<div class="ops-page-header ops-page-header-row ops-allocation-detail-header">
+    <div class="ops-allocation-detail-identity">
+        <div class="ops-kicker">Distribución financiera</div>
         <h1>{{ object.code }}</h1>
-        <p>
-            {{ object.donation.donor.name }} → {{ object.project.name }}
-            · <span class="badge text-bg-light">{{ object.donation.code }}</span>
-            <span class="badge text-bg-light">{{ object.project.code }}</span>
-            · Ciclo <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
-            · Ejecución <span class="badge text-bg-light">{{ object.execution_progress_label }}</span>
-        </p>
+        <div class="ops-allocation-detail-primary-meta">
+            <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            <span>{{ object.get_budget_category_display }}</span>
+            <span>{{ object.allocation_date }}</span>
+        </div>
+        <div class="ops-allocation-detail-relations">
+            <span><strong>Donación origen:</strong>
+                {% if perms.operations.view_donation %}<a href="{% url 'donation_detail' object.donation.pk %}">{{ object.donation.code }}</a>{% else %}{{ object.donation.code }}{% endif %}
+            </span>
+            <span><strong>Proyecto destino:</strong>
+                {% if perms.operations.view_project %}<a href="{% url 'project_detail' object.project.pk %}">{{ object.project.code }} · {{ object.project.name }}</a>{% else %}{{ object.project.code }} · {{ object.project.name }}{% endif %}
+            </span>
+        </div>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+        {% if can_create_expense %}<a class="btn btn-primary" href="{% url 'expense_create' %}">Nuevo gasto</a>{% endif %}
         {% if perms.operations.change_fundallocation and object.status != 'finished' and object.status != 'annulled' %}
-            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+            {% if not show_edit_in_more %}<a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>{% endif %}
+        {% endif %}
+        {% if show_edit_in_more or perms.operations.change_fundallocation and can_annul or perms.operations.delete_fundallocation %}
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="allocation-actions-{{ object.pk }}" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" aria-label="Más acciones para {{ object.code }}">Más</button>
+                <ul class="dropdown-menu dropdown-menu-end ops-allocation-detail-action-menu" aria-labelledby="allocation-actions-{{ object.pk }}">
+                    {% if show_edit_in_more %}<li><a class="dropdown-item" href="{% url update_url_name object.pk %}">Editar</a></li>{% endif %}
+                    {% if perms.operations.change_fundallocation and can_annul %}<li><a class="dropdown-item text-danger" href="{% url 'allocation_annul' object.pk %}">Anular asignación</a></li>{% endif %}
+                    {% if perms.operations.delete_fundallocation %}
+                    <li><a class="dropdown-item text-danger" href="{% url delete_url_name object.pk %}" data-confirm-action data-confirm-form="allocation-delete-form" data-confirm-title="¿Eliminar esta asignación?" data-confirm-text="Esta acción no se puede deshacer. Si existen gastos vinculados, el sistema impedirá la eliminación." data-confirm-confirm-label="Sí, eliminar" data-confirm-variant="danger">Eliminar asignación</a></li>
+                    {% endif %}
+                </ul>
+                {% if perms.operations.delete_fundallocation %}<form id="allocation-delete-form" method="post" action="{% url delete_url_name object.pk %}">{% csrf_token %}</form>{% endif %}
+            </div>
         {% endif %}
     </div>
 </div>
-{% if perms.operations.change_fundallocation and status_transitions %}
-<div class="d-flex gap-2 mb-4">
-    {% for transition in status_transitions %}
-    <form method="post" action="{% url transition_url_name object.pk transition.value %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Cambiar a {{ transition.label }}</button></form>
-    {% endfor %}
-</div>
-{% endif %}
-{% if perms.operations.change_fundallocation and can_annul %}
-<div class="d-flex gap-2 mb-4">
-    <a class="btn btn-danger" href="{% url 'allocation_annul' object.pk %}">Anular asignación</a>
-</div>
-{% endif %}
 
-<div class="row g-3 mb-4">
-    <div class="col-md-4">
-        <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
-            <div class="ops-metric-label">Monto asignado</div>
-            <div class="ops-metric-value">{{ allocation_financial_summary.allocated_amount|money_es }}</div>
-        </div></div>
+<section class="ops-allocation-financial-summary" aria-labelledby="allocation-financial-summary-title">
+    <div class="ops-allocation-financial-heading">
+        <h2 id="allocation-financial-summary-title" class="h5 mb-0">Resumen financiero</h2>
+        <span class="small text-muted">Estado de ejecución: {{ object.execution_progress_label }}</span>
     </div>
-    <div class="col-md-4">
-        <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
-            <div class="ops-metric-label">Ejecutado</div>
-            <div class="ops-metric-value">{{ allocation_financial_summary.executed_amount|money_es }}</div>
-        </div></div>
+    <div class="ops-allocation-financial-metrics">
+        <div class="ops-allocation-financial-metric"><span class="ops-metric-label">Monto asignado</span><strong class="ops-allocation-financial-value ops-money text-nowrap">{{ allocation_financial_summary.allocated_amount|money_es }} {{ object.donation.currency }}</strong></div>
+        <div class="ops-allocation-financial-metric"><span class="ops-metric-label">Ejecutado</span><strong class="ops-allocation-financial-value ops-money text-nowrap">{{ allocation_financial_summary.executed_amount|money_es }} {{ object.donation.currency }}</strong></div>
+        <div class="ops-allocation-financial-metric ops-allocation-financial-metric-available"><span class="ops-metric-label">Disponible</span><strong class="ops-allocation-financial-value ops-money text-nowrap">{{ allocation_financial_summary.available_amount|money_es }} {{ object.donation.currency }}</strong></div>
     </div>
-    <div class="col-md-4">
-        <div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body">
-            <div class="ops-metric-label">Disponible</div>
-            <div class="ops-metric-value">{{ allocation_financial_summary.available_amount|money_es }}</div>
-        </div></div>
-    </div>
-</div>
+</section>
 
-<div class="row g-4">
-    <div class="col-lg-6">
-        <div class="card border-0 h-100 ops-detail-card">
-            <div class="card-body">
-                <h2 class="h5 mb-3">Detalle de la asignación</h2>
-                <dl class="row mb-0">
-                    <dt class="col-sm-4">Donación origen</dt>
-                    <dd class="col-sm-8">
-                        <a href="{% url 'donation_detail' object.donation.pk %}">{{ object.donation.donor.name }}</a>
-                        <span class="small text-muted">{{ object.donation.code }}</span>
-                    </dd>
-                    <dt class="col-sm-4">Proyecto destino</dt>
-                    <dd class="col-sm-8">
-                        <a href="{% url 'project_detail' object.project.pk %}">{{ object.project.name }}</a>
-                        <span class="small text-muted">{{ object.project.code }}</span>
-                    </dd>
-                    <dt class="col-sm-4">Categoría presupuestaria</dt>
-                    <dd class="col-sm-8">{{ object.get_budget_category_display }}</dd>
-                    <dt class="col-sm-4">Responsable</dt>
-                    <dd class="col-sm-8">{{ object.responsible_person|default:"-" }}</dd>
-                    <dt class="col-sm-4">Fecha de asignación</dt>
-                    <dd class="col-sm-8">{{ object.allocation_date }}</dd>
-                    <dt class="col-sm-4">Ciclo</dt>
-                    <dd class="col-sm-8">{{ object.get_status_display }}</dd>
-                    <dt class="col-sm-4">Ejecución</dt>
-                    <dd class="col-sm-8">{{ object.execution_progress_label }}</dd>
-                    {% if object.terminal_at %}
-                        <dt class="col-sm-4">Motivo terminal</dt>
-                        <dd class="col-sm-8">{{ object.terminal_reason|default:"-" }}</dd>
-                        <dt class="col-sm-4">Procesado por</dt>
-                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
-                        <dt class="col-sm-4">Fecha terminal</dt>
-                        <dd class="col-sm-8">{{ object.terminal_at }}</dd>
-                    {% endif %}
-                    <dt class="col-sm-4">Notas</dt>
-                    <dd class="col-sm-8">{{ object.notes|default:"-" }}</dd>
-                </dl>
-            </div>
+<article class="ops-allocation-detail-body">
+    <section class="ops-allocation-detail-section" aria-labelledby="allocation-expenses-title">
+        <div class="ops-allocation-expenses-heading">
+            <h2 id="allocation-expenses-title" class="h5 mb-0">Gastos vinculados</h2>
+            {% if has_more_allocation_expenses %}<span class="small text-muted">Mostrando 5 de {{ allocation_expense_count }} gastos</span>{% endif %}
         </div>
-    </div>
-    <div class="col-lg-6">
-        <h2 class="h5">Gastos registrados</h2>
-        <div class="list-group">
-            {% for expense in registered_expenses %}
-                <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
-                    <div class="fw-semibold">{{ expense.code }}</div>
-                    <div>{{ expense.reason }}</div>
-                    <div class="small text-muted">{{ expense.amount|money_es }} {{ expense.currency }} · {{ expense.get_status_display }} · {{ expense.expense_date }}</div>
-                </a>
-            {% empty %}
-                <div class="list-group-item text-muted">Esta asignación todavía no tiene gastos registrados.</div>
+        {% if recent_allocation_expenses %}
+        <ul class="ops-allocation-expense-list">
+            {% for expense in recent_allocation_expenses %}
+            <li>
+                <a class="fw-semibold" href="{% url 'expense_detail' expense.pk %}">{{ expense.code }}</a>
+                <span>{{ expense.reason }}</span>
+                <span class="ops-money text-nowrap">{{ expense.amount|money_es }} {{ expense.currency }}</span>
+                <span>{{ expense.expense_date }}</span>
+                <span class="badge ops-status-badge">{{ expense.get_status_display }}</span>
+            </li>
             {% endfor %}
+        </ul>
+        {% else %}<p class="text-muted mb-0">Sin gastos vinculados</p>{% endif %}
+    </section>
+    {% if object.responsible_person or object.notes %}
+    <section class="ops-allocation-detail-section" aria-labelledby="allocation-information-title">
+        <h2 id="allocation-information-title" class="h5">Información de la asignación</h2>
+        {% if object.responsible_person %}<div class="ops-allocation-information-grid"><div><span class="ops-detail-label">Responsable</span><span>{{ object.responsible_person }}</span></div></div>{% endif %}
+        {% if object.notes %}<div class="ops-allocation-information-text"><h3>Notas</h3><p>{{ object.notes }}</p></div>{% endif %}
+    </section>
+    {% endif %}
+    <section class="ops-allocation-detail-section ops-allocation-detail-metadata" aria-labelledby="allocation-metadata-title">
+        <h2 id="allocation-metadata-title" class="h5">Información de registro</h2>
+        <div class="ops-allocation-metadata-grid">
+            <div><span class="ops-detail-label">Creada</span><span>{{ object.created_at }}</span></div>
+            <div><span class="ops-detail-label">Actualizada</span><span>{{ object.updated_at }}</span></div>
+            {% if object.status == 'annulled' or object.status == 'finished' %}
+                {% if object.terminal_reason %}<div><span class="ops-detail-label">Motivo terminal</span><span>{{ object.terminal_reason }}</span></div>{% endif %}
+                {% if object.terminal_at %}<div><span class="ops-detail-label">Fecha terminal</span><span>{{ object.terminal_at }}</span></div>{% endif %}
+                {% if object.terminal_by %}<div><span class="ops-detail-label">Procesada por</span><span>{{ object.terminal_by }}</span></div>{% endif %}
+            {% endif %}
         </div>
-        <h2 class="h5 mt-4">Gastos anulados</h2>
-        <div class="list-group">
-            {% for expense in annulled_expenses %}
-                <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
-                    <div class="fw-semibold">{{ expense.code }}</div>
-                    <div>{{ expense.reason }}</div>
-                    <div class="small text-muted">{{ expense.amount|money_es }} {{ expense.currency }} · {{ expense.get_status_display }} · {{ expense.expense_date }}</div>
-                </a>
-            {% empty %}
-                <div class="list-group-item text-muted">No hay gastos anulados en esta asignación.</div>
-            {% endfor %}
-        </div>
-    </div>
-</div>
+    </section>
+</article>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+{% if perms.operations.delete_fundallocation %}<script src="{% static 'web/js/confirm_actions.js' %}" defer></script>{% endif %}
 {% endblock %}

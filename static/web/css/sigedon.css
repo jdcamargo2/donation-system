@@ -914,7 +914,6 @@ input[type="number"] {
 
 .table-responsive {
     -webkit-overflow-scrolling: touch;
-    scrollbar-gutter: stable;
 }
 
 .table td,
@@ -1109,6 +1108,1005 @@ input[type="number"] {
     max-width: 760px;
 }
 
+/* Detalle de proyecto: jerarquía compacta sin afectar otros detalles. */
+.ops-project-detail-header {
+    gap: 1rem;
+    padding-bottom: 1.15rem;
+}
+
+.ops-project-detail-identity {
+    min-width: 0;
+}
+
+.ops-project-detail-primary-meta,
+.ops-project-detail-secondary-meta {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+}
+
+.ops-project-detail-primary-meta {
+    color: var(--ops-muted);
+}
+
+.ops-project-detail-code {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+}
+
+.ops-project-detail-secondary-meta {
+    color: var(--ops-muted);
+    font-size: 0.86rem;
+    margin-top: 0.55rem;
+}
+
+.ops-project-detail-action-menu {
+    max-height: calc(100vh - 2rem);
+    max-width: calc(100vw - 2rem);
+    overflow-y: auto;
+}
+
+.ops-project-detail-action-menu form {
+    margin: 0;
+}
+
+/* Detalle de institución: una superficie continua y metadatos operativos compactos. */
+.ops-institution-detail-header {
+    gap: 1rem;
+    padding-bottom: 1.15rem;
+}
+
+.ops-institution-detail-identity {
+    min-width: 0;
+}
+
+.ops-institution-detail-primary-meta,
+.ops-institution-detail-secondary-meta {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+}
+
+.ops-institution-detail-primary-meta {
+    margin-top: 0.1rem;
+}
+
+.ops-institution-detail-secondary-meta {
+    color: var(--ops-muted);
+    font-size: 0.86rem;
+    margin-top: 0.55rem;
+}
+
+.ops-institution-detail-action-menu {
+    max-height: calc(100vh - 2rem);
+    max-width: calc(100vw - 2rem);
+    overflow-y: auto;
+}
+
+.ops-institution-detail-body {
+    background: var(--ops-surface);
+    border: 1px solid var(--ops-border);
+    border-radius: 1rem;
+    box-shadow: var(--ops-shadow-soft);
+    overflow: hidden;
+}
+
+.ops-institution-detail-section {
+    padding: 1.1rem;
+}
+
+.ops-institution-detail-section + .ops-institution-detail-section {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-institution-detail-section h2 {
+    margin-bottom: 0.85rem;
+}
+
+.ops-institution-document,
+.ops-institution-donations-heading {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: space-between;
+}
+
+.ops-institution-contact-grid,
+.ops-institution-metadata-grid {
+    display: grid;
+    gap: 0.9rem 1.25rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ops-institution-contact-grid > div,
+.ops-institution-metadata-grid > div {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.ops-detail-label {
+    color: var(--ops-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.ops-institution-donation-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ops-institution-donation-list li {
+    align-items: center;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(8rem, 1fr) minmax(8rem, auto) auto auto;
+    padding: 0.75rem 0;
+}
+
+.ops-institution-donation-list li + li {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-institution-detail-metadata {
+    background: var(--ops-surface-soft);
+}
+
+.ops-institution-metadata-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Detalle de donación: resumen financiero y relaciones sin tarjetas anidadas. */
+.ops-donation-detail-header {
+    gap: 1rem;
+    padding-bottom: 1.15rem;
+}
+
+.ops-donation-detail-identity {
+    min-width: 0;
+}
+
+.ops-donation-detail-primary-meta,
+.ops-donation-detail-donor {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+}
+
+.ops-donation-detail-primary-meta {
+    color: var(--ops-muted);
+}
+
+.ops-donation-detail-donor {
+    font-size: 0.9rem;
+    margin-top: 0.55rem;
+}
+
+.ops-donation-detail-donor a {
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.ops-donation-detail-action-menu {
+    max-height: calc(100vh - 2rem);
+    max-width: calc(100vw - 2rem);
+    overflow-y: auto;
+}
+
+.ops-donation-detail-action-menu form {
+    margin: 0;
+}
+
+.ops-donation-financial-summary {
+    background: var(--ops-surface);
+    border: 1px solid var(--ops-border);
+    border-radius: 1rem;
+    margin-bottom: 1rem;
+    padding: 1rem 1.1rem;
+}
+
+.ops-donation-financial-heading,
+.ops-donation-allocations-heading {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: space-between;
+}
+
+.ops-donation-financial-metrics {
+    display: grid;
+    gap: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 0.9rem;
+}
+
+.ops-donation-financial-metric {
+    border-left: 3px solid var(--ops-primary);
+    display: grid;
+    gap: 0.3rem;
+    min-width: 0;
+    padding: 0.3rem 1rem;
+}
+
+.ops-donation-financial-metric:first-child {
+    padding-left: 0.85rem;
+}
+
+.ops-donation-financial-metric-available {
+    border-left-color: var(--ops-success);
+}
+
+.ops-donation-financial-value {
+    color: var(--ops-text);
+    font-size: clamp(1.2rem, 2vw, 1.65rem);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+.ops-donation-detail-body {
+    background: var(--ops-surface);
+    border: 1px solid var(--ops-border);
+    border-radius: 1rem;
+    box-shadow: var(--ops-shadow-soft);
+    overflow: hidden;
+}
+
+.ops-donation-detail-section {
+    padding: 1.1rem;
+}
+
+.ops-donation-detail-section + .ops-donation-detail-section {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-donation-detail-section h2 {
+    margin-bottom: 0.85rem;
+}
+
+.ops-donation-information-grid,
+.ops-donation-metadata-grid {
+    display: grid;
+    gap: 0.9rem 1.25rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ops-donation-information-grid > div,
+.ops-donation-metadata-grid > div {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.ops-donation-information-text,
+.ops-donation-restrictions {
+    border-top: 1px solid var(--ops-border);
+    margin-top: 1rem;
+    padding-top: 1rem;
+}
+
+.ops-donation-information-text h3,
+.ops-donation-restrictions h3 {
+    color: var(--ops-muted);
+    font-size: 0.82rem;
+    font-weight: 800;
+    margin: 0 0 0.35rem;
+}
+
+.ops-donation-information-text p,
+.ops-donation-restrictions p {
+    margin: 0;
+    white-space: pre-line;
+}
+
+.ops-donation-restrictions {
+    background: var(--ops-surface-soft);
+    border-radius: 0.75rem;
+    padding: 0.8rem;
+}
+
+.ops-donation-allocation-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ops-donation-allocation-list li {
+    align-items: center;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(7rem, 1fr) minmax(10rem, 1.5fr) auto minmax(7rem, 1fr) auto;
+    padding: 0.75rem 0;
+}
+
+.ops-donation-allocation-list li + li {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-donation-detail-metadata {
+    background: var(--ops-surface-soft);
+}
+
+/* Detalle de asignación: relaciones y gastos en una única superficie compacta. */
+.ops-allocation-detail-header {
+    gap: 1rem;
+    padding-bottom: 1.15rem;
+}
+
+.ops-allocation-detail-identity {
+    min-width: 0;
+}
+
+.ops-allocation-detail-primary-meta,
+.ops-allocation-detail-relations,
+.ops-allocation-expenses-heading {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+}
+
+.ops-allocation-detail-primary-meta,
+.ops-allocation-detail-relations {
+    color: var(--ops-muted);
+}
+
+.ops-allocation-detail-relations {
+    font-size: 0.9rem;
+    margin-top: 0.55rem;
+}
+
+.ops-allocation-detail-relations a {
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.ops-allocation-detail-action-menu {
+    max-height: calc(100vh - 2rem);
+    max-width: calc(100vw - 2rem);
+    overflow-y: auto;
+}
+
+.ops-allocation-detail-action-menu form {
+    margin: 0;
+}
+
+.ops-allocation-financial-summary {
+    background: var(--ops-surface);
+    border: 1px solid var(--ops-border);
+    border-radius: 1rem;
+    margin-bottom: 1rem;
+    padding: 1rem 1.1rem;
+}
+
+.ops-allocation-financial-heading,
+.ops-allocation-expenses-heading {
+    justify-content: space-between;
+}
+
+.ops-allocation-financial-metrics {
+    display: grid;
+    gap: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 0.9rem;
+}
+
+.ops-allocation-financial-metric {
+    border-left: 3px solid var(--ops-primary);
+    display: grid;
+    gap: 0.3rem;
+    min-width: 0;
+    padding: 0.3rem 1rem;
+}
+
+.ops-allocation-financial-metric:first-child {
+    padding-left: 0.85rem;
+}
+
+.ops-allocation-financial-metric-available {
+    border-left-color: var(--ops-success);
+}
+
+.ops-allocation-financial-value {
+    color: var(--ops-text);
+    font-size: clamp(1.2rem, 2vw, 1.65rem);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+.ops-allocation-detail-body {
+    background: var(--ops-surface);
+    border: 1px solid var(--ops-border);
+    border-radius: 1rem;
+    box-shadow: var(--ops-shadow-soft);
+    overflow: hidden;
+}
+
+.ops-allocation-detail-section {
+    padding: 1.1rem;
+}
+
+.ops-allocation-detail-section + .ops-allocation-detail-section {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-allocation-detail-section h2 {
+    margin-bottom: 0.85rem;
+}
+
+.ops-allocation-expense-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ops-allocation-expense-list li {
+    align-items: center;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(6.5rem, 1fr) minmax(10rem, 1.5fr) auto auto auto;
+    padding: 0.75rem 0;
+}
+
+.ops-allocation-expense-list li + li {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-allocation-information-grid,
+.ops-allocation-metadata-grid {
+    display: grid;
+    gap: 0.9rem 1.25rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ops-allocation-information-grid > div,
+.ops-allocation-metadata-grid > div {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.ops-allocation-information-text {
+    border-top: 1px solid var(--ops-border);
+    margin-top: 1rem;
+    padding-top: 1rem;
+}
+
+.ops-allocation-information-text h3 {
+    color: var(--ops-muted);
+    font-size: 0.82rem;
+    font-weight: 800;
+    margin: 0 0 0.35rem;
+}
+
+.ops-allocation-information-text p {
+    margin: 0;
+    white-space: pre-line;
+}
+
+.ops-allocation-detail-metadata {
+    background: var(--ops-surface-soft);
+}
+
+/* Detalle de gasto: ejecución, soporte y trazabilidad en una única superficie. */
+.ops-expense-detail-header {
+    gap: 1rem;
+    padding-bottom: 1.15rem;
+}
+
+.ops-expense-detail-identity {
+    min-width: 0;
+}
+
+.ops-expense-detail-primary-meta,
+.ops-expense-detail-context,
+.ops-expense-document-name,
+.ops-expense-document-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+}
+
+.ops-expense-detail-primary-meta,
+.ops-expense-detail-context {
+    color: var(--ops-muted);
+}
+
+.ops-expense-detail-primary-meta {
+    font-size: 0.9rem;
+}
+
+.ops-expense-detail-context {
+    font-size: 0.88rem;
+    margin-top: 0.55rem;
+}
+
+.ops-expense-detail-context a,
+.ops-expense-origin-grid a {
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.ops-expense-detail-action-menu,
+.ops-expense-document-action-menu {
+    max-height: calc(100vh - 2rem);
+    max-width: calc(100vw - 2rem);
+    overflow-y: auto;
+}
+
+.ops-expense-detail-action-menu form,
+.ops-expense-document-action-menu form {
+    margin: 0;
+}
+
+.ops-expense-financial-summary {
+    background: var(--ops-surface);
+    border: 1px solid var(--ops-border);
+    border-radius: 1rem;
+    display: grid;
+    gap: 0.3rem;
+    margin-bottom: 1rem;
+    padding: 1rem 1.1rem;
+}
+
+.ops-expense-financial-value {
+    color: var(--ops-text);
+    font-size: clamp(1.3rem, 2vw, 1.7rem);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+.ops-expense-detail-body {
+    background: var(--ops-surface);
+    border: 1px solid var(--ops-border);
+    border-radius: 1rem;
+    box-shadow: var(--ops-shadow-soft);
+    overflow: hidden;
+}
+
+.ops-expense-detail-section {
+    padding: 1.1rem;
+}
+
+.ops-expense-detail-section + .ops-expense-detail-section {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-expense-detail-section h2 {
+    margin-bottom: 0.85rem;
+}
+
+.ops-expense-information-grid,
+.ops-expense-origin-grid,
+.ops-expense-metadata-grid {
+    display: grid;
+    gap: 0.9rem 1.25rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ops-expense-information-grid > div,
+.ops-expense-origin-grid > div,
+.ops-expense-metadata-grid > div {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.ops-expense-information-text {
+    border-top: 1px solid var(--ops-border);
+    margin-top: 1rem;
+    padding-top: 1rem;
+}
+
+.ops-expense-information-text h3 {
+    color: var(--ops-muted);
+    font-size: 0.82rem;
+    font-weight: 800;
+    margin: 0 0 0.35rem;
+}
+
+.ops-expense-information-text p {
+    margin: 0;
+    white-space: pre-line;
+}
+
+.ops-expense-document-list {
+    min-width: 0;
+}
+
+.ops-expense-document-item {
+    align-items: center;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    min-width: 0;
+    padding: 0.65rem 0;
+}
+
+.ops-expense-document-item + .ops-expense-document-item {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-expense-document-name {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+.ops-expense-document-name > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ops-expense-document-name > i {
+    color: var(--ops-primary-strong);
+    font-size: 1.1rem;
+}
+
+.ops-expense-document-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+}
+
+.ops-expense-document-more {
+    font-size: 1.1rem;
+    line-height: 1;
+    min-width: 2rem;
+}
+
+.ops-expense-detail-metadata {
+    background: var(--ops-surface-soft);
+}
+
+@media (max-width: 767.98px) {
+    .ops-expense-information-grid,
+    .ops-expense-origin-grid,
+    .ops-expense-metadata-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ops-expense-document-item {
+        align-items: flex-start;
+    }
+}
+
+.ops-project-financial-summary {
+    background: #ffffff;
+    border: 1px solid var(--ops-border);
+    border-radius: 1rem;
+    padding: 1rem 1.1rem;
+}
+
+.ops-project-financial-heading {
+    align-items: flex-start;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+}
+
+.ops-project-financial-secondary {
+    color: var(--ops-muted);
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 0.86rem;
+    gap: 0.35rem 1rem;
+    justify-content: flex-end;
+}
+
+.ops-project-financial-metrics {
+    display: grid;
+    gap: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 0.9rem;
+}
+
+.ops-project-financial-metric {
+    border-left: 3px solid var(--ops-primary);
+    min-width: 0;
+    padding: 0.3rem 1rem;
+}
+
+.ops-project-financial-metric:first-child {
+    padding-left: 0.85rem;
+}
+
+.ops-project-financial-metric-available {
+    border-left-color: var(--ops-success);
+}
+
+.ops-project-financial-value {
+    color: var(--ops-text);
+    font-size: clamp(1.2rem, 2vw, 1.65rem);
+    font-variant-numeric: tabular-nums;
+    font-weight: 850;
+    line-height: 1.2;
+    margin-top: 0.3rem;
+    max-width: 100%;
+}
+
+.ops-project-updates-header,
+.ops-project-updates-header-actions,
+.ops-project-update-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.ops-project-updates-header {
+    justify-content: space-between;
+}
+
+.ops-project-updates-header-actions {
+    justify-content: flex-end;
+}
+
+.ops-project-updates-list {
+    max-height: 32rem;
+    overflow-y: auto;
+    scrollbar-color: #aebdce transparent;
+    scrollbar-width: thin;
+}
+
+.ops-project-updates-list:focus-visible {
+    outline: 3px solid rgba(31, 95, 191, 0.28);
+    outline-offset: 3px;
+}
+
+.ops-project-update-chunk {
+    display: contents;
+}
+
+.ops-project-updates-more {
+    color: var(--ops-primary-strong);
+    font-size: 0.88rem;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.ops-project-updates-more:hover,
+.ops-project-updates-more:focus-visible {
+    background: #f8fbff;
+    color: var(--ops-primary-strong);
+    text-decoration: underline;
+}
+
+.ops-project-updates-loading {
+    color: var(--ops-muted);
+    display: none;
+    font-weight: 550;
+    margin-left: 0.35rem;
+}
+
+.ops-project-updates-loading.htmx-request {
+    display: inline;
+}
+
+.ops-project-update-item {
+    min-width: 0;
+}
+
+.ops-project-update-item .min-w-0 {
+    min-width: 0;
+}
+
+.ops-project-update-actions form {
+    margin: 0;
+}
+
+.ops-project-update-more {
+    font-size: 1.1rem;
+    line-height: 1;
+    min-width: 2rem;
+}
+
+.ops-project-update-actions .dropdown-menu {
+    max-width: calc(100vw - 2rem);
+}
+
+.ops-project-general-grid {
+    display: grid;
+    gap: 0.85rem 1.25rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+}
+
+.ops-project-general-grid > div,
+.ops-project-terminal-history dl > div {
+    min-width: 0;
+}
+
+.ops-project-general-grid dd,
+.ops-project-terminal-history dd {
+    margin-bottom: 0;
+}
+
+.ops-project-general-text,
+.ops-project-terminal-history {
+    border-top: 1px solid var(--ops-border);
+    margin-top: 1rem;
+    padding-top: 1rem;
+}
+
+.ops-project-general-text h3,
+.ops-project-terminal-history h3 {
+    color: var(--ops-muted);
+    font-size: 0.82rem;
+    font-weight: 800;
+    margin: 0 0 0.35rem;
+}
+
+.ops-project-general-text p {
+    margin: 0;
+    white-space: pre-line;
+}
+
+.ops-project-terminal-history {
+    background: var(--ops-surface-soft, #f8fafc);
+    border-radius: 0.75rem;
+    padding: 0.8rem;
+}
+
+.ops-project-terminal-history dl {
+    display: grid;
+    font-size: 0.88rem;
+    gap: 0.6rem 1rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 0;
+}
+
+/* Detalle de avance: composición compacta e independiente del detalle de proyecto. */
+.ops-project-update-detail-header {
+    gap: 1rem;
+    padding-bottom: 1.15rem;
+}
+
+.ops-project-update-detail-identity {
+    min-width: 0;
+}
+
+.ops-project-update-detail-primary-meta,
+.ops-project-update-detail-project,
+.ops-project-update-attachment-name,
+.ops-project-update-attachment-actions,
+.ops-project-update-detail-section-heading {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+}
+
+.ops-project-update-detail-primary-meta {
+    color: var(--ops-muted);
+    font-size: 0.88rem;
+}
+
+.ops-project-update-detail-project {
+    font-size: 0.9rem;
+    margin-top: 0.65rem;
+}
+
+.ops-project-update-detail-project a {
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.ops-project-update-detail-action-menu,
+.ops-project-update-attachment-actions .dropdown-menu {
+    max-height: calc(100vh - 2rem);
+    max-width: calc(100vw - 2rem);
+    overflow-y: auto;
+}
+
+.ops-project-update-detail-action-menu form,
+.ops-project-update-attachment-actions form {
+    margin: 0;
+}
+
+.ops-project-update-body {
+    background: var(--ops-surface);
+    border: 1px solid var(--ops-border);
+    border-radius: 1rem;
+    box-shadow: var(--ops-shadow-soft);
+    overflow: hidden;
+}
+
+.ops-project-update-detail-description p {
+    margin-bottom: 0;
+    white-space: pre-line;
+}
+
+.ops-project-update-section {
+    padding: 1rem 1.25rem;
+}
+
+.ops-project-update-section + .ops-project-update-section {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-project-update-detail-section-heading {
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.ops-project-update-attachment-list {
+    min-width: 0;
+}
+
+.ops-project-update-attachment-item {
+    align-items: center;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    min-width: 0;
+    padding: 0.65rem 0;
+}
+
+.ops-project-update-attachment-item + .ops-project-update-attachment-item {
+    border-top: 1px solid var(--ops-border);
+}
+
+.ops-project-update-attachment-name {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+.ops-project-update-attachment-name > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ops-project-update-attachment-icon {
+    color: var(--ops-primary-strong);
+    font-size: 1.1rem;
+}
+
+.ops-project-update-attachment-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+}
+
+.ops-project-update-attachment-more {
+    font-size: 1.1rem;
+    line-height: 1;
+    min-width: 2rem;
+}
+
+.ops-project-update-metadata {
+    background: var(--ops-surface-soft, #f8fafc);
+}
+
+.ops-project-update-metadata-grid {
+    display: grid;
+    gap: 0.75rem 1rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 0.75rem;
+}
+
+.ops-project-update-metadata-grid > div {
+    min-width: 0;
+}
+
+.ops-project-update-metadata-grid span,
+.ops-project-update-metadata-grid strong {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.ops-project-update-metadata-grid span {
+    color: var(--ops-muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.15rem;
+}
+
 @media (max-width: 991.98px) {
     .sigedon-sidebar {
         width: var(--sidebar-collapsed-width);
@@ -1137,6 +2135,31 @@ input[type="number"] {
     .ops-form-actions {
         justify-content: flex-start;
         width: 100%;
+    }
+
+    .ops-project-financial-heading {
+        display: block;
+    }
+
+    .ops-project-updates-header {
+        align-items: flex-start;
+    }
+
+    .ops-project-financial-secondary {
+        justify-content: flex-start;
+        margin-top: 0.5rem;
+    }
+
+    .ops-project-update-detail-section-heading {
+        align-items: flex-start;
+    }
+
+    .ops-institution-contact-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ops-donation-financial-heading {
+        align-items: flex-start;
     }
 
     .ops-page-header-row > *,
@@ -1213,6 +2236,98 @@ input[type="number"] {
         font-size: clamp(1.15rem, 7vw, 1.55rem);
     }
 
+    .ops-project-financial-metrics,
+    .ops-project-general-grid,
+    .ops-project-terminal-history dl,
+    .ops-project-update-metadata-grid,
+    .ops-institution-contact-grid,
+    .ops-institution-metadata-grid,
+    .ops-donation-financial-metrics,
+    .ops-donation-information-grid,
+    .ops-donation-metadata-grid,
+    .ops-allocation-financial-metrics,
+    .ops-allocation-information-grid,
+    .ops-allocation-metadata-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ops-project-financial-metric {
+        padding-bottom: 0.65rem;
+        padding-top: 0.65rem;
+    }
+
+    .ops-project-detail-header .ops-header-actions .dropdown,
+    .ops-project-detail-header .ops-header-actions .dropdown-toggle {
+        width: 100%;
+    }
+
+    .ops-institution-detail-header .ops-header-actions .dropdown,
+    .ops-institution-detail-header .ops-header-actions .dropdown-toggle {
+        width: 100%;
+    }
+
+    .ops-donation-detail-header .ops-header-actions .dropdown,
+    .ops-donation-detail-header .ops-header-actions .dropdown-toggle {
+        width: 100%;
+    }
+
+    .ops-allocation-detail-header .ops-header-actions .dropdown,
+    .ops-allocation-detail-header .ops-header-actions .dropdown-toggle {
+        width: 100%;
+    }
+
+    .ops-expense-detail-header .ops-header-actions .dropdown,
+    .ops-expense-detail-header .ops-header-actions .dropdown-toggle {
+        width: 100%;
+    }
+
+    .ops-institution-donation-list li {
+        align-items: start;
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .ops-institution-donation-list li > :nth-child(2) {
+        grid-column: 1;
+    }
+
+    .ops-donation-allocation-list li {
+        align-items: start;
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .ops-donation-allocation-list li > :nth-child(2),
+    .ops-donation-allocation-list li > :nth-child(4) {
+        grid-column: 1;
+    }
+
+    .ops-allocation-expense-list li {
+        align-items: start;
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .ops-allocation-expense-list li > :nth-child(2),
+    .ops-allocation-expense-list li > :nth-child(4) {
+        grid-column: 1;
+    }
+
+    .ops-project-updates-header,
+    .ops-project-updates-header-actions {
+        width: 100%;
+    }
+
+    .ops-project-updates-header-actions {
+        justify-content: flex-start;
+    }
+
+    .ops-project-update-detail-header .ops-header-actions .dropdown,
+    .ops-project-update-detail-header .ops-header-actions .dropdown-toggle {
+        width: 100%;
+    }
+
+    .ops-project-update-attachment-item {
+        align-items: flex-start;
+    }
+
     .ops-milestones-heading-row {
         align-items: stretch;
         flex-direction: column;
@@ -1242,7 +2357,7 @@ input[type="number"] {
 }
 
 .ops-audit-table thead th {
-    background: linear-gradient(180deg, #f4f7fb, #eef2f7);
+    background: #eef2f7;
     border-bottom: 1px solid #d9e2ec;
     color: #334155;
 }
@@ -1251,6 +2366,7 @@ input[type="number"] {
 .ops-audit-table tbody td {
     padding-bottom: 0.7rem;
     padding-top: 0.7rem;
+    vertical-align: middle;
 }
 
 .ops-audit-table tbody tr:hover {
@@ -1287,10 +2403,16 @@ input[type="number"] {
     margin-top: 0.1rem;
 }
 
+.ops-audit-action-cell {
+    min-width: 7.5rem;
+    white-space: nowrap;
+}
+
 .ops-audit-object-label {
     color: var(--ops-text);
     display: block;
     font-weight: 650;
+    overflow-wrap: anywhere;
 }
 
 .ops-audit-object-model {
@@ -1314,8 +2436,11 @@ input[type="number"] {
     padding: 1.25rem 1rem;
 }
 
+/* Fallback legible para acciones sin clase semántica conocida. */
 .ops-audit-action {
-    border: 1px solid transparent;
+    background: #eef2f6;
+    border: 1px solid #c5ced9;
+    color: #1f2937;
     font-weight: 700;
     line-height: 1.25;
     max-width: 100%;
@@ -1326,7 +2451,8 @@ input[type="number"] {
 
 .ops-audit-action-created,
 .ops-audit-action-validated,
-.ops-audit-action-published {
+.ops-audit-action-published,
+.ops-audit-action-completed {
     background: #e8f7ef;
     border-color: #b7e4c7;
     color: #146c43;
@@ -1334,9 +2460,9 @@ input[type="number"] {
 
 .ops-audit-action-updated,
 .ops-audit-action-assigned {
-    background: #eef4ff;
+    background: #e8f1ff;
     border-color: #c9daf8;
-    color: #1d4ed8;
+    color: #184b96;
 }
 
 .ops-audit-action-executed,
@@ -1346,9 +2472,22 @@ input[type="number"] {
     color: #9a6700;
 }
 
+.ops-audit-action-reopened {
+    background: #fff4e0;
+    border-color: #efd09a;
+    color: #8a5a00;
+}
+
+.ops-audit-action-reordered {
+    background: #f0eef8;
+    border-color: #d0c9e8;
+    color: #4338a4;
+}
+
 .ops-audit-action-rejected,
 .ops-audit-action-annulled,
-.ops-audit-action-expense_cancelled {
+.ops-audit-action-expense_cancelled,
+.ops-audit-action-deleted {
     background: #fdecec;
     border-color: #f0b4b4;
     color: #b42318;

@@ -1,0 +1,21 @@
+{% for update in project_updates %}
+    {% include "web/includes/project_update_item.html" %}
+{% empty %}
+    <div class="list-group-item text-muted">No hay avances publicados{% if perms.operations.view_projectupdate %} ni borradores registrados{% endif %} para este proyecto.</div>
+{% endfor %}
+{% if project_update_page.has_next %}
+<a
+    class="list-group-item ops-project-updates-more text-center"
+    href="{% url 'project_update_chunk' object.pk %}?page={{ project_update_page.next_page_number }}"
+    hx-get="{% url 'project_update_chunk' object.pk %}?page={{ project_update_page.next_page_number }}"
+    hx-target="this"
+    hx-swap="outerHTML"
+    hx-indicator="find .ops-project-updates-loading"
+    aria-controls="project-update-list"
+    data-project-update-load-more
+    data-update-page="{{ project_update_page.next_page_number }}"
+>
+    <span>Ver más avances</span>
+    <span class="htmx-indicator ops-project-updates-loading" role="status">Cargando avances…</span>
+</a>
+{% endif %}

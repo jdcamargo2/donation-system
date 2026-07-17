@@ -113,6 +113,25 @@ class ProjectDocumentTests(TestCase):
         self.assertContains(response, reverse('project_document_download', args=[document.pk]))
         self.assertNotContains(response, document.file.url)
 
+    def test_detail_document_delete_uses_post_confirmation_with_get_fallback(self):
+        document = self.create_document()
+        self.client.force_login(self.user)
+        delete_url = reverse('project_document_delete', args=[document.pk])
+
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+        content = response.content.decode()
+
+        self.assertContains(response, f'href="{delete_url}"')
+        self.assertContains(response, 'data-confirm-title="¿Eliminar este documento?"')
+        self.assertIn(
+            f'id="project-document-delete-form-{document.pk}" method="post" action="{delete_url}"',
+            content,
+        )
+        self.assertIn('name="csrfmiddlewaretoken"', content)
+        fallback_response = self.client.get(delete_url)
+        self.assertEqual(fallback_response.status_code, 200)
+        self.assertTrue(ProjectDocument.objects.filter(pk=document.pk).exists())
+
     def test_published_update_attachment_cannot_be_deleted(self):
         update = self.create_draft()
         attachment = ProjectUpdateAttachment.objects.create(

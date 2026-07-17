@@ -1,4 +1,6 @@
 from decimal import Decimal
+import re
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -16,6 +18,69 @@ from apps.operations.tests.helpers import (
     create_project,
     create_user,
 )
+
+SIGEDON_CSS = Path(__file__).resolve().parents[2] / 'static' / 'web' / 'css' / 'sigedon.css'
+
+# Each known AuditLog action must resolve to a dedicated semantic CSS class.
+AUDIT_ACTION_SEMANTIC_CLASSES = {
+    AuditLog.Action.CREATED: 'ops-audit-action-created',
+    AuditLog.Action.UPDATED: 'ops-audit-action-updated',
+    AuditLog.Action.VALIDATED: 'ops-audit-action-validated',
+    AuditLog.Action.REJECTED: 'ops-audit-action-rejected',
+    AuditLog.Action.ANNULLED: 'ops-audit-action-annulled',
+    AuditLog.Action.ASSIGNED: 'ops-audit-action-assigned',
+    AuditLog.Action.EXECUTED: 'ops-audit-action-executed',
+    AuditLog.Action.CLOSED: 'ops-audit-action-closed',
+    AuditLog.Action.EXPENSE_CANCELLED: 'ops-audit-action-expense_cancelled',
+    AuditLog.Action.PUBLISHED: 'ops-audit-action-published',
+    AuditLog.Action.COMPLETED: 'ops-audit-action-completed',
+    AuditLog.Action.REOPENED: 'ops-audit-action-reopened',
+    AuditLog.Action.REORDERED: 'ops-audit-action-reordered',
+    AuditLog.Action.DELETED: 'ops-audit-action-deleted',
+}
+
+
+def _extract_css_rule_block(css_text, selector_fragment, *, exact_selector=False):
+    """
+    PRE: css_text is the SIGEDON stylesheet and selector_fragment appears in a rule.
+    POST: returns the first matching rule body, or raises AssertionError.
+    """
+    if exact_selector:
+        pattern = re.compile(
+            rf'(?m)^\s*{re.escape(selector_fragment)}\s*\{{([^}}]+)\}}',
+        )
+    else:
+        pattern = re.compile(
+            rf'[^{{}}]*{re.escape(selector_fragment)}[^{{}}]*\{{([^}}]+)\}}',
+            re.MULTILINE,
+        )
+    match = pattern.search(css_text)
+    if match is None:
+        raise AssertionError(f'No CSS rule found for selector fragment {selector_fragment!r}')
+    return match.group(1)
+
+
+def _rule_declares_light_text_on_soft_background(rule_body):
+    """
+    PRE: rule_body is a CSS declarations block for an audit action badge.
+    POST: returns True when the rule uses white/near-white text (low contrast risk).
+    """
+    color_match = re.search(r'(?<![\w-])color\s*:\s*([^;]+);', rule_body)
+    if color_match is None:
+        return False
+    color = color_match.group(1).strip().lower()
+    return color in {'#fff', '#ffffff', 'white', '#f8fafc', '#f4f7fb', '#eef2f6', '#eef2f7'}
+
+
+def _rule_text_color(rule_body):
+    """
+    PRE: rule_body is a CSS declarations block.
+    POST: returns the declared text color value, or raises AssertionError.
+    """
+    color_match = re.search(r'(?<![\w-])color\s*:\s*([^;]+);', rule_body)
+    if color_match is None:
+        raise AssertionError('Rule does not declare a text color')
+    return color_match.group(1).strip().lower()
 
 
 class ParsePageSizeTests(TestCase):
@@ -232,6 +297,117 @@ class AuditTests(TestCase):
         self.assertNotContains(response, 'Project created.')
 
 
+class AuditLogActionBadgeContrastTests(TestCase):
+    def setUp(self):
+        self.user = create_user(username='audit-badge-contrast')
+        self.client.force_login(self.user)
+        self.url = reverse('audit_log_list')
+        self.css_text = SIGEDON_CSS.read_text(encoding='utf-8')
+
+    def test_inventory_covers_every_auditlog_action_choice(self):
+        self.assertEqual(
+            set(AUDIT_ACTION_SEMANTIC_CLASSES),
+            {choice.value for choice in AuditLog.Action},
+        )
+
+    def test_each_known_action_renders_semantic_class_and_visible_label(self):
+        for index, (action, css_class) in enumerate(AUDIT_ACTION_SEMANTIC_CLASSES.items(), start=1):
+            AuditLog.objects.create(
+                user=self.user,
+                action=action,
+                model_name='Hito de proyecto',
+                entity_id=str(index),
+                entity_label=f'MILESTONE-{index:02d}',
+                summary=f'Evento de prueba para {action}.',
+            )
+
+        response = self.client.get(self.url, {'page_size': '100'})
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        for action, css_class in AUDIT_ACTION_SEMANTIC_CLASSES.items():
+            with self.subTest(action=action):
+                label = AuditLog.Action(action).label
+                self.assertIn(css_class, content)
+                self.assertIn(str(label), content)
+                self.assertIn(
+                    f'class="badge ops-audit-action {css_class}"',
+                    content,
+                )
+
+    def test_reopened_uses_dedicated_class_not_only_generic_fallback(self):
+        AuditLog.objects.create(
+            user=self.user,
+            action=AuditLog.Action.REOPENED,
+            model_name='Hito de proyecto',
+            entity_id='reopened-1',
+            entity_label='MILESTONE-REOPENED',
+            summary='Hito reabierto.',
+        )
+
+        response = self.client.get(self.url)
+        content = response.content.decode()
+
+        self.assertContains(response, 'ops-audit-action-reopened')
+        self.assertContains(response, 'Reabierta')
+        self.assertIn('ops-audit-action-reopened', self.css_text)
+        reopened_rule = _extract_css_rule_block(self.css_text, '.ops-audit-action-reopened')
+        self.assertIn(
+            'class="badge ops-audit-action ops-audit-action-reopened"',
+            content,
+        )
+        self.assertFalse(_rule_declares_light_text_on_soft_background(reopened_rule))
+        self.assertNotIn(_rule_text_color(reopened_rule), {'#fff', '#ffffff', 'white'})
+
+    def test_known_action_css_rules_avoid_white_text_on_light_background(self):
+        for action, css_class in AUDIT_ACTION_SEMANTIC_CLASSES.items():
+            with self.subTest(action=action, css_class=css_class):
+                self.assertIn(f'.{css_class}', self.css_text)
+                rule = _extract_css_rule_block(self.css_text, f'.{css_class}')
+                self.assertFalse(
+                    _rule_declares_light_text_on_soft_background(rule),
+                    msg=f'{css_class} declares light text unsuitable for soft backgrounds',
+                )
+                self.assertRegex(rule, r'background\s*:')
+                self.assertRegex(rule, r'(?<!-)color\s*:')
+
+    def test_fallback_style_is_readable_for_unknown_action(self):
+        unknown_action = 'mystery_action'
+        AuditLog.objects.create(
+            user=self.user,
+            action=unknown_action,
+            model_name='Entidad experimental',
+            entity_id='unknown-1',
+            entity_label='OBJ-UNKNOWN',
+            summary='Acción desconocida simulada.',
+        )
+
+        response = self.client.get(self.url)
+        content = response.content.decode()
+        fallback_rule = _extract_css_rule_block(
+            self.css_text,
+            '.ops-audit-action',
+            exact_selector=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('ops-audit-action-mystery_action', content)
+        self.assertIn('mystery_action', content)
+        self.assertIn('background:', fallback_rule)
+        self.assertIn('border:', fallback_rule)
+        self.assertIn('color:', fallback_rule)
+        self.assertFalse(_rule_declares_light_text_on_soft_background(fallback_rule))
+        fallback_color = _rule_text_color(fallback_rule)
+        self.assertNotIn(fallback_color, {'#fff', '#ffffff', 'white', '#eef2f6', '#eef2f7'})
+        self.assertTrue(fallback_color.startswith('#'))
+
+    def test_audit_table_header_uses_solid_background_without_gradient(self):
+        header_rule = _extract_css_rule_block(self.css_text, '.ops-audit-table thead th')
+        self.assertIn('background:', header_rule)
+        self.assertNotIn('linear-gradient', header_rule)
+        self.assertNotIn('gradient', header_rule.lower())
+
+
 class AuditLogListPaginationTests(TestCase):
     def setUp(self):
         self.user = create_user(username='audit-pager')
@@ -265,7 +441,7 @@ class AuditLogListPaginationTests(TestCase):
         self.assertContains(response, 'ops-audit-table')
         self.assertContains(response, '<th>Fecha y hora</th>')
         self.assertContains(response, '<th>Usuario</th>')
-        self.assertContains(response, '<th>Acción</th>')
+        self.assertContains(response, 'ops-audit-action-cell')
         self.assertContains(response, '<th>Objeto</th>')
         self.assertContains(response, '<th>Detalle</th>')
         self.assertNotContains(response, '<th>Modelo</th>')

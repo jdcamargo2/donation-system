@@ -1,102 +1,151 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Avance de proyecto - SIGEDON{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0">{{ object.title }}</h1>
-    <div>
-        <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Volver al proyecto</a>
-        {% if object.status == 'draft' and perms.operations.change_projectupdate %}
-            <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
-        {% endif %}
+<div class="ops-page-header ops-page-header-row ops-project-update-detail-header">
+    <div class="ops-project-update-detail-identity">
+        <div class="ops-kicker">Avance de proyecto</div>
+        <h1>{{ object.title }}</h1>
+        <div class="ops-project-update-detail-primary-meta">
+            <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            <span>Fecha del avance: {{ object.update_date }}</span>
+            {% if object.reported_by %}<span>Responsable: {{ object.reported_by }}</span>{% endif %}
+        </div>
+        <div class="ops-project-update-detail-project">
+            <span class="text-muted">Proyecto</span>
+            <a href="{% url 'project_detail' object.project.pk %}">{{ object.project.code }} · {{ object.project.name }}</a>
+        </div>
+    </div>
+    <div class="ops-header-actions">
+        <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Volver</a>
         {% if object.status == 'draft' and perms.operations.publish_projectupdate %}
-            <form class="d-inline" method="post" action="{% url 'project_update_publish' object.pk %}">
+            <form id="project-update-publish-form" method="post" action="{% url 'project_update_publish' object.pk %}">
                 {% csrf_token %}
-                <button class="btn btn-outline-primary" type="submit">Publicar</button>
+                <button
+                    class="btn btn-primary"
+                    type="submit"
+                    data-confirm-action
+                    data-confirm-form="project-update-publish-form"
+                    data-confirm-title="¿Publicar este avance?"
+                    data-confirm-text="Una vez publicado ya no podrá editarse ni eliminarse."
+                    data-confirm-confirm-label="Sí, publicar"
+                    data-confirm-variant="primary"
+                >Publicar</button>
             </form>
         {% endif %}
-        {% if object.status == 'draft' and perms.operations.delete_projectupdate %}
-            <a class="btn btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
-        {% endif %}
-    </div>
-</div>
-
-<div class="card border-0">
-    <div class="card-body">
-        <dl class="row mb-0">
-            <dt class="col-sm-4">Proyecto</dt>
-            <dd class="col-sm-8">{{ object.project }}</dd>
-            <dt class="col-sm-4">Título</dt>
-            <dd class="col-sm-8">{{ object.title }}</dd>
-            <dt class="col-sm-4">Descripción</dt>
-            <dd class="col-sm-8">{{ object.description }}</dd>
-            <dt class="col-sm-4">Estado</dt>
-            <dd class="col-sm-8"><span class="badge ops-status-badge">{{ object.get_status_display }}</span></dd>
-            <dt class="col-sm-4">Fecha del avance</dt>
-            <dd class="col-sm-8">{{ object.update_date }}</dd>
-            <dt class="col-sm-4">Progreso</dt>
-            <dd class="col-sm-8">{{ object.progress_percentage }}%</dd>
-            <dt class="col-sm-4">Fecha de creación</dt>
-            <dd class="col-sm-8">{{ object.created_at }}</dd>
-            <dt class="col-sm-4">Creado por</dt>
-            <dd class="col-sm-8">{{ object.created_by|default:"-" }}</dd>
-            <dt class="col-sm-4">Persona responsable del avance</dt>
-            <dd class="col-sm-8">{{ object.reported_by|default:"—" }}</dd>
-        </dl>
-    </div>
-</div>
-
-<section class="mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="h5 mb-0">Revisión documental del Comité</h2>
-        {% if not object.committee_review and object.status == 'published' and perms.operations.review_projectupdate %}
-            <a class="btn btn-sm btn-primary" href="{% url 'project_update_review_create' object.pk %}">Registrar revisión</a>
-        {% endif %}
-    </div>
-    {% if object.committee_review %}
-        <div class="card border-0">
-            <div class="card-body">
-                <p class="mb-2">{{ object.committee_review.observations|truncatewords:30 }}</p>
-                <div class="small text-muted">
-                    {{ object.committee_review.reviewed_by|default:"—" }} · {{ object.committee_review.reviewed_at }}
-                </div>
-                {% if perms.operations.view_projectupdatereview %}
-                    <a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_review_detail' object.committee_review.pk %}">Ver revisión</a>
+        {% if object.status == 'draft' and perms.operations.change_projectupdate or object.status == 'draft' and perms.operations.add_projectupdateattachment or object.status == 'draft' and perms.operations.delete_projectupdate %}
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Más acciones del avance">
+                Más
+            </button>
+            <div class="dropdown-menu dropdown-menu-end ops-project-update-detail-action-menu">
+                {% if perms.operations.change_projectupdate %}<a class="dropdown-item" href="{% url update_url_name object.pk %}">Editar</a>{% endif %}
+                {% if perms.operations.add_projectupdateattachment %}<a class="dropdown-item" href="{% url 'project_update_attachment_create' object.pk %}">Agregar adjunto</a>{% endif %}
+                {% if perms.operations.delete_projectupdate %}
+                    <a
+                        class="dropdown-item text-danger"
+                        href="{% url delete_url_name object.pk %}"
+                        data-confirm-action
+                        data-confirm-form="project-update-delete-form"
+                        data-confirm-title="¿Eliminar este avance?"
+                        data-confirm-text="Esta acción no se puede deshacer."
+                        data-confirm-confirm-label="Sí, eliminar"
+                        data-confirm-variant="danger"
+                    >Eliminar avance</a>
+                    <form id="project-update-delete-form" method="post" action="{% url delete_url_name object.pk %}">{% csrf_token %}</form>
                 {% endif %}
-                {% if object.committee_review.decision.remediation %}<a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_remediation_detail' object.committee_review.decision.remediation.pk %}">Ver remediación</a>{% endif %}
             </div>
         </div>
-    {% else %}
-        <p class="text-muted mb-0">Sin revisión del Comité</p>
-    {% endif %}
-</section>
-
-<section class="mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="h5 mb-0">Adjuntos</h2>
-        {% if object.status == 'draft' and perms.operations.add_projectupdateattachment %}
-            <a class="btn btn-sm btn-primary" href="{% url 'project_update_attachment_create' object.pk %}">Agregar adjunto</a>
         {% endif %}
     </div>
-    <div class="list-group">
-        {% for attachment in object.attachments.all %}
-            <div class="list-group-item d-flex justify-content-between align-items-center">
-                <span>{{ attachment.title|default:attachment }}</span>
-                <div class="d-flex gap-2">
-                    {% if perms.operations.view_projectupdateattachment %}
-                        <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_attachment_download' attachment.pk %}">Descargar</a>
-                    {% endif %}
-                    {% if object.status == 'draft' and perms.operations.delete_projectupdateattachment %}
-                        <form method="post" action="{% url 'project_update_attachment_delete' attachment.pk %}">
-                            {% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Eliminar</button>
-                        </form>
-                    {% endif %}
-                </div>
+</div>
+
+<article class="ops-project-update-body">
+    <section class="ops-project-update-section ops-project-update-detail-description" aria-labelledby="project-update-description-title">
+        <h2 id="project-update-description-title" class="h5">Descripción del avance</h2>
+        {% if object.description %}<p>{{ object.description }}</p>{% else %}<p class="text-muted mb-0">Sin descripción registrada.</p>{% endif %}
+    </section>
+
+    <section class="ops-project-update-section ops-project-update-detail-review" aria-labelledby="project-update-review-title">
+        <div class="ops-project-update-detail-section-heading">
+            <h2 id="project-update-review-title" class="h5 mb-0">Revisión documental del Comité</h2>
+            {% if not object.committee_review and object.status == 'published' and perms.operations.review_projectupdate %}
+                <a class="btn btn-sm btn-primary" href="{% url 'project_update_review_create' object.pk %}">Registrar revisión</a>
+            {% endif %}
+        </div>
+        {% if object.committee_review %}
+            <p class="mb-2">{{ object.committee_review.observations|truncatewords:30 }}</p>
+            <div class="small text-muted">
+                {{ object.committee_review.reviewed_by|default:"—" }} · {{ object.committee_review.reviewed_at }}
             </div>
-        {% empty %}
-            <div class="list-group-item text-muted">Este avance no tiene adjuntos.</div>
-        {% endfor %}
-    </div>
-</section>
+            {% if perms.operations.view_projectupdatereview %}
+                <a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_review_detail' object.committee_review.pk %}">Ver revisión</a>
+            {% endif %}
+            {% if object.committee_review.decision.remediation %}<a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'project_update_remediation_detail' object.committee_review.decision.remediation.pk %}">Ver remediación</a>{% endif %}
+        {% else %}
+            <p class="text-muted mb-0">Sin revisión del Comité</p>
+        {% endif %}
+    </section>
+
+    <section class="ops-project-update-section" aria-labelledby="project-update-attachments-title">
+        <div class="ops-project-update-detail-section-heading">
+            <h2 id="project-update-attachments-title" class="h5 mb-0">Evidencias y adjuntos</h2>
+        </div>
+        <div class="ops-project-update-attachment-list">
+            {% for attachment in object.attachments.all %}
+                <div class="ops-project-update-attachment-item">
+                    <div class="ops-project-update-attachment-name">
+                        <i class="bi bi-file-earmark ops-project-update-attachment-icon" aria-hidden="true"></i>
+                        <div>
+                            <strong>{{ attachment.title|default:attachment }}</strong>
+                            <div class="small text-muted">Cargado el {{ attachment.created_at }}</div>
+                        </div>
+                    </div>
+                    <div class="ops-project-update-attachment-actions">
+                        {% if perms.operations.view_projectupdateattachment %}
+                            <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_attachment_download' attachment.pk %}">Descargar</a>
+                        {% endif %}
+                        {% if object.status == 'draft' and perms.operations.delete_projectupdateattachment %}
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-outline-secondary ops-project-update-attachment-more" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Acciones del archivo {{ attachment.title|default:attachment }}">⋮</button>
+                                <form id="project-update-attachment-delete-form-{{ attachment.pk }}" method="post" action="{% url 'project_update_attachment_delete' attachment.pk %}">
+                                    {% csrf_token %}
+                                    <button
+                                        class="dropdown-item text-danger"
+                                        type="submit"
+                                        data-confirm-action
+                                        data-confirm-form="project-update-attachment-delete-form-{{ attachment.pk }}"
+                                        data-confirm-title="¿Eliminar este archivo?"
+                                        data-confirm-text="El adjunto dejará de estar disponible en el avance."
+                                        data-confirm-confirm-label="Sí, eliminar"
+                                        data-confirm-variant="danger"
+                                    >Eliminar</button>
+                                </form>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% empty %}
+                <p class="text-muted mb-0">Este avance no tiene adjuntos.</p>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="ops-project-update-section ops-project-update-metadata" aria-labelledby="project-update-record-title">
+        <h2 id="project-update-record-title" class="h5">Información de registro</h2>
+        <div class="ops-project-update-metadata-grid">
+            <div><span>Fecha del avance</span><strong>{{ object.update_date }}</strong></div>
+            <div><span>Creado el</span><strong>{{ object.created_at }}</strong></div>
+            <div><span>Creado por</span><strong>{{ object.created_by|default:"—" }}</strong></div>
+            {% if object.reported_by %}<div><span>Persona responsable</span><strong>{{ object.reported_by }}</strong></div>{% endif %}
+        </div>
+    </section>
+</article>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script src="{% static 'web/js/confirm_actions.js' %}" defer></script>
 {% endblock %}

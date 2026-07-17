@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.test import TestCase
 from django.urls import reverse
 
@@ -93,6 +93,24 @@ class FinancialDetailLinkTests(TestCase):
         self.assertContains(response, reverse('allocation_detail', args=[self.first_allocation.pk]))
         self.assertContains(response, reverse('donation_detail', args=[self.donation.pk]))
         self.assertContains(response, reverse('project_detail', args=[self.project.pk]))
+
+    def test_expense_detail_hides_financial_links_without_related_view_permissions(self):
+        user = get_user_model().objects.create_user(
+            username='expense-detail-viewer', password='pass-12345'
+        )
+        user.user_permissions.add(
+            Permission.objects.get(content_type__app_label='operations', codename='view_expense')
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse('expense_detail', args=[self.first_expense.pk]))
+
+        self.assertContains(response, self.first_allocation.code)
+        self.assertContains(response, self.donation.code)
+        self.assertContains(response, self.project.name)
+        self.assertNotContains(response, reverse('allocation_detail', args=[self.first_allocation.pk]))
+        self.assertNotContains(response, reverse('donation_detail', args=[self.donation.pk]))
+        self.assertNotContains(response, reverse('project_detail', args=[self.project.pk]))
 
     def test_dashboard_recent_expense_links_to_expense_detail(self):
         response = self.client.get(reverse('dashboard'))

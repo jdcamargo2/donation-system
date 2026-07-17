@@ -5,6 +5,8 @@ from django.core.exceptions import (
     ValidationError,
 )
 
+from django.db.models import Count
+
 from django.shortcuts import get_object_or_404
 
 from django.http import HttpResponseRedirect
@@ -25,7 +27,6 @@ from ..forms import FundAllocationForm
 
 from ..models import (
     AuditLog,
-    Expense,
     FundAllocation,
 )
 
@@ -113,26 +114,44 @@ class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermission
 
     def get_queryset(self):
         # PRE: la vista consulta una asignación autorizada por clave primaria.
-        # POST: carga origen, destino, metadata terminal y gastos para render sin N+1.
+        # POST: carga origen, destino, metadata terminal y el total de gastos sin precargar filas visuales.
         return FundAllocation.objects.select_related(
             'donation__donor', 'project', 'terminal_by'
-        ).prefetch_related('expenses')
+        ).annotate(allocation_expense_count=Count('expenses'))
 
     def get_context_data(self, **kwargs):
+        """
+        PRE: self.object incluye el conteo anotado de gastos de la asignación.
+        POST: expone el resumen completo y, por separado, hasta cinco gastos recientes en orden estable.
+        """
         context = super().get_context_data(**kwargs)
         allowed_targets = FUND_ALLOCATION_STATUS_TRANSITIONS.get(self.object.status, ())
         context['can_annul'] = (
             FundAllocation.Status.ANNULLED in allowed_targets
             and not allocation_has_effective_expenses(self.object)
         )
-        expenses = list(self.object.expenses.all())
-        context['allocation_financial_summary'] = get_allocation_financial_summary(self.object)
-        context['registered_expenses'] = [
-            expense for expense in expenses if expense.status != Expense.Status.ANNULLED
-        ]
-        context['annulled_expenses'] = [
-            expense for expense in expenses if expense.status == Expense.Status.ANNULLED
-        ]
+        financial_summary = get_allocation_financial_summary(self.object)
+        recent_expenses = list(
+            self.object.expenses.order_by('-expense_date', '-created_at', '-pk')[:5]
+        )
+        expense_count = self.object.allocation_expense_count
+        context['allocation_financial_summary'] = financial_summary
+        context['recent_allocation_expenses'] = recent_expenses
+        context['allocation_expense_count'] = expense_count
+        context['has_more_allocation_expenses'] = expense_count > len(recent_expenses)
+        context['can_create_expense'] = (
+            self.request.user.has_perm('operations.add_expense')
+            and self.object.status == FundAllocation.Status.ACTIVE
+            and financial_summary['available_amount'] > 0
+        )
+        context['show_edit_in_more'] = (
+            context['can_create_expense']
+            and self.request.user.has_perm('operations.change_fundallocation')
+            and self.object.status not in (
+                FundAllocation.Status.FINISHED,
+                FundAllocation.Status.ANNULLED,
+            )
+        )
         return context
 
 

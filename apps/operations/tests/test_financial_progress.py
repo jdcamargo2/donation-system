@@ -127,7 +127,7 @@ class DerivedFinancialProgressTests(TestCase):
         allocation_response = self.client.get(
             reverse('allocation_detail', args=(allocation.pk,))
         )
-        self.assertContains(donation_response, 'Ciclo')
+        self.assertContains(donation_response, self.donation.get_status_display())
         self.assertContains(donation_response, 'Sin asignar')
-        self.assertContains(allocation_response, 'Ciclo')
-        self.assertContains(allocation_response, 'Sin ejecución')
+        self.assertContains(allocation_response, allocation.get_status_display())
+        self.assertContains(allocation_response, 'Estado de ejecución: Sin ejecución')

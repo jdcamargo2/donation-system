@@ -1,3 +1,5 @@
+from django.db.models import Count
+
 from django.urls import reverse_lazy
 
 from django.utils.translation import gettext_lazy as _
@@ -50,6 +52,30 @@ class InstitutionDetailView(OperationsPermissionRequiredMixin, RouteContextMixin
     template_name = 'web/institution_detail.html'
     route_prefix = 'institution'
     page_title = _('Institución')
+
+    def get_queryset(self):
+        """
+        PRE: the requested institution is visible to the current user.
+        POST: returns it with its donation count, without loading its donation collection.
+        """
+        return Institution.objects.annotate(
+            institution_donation_count=Count('donations'),
+        )
+
+    def get_context_data(self, **kwargs):
+        """
+        PRE: self.object includes the annotated donation count from get_queryset.
+        POST: exposes at most five latest donations and their truthful total for the detail.
+        """
+        context = super().get_context_data(**kwargs)
+        recent_donations = list(
+            self.object.donations.order_by('-received_date', '-created_at', '-pk')[:5]
+        )
+        donation_count = self.object.institution_donation_count
+        context['recent_institution_donations'] = recent_donations
+        context['institution_donation_count'] = donation_count
+        context['has_more_institution_donations'] = donation_count > len(recent_donations)
+        return context
 
 
 class InstitutionLegalDocumentDownloadView(OperationsPermissionRequiredMixin, DetailView):

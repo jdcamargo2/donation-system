@@ -96,6 +96,15 @@ class ExpenseDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
     route_prefix = 'expense'
     page_title = _('Gasto')
 
+    def get_queryset(self):
+        # PRE: the detail renders allocation, donation, project, terminal actor, and support data.
+        # POST: returns the expense with all displayed relations loaded without per-row queries.
+        return Expense.objects.select_related(
+            'allocation__donation__donor',
+            'allocation__project',
+            'terminal_by',
+        ).prefetch_related('supporting_documents')
+
 
 class ExpenseCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):
     permission_required = 'operations.add_expense'
