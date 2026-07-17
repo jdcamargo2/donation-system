@@ -192,7 +192,7 @@ class FinancialListAnnotationTests(TestCase):
             [Decimal('30.00'), Decimal('30.00')],
         )
 
-    def test_financial_list_html_uses_the_annotated_values(self):
+    def test_financial_list_html_uses_current_compact_values(self):
         donation = create_donation(
             code='DON-ANNOTATED-HTML',
             donor=self.donor,
@@ -212,10 +212,12 @@ class FinancialListAnnotationTests(TestCase):
             reverse('allocation_list'), {'q': allocation.code}
         )
 
-        self.assertContains(donation_response, '50,00 USD')
-        self.assertContains(donation_response, '150,00 USD')
-        self.assertContains(allocation_response, '20,00')
-        self.assertContains(allocation_response, '30,00')
+        self.assertContains(donation_response, '200,00 USD')
+        self.assertNotContains(donation_response, '50,00 USD')
+        self.assertNotContains(donation_response, '150,00 USD')
+        self.assertContains(allocation_response, '50,00 USD')
+        self.assertNotContains(allocation_response, '20,00')
+        self.assertNotContains(allocation_response, '30,00')
 
     def test_expense_and_project_update_lists_use_correlated_annotations(self):
         donation = create_donation(
@@ -266,9 +268,11 @@ class FinancialListAnnotationTests(TestCase):
             {with_support.pk: True, without_support.pk: False},
         )
         self.assertEqual(annotated_update.annotated_attachment_count, 2)
-        self.assertContains(expense_response, 'Con soporte')
-        self.assertContains(expense_response, 'Sin soporte')
-        self.assertContains(update_response, '<td>2</td>', html=True)
+        self.assertContains(expense_response, with_support.reason)
+        self.assertContains(expense_response, without_support.reason)
+        self.assertNotContains(expense_response, '<th>Soporte</th>')
+        self.assertContains(update_response, 'Avance con conteo anotado')
+        self.assertNotContains(update_response, '<th>Adjuntos</th>')
 
 
 class FinancialListQueryScalingTests(TestCase):
@@ -373,3 +377,54 @@ class FinancialListQueryScalingTests(TestCase):
             ),
             lambda update: update.annotated_attachment_count,
         )
+
+    def test_donation_list_render_queries_do_not_scale_with_rows(self):
+        self.client.force_login(self.user)
+
+        one_row_queries = self.query_count(
+            lambda: self.client.get(reverse('donation_list'), {'q': 'DON-QUERY-00'})
+        )
+        all_rows_queries = self.query_count(
+            lambda: self.client.get(reverse('donation_list'), {'q': 'DON-QUERY-'})
+        )
+
+        self.assertLessEqual(all_rows_queries, one_row_queries + 1)
+
+    def test_allocation_list_render_queries_do_not_scale_with_rows(self):
+        self.client.force_login(self.user)
+        first_code = (
+            FundAllocation.objects
+            .filter(donation__code='DON-QUERY-SCALING')
+            .values_list('code', flat=True)
+            .first()
+        )
+
+        one_row_queries = self.query_count(
+            lambda: self.client.get(reverse('allocation_list'), {'q': first_code})
+        )
+        all_rows_queries = self.query_count(
+            lambda: self.client.get(
+                reverse('allocation_list'),
+                {'q': 'DON-QUERY-SCALING'},
+            )
+        )
+
+        self.assertLessEqual(all_rows_queries, one_row_queries + 1)
+
+    def test_expense_list_render_queries_do_not_scale_with_rows(self):
+        self.client.force_login(self.user)
+        first_code = (
+            Expense.objects
+            .filter(reason__startswith='Query expense')
+            .values_list('code', flat=True)
+            .first()
+        )
+
+        one_row_queries = self.query_count(
+            lambda: self.client.get(reverse('expense_list'), {'q': first_code})
+        )
+        all_rows_queries = self.query_count(
+            lambda: self.client.get(reverse('expense_list'), {'q': 'Query expense'})
+        )
+
+        self.assertLessEqual(all_rows_queries, one_row_queries + 1)

@@ -1,0 +1,216 @@
+:root {
+    --auth-bg: #f4f7fb;
+    --auth-surface: #ffffff;
+    --auth-primary: #1f5fbf;
+    --auth-primary-strong: #184b96;
+    --auth-text: #162033;
+    --auth-muted: #667085;
+    --auth-border: #dce4ef;
+    --auth-danger: #b42318;
+    --auth-shadow: 0 18px 44px rgba(22, 32, 51, 0.08);
+    --auth-shadow-soft: 0 10px 28px rgba(22, 32, 51, 0.06);
+}
+
+html,
+body {
+    min-height: 100%;
+    width: 100%;
+}
+
+body {
+    background: var(--auth-bg);
+    color: var(--auth-text);
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0;
+}
+
+.auth-body,
+.auth-main {
+    min-height: 100vh;
+    width: 100%;
+}
+
+.login-screen,
+.ops-login-shell {
+    align-items: center;
+    background:
+        linear-gradient(135deg, rgba(31, 95, 191, 0.08), rgba(15, 123, 85, 0.04)),
+        radial-gradient(circle at 1px 1px, rgba(31, 95, 191, 0.12) 1px, transparent 0),
+        var(--auth-bg);
+    background-size: auto, 26px 26px, auto;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    padding: clamp(1.25rem, 4vw, 3rem);
+}
+
+.login-shell,
+.ops-login-card-wrap {
+    align-items: stretch;
+    display: grid;
+    gap: 1.4rem;
+    grid-template-columns: minmax(0, 0.85fr) minmax(360px, 1fr);
+    max-width: 980px;
+    width: 100%;
+}
+
+.login-brand-panel {
+    align-content: center;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.86), rgba(248, 251, 255, 0.72));
+    border: 1px solid rgba(220, 228, 239, 0.86);
+    border-radius: 1.25rem;
+    box-shadow: var(--auth-shadow-soft);
+    display: grid;
+    padding: clamp(1.4rem, 3vw, 2rem);
+}
+
+.login-brand {
+    align-items: center;
+    display: flex;
+    gap: 0.95rem;
+    justify-content: flex-start;
+    margin-bottom: 1.25rem;
+}
+
+.sigedon-brand-mark {
+    align-items: center;
+    background: linear-gradient(135deg, var(--auth-primary), var(--auth-primary-strong));
+    border-radius: 0.8rem;
+    box-shadow: 0 10px 24px rgba(31, 95, 191, 0.22);
+    color: #ffffff;
+    display: inline-flex;
+    flex: 0 0 44px;
+    font-weight: 800;
+    height: 44px;
+    justify-content: center;
+    width: 44px;
+}
+
+.login-badge {
+    flex-basis: 54px;
+    height: 54px;
+    width: 54px;
+}
+
+.login-brand h1 {
+    color: var(--auth-text);
+    font-size: clamp(1.8rem, 3vw, 2.35rem);
+    font-weight: 900;
+    line-height: 1;
+    margin: 0;
+}
+
+.ops-kicker {
+    color: var(--auth-primary);
+    font-size: 0.76rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.login-brand-panel p {
+    color: var(--auth-muted);
+    font-size: 1rem;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.login-security-note {
+    align-items: center;
+    align-self: end;
+    background: rgba(232, 241, 255, 0.72);
+    border: 1px solid #d7e6ff;
+    border-radius: 0.85rem;
+    color: var(--auth-primary-strong);
+    display: flex;
+    font-size: 0.9rem;
+    font-weight: 750;
+    gap: 0.55rem;
+    margin-top: 1.5rem;
+    padding: 0.75rem 0.85rem;
+}
+
+.login-card,
+.ops-login-card {
+    align-self: center;
+    border: 1px solid rgba(220, 228, 239, 0.96);
+    border-radius: 1.25rem;
+    box-shadow: var(--auth-shadow);
+    overflow: hidden;
+}
+
+.login-card .card-body {
+    padding: clamp(1.4rem, 3vw, 2rem);
+}
+
+.login-card-header {
+    margin-bottom: 1.4rem;
+}
+
+.login-card-kicker {
+    color: var(--auth-primary);
+    font-size: 0.78rem;
+    font-weight: 850;
+    text-transform: uppercase;
+}
+
+.login-title {
+    color: var(--auth-text);
+    font-size: 1.65rem;
+    font-weight: 850;
+    margin: 0.3rem 0 0.4rem;
+}
+
+.login-subtitle {
+    color: var(--auth-muted);
+    margin: 0;
+}
+
+.login-field {
+    margin-bottom: 1rem !important;
+}
+
+.login-field .form-control,
+.login-submit {
+    min-height: 46px;
+}
+
+.login-note {
+    color: var(--auth-muted);
+    font-size: 0.82rem;
+    line-height: 1.45;
+    margin: 1rem 0 0;
+    text-align: center;
+}
+
+.required-mark {
+    color: var(--auth-danger);
+    font-weight: 900;
+    margin-left: 0.2rem;
+}
+
+.form-label {
+    color: var(--auth-text);
+    font-weight: 600;
+}
+
+.form-control {
+    border-color: #d8e0ec;
+    border-radius: 0.65rem;
+}
+
+.btn {
+    border-radius: 0.6rem;
+    font-weight: 650;
+}
+
+@media (max-width: 991.98px) {
+    .login-shell,
+    .ops-login-card-wrap {
+        grid-template-columns: 1fr;
+        max-width: 520px;
+    }
+
+    .login-brand-panel {
+        padding: 1.25rem;
+    }
+}

@@ -1,0 +1,73 @@
+{% if page_obj.paginator %}
+<div class="ops-pagination" role="navigation" aria-label="Paginación del listado">
+    <div class="ops-pagination-summary">
+        {% if page_obj.paginator.count %}
+            Mostrando {{ page_obj.start_index }}–{{ page_obj.end_index }} de {{ page_obj.paginator.count }}
+        {% else %}
+            Mostrando 0 de 0
+        {% endif %}
+    </div>
+
+    {% if page_size_choices %}
+        <form class="ops-pagination-size" method="get" action="{{ request.path }}">
+            {% if request.GET.q %}<input type="hidden" name="q" value="{{ request.GET.q }}">{% endif %}
+            {% if request.GET.status %}<input type="hidden" name="status" value="{{ request.GET.status }}">{% endif %}
+            {% if request.GET.institution %}<input type="hidden" name="institution" value="{{ request.GET.institution }}">{% endif %}
+            {% if request.GET.project %}<input type="hidden" name="project" value="{{ request.GET.project }}">{% endif %}
+            {% if request.GET.date_from %}<input type="hidden" name="date_from" value="{{ request.GET.date_from }}">{% endif %}
+            {% if request.GET.date_to %}<input type="hidden" name="date_to" value="{{ request.GET.date_to }}">{% endif %}
+            <label class="form-label mb-0" for="page-size-select">Por página</label>
+            <select class="form-select form-select-sm" id="page-size-select" name="page_size" onchange="this.form.submit()">
+                {% for size in page_size_choices %}
+                    <option value="{{ size }}"{% if page_size == size %} selected{% endif %}>{{ size }}</option>
+                {% endfor %}
+            </select>
+            <noscript>
+                <button class="btn btn-sm btn-outline-secondary" type="submit">Aplicar</button>
+            </noscript>
+        </form>
+    {% endif %}
+
+    {% if is_paginated %}
+        <ul class="ops-pagination-controls">
+            <li>
+                {% if page_obj.has_previous %}
+                    <a
+                        class="ops-pagination-link"
+                        href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}"
+                        aria-label="Ir a la página anterior"
+                    >Anterior</a>
+                {% else %}
+                    <span class="ops-pagination-link is-disabled" aria-disabled="true">Anterior</span>
+                {% endif %}
+            </li>
+            {% for page_number in pagination_page_numbers %}
+                <li>
+                    {% if page_number is None %}
+                        <span class="ops-pagination-ellipsis" aria-hidden="true">…</span>
+                    {% elif page_number == page_obj.number %}
+                        <span class="ops-pagination-link is-current" aria-current="page">{{ page_number }}</span>
+                    {% else %}
+                        <a
+                            class="ops-pagination-link"
+                            href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_number }}"
+                            aria-label="Ir a la página {{ page_number }}"
+                        >{{ page_number }}</a>
+                    {% endif %}
+                </li>
+            {% endfor %}
+            <li>
+                {% if page_obj.has_next %}
+                    <a
+                        class="ops-pagination-link"
+                        href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}"
+                        aria-label="Ir a la página siguiente"
+                    >Siguiente</a>
+                {% else %}
+                    <span class="ops-pagination-link is-disabled" aria-disabled="true">Siguiente</span>
+                {% endif %}
+            </li>
+        </ul>
+    {% endif %}
+</div>
+{% endif %}

@@ -56,6 +56,7 @@ from .common import (
     DetailMetricsMixin,
     FilteredListContextMixin,
     OperationsPermissionRequiredMixin,
+    PaginatedListMixin,
     RouteContextMixin,
     StateTransitionContextMixin,
     StateTransitionView,
@@ -89,7 +90,13 @@ class ProjectAnnulView(TerminalActionView):
     success_message = _('Proyecto anulado.')
 
 
-class ProjectListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, RouteContextMixin, ListView):
+class ProjectListView(
+    OperationsPermissionRequiredMixin,
+    FilteredListContextMixin,
+    RouteContextMixin,
+    PaginatedListMixin,
+    ListView,
+):
     permission_required = 'operations.view_project'
     model = Project
     template_name = 'web/project_list.html'
@@ -103,8 +110,7 @@ class ProjectListView(OperationsPermissionRequiredMixin, FilteredListContextMixi
         return apply_list_filters(
             Project.objects.all(), self.request.GET,
             text_fields=('code', 'name'), date_field='start_date',
-        )
-
+        ).order_by('code', 'pk')
 
 class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_project'

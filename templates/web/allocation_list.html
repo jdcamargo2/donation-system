@@ -18,16 +18,12 @@
 
 <div class="card border-0 ops-table-card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-hover align-middle mb-0 ops-allocation-table">
             <thead>
                 <tr>
-                    <th>Donación</th>
+                    <th>Asignación</th>
                     <th>Proyecto</th>
-                    <th>Monto asignado</th>
-                    <th>Ejecutado</th>
-                    <th>Disponible</th>
-                    <th>Ciclo</th>
-                    <th>Ejecución</th>
+                    <th>Monto</th>
                     <th>Categoría</th>
                     <th class="text-end">Acciones</th>
                 </tr>
@@ -39,34 +35,48 @@
                             <a class="fw-semibold text-decoration-none" href="{% url 'allocation_detail' allocation.pk %}">
                                 {{ allocation.code }}
                             </a>
-                            <div class="small text-muted">{{ allocation.donation.donor.name }} · {{ allocation.donation.code }}</div>
+                            <span class="small text-muted d-block">{{ allocation.donation.donor.name }} · {{ allocation.donation.code }}</span>
                         </td>
                         <td>
                             {{ allocation.project.name }}
-                            <div class="small text-muted">{{ allocation.project.code }}</div>
+                            <span class="small text-muted d-block">{{ allocation.project.code }}</span>
                         </td>
-                        <td class="ops-money">{{ allocation.amount|money_es }}</td>
-                        <td class="ops-money">{{ allocation.executed_amount|money_es }}</td>
-                        <td class="ops-money">{{ allocation.available_balance|money_es }}</td>
-                        <td><span class="badge ops-status-badge">{{ allocation.get_status_display }}</span></td>
-                        <td><span class="badge text-bg-light">{{ allocation.execution_progress_label }}</span></td>
-                        <td>{{ allocation.get_budget_category_display }}</td>
-                        <td class="text-end ops-row-actions">
-                            {% if perms.operations.change_fundallocation %}
-                                <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name allocation.pk %}">Editar</a>
-                            {% endif %}
-                            {% if perms.operations.delete_fundallocation %}
-                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name allocation.pk %}">Eliminar</a>
+                        <td class="ops-money text-nowrap">{{ allocation.amount|money_es }} {{ allocation.donation.currency }}</td>
+                        <td class="ops-allocation-category">{{ allocation.get_budget_category_display }}</td>
+                        <td class="text-end">
+                            {% if perms.operations.change_fundallocation or perms.operations.delete_fundallocation %}
+                                <div class="dropdown">
+                                    <button
+                                        class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                                        type="button"
+                                        id="allocation-actions-{{ allocation.pk }}"
+                                        data-bs-toggle="dropdown"
+                                        data-bs-boundary="viewport"
+                                        aria-expanded="false"
+                                        aria-label="Acciones para {{ allocation.code }}"
+                                    >
+                                        Más
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="allocation-actions-{{ allocation.pk }}">
+                                        {% if perms.operations.change_fundallocation %}
+                                            <li><a class="dropdown-item" href="{% url update_url_name allocation.pk %}">Editar</a></li>
+                                        {% endif %}
+                                        {% if perms.operations.delete_fundallocation %}
+                                            <li><a class="dropdown-item text-danger" href="{% url delete_url_name allocation.pk %}">Eliminar</a></li>
+                                        {% endif %}
+                                    </ul>
+                                </div>
                             {% endif %}
                         </td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="9" class="text-muted">No hay asignaciones registradas.</td>
+                        <td colspan="5" class="text-muted">No hay asignaciones registradas.</td>
                     </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 </div>
+{% include "web/includes/pagination.html" %}
 {% endblock %}

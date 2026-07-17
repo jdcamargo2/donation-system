@@ -22,12 +22,18 @@ from .common import (
     DeleteAuditMixin,
     DetailMetricsMixin,
     OperationsPermissionRequiredMixin,
+    PaginatedListMixin,
     RouteContextMixin,
     _protected_file_response,
 )
 
 
-class InstitutionListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
+class InstitutionListView(
+    OperationsPermissionRequiredMixin,
+    RouteContextMixin,
+    PaginatedListMixin,
+    ListView,
+):
     permission_required = 'operations.view_institution'
     model = Institution
     template_name = 'web/institution_list.html'
@@ -35,6 +41,8 @@ class InstitutionListView(OperationsPermissionRequiredMixin, RouteContextMixin, 
     route_prefix = 'institution'
     page_title = _('Instituciones')
 
+    def get_queryset(self):
+        return Institution.objects.order_by('name', 'pk')
 
 class InstitutionDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_institution'

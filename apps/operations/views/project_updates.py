@@ -75,13 +75,19 @@ from ..services import (
 from .common import (
     DeleteAuditMixin,
     OperationsPermissionRequiredMixin,
+    PaginatedListMixin,
     RouteContextMixin,
     _protected_file_response,
     add_service_errors_to_form,
 )
 
 
-class ProjectUpdateListView(OperationsPermissionRequiredMixin, RouteContextMixin, ListView):
+class ProjectUpdateListView(
+    OperationsPermissionRequiredMixin,
+    RouteContextMixin,
+    PaginatedListMixin,
+    ListView,
+):
     permission_required = 'operations.view_projectupdate'
     model = ProjectUpdate
     template_name = 'web/project_update_list.html'
@@ -92,8 +98,7 @@ class ProjectUpdateListView(OperationsPermissionRequiredMixin, RouteContextMixin
     def get_queryset(self):
         return with_project_update_attachment_count(
             ProjectUpdate.objects.select_related('project', 'created_by', 'reported_by')
-        )
-
+        ).order_by('-created_at', '-pk')
 
 class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailView):
     permission_required = 'operations.view_projectupdate'

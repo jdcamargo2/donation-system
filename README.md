@@ -25,7 +25,7 @@ El MVP se encuentra funcional y cubierto por pruebas automatizadas.
 
 | Indicador                             | Estado          |
 | ------------------------------------- | --------------- |
-| Pruebas automatizadas                 | 791             |
+| Pruebas automatizadas                 | 795             |
 | Estado de la suite                    | OK              |
 | Migraciones pendientes                | Ninguna         |
 | Django system check                   | Sin incidencias |

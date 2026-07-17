@@ -50,13 +50,20 @@ from .common import (
     DeleteAuditMixin,
     FilteredListContextMixin,
     OperationsPermissionRequiredMixin,
+    PaginatedListMixin,
     RouteContextMixin,
     add_service_errors_to_form,
     apply_list_filters,
 )
 
 
-class ExpenseListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, RouteContextMixin, ListView):
+class ExpenseListView(
+    OperationsPermissionRequiredMixin,
+    FilteredListContextMixin,
+    RouteContextMixin,
+    PaginatedListMixin,
+    ListView,
+):
     permission_required = 'operations.view_expense'
     model = Expense
     template_name = 'web/expense_list.html'
@@ -80,8 +87,7 @@ class ExpenseListView(OperationsPermissionRequiredMixin, FilteredListContextMixi
             text_fields=('code', 'reason', 'provider_or_recipient', 'allocation__project__code'),
             date_field='expense_date', institution_field='allocation__donation__donor_id',
             project_field='allocation__project_id',
-        )
-
+        ).order_by('-expense_date', '-created_at', '-pk')
 
 class ExpenseDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailView):
     permission_required = 'operations.view_expense'

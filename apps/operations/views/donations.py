@@ -41,6 +41,7 @@ from .common import (
     DetailMetricsMixin,
     FilteredListContextMixin,
     OperationsPermissionRequiredMixin,
+    PaginatedListMixin,
     RouteContextMixin,
     StateTransitionContextMixin,
     StateTransitionView,
@@ -60,7 +61,13 @@ class DonationAnnulView(TerminalActionView):
     success_message = _('Donación anulada.')
 
 
-class DonationListView(OperationsPermissionRequiredMixin, FilteredListContextMixin, RouteContextMixin, ListView):
+class DonationListView(
+    OperationsPermissionRequiredMixin,
+    FilteredListContextMixin,
+    RouteContextMixin,
+    PaginatedListMixin,
+    ListView,
+):
     permission_required = 'operations.view_donation'
     model = Donation
     template_name = 'web/donation_list.html'
@@ -77,8 +84,7 @@ class DonationListView(OperationsPermissionRequiredMixin, FilteredListContextMix
             self.request.GET,
             text_fields=('code', 'donor__name'), date_field='received_date',
             institution_field='donor_id',
-        )
-
+        ).order_by('-received_date', '-created_at', '-pk')
 
 class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_donation'

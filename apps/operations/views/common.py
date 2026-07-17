@@ -40,6 +40,13 @@ from django.views import View
 
 from django.views.generic import FormView
 
+from ..pagination import (
+    ALLOWED_PAGE_SIZES,
+    DEFAULT_PAGE_SIZE,
+    build_pagination_page_numbers,
+    parse_page_size,
+)
+
 from ..forms import (
     TerminalActionConfirmationForm,
     TerminalActionReasonForm,
@@ -261,6 +268,31 @@ class FilteredListContextMixin:
         context['filter_projects'] = Project.objects.order_by('code') if self.project_filter else ()
         context['export_url_name'] = self.export_url_name
         context['active_filter_query'] = self.request.GET.urlencode()
+        return context
+
+
+class PaginatedListMixin:
+    """
+    PRE: la vista es un ListView interno que pagina en base de datos.
+    POST: expone page_size validado, querystring estable y números de página con elipsis.
+    """
+    paginate_by = DEFAULT_PAGE_SIZE
+
+    def get_paginate_by(self, queryset):
+        return parse_page_size(self.request.GET)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        page_size = self.get_paginate_by(self.object_list)
+        context['page_size'] = page_size
+        context['page_size_choices'] = ALLOWED_PAGE_SIZES
+        query = self.request.GET.copy()
+        query.pop('page', None)
+        query['page_size'] = str(page_size)
+        context['pagination_query'] = query.urlencode()
+        page_obj = context.get('page_obj')
+        if page_obj is not None:
+            context['pagination_page_numbers'] = build_pagination_page_numbers(page_obj)
         return context
 
 

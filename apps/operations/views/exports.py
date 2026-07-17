@@ -64,10 +64,11 @@ class FundAllocationCsvExportView(FilteredCsvExportView):
     permission_required = 'operations.view_fundallocation'
     list_view_class = FundAllocationListView
     filename = 'asignaciones.csv'
-    headers = ('Código', 'Donación', 'Proyecto', 'Monto USD', 'Estado', 'Fecha', 'Categoría')
+    headers = ('Código', 'Donación', 'Proyecto', 'Monto USD', 'Estado', 'Ejecución', 'Fecha', 'Categoría')
     row_builder = staticmethod(lambda item: (
         item.code, item.donation.code, item.project.code, str(item.amount),
-        item.get_status_display(), item.allocation_date, item.get_budget_category_display(),
+        item.get_status_display(), item.execution_progress_label, item.allocation_date,
+        item.get_budget_category_display(),
     ))
 
 

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -13,8 +15,9 @@ class InternalExperienceTemplateTests(TestCase):
         self.client.force_login(self.user)
         self.institution = create_institution(name='Fundación Operativa')
         self.project = create_project(code='PRJ-OPS-001', name='Proyecto operativo')
+        self.project.location = 'Zona central'
         self.project.status = Project.Status.ACTIVE
-        self.project.save()
+        self.project.save(update_fields=('location', 'status', 'updated_at'))
         self.donation = create_donation(code='DON-OPS-001', donor=self.institution)
         self.allocation = create_allocation(donation=self.donation, project=self.project)
         self.expense = create_expense(allocation=self.allocation)
@@ -31,32 +34,35 @@ class InternalExperienceTemplateTests(TestCase):
             (
                 reverse('project_list'),
                 'web/project_list.html',
-                ['Código', 'Nombre', 'Estado', 'Presupuesto', 'Inicio', 'Cierre', 'Proyecto operativo'],
+                ['Proyecto', 'Estado', 'Presupuesto', 'Periodo', 'Acciones', 'Proyecto operativo'],
             ),
             (
                 reverse('institution_list'),
                 'web/institution_list.html',
-                ['Nombre', 'Tipo', 'País', 'Estado', 'Acciones', 'Fundación Operativa'],
+                ['Institución', 'Tipo', 'Estado', 'Acciones', 'Fundación Operativa'],
             ),
             (
                 reverse('donation_list'),
                 'web/donation_list.html',
-                ['Código', 'Donante', 'Monto', 'Asignado', 'Disponible', 'Fecha', 'DON-OPS-001'],
+                [
+                    'Donación', 'Donante', 'Monto', 'Estado',
+                    'Acciones', 'DON-OPS-001',
+                ],
             ),
             (
                 reverse('allocation_list'),
                 'web/allocation_list.html',
-                ['Donación', 'Proyecto', 'Monto asignado', 'Ejecutado', 'Disponible', 'Categoría'],
+                ['Asignación', 'Proyecto', 'Monto', 'Categoría', 'Acciones'],
             ),
             (
                 reverse('expense_list'),
                 'web/expense_list.html',
-                ['Gasto', 'Proyecto', 'Monto', 'Categoría', 'Estado', 'Soporte', 'Fecha'],
+                ['Gasto', 'Proyecto', 'Monto', 'Estado', 'Acciones'],
             ),
             (
                 reverse('project_update_list'),
                 'web/project_update_list.html',
-                ['Proyecto', 'Título', 'Estado', 'Creado', 'Adjuntos', 'Avance operativo'],
+                ['Avance', 'Proyecto', 'Estado', 'Acciones', 'Avance operativo'],
             ),
         ]
 
@@ -69,6 +75,184 @@ class InternalExperienceTemplateTests(TestCase):
                 self.assertContains(response, 'class="table-responsive"')
                 for text in expected_texts:
                     self.assertContains(response, text)
+
+    def test_project_and_institution_lists_compact_existing_context_and_detail_links(self):
+        project_response = self.client.get(reverse('project_list'))
+        institution_response = self.client.get(reverse('institution_list'))
+
+        self.assertContains(
+            project_response,
+            reverse('project_detail', args=[self.project.pk]),
+        )
+        self.assertContains(project_response, self.project.code)
+        self.assertContains(project_response, self.project.location)
+        self.assertContains(project_response, 'Cierre:')
+        self.assertNotContains(project_response, '<th>Código</th>')
+        self.assertNotContains(project_response, '<th>Nombre</th>')
+        self.assertNotContains(project_response, '<th>Inicio</th>')
+        self.assertNotContains(project_response, '<th>Cierre</th>')
+
+        self.assertContains(
+            institution_response,
+            reverse('institution_detail', args=[self.institution.pk]),
+        )
+        self.assertContains(institution_response, self.institution.get_role_display())
+        self.assertContains(institution_response, self.institution.country.name)
+        self.assertNotContains(institution_response, '<th>Nombre</th>')
+        self.assertNotContains(institution_response, '<th>País</th>')
+
+    def test_donation_list_keeps_only_total_amount_and_cycle(self):
+        list_response = self.client.get(reverse('donation_list'))
+        detail_response = self.client.get(
+            reverse('donation_detail', args=[self.donation.pk])
+        )
+
+        self.assertContains(
+            list_response,
+            reverse('donation_detail', args=[self.donation.pk]),
+        )
+        self.assertContains(list_response, '100,00 USD')
+        self.assertContains(list_response, self.donation.get_status_display())
+        self.assertNotContains(list_response, 'Recibido')
+        self.assertNotContains(list_response, 'Asignado')
+        self.assertNotContains(list_response, 'Disponible')
+        self.assertNotContains(list_response, '60,00 USD')
+        self.assertNotContains(list_response, '40,00 USD')
+        self.assertNotContains(list_response, self.donation.allocation_progress_label)
+        self.assertContains(detail_response, 'Monto asignado')
+        self.assertContains(detail_response, 'Monto disponible')
+        self.assertContains(detail_response, self.donation.allocation_progress_label)
+        for old_header in (
+            'Código', 'Asignado', 'Disponible',
+            'Ciclo', 'Asignación', 'Fecha',
+        ):
+            with self.subTest(old_header=old_header):
+                self.assertNotContains(list_response, f'<th>{old_header}</th>')
+
+    def test_allocation_list_keeps_origin_amount_and_category_without_execution(self):
+        list_response = self.client.get(reverse('allocation_list'))
+        detail_response = self.client.get(
+            reverse('allocation_detail', args=[self.allocation.pk])
+        )
+
+        self.assertContains(
+            list_response,
+            reverse('allocation_detail', args=[self.allocation.pk]),
+        )
+        self.assertContains(list_response, self.allocation.code)
+        self.assertContains(list_response, self.donation.code)
+        self.assertContains(list_response, self.institution.name)
+        self.assertContains(list_response, self.project.name)
+        self.assertContains(list_response, self.project.code)
+        self.assertContains(list_response, '60,00 USD')
+        self.assertContains(list_response, self.allocation.get_budget_category_display())
+        self.assertNotContains(list_response, '<th>Ejecución</th>')
+        self.assertNotContains(list_response, self.allocation.execution_progress_label)
+        self.assertNotContains(list_response, '<th>Ejecutado</th>')
+        self.assertNotContains(list_response, '<th>Disponible</th>')
+        self.assertNotContains(list_response, '<th>Ciclo</th>')
+        self.assertContains(detail_response, 'Monto asignado')
+        self.assertContains(detail_response, 'Ejecución')
+        self.assertContains(detail_response, self.allocation.execution_progress_label)
+        self.assertContains(detail_response, 'Ejecutado')
+        self.assertContains(detail_response, 'Disponible')
+        self.assertContains(detail_response, self.allocation.get_status_display())
+
+    def test_expense_list_keeps_concept_date_project_amount_and_state(self):
+        list_response = self.client.get(reverse('expense_list'))
+        detail_response = self.client.get(
+            reverse('expense_detail', args=[self.expense.pk])
+        )
+
+        self.assertContains(
+            list_response,
+            reverse('expense_detail', args=[self.expense.pk]),
+        )
+        self.assertContains(list_response, self.expense.code)
+        self.assertContains(list_response, self.expense.reason)
+        self.assertContains(list_response, '8 de julio de 2026')
+        self.assertContains(list_response, self.project.name)
+        self.assertContains(list_response, self.project.code)
+        self.assertContains(list_response, self.allocation.code)
+        self.assertContains(list_response, '20,00 USD')
+        self.assertContains(list_response, self.expense.get_status_display())
+        self.assertNotContains(list_response, '<th>Categoría</th>')
+        self.assertNotContains(list_response, '<th>Soporte</th>')
+        self.assertNotContains(list_response, '<th>Fecha</th>')
+        self.assertNotContains(list_response, self.expense.provider_or_recipient)
+        self.assertNotContains(list_response, self.donation.code)
+        self.assertContains(detail_response, 'Donación origen')
+        self.assertContains(detail_response, 'Proveedor o destinatario')
+        self.assertContains(detail_response, 'Categoría')
+        self.assertContains(detail_response, 'Documentos soporte')
+
+    def test_filtered_internal_lists_share_search_and_advanced_filter_structure(self):
+        cases = (
+            (reverse('project_list'), ('status', 'date_from', 'date_to'), False),
+            (
+                reverse('donation_list'),
+                ('status', 'institution', 'date_from', 'date_to'),
+                False,
+            ),
+            (
+                reverse('allocation_list'),
+                ('status', 'institution', 'project', 'date_from', 'date_to'),
+                False,
+            ),
+            (
+                reverse('expense_list'),
+                ('status', 'institution', 'project', 'date_from', 'date_to'),
+                False,
+            ),
+            (reverse('audit_log_list'), ('status', 'date_from', 'date_to'), True),
+        )
+
+        for url, advanced_names, omits_export in cases:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assertContains(response, 'class="card border-0 mb-3 ops-list-filters"')
+                self.assertContains(response, 'method="get"')
+                self.assertContains(response, 'name="q"')
+                self.assertContains(response, '>Buscar</button>')
+                self.assertContains(response, 'data-bs-target="#list-advanced-filters"')
+                self.assertContains(response, 'aria-expanded="false"')
+                self.assertContains(response, 'aria-controls="list-advanced-filters"')
+                self.assertContains(response, 'id="list-advanced-filters"')
+                for name in advanced_names:
+                    self.assertContains(response, f'name="{name}"')
+                for name in {'status', 'institution', 'project'} - set(advanced_names):
+                    self.assertNotContains(response, f'name="{name}"')
+                if omits_export:
+                    self.assertNotContains(response, 'Exportar CSV')
+                else:
+                    self.assertContains(response, 'Exportar CSV')
+
+        source = Path('templates/web/includes/list_filters.html').read_text()
+        css_source = Path('static/web/css/sigedon.css').read_text()
+        self.assertIn('<noscript>', source)
+        self.assertIn('href="#list-advanced-filters"', source)
+        self.assertIn('.ops-list-filter-panel:target', css_source)
+
+    def test_compact_list_badges_prevent_internal_word_breaks(self):
+        css_source = Path('static/web/css/sigedon.css').read_text()
+
+        for template_name in (
+            'project_list.html',
+            'institution_list.html',
+            'donation_list.html',
+        ):
+            with self.subTest(template_name=template_name):
+                source = Path('templates/web', template_name).read_text()
+                self.assertIn('class="badge ops-status-badge"', source)
+                self.assertNotIn('text-break', source)
+
+        self.assertRegex(
+            css_source,
+            r'\.ops-status-badge,\s*\.badge\s*\{[^}]*white-space: nowrap;[^}]*word-break: normal;',
+        )
+        donation_source = Path('templates/web/donation_list.html').read_text()
+        self.assertIn('class="ops-money text-nowrap"', donation_source)
 
     def test_financial_detail_views_show_relationships_and_metrics(self):
         cases = [
