@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load operations_format %}
+{% load operations_format static %}
 
 {% block title %}Proyecto - SIGEDON{% endblock %}
 
@@ -37,6 +37,9 @@
     <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card"><div class="card-body"><div class="ops-metric-label">Ejecutado USD</div><div class="ops-metric-value">{{ project_financial_summary.executed_amount|money_es }} USD</div></div></div></div>
     <div class="col-md-3"><div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body"><div class="ops-metric-label">Disponible USD</div><div class="ops-metric-value">{{ project_financial_summary.available_amount|money_es }} USD</div><div class="small text-muted">Ejecución {{ execution_percentage|floatformat:1 }}%</div></div></div></div>
 </div>
+
+{% include "web/includes/project_milestones.html" %}
+
 <div class="row g-4">
     <div class="col-lg-7">
         <div class="card border-0 h-100 ops-detail-card">
@@ -152,4 +155,10 @@
         {% endfor %}
     </div>
 </section>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script src="{% static 'vendor/htmx/htmx.min.js' %}" defer></script>
+<script src="{% static 'web/js/project_milestones.js' %}" defer></script>
 {% endblock %}

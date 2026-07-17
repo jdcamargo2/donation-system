@@ -5,8 +5,8 @@ Este documento describe el estado de referencia de la suite automatizada, las á
 ## 1. Estado de referencia
 
 ```text
-791 tests
-791 aprobados
+880 tests
+880 aprobados
 ```
 
 Este número representa el estado de referencia actual de esta rama.

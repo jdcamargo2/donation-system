@@ -30,6 +30,53 @@ Este documento describe los principales flujos operativos de SIGEDON, incluyendo
 * El proyecto queda disponible para las operaciones permitidas por su estado.
 * Las acciones realizadas conservan trazabilidad.
 
+### 1.1. Flujo de hitos verificables
+
+1. El servicio bloquea el proyecto y sus hitos mediante `select_for_update()`.
+2. Los proyectos cerrados o anulados rechazan toda mutación de hitos.
+3. Crear añade un hito pendiente al final; eliminar compacta las posiciones.
+4. Completar y reabrir actualizan únicamente el estado y metadatos del hito.
+5. Reordenar intercambia hitos adyacentes mediante una posición temporal libre.
+6. La mutación y sus eventos de auditoría se confirman en la misma transacción.
+7. Solo se audita el proyecto cuando el progreso derivado cruza hacia o desde el 100 %.
+
+El progreso por hitos nunca modifica `Project.status` ni se almacena como porcentaje persistido.
+
+La interfaz HTTP mantiene las mutaciones en la capa de servicios y exige el
+permiso específico del hito junto con `operations.view_project`:
+
+| Operación | Métodos HTTP | Permiso específico |
+| --- | --- | --- |
+| Crear | `GET`, `POST` | `add_projectmilestone` |
+| Editar | `GET`, `POST` | `change_projectmilestone` |
+| Completar | `POST` | `complete_projectmilestone` |
+| Reabrir | `GET` de confirmación, `POST` | `complete_projectmilestone` |
+| Eliminar | `GET` de confirmación, `POST` | `delete_projectmilestone` |
+| Subir o bajar | `POST` | `reorder_projectmilestone` |
+
+Los formularios no exponen proyecto, posición ni metadatos de finalización. Un
+`GET` nunca completa, reabre, elimina ni reordena hitos, y todo `POST` requiere
+protección CSRF.
+
+El detalle interno presenta una checklist ordenada y calcula su progreso con
+`get_milestone_progress()` sobre hitos precargados. Los proyectos cerrados o
+anulados conservan esa información como registro histórico, pero no muestran
+acciones de mutación.
+
+En navegadores con JavaScript, HTMX usa un contrato de fragmentos según la
+operación: completar y reabrir sustituyen solo la fila afectada y actualizan el
+resumen y la barra mediante OOB; reordenar sustituye solo la lista; eliminar
+sustituye la lista compactada y actualiza el progreso mediante OOB. Ninguna de
+estas acciones reconstruye la sección completa. SweetAlert2 confirma reapertura
+y eliminación, y `HX-Trigger` transporta el toast sin almacenar un mensaje
+duplicado. Sin JavaScript se conservan los mismos `POST`, los redirects con
+ancla y las páginas de confirmación.
+
+El piloto usa HTMX 2.0.10 vendorizado en `static/vendor/htmx/htmx.min.js` y se
+carga solo desde el detalle interno del proyecto. El archivo fue verificado
+contra el SHA-384 oficial
+`H5SrcfygHmAuTDZphMHqBJLc3FhssKjG7w/CeCpFReSfwBWDTKpkzPP8c+cLsK+V`.
+
 ---
 
 ## 2. Flujo de donación

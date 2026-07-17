@@ -1,0 +1,33 @@
+<p
+    id="milestone-progress-summary"
+    class="ops-milestones-summary mb-0"
+    aria-live="polite"
+    aria-atomic="true"
+    {% if milestone_progress_oob %}hx-swap-oob="outerHTML"{% endif %}
+>
+    {% if milestone_progress.total %}
+        {{ milestone_progress.completed }} de {{ milestone_progress.total }} completados
+        · {{ milestone_progress.percentage }} %
+        · <strong>{% if milestone_progress.is_completed %}Completado{% else %}En progreso{% endif %}</strong>
+    {% else %}
+        Sin hitos definidos
+    {% endif %}
+</p>
+<div
+    id="milestone-progress-bar"
+    class="ops-milestones-progress-wrap"
+    {% if milestone_progress_oob %}hx-swap-oob="outerHTML"{% endif %}
+>
+    {% if milestone_progress.total %}
+        <div
+            class="progress ops-milestones-progress{% if milestone_progress.is_completed %} is-completed{% endif %}"
+            role="progressbar"
+            aria-label="Progreso de hitos del proyecto"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="{{ milestone_progress.percentage }}"
+        >
+            <div class="progress-bar" style="width: {{ milestone_progress.percentage }}%"></div>
+        </div>
+    {% endif %}
+</div>

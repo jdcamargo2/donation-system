@@ -55,6 +55,21 @@ ANNULLED
 * PostgreSQL impide monedas distintas de USD en donaciones y gastos.
 * Los proyectos cerrados o anulados no deben recibir nuevas operaciones incompatibles con su estado.
 
+### 2.1. `ProjectMilestone`
+
+Representa un resultado verificable ordenado dentro de un proyecto.
+
+Reglas:
+
+* Sus posiciones son consecutivas desde 1 y únicas dentro del proyecto.
+* El progreso se deriva de hitos completados sobre el total; no se persiste en `Project`.
+* Un proyecto sin hitos tiene progreso indefinido.
+* Completar o reabrir hitos no modifica `Project.status`.
+* Los proyectos cerrados o anulados conservan sus hitos visibles, pero no admiten mutaciones.
+* Completar exige un actor autenticado y conserva fecha y actor mientras este exista.
+* Si el actor se elimina posteriormente, `completed_by` puede quedar en `NULL` sin perder la fecha ni la completitud histórica.
+* Crear, editar, completar, reabrir, eliminar y reordenar se ejecutan mediante servicios atómicos y auditados.
+
 ## 3. `Donation`
 
 Representa una donación monetaria.

@@ -1,0 +1,4 @@
+{% include "web/includes/project_milestone_list.html" %}
+{% if milestone_progress_oob %}
+    {% include "web/includes/project_milestone_progress.html" with milestone_progress_oob=True %}
+{% endif %}

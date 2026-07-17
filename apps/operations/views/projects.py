@@ -64,6 +64,10 @@ from .common import (
     _protected_file_response,
     apply_list_filters,
 )
+from .project_milestone_context import (
+    build_project_milestone_context,
+    project_milestone_prefetch,
+)
 
 
 class ProjectFinishView(TerminalActionView):
@@ -134,9 +138,14 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
                 queryset=ProjectDocument.objects.select_related('uploaded_by'),
                 to_attr='detail_documents',
             ),
+            project_milestone_prefetch(),
         )
 
     def get_context_data(self, **kwargs):
+        """
+        PRE: self.object was loaded through get_queryset with detail relations prefetched.
+        POST: returns one coherent detail context with derived milestone progress and UI permissions.
+        """
         context = super().get_context_data(**kwargs)
         allowed_targets = PROJECT_STATUS_TRANSITIONS.get(self.object.status, ())
         context['can_finish'] = Project.Status.CLOSED in allowed_targets
@@ -149,6 +158,9 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
             updates = updates.filter(status=ProjectUpdate.Status.PUBLISHED)
         context['project_updates'] = updates.order_by('-update_date', '-created_at')
         context['project_documents'] = self.object.detail_documents
+        context.update(
+            build_project_milestone_context(self.object, self.request.user)
+        )
         summary = get_project_financial_summary(self.object)
         context['project_financial_summary'] = summary
         context['execution_percentage'] = (

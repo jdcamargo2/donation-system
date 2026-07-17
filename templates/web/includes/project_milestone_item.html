@@ -1,0 +1,158 @@
+<li
+    id="milestone-{{ milestone.pk }}"
+    class="ops-milestone-item{% if milestone.is_completed %} is-completed{% endif %}"
+    data-milestone-id="{{ milestone.pk }}"
+>
+    <div class="ops-milestone-main">
+        {% if not milestone.is_completed and milestone_mutations_allowed and can_complete_project_milestone %}
+            <form
+                class="ops-milestone-check-form"
+                method="post"
+                action="{% url 'project_milestone_complete' milestone.pk %}"
+                hx-post="{% url 'project_milestone_complete' milestone.pk %}"
+                hx-target="#milestone-{{ milestone.pk }}"
+                hx-swap="outerHTML swap:0ms settle:0ms"
+                hx-disabled-elt="find button"
+                hx-indicator="#project-milestones .ops-milestone-loading"
+                data-milestone-action="complete"
+            >
+                {% csrf_token %}
+                <button
+                    class="ops-milestone-check-button"
+                    type="submit"
+                    role="checkbox"
+                    aria-checked="false"
+                    aria-label="Completar hito: {{ milestone.title }}"
+                ></button>
+            </form>
+        {% else %}
+            <input
+                class="form-check-input ops-milestone-check"
+                type="checkbox"
+                disabled
+                {% if milestone.is_completed %}checked{% endif %}
+                aria-label="{{ milestone.title }}: {% if milestone.is_completed %}completado{% else %}pendiente{% endif %}"
+            >
+        {% endif %}
+        <div class="ops-milestone-content">
+            <h3 class="ops-milestone-title">{{ milestone.title }}</h3>
+            {% if milestone.description %}
+                <p class="ops-milestone-description">{{ milestone.description }}</p>
+            {% endif %}
+            {% if milestone.is_completed and milestone.completed_at %}
+                <p class="ops-milestone-meta">
+                    Completado por
+                    {% if milestone.completed_by %}
+                        {{ milestone.completed_by.get_full_name|default:milestone.completed_by.get_username }}
+                    {% else %}
+                        Usuario eliminado
+                    {% endif %}
+                    · {{ milestone.completed_at|date:"d/m/Y H:i" }}
+                </p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if milestone_mutations_allowed %}
+        {% if can_change_project_milestone or can_delete_project_milestone or can_reorder_project_milestone or milestone.is_completed and can_complete_project_milestone %}
+            <div class="ops-milestone-actions">
+                <div class="dropdown">
+                    <button
+                        class="btn ops-milestone-menu-button"
+                        type="button"
+                        data-bs-toggle="dropdown"
+                        aria-expanded="false"
+                        aria-label="Más acciones para {{ milestone.title }}"
+                    >
+                        <i class="bi bi-three-dots" aria-hidden="true"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end ops-milestone-dropdown">
+                        {% if milestone.is_completed and can_complete_project_milestone %}
+                            <li>
+                                <form
+                                    class="ops-milestone-htmx-confirm"
+                                    method="post"
+                                    action="{% url 'project_milestone_reopen' milestone.pk %}"
+                                    hx-post="{% url 'project_milestone_reopen' milestone.pk %}"
+                                    hx-target="#milestone-{{ milestone.pk }}"
+                                    hx-swap="outerHTML swap:0ms settle:0ms"
+                                    hx-disabled-elt="find button"
+                                    hx-indicator="#project-milestones .ops-milestone-loading"
+                                    data-milestone-action="reopen"
+                                    data-confirm-kind="reopen"
+                                    data-confirm-title="¿Reabrir este hito?"
+                                    data-confirm-text="Este hito volverá a estado pendiente. El progreso general del proyecto será recalculado."
+                                    data-confirm-button="Sí, reabrir"
+                                >
+                                    {% csrf_token %}
+                                    <button class="dropdown-item" type="submit">Reabrir</button>
+                                </form>
+                                <a class="dropdown-item ops-milestone-fallback-confirm" href="{% url 'project_milestone_reopen' milestone.pk %}">Reabrir</a>
+                            </li>
+                        {% endif %}
+                        {% if can_change_project_milestone %}
+                            <li><a class="dropdown-item" href="{% url 'project_milestone_edit' milestone.pk %}">Editar</a></li>
+                        {% endif %}
+                        {% if can_reorder_project_milestone and not milestone_is_first %}
+                            <li>
+                                <form
+                                    method="post"
+                                    action="{% url 'project_milestone_move_up' milestone.pk %}"
+                                    hx-post="{% url 'project_milestone_move_up' milestone.pk %}"
+                                    hx-target="#project-milestone-list"
+                                    hx-swap="outerHTML swap:0ms settle:0ms"
+                                    hx-disabled-elt="find button"
+                                    hx-indicator="#project-milestones .ops-milestone-loading"
+                                    data-milestone-action="move"
+                                >
+                                    {% csrf_token %}
+                                    <button class="dropdown-item" type="submit">Subir</button>
+                                </form>
+                            </li>
+                        {% endif %}
+                        {% if can_reorder_project_milestone and not milestone_is_last %}
+                            <li>
+                                <form
+                                    method="post"
+                                    action="{% url 'project_milestone_move_down' milestone.pk %}"
+                                    hx-post="{% url 'project_milestone_move_down' milestone.pk %}"
+                                    hx-target="#project-milestone-list"
+                                    hx-swap="outerHTML swap:0ms settle:0ms"
+                                    hx-disabled-elt="find button"
+                                    hx-indicator="#project-milestones .ops-milestone-loading"
+                                    data-milestone-action="move"
+                                >
+                                    {% csrf_token %}
+                                    <button class="dropdown-item" type="submit">Bajar</button>
+                                </form>
+                            </li>
+                        {% endif %}
+                        {% if can_delete_project_milestone %}
+                            <li>
+                                <form
+                                    class="ops-milestone-htmx-confirm"
+                                    method="post"
+                                    action="{% url 'project_milestone_delete' milestone.pk %}"
+                                    hx-post="{% url 'project_milestone_delete' milestone.pk %}"
+                                    hx-target="#project-milestone-list"
+                                    hx-swap="outerHTML swap:0ms settle:0ms"
+                                    hx-disabled-elt="find button"
+                                    hx-indicator="#project-milestones .ops-milestone-loading"
+                                    data-milestone-action="delete"
+                                    data-confirm-kind="delete"
+                                    data-confirm-title="¿Eliminar este hito?"
+                                    data-confirm-text="Eliminar este hito recalculará el progreso del proyecto. Esta acción no se puede deshacer."
+                                    data-confirm-button="Sí, eliminar"
+                                >
+                                    {% csrf_token %}
+                                    <button class="dropdown-item text-danger" type="submit">Eliminar</button>
+                                </form>
+                                <a class="dropdown-item text-danger ops-milestone-fallback-confirm" href="{% url 'project_milestone_delete' milestone.pk %}">Eliminar</a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+        {% endif %}
+    {% endif %}
+</li>

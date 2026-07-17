@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Eliminar hito - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="card border-danger ops-confirmation-card">
+    <div class="card-body">
+        <h1 class="h4">Eliminar hito</h1>
+        <p><strong>{{ milestone.title }}</strong></p>
+        <p>Proyecto: {{ project.code }} - {{ project.name }}</p>
+        <div class="alert alert-danger">
+            Eliminar este hito recalculará el progreso del proyecto. Esta acción no se puede deshacer.
+        </div>
+        <form method="post">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <a class="btn btn-outline-secondary" href="{% url 'project_detail' project.pk %}#project-milestones">Cancelar</a>
+            <button type="submit" class="btn btn-danger">Eliminar hito</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

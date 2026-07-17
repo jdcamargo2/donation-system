@@ -17,6 +17,7 @@ from apps.operations.models import (
     FundAllocation,
     OperationalCodeSequence,
     Project,
+    ProjectMilestone,
     ProjectUpdate,
     SupportingDocument,
     ZERO_MONEY,
@@ -26,9 +27,15 @@ from apps.operations.project_update_responsibles import eligible_project_update_
 from apps.operations.services import (
     ExpenseFinalizedError,
     annul_expense,
+    complete_project_milestone,
+    create_project_milestone,
     create_expense,
     create_fund_allocation,
+    delete_project_milestone,
+    move_project_milestone_down,
+    move_project_milestone_up,
     publish_project_update,
+    reopen_project_milestone,
     update_expense,
     update_fund_allocation,
     annul_fund_allocation,
@@ -163,6 +170,190 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             namespace='project',
             before=before,
         )
+
+    def test_concurrent_milestone_creations_keep_unique_consecutive_positions(self):
+        project = create_project(code='PRJ-CONCURRENT-MILESTONE-CREATE')
+        actors = (
+            create_user('milestone-creator-a'),
+            create_user('milestone-creator-b'),
+        )
+
+        def create_milestone(title, actor_id):
+            actor = get_user_model().objects.get(pk=actor_id)
+            milestone = create_project_milestone(
+                project_id=project.pk,
+                title=title,
+                actor=actor,
+            )
+            return milestone.pk
+
+        results = self.run_concurrently(
+            [
+                lambda: create_milestone('Hito concurrente A', actors[0].pk),
+                lambda: create_milestone('Hito concurrente B', actors[1].pk),
+            ]
+        )
+
+        self.assertEqual([outcome for outcome, _value in results].count('success'), 2)
+        self.assertEqual(
+            list(
+                ProjectMilestone.objects.filter(project=project)
+                .order_by('position')
+                .values_list('position', flat=True)
+            ),
+            [1, 2],
+        )
+        self.assertEqual(
+            AuditLog.objects.filter(
+                model_name='Hito de proyecto', action=AuditLog.Action.CREATED
+            ).count(),
+            2,
+        )
+
+    def test_concurrent_milestone_completion_is_idempotent_and_audited_once(self):
+        project = create_project(code='PRJ-CONCURRENT-MILESTONE-COMPLETE')
+        milestone = ProjectMilestone.objects.create(
+            project=project,
+            title='Hito por completar',
+            position=1,
+        )
+        actors = (
+            create_user('milestone-completer-a'),
+            create_user('milestone-completer-b'),
+        )
+
+        def complete(actor_id):
+            actor = get_user_model().objects.get(pk=actor_id)
+            return complete_project_milestone(milestone.pk, actor=actor).completed_by_id
+
+        results = self.run_concurrently(
+            [lambda: complete(actors[0].pk), lambda: complete(actors[1].pk)]
+        )
+
+        self.assertEqual([outcome for outcome, _value in results].count('success'), 2)
+        milestone.refresh_from_db()
+        self.assertTrue(milestone.is_completed)
+        self.assertIsNotNone(milestone.completed_at)
+        self.assertIn(milestone.completed_by_id, {actors[0].pk, actors[1].pk})
+        self.assertEqual(
+            AuditLog.objects.filter(
+                entity_id=str(milestone.pk), action=AuditLog.Action.COMPLETED
+            ).count(),
+            1,
+        )
+
+    def test_concurrent_complete_and_reopen_leave_coherent_milestone_state(self):
+        project = create_project(code='PRJ-CONCURRENT-MILESTONE-STATE')
+        milestone = ProjectMilestone.objects.create(
+            project=project,
+            title='Hito con carrera de estado',
+            position=1,
+        )
+        completer = create_user('milestone-state-completer')
+        reopener = create_user('milestone-state-reopener')
+
+        def complete():
+            actor = get_user_model().objects.get(pk=completer.pk)
+            return complete_project_milestone(milestone.pk, actor=actor).is_completed
+
+        def reopen():
+            actor = get_user_model().objects.get(pk=reopener.pk)
+            return reopen_project_milestone(milestone.pk, actor=actor).is_completed
+
+        results = self.run_concurrently([complete, reopen])
+
+        self.assertEqual([outcome for outcome, _value in results].count('success'), 2)
+        milestone.refresh_from_db()
+        if milestone.is_completed:
+            self.assertIsNotNone(milestone.completed_at)
+            self.assertIsNotNone(milestone.completed_by)
+        else:
+            self.assertIsNone(milestone.completed_at)
+            self.assertIsNone(milestone.completed_by)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                entity_id=str(milestone.pk), action=AuditLog.Action.COMPLETED
+            ).count(),
+            1,
+        )
+        self.assertLessEqual(
+            AuditLog.objects.filter(
+                entity_id=str(milestone.pk), action=AuditLog.Action.REOPENED
+            ).count(),
+            1,
+        )
+
+    def test_concurrent_milestone_reorders_preserve_valid_order(self):
+        project = create_project(code='PRJ-CONCURRENT-MILESTONE-REORDER')
+        milestones = [
+            ProjectMilestone.objects.create(
+                project=project,
+                title=f'Hito {position}',
+                position=position,
+            )
+            for position in range(1, 5)
+        ]
+        actors = (
+            create_user('milestone-reorder-a'),
+            create_user('milestone-reorder-b'),
+        )
+
+        def move_down():
+            actor = get_user_model().objects.get(pk=actors[0].pk)
+            return move_project_milestone_down(milestones[0].pk, actor=actor).position
+
+        def move_up():
+            actor = get_user_model().objects.get(pk=actors[1].pk)
+            return move_project_milestone_up(milestones[-1].pk, actor=actor).position
+
+        results = self.run_concurrently([move_down, move_up])
+
+        self.assertEqual([outcome for outcome, _value in results].count('success'), 2)
+        positions = list(
+            ProjectMilestone.objects.filter(project=project)
+            .order_by('position')
+            .values_list('position', flat=True)
+        )
+        self.assertEqual(positions, [1, 2, 3, 4])
+        self.assertEqual(
+            AuditLog.objects.filter(action=AuditLog.Action.REORDERED).count(),
+            2,
+        )
+
+    def test_concurrent_milestone_delete_and_reorder_leave_no_gaps(self):
+        project = create_project(code='PRJ-CONCURRENT-MILESTONE-DELETE')
+        milestones = [
+            ProjectMilestone.objects.create(
+                project=project,
+                title=f'Hito {position}',
+                position=position,
+            )
+            for position in range(1, 5)
+        ]
+        actors = (
+            create_user('milestone-delete-actor'),
+            create_user('milestone-delete-reorder-actor'),
+        )
+
+        def delete():
+            actor = get_user_model().objects.get(pk=actors[0].pk)
+            delete_project_milestone(milestones[1].pk, actor=actor)
+            return milestones[1].pk
+
+        def move_up():
+            actor = get_user_model().objects.get(pk=actors[1].pk)
+            return move_project_milestone_up(milestones[-1].pk, actor=actor).pk
+
+        results = self.run_concurrently([delete, move_up])
+
+        self.assertEqual([outcome for outcome, _value in results].count('success'), 2)
+        self.assertFalse(ProjectMilestone.objects.filter(pk=milestones[1].pk).exists())
+        positions = list(
+            ProjectMilestone.objects.filter(project=project)
+            .order_by('position')
+            .values_list('position', flat=True)
+        )
+        self.assertEqual(positions, [1, 2, 3])
 
     def test_concurrent_donation_creations_reserve_ten_distinct_codes(self):
         donor = create_donation().donor

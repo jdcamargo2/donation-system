@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Hitos verificables</div>
+        <h1>{{ title }}</h1>
+        <p>Proyecto: <strong>{{ project.code }} - {{ project.name }}</strong></p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'project_detail' project.pk %}#project-milestones">Volver</a>
+</div>
+
+<div class="card border-0 ops-form-card">
+    <div class="card-body">
+        <form method="post" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
+            {% endif %}
+            {% for field in form %}
+                <div class="ops-form-field ops-field mb-3">
+                    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="text-danger small" role="alert">{{ field.errors|striptags }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div class="ops-form-actions">
+                <a class="btn btn-outline-secondary" href="{% url 'project_detail' project.pk %}#project-milestones">Cancelar</a>
+                <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

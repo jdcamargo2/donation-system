@@ -14,11 +14,12 @@ EXPECTED_VIEW_MODULES = (
     'expenses',
     'exports',
     'institutions',
+    'project_milestones',
     'project_updates',
     'projects',
     'supporting_documents',
 )
-EXPECTED_ROUTE_COUNT = 68
+EXPECTED_ROUTE_COUNT = 75
 INCIDENTAL_NAMES_MUST_STAY_PRIVATE = (
     'Donation',
     'CreateView',

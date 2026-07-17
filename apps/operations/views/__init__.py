@@ -83,6 +83,15 @@ from .projects import (
     ProjectStatusTransitionView,
     ProjectUpdateView,
 )
+from .project_milestones import (
+    ProjectMilestoneAddView,
+    ProjectMilestoneCompleteView,
+    ProjectMilestoneDeleteView,
+    ProjectMilestoneEditView,
+    ProjectMilestoneMoveDownView,
+    ProjectMilestoneMoveUpView,
+    ProjectMilestoneReopenView,
+)
 from .supporting_documents import (
     SupportingDocumentCreateForExpenseView,
     SupportingDocumentDeleteView,
@@ -131,6 +140,13 @@ __all__ = [
     'ProjectDocumentDownloadView',
     'ProjectFinishView',
     'ProjectListView',
+    'ProjectMilestoneAddView',
+    'ProjectMilestoneCompleteView',
+    'ProjectMilestoneDeleteView',
+    'ProjectMilestoneEditView',
+    'ProjectMilestoneMoveDownView',
+    'ProjectMilestoneMoveUpView',
+    'ProjectMilestoneReopenView',
     'ProjectStatusTransitionView',
     'ProjectUpdateAttachmentCreateView',
     'ProjectUpdateAttachmentDeleteView',
