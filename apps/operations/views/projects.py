@@ -3,12 +3,13 @@ from decimal import Decimal
 from django.conf import settings
 
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 
 from django.db.models import Prefetch
 
-from django.shortcuts import get_object_or_404
+from django.http import Http404, HttpResponseRedirect
 
-from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404, render
 
 from django.urls import (
     reverse,
@@ -23,6 +24,7 @@ from django.views.generic import (
     DetailView,
     ListView,
     UpdateView,
+    View,
 )
 
 from ..forms import (
@@ -68,6 +70,20 @@ from .project_milestone_context import (
     build_project_milestone_context,
     project_milestone_prefetch,
 )
+
+
+RECENT_PROJECT_UPDATES_LIMIT = 5
+
+
+def get_visible_project_updates(project, user):
+    """
+    PRE: project is persisted and user is authenticated.
+    POST: returns an unevaluated, stably ordered queryset visible to that user.
+    """
+    updates = project.updates.select_related('reported_by')
+    if not user.has_perm('operations.view_projectupdate'):
+        updates = updates.filter(status=ProjectUpdate.Status.PUBLISHED)
+    return updates.order_by('-created_at', '-pk')
 
 
 class ProjectFinishView(TerminalActionView):
@@ -153,10 +169,16 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
             Project.Status.ANNULLED in allowed_targets
             and not self.object.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists()
         )
-        updates = self.object.updates.select_related('created_by', 'reported_by').prefetch_related('attachments')
-        if not self.request.user.has_perm('operations.view_projectupdate'):
-            updates = updates.filter(status=ProjectUpdate.Status.PUBLISHED)
-        context['project_updates'] = updates.order_by('-update_date', '-created_at')
+        visible_updates = get_visible_project_updates(self.object, self.request.user)
+        update_paginator = Paginator(
+            visible_updates,
+            RECENT_PROJECT_UPDATES_LIMIT,
+        )
+        update_page = update_paginator.page(1)
+        context['recent_project_updates'] = update_page.object_list
+        context['project_update_page'] = update_page
+        context['project_update_count'] = update_paginator.count
+        context['has_more_project_updates'] = update_page.has_next()
         context['project_documents'] = self.object.detail_documents
         context.update(
             build_project_milestone_context(self.object, self.request.user)
@@ -216,6 +238,35 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
         if settings.KOBO_ENABLED:
             return ['operations/project_detail.html']
         return super().get_template_names()
+
+
+class ProjectUpdateChunkView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.view_project'
+
+    def get(self, request, project_pk):
+        """
+        PRE: request.user may view projects and project_pk identifies the requested project.
+        POST: returns one database-paginated update fragment using detail visibility rules.
+        """
+        project = get_object_or_404(Project, pk=project_pk)
+        paginator = Paginator(
+            get_visible_project_updates(project, request.user),
+            RECENT_PROJECT_UPDATES_LIMIT,
+        )
+        try:
+            page = paginator.page(request.GET.get('page', 1))
+        except (PageNotAnInteger, EmptyPage) as exc:
+            raise Http404('La página de avances solicitada no existe.') from exc
+        return render(
+            request,
+            'web/includes/project_update_chunk.html',
+            {
+                'object': project,
+                'project_update_page': page,
+                'project_updates': page.object_list,
+                'is_update_chunk': True,
+            },
+        )
 
 
 class ProjectCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, CreateView):
@@ -313,6 +364,17 @@ class ProjectDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView):
     permission_required = 'operations.delete_projectdocument'
     model = ProjectDocument
     template_name = 'web/object_confirm_delete.html'
+
+    def get_context_data(self, **kwargs):
+        """
+        PRE: self.object is the project document selected for confirmation.
+        POST: gives the shared confirmation page a valid return URL to its project.
+        """
+        context = super().get_context_data(**kwargs)
+        context['cancel_url'] = reverse(
+            'project_detail', args=[self.object.project_id]
+        )
+        return context
 
     def form_valid(self, form):
         # PRE: el usuario tiene permiso y self.object es el documento confirmado.

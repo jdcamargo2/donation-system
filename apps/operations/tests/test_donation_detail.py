@@ -1,0 +1,170 @@
+from datetime import date
+from decimal import Decimal
+
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
+from django.db import connection
+from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
+
+from apps.operations.models import Donation, FundAllocation
+from apps.operations.tests.helpers import create_donation, create_institution, create_project
+
+
+class DonationDetailTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            username='donation-detail-admin', password='pass-12345',
+        )
+        self.client.force_login(self.user)
+        self.donor = create_institution(name='Donante del detalle')
+        self.donation = create_donation(code='DON-DETAIL-001', donor=self.donor)
+        self.donation.received_date = date(2026, 7, 8)
+        self.donation.objective = 'Objetivo del detalle.'
+        self.donation.restrictions = 'Restricción única.'
+        self.donation.save(update_fields=('received_date', 'objective', 'restrictions', 'updated_at'))
+
+    def create_user_with_permissions(self, username, *codenames):
+        user = get_user_model().objects.create_user(username=username, password='pass-12345')
+        user.user_permissions.add(*Permission.objects.filter(codename__in=codenames))
+        return user
+
+    def create_allocation(self, *, code, donation, project):
+        """
+        PRE: code is unique and donation/project are persisted test fixtures.
+        POST: creates an allocation without depending on a preserved test database sequence.
+        """
+        return FundAllocation.objects.create(
+            code=code,
+            donation=donation,
+            project=project,
+            budget_category='health_psychosocial',
+            amount=Decimal('10.00'),
+            allocation_date=date(2026, 7, 8),
+        )
+
+    def test_header_shows_identity_once_and_links_donor_when_allowed(self):
+        response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
+        content = response.content.decode()
+
+        self.assertContains(response, self.donation.code)
+        self.assertContains(response, self.donation.get_status_display())
+        self.assertContains(response, 'Fecha de recepción: 8 de julio de 2026')
+        self.assertContains(response, reverse('institution_detail', args=[self.donor.pk]))
+        self.assertEqual(content.count('class="badge ops-status-badge"'), 1)
+        self.assertNotContains(response, 'Progreso de asignación')
+
+        viewer = self.create_user_with_permissions('donation-only-viewer', 'view_donation')
+        self.client.force_login(viewer)
+        response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
+        self.assertContains(response, self.donor.name)
+        self.assertNotContains(response, reverse('institution_detail', args=[self.donor.pk]))
+
+    def test_contextual_actions_and_delete_confirmation_preserve_fallbacks(self):
+        response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
+        delete_url = reverse('donation_delete', args=[self.donation.pk])
+        content = response.content.decode()
+
+        self.assertContains(response, reverse('allocation_create'))
+        self.assertContains(response, reverse('donation_update', args=[self.donation.pk]))
+        self.assertContains(response, 'aria-label="Más acciones para DON-DETAIL-001"')
+        self.assertIn(f'href="{delete_url}"', content)
+        self.assertIn(f'id="donation-delete-form" method="post" action="{delete_url}"', content)
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertContains(response, 'data-confirm-title="¿Eliminar esta donación?"')
+        self.assertContains(response, 'web/js/confirm_actions.js')
+
+        registered = create_donation(
+            code='DON-DETAIL-REGISTERED', donor=self.donor,
+            status=Donation.Status.REGISTERED,
+        )
+        registered.received_date = date(2026, 7, 9)
+        registered.save(update_fields=('received_date', 'updated_at'))
+        transition_url = reverse(
+            'donation_status_transition', args=[registered.pk, Donation.Status.RECEIVED],
+        )
+        transition_response = self.client.get(
+            reverse('donation_detail', args=[registered.pk])
+        )
+        self.assertContains(transition_response, f'<form method="post" action="{transition_url}">')
+        self.assertContains(transition_response, 'Cambiar a Recibida')
+
+        annulled = create_donation(code='DON-DETAIL-ANNULLED', donor=self.donor)
+        annulled.status = Donation.Status.ANNULLED
+        annulled.save(update_fields=('status', 'updated_at'))
+        response = self.client.get(reverse('donation_detail', args=[annulled.pk]))
+        self.assertNotContains(response, reverse('allocation_create'))
+        self.assertNotContains(response, reverse('donation_update', args=[annulled.pk]))
+
+    def test_detail_limits_allocations_in_stable_order_and_uses_existing_filter(self):
+        allocations = []
+        for index in range(6):
+            allocation = self.create_allocation(
+                code=f'ASG-DON-{index}',
+                donation=self.donation,
+                project=create_project(code=f'PRJ-DON-{index}'),
+            )
+            allocation.allocation_date = date(2026, 7, index + 1)
+            allocation.save(update_fields=('allocation_date', 'updated_at'))
+            allocations.append(allocation)
+
+        response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
+
+        self.assertEqual(response.context['donation_allocation_count'], 6)
+        self.assertTrue(response.context['has_more_donation_allocations'])
+        recent = response.context['recent_donation_allocations']
+        self.assertEqual([allocation.pk for allocation in recent], [allocation.pk for allocation in reversed(allocations[1:])])
+        self.assertTrue(all(
+            'project' in allocation._state.fields_cache
+            for allocation in recent
+        ))
+        self.assertContains(response, 'Mostrando 5 de 6')
+        self.assertContains(response, f'{reverse("allocation_list")}?q={self.donation.code}')
+        self.assertNotContains(response, allocations[0].code)
+
+    def test_empty_optional_fields_and_allocations_are_not_rendered(self):
+        donation = create_donation(code='DON-DETAIL-EMPTY', donor=self.donor)
+        donation.objective = ''
+        donation.restrictions = ''
+        donation.commitment_date = None
+        donation.support_reference = ''
+        donation.save(update_fields=('objective', 'restrictions', 'commitment_date', 'support_reference', 'updated_at'))
+
+        response = self.client.get(reverse('donation_detail', args=[donation.pk]))
+
+        self.assertContains(response, 'Información de la donación')
+        self.assertNotContains(response, 'Objetivo')
+        self.assertNotContains(response, 'Restricciones de uso')
+        self.assertNotContains(response, 'Fecha de compromiso')
+        self.assertNotContains(response, 'Referencia de soporte')
+        self.assertNotContains(response, '>-<')
+        self.assertContains(response, 'Sin asignaciones vinculadas')
+        self.assertContains(response, 'Información de registro')
+
+    def test_allocation_rows_do_not_add_queries_or_preload_expenses(self):
+        one_allocation_donation = create_donation(code='DON-DETAIL-ONE', donor=self.donor)
+        many_allocations_donation = create_donation(code='DON-DETAIL-MANY', donor=self.donor)
+        self.create_allocation(
+            code='ASG-DON-ONE', donation=one_allocation_donation,
+            project=create_project(code='PRJ-DON-ONE'),
+        )
+        for index in range(6):
+            self.create_allocation(
+                code=f'ASG-DON-MANY-{index}',
+                donation=many_allocations_donation,
+                project=create_project(code=f'PRJ-DON-MANY-{index}'),
+            )
+
+        self.client.get(reverse('donation_detail', args=[one_allocation_donation.pk]))
+        with CaptureQueriesContext(connection) as one_allocation_queries:
+            self.client.get(reverse('donation_detail', args=[one_allocation_donation.pk]))
+        with CaptureQueriesContext(connection) as many_allocation_queries:
+            response = self.client.get(reverse('donation_detail', args=[many_allocations_donation.pk]))
+
+        self.assertEqual(len(one_allocation_queries), len(many_allocation_queries))
+        self.assertNotIn('expenses', '\n'.join(query['sql'] for query in many_allocation_queries).lower())
+        self.assertTrue(all(
+            'project' in allocation._state.fields_cache
+            for allocation in response.context['recent_donation_allocations']
+        ))

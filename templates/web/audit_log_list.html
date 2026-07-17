@@ -19,7 +19,7 @@
                 <tr>
                     <th>Fecha y hora</th>
                     <th>Usuario</th>
-                    <th>Acción</th>
+                    <th class="ops-audit-action-cell">Acción</th>
                     <th>Objeto</th>
                     <th>Detalle</th>
                 </tr>
@@ -37,7 +37,7 @@
                                 <span class="ops-audit-user-meta">{{ log.user.get_username }}</span>
                             {% endif %}
                         </td>
-                        <td>
+                        <td class="ops-audit-action-cell">
                             <span class="badge ops-audit-action ops-audit-action-{{ log.action }}">{{ log.get_action_display }}</span>
                         </td>
                         <td class="ops-audit-object">

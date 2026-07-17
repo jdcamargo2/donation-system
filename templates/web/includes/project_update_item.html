@@ -1,0 +1,64 @@
+<article
+    class="list-group-item ops-project-update-item"
+    data-project-update-id="{{ update.pk }}"
+>
+    <div class="d-flex justify-content-between align-items-start gap-3">
+        <div class="min-w-0">
+            <a class="fw-semibold text-decoration-none" href="{% url 'project_update_detail' update.pk %}">
+                {{ update.title }}
+            </a>
+            <div class="small text-muted">
+                {{ update.update_date }}{% if update.reported_by %} · Persona responsable del avance: {{ update.reported_by }}{% endif %}
+            </div>
+        </div>
+        <span class="badge ops-status-badge">{{ update.get_status_display }}</span>
+    </div>
+    <p class="mb-2 mt-2">{{ update.description|truncatewords:20 }}</p>
+    <div class="ops-project-update-actions">
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_detail' update.pk %}">Ver detalle</a>
+        {% if update.status == 'draft' %}
+            {% if perms.operations.publish_projectupdate %}
+                <form method="post" action="{% url 'project_update_publish' update.pk %}">
+                    {% csrf_token %}
+                    <button class="btn btn-sm btn-primary" type="submit">Publicar</button>
+                </form>
+            {% endif %}
+            {% if perms.operations.change_projectupdate or perms.operations.delete_projectupdate %}
+            <div class="dropdown ms-auto">
+                <button
+                    class="btn btn-sm btn-outline-secondary ops-project-update-more"
+                    type="button"
+                    id="project-detail-update-actions-{{ update.pk }}"
+                    data-bs-toggle="dropdown"
+                    data-bs-boundary="viewport"
+                    aria-expanded="false"
+                    aria-label="Más acciones para {{ update.title }}"
+                >⋯</button>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="project-detail-update-actions-{{ update.pk }}">
+                    {% if perms.operations.change_projectupdate %}
+                        <li><a class="dropdown-item" href="{% url 'project_update_update' update.pk %}">Editar</a></li>
+                    {% endif %}
+                    {% if perms.operations.delete_projectupdate %}
+                        {% if perms.operations.change_projectupdate %}<li><hr class="dropdown-divider"></li>{% endif %}
+                        <li>
+                            <a
+                                class="dropdown-item text-danger"
+                                href="{% url 'project_update_delete' update.pk %}"
+                                data-confirm-action
+                                data-confirm-form="project-update-delete-form-{{ update.pk }}"
+                                data-confirm-title="¿Eliminar este avance?"
+                                data-confirm-text="Esta acción no se puede deshacer."
+                                data-confirm-confirm-label="Sí, eliminar"
+                                data-confirm-variant="danger"
+                            >Eliminar</a>
+                            <form id="project-update-delete-form-{{ update.pk }}" method="post" action="{% url 'project_update_delete' update.pk %}">
+                                {% csrf_token %}
+                            </form>
+                        </li>
+                    {% endif %}
+                </ul>
+            </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</article>

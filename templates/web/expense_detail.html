@@ -1,109 +1,100 @@
 {% extends "base.html" %}
-{% load operations_format %}
+{% load operations_format static %}
 
 {% block title %}Gasto - SIGEDON{% endblock %}
 
 {% block content %}
-<div class="ops-page-header ops-page-header-row">
-    <div>
-        <div class="ops-kicker">Detalle de ejecución</div>
+<div class="ops-page-header ops-page-header-row ops-expense-detail-header">
+    <div class="ops-expense-detail-identity">
+        <div class="ops-kicker">Ejecución financiera</div>
         <h1>{{ object.code }}</h1>
-        <p>{{ object.reason }} · {{ object.amount|money_es }} {{ object.currency }} · <span class="badge ops-status-badge">{{ object.get_status_display }}</span></p>
+        <div class="ops-expense-detail-primary-meta">
+            <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            <span>{{ object.reason }}</span>
+            <span>Fecha del gasto: {{ object.expense_date }}</span>
+        </div>
+        <div class="ops-expense-detail-context">
+            <span><strong>Asignación:</strong>
+                {% if perms.operations.view_fundallocation %}<a href="{% url 'allocation_detail' object.allocation.pk %}">{{ object.allocation.code }}</a>{% else %}{{ object.allocation.code }}{% endif %}
+            </span>
+            <span><strong>Proyecto:</strong>
+                {% if perms.operations.view_project %}<a href="{% url 'project_detail' object.allocation.project.pk %}">{{ object.allocation.project.code }} · {{ object.allocation.project.name }}</a>{% else %}{{ object.allocation.project.code }} · {{ object.allocation.project.name }}{% endif %}
+            </span>
+        </div>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
         {% if perms.operations.change_expense and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
-        {% if perms.operations.delete_expense and object.status != 'annulled' %}
-            <a class="btn btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
-        {% endif %}
-        {% if perms.operations.change_expense and object.status == 'registered' %}
-            <a class="btn btn-warning" href="{% url 'expense_annul' object.pk %}">Anular</a>
+        {% if perms.operations.add_supportingdocument and object.status != 'annulled' or perms.operations.change_expense and object.status == 'registered' or perms.operations.delete_expense and object.status != 'annulled' %}
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="expense-actions-{{ object.pk }}" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" aria-label="Más acciones para {{ object.code }}">Más</button>
+                <ul class="dropdown-menu dropdown-menu-end ops-expense-detail-action-menu" aria-labelledby="expense-actions-{{ object.pk }}">
+                    {% if perms.operations.add_supportingdocument and object.status != 'annulled' %}<li><a class="dropdown-item" href="{% url 'supporting_document_create_for_expense' object.pk %}">Adjuntar soporte</a></li>{% endif %}
+                    {% if perms.operations.change_expense and object.status == 'registered' %}<li><a class="dropdown-item text-danger" href="{% url 'expense_annul' object.pk %}">Anular</a></li>{% endif %}
+                    {% if perms.operations.delete_expense and object.status != 'annulled' %}
+                        <li><a class="dropdown-item text-danger" href="{% url delete_url_name object.pk %}" data-confirm-action data-confirm-form="expense-delete-form" data-confirm-title="¿Eliminar este gasto?" data-confirm-text="Esta acción no se puede deshacer. Los documentos de soporte vinculados también dejarán de estar disponibles." data-confirm-confirm-label="Sí, eliminar" data-confirm-variant="danger">Eliminar</a></li>
+                    {% endif %}
+                </ul>
+                {% if perms.operations.delete_expense and object.status != 'annulled' %}<form id="expense-delete-form" method="post" action="{% url delete_url_name object.pk %}">{% csrf_token %}</form>{% endif %}
+            </div>
         {% endif %}
     </div>
 </div>
 
-<div class="row g-4">
-    <div class="col-lg-7">
-        <div class="card border-0 ops-detail-card">
-            <div class="card-body">
-                <dl class="row mb-0">
-                    <dt class="col-sm-4">Asignación</dt>
-                    <dd class="col-sm-8">
-                        <a href="{% url 'allocation_detail' object.allocation.pk %}">
-                            {{ object.allocation.code }} · {{ object.allocation.project.name }}
-                        </a>
-                    </dd>
-                    <dt class="col-sm-4">Donación origen</dt>
-                    <dd class="col-sm-8">
-                        <a href="{% url 'donation_detail' object.allocation.donation.pk %}">{{ object.allocation.donation.donor.name }}</a>
-                        <span class="small text-muted">{{ object.allocation.donation.code }}</span>
-                    </dd>
-                    <dt class="col-sm-4">Proyecto</dt>
-                    <dd class="col-sm-8">
-                        <a href="{% url 'project_detail' object.allocation.project.pk %}">{{ object.allocation.project.name }}</a>
-                        <span class="small text-muted">{{ object.allocation.project.code }}</span>
-                    </dd>
-                    <dt class="col-sm-4">Fecha</dt>
-                    <dd class="col-sm-8">{{ object.expense_date }}</dd>
-                    <dt class="col-sm-4">Monto</dt>
-                    <dd class="col-sm-8 ops-money">{{ object.amount|money_es }} {{ object.currency }}</dd>
-                    <dt class="col-sm-4">Categoría</dt>
-                    <dd class="col-sm-8">{{ object.get_category_display }}</dd>
-                    <dt class="col-sm-4">Proveedor o destinatario</dt>
-                    <dd class="col-sm-8">{{ object.provider_or_recipient }}</dd>
-                    <dt class="col-sm-4">Estado</dt>
-                    <dd class="col-sm-8">{{ object.get_status_display }}</dd>
-                    <dt class="col-sm-4">Motivo</dt>
-                    <dd class="col-sm-8">{{ object.reason }}</dd>
-                    <dt class="col-sm-4">Descripción</dt>
-                    <dd class="col-sm-8">{{ object.description|default:"-" }}</dd>
-                    {% if object.status == 'annulled' %}
-                        <dt class="col-sm-4">Motivo de anulación</dt>
-                        <dd class="col-sm-8">{{ object.terminal_reason }}</dd>
-                        <dt class="col-sm-4">Anulado por</dt>
-                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
-                        <dt class="col-sm-4">Fecha de anulación</dt>
-                        <dd class="col-sm-8">{{ object.terminal_at|default:"-" }}</dd>
-                    {% endif %}
-                </dl>
-            </div>
+<section class="ops-expense-financial-summary" aria-labelledby="expense-amount-title">
+    <span id="expense-amount-title" class="ops-metric-label">Monto del gasto</span>
+    <strong class="ops-expense-financial-value ops-money text-nowrap">{{ object.amount|money_es }} {{ object.currency }}</strong>
+</section>
+
+<article class="ops-expense-detail-body">
+    {% if object.category or object.provider_or_recipient or object.payment_method or object.description or object.observations %}
+    <section class="ops-expense-detail-section" aria-labelledby="expense-information-title">
+        <h2 id="expense-information-title" class="h5">Información del gasto</h2>
+        {% if object.category or object.provider_or_recipient or object.payment_method %}<div class="ops-expense-information-grid">
+            {% if object.category %}<div><span class="ops-detail-label">Categoría</span><span>{{ object.get_category_display }}</span></div>{% endif %}
+            {% if object.provider_or_recipient %}<div><span class="ops-detail-label">Proveedor o destinatario</span><span>{{ object.provider_or_recipient }}</span></div>{% endif %}
+            {% if object.payment_method %}<div><span class="ops-detail-label">Método de pago</span><span>{{ object.get_payment_method_display }}</span></div>{% endif %}
+        </div>{% endif %}
+        {% if object.description %}<div class="ops-expense-information-text"><h3>Descripción</h3><p>{{ object.description }}</p></div>{% endif %}
+        {% if object.observations %}<div class="ops-expense-information-text"><h3>Observaciones</h3><p>{{ object.observations }}</p></div>{% endif %}
+    </section>
+    {% endif %}
+    <section class="ops-expense-detail-section" aria-labelledby="expense-origin-title">
+        <h2 id="expense-origin-title" class="h5">Origen financiero</h2>
+        <div class="ops-expense-origin-grid">
+            <div><span class="ops-detail-label">Asignación</span>{% if perms.operations.view_fundallocation %}<a href="{% url 'allocation_detail' object.allocation.pk %}">{{ object.allocation.code }}</a>{% else %}<span>{{ object.allocation.code }}</span>{% endif %}</div>
+            <div><span class="ops-detail-label">Donación</span>{% if perms.operations.view_donation %}<a href="{% url 'donation_detail' object.allocation.donation.pk %}">{{ object.allocation.donation.code }}</a>{% else %}<span>{{ object.allocation.donation.code }}</span>{% endif %}</div>
+            <div><span class="ops-detail-label">Proyecto</span>{% if perms.operations.view_project %}<a href="{% url 'project_detail' object.allocation.project.pk %}">{{ object.allocation.project.code }} · {{ object.allocation.project.name }}</a>{% else %}<span>{{ object.allocation.project.code }} · {{ object.allocation.project.name }}</span>{% endif %}</div>
         </div>
-    </div>
-    <div class="col-lg-5">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h2 class="h5 mb-0">Documentos soporte</h2>
-            {% if perms.operations.add_supportingdocument and object.status != 'annulled' %}
-                <a class="btn btn-sm btn-primary" href="{% url 'supporting_document_create_for_expense' object.pk %}">
-                    Adjuntar soporte
-                </a>
-            {% endif %}
-        </div>
-        <div class="list-group">
+    </section>
+    <section class="ops-expense-detail-section" aria-labelledby="expense-documents-title">
+        <h2 id="expense-documents-title" class="h5">Documentos de soporte</h2>
+        <div class="ops-expense-document-list">
             {% for document in object.supporting_documents.all %}
-                <div class="list-group-item">
-                    <div class="d-flex justify-content-between align-items-start gap-3">
-                        <div>
-                            <a class="fw-semibold text-decoration-none" href="{% url 'supporting_document_download' document.pk %}">
-                                {{ document.title }}
-                            </a>
-                            <div class="small text-muted">{{ document.uploaded_at }}</div>
-                            {% if document.notes %}
-                                <div class="small mt-1">{{ document.notes }}</div>
-                            {% endif %}
-                        </div>
-                        {% if perms.operations.delete_supportingdocument and object.status != 'annulled' %}
-                            <a class="btn btn-sm btn-outline-danger" href="{% url 'supporting_document_delete' document.pk %}">
-                                Eliminar
-                            </a>
-                        {% endif %}
+                <div class="ops-expense-document-item">
+                    <div class="ops-expense-document-name"><i class="bi bi-file-earmark" aria-hidden="true"></i><div><strong>{{ document.title }}</strong><div class="small text-muted">Cargado el {{ document.uploaded_at }}</div>{% if document.notes %}<div class="small mt-1">{{ document.notes }}</div>{% endif %}</div></div>
+                    <div class="ops-expense-document-actions">
+                        {% if perms.operations.view_supportingdocument %}<a class="btn btn-sm btn-outline-primary" href="{% url 'supporting_document_download' document.pk %}">Descargar</a>{% endif %}
+                        {% if perms.operations.delete_supportingdocument and object.status != 'annulled' %}<div class="dropdown"><button class="btn btn-sm btn-outline-secondary ops-expense-document-more" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" aria-label="Acciones del documento {{ document.title }}">⋮</button><ul class="dropdown-menu dropdown-menu-end ops-expense-document-action-menu"><li><a class="dropdown-item text-danger" href="{% url 'supporting_document_delete' document.pk %}" data-confirm-action data-confirm-form="supporting-document-delete-form-{{ document.pk }}" data-confirm-title="¿Eliminar este documento?" data-confirm-text="El archivo dejará de estar disponible como soporte del gasto." data-confirm-confirm-label="Sí, eliminar" data-confirm-variant="danger">Eliminar</a></li></ul><form id="supporting-document-delete-form-{{ document.pk }}" method="post" action="{% url 'supporting_document_delete' document.pk %}">{% csrf_token %}</form></div>{% endif %}
                     </div>
                 </div>
-            {% empty %}
-                <div class="list-group-item text-muted">Este gasto todavía no tiene documentos soporte.</div>
-            {% endfor %}
+            {% empty %}<p class="text-muted mb-0">Sin documentos de soporte</p>{% endfor %}
         </div>
-    </div>
-</div>
+    </section>
+    <section class="ops-expense-detail-section ops-expense-detail-metadata" aria-labelledby="expense-metadata-title">
+        <h2 id="expense-metadata-title" class="h5">Información de registro</h2>
+        <div class="ops-expense-metadata-grid">
+            <div><span class="ops-detail-label">Creado</span><span>{{ object.created_at }}</span></div>
+            <div><span class="ops-detail-label">Actualizado</span><span>{{ object.updated_at }}</span></div>
+            {% if object.status == 'annulled' %}{% if object.terminal_reason %}<div><span class="ops-detail-label">Motivo de anulación</span><span>{{ object.terminal_reason }}</span></div>{% endif %}{% if object.terminal_at %}<div><span class="ops-detail-label">Fecha de anulación</span><span>{{ object.terminal_at }}</span></div>{% endif %}{% if object.terminal_by %}<div><span class="ops-detail-label">Anulado por</span><span>{{ object.terminal_by }}</span></div>{% endif %}{% endif %}
+        </div>
+    </section>
+</article>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+{% if perms.operations.delete_expense and object.status != 'annulled' or perms.operations.delete_supportingdocument and object.status != 'annulled' %}<script src="{% static 'web/js/confirm_actions.js' %}" defer></script>{% endif %}
 {% endblock %}

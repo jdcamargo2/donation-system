@@ -252,7 +252,7 @@ class OperationalDetailViewTests(TestCase):
         self.assertContains(response, 'Restricciones de uso')
         self.assertContains(response, self.donation.restrictions)
         self.assertContains(response, self.allocation.code)
-        self.assertContains(response, 'Progreso de asignación')
+        self.assertContains(response, 'Estado de asignación')
 
     def test_allocation_detail_separates_registered_and_annulled_expenses(self):
         registered = create_expense(allocation=self.allocation, amount=Decimal('10.00'), reason='Gasto vigente')

@@ -1,109 +1,148 @@
 {% extends "base.html" %}
-{% load operations_format %}
+{% load operations_format static %}
 
 {% block title %}Donación - SIGEDON{% endblock %}
 
 {% block content %}
-<div class="ops-page-header ops-page-header-row">
-    <div>
+{# DEUDA TÉCNICA: DetailMetricsMixin aún entrega metrics, pero este detalle usa contexto específico. #}
+<div class="ops-page-header ops-page-header-row ops-donation-detail-header">
+    <div class="ops-donation-detail-identity">
         <div class="ops-kicker">Ficha de donación</div>
         <h1>{{ object.code }}</h1>
-        <p>
-            {{ object.donor }}
-            · Ciclo <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
-            · Progreso de asignación <span class="badge text-bg-light">{{ object.allocation_progress_label }}</span>
-        </p>
+        <div class="ops-donation-detail-primary-meta">
+            <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            {% if object.received_date %}<span>Fecha de recepción: {{ object.received_date }}</span>{% endif %}
+        </div>
+        <div class="ops-donation-detail-donor">
+            <span class="text-muted">Donante</span>
+            {% if perms.operations.view_institution %}
+                <a href="{% url 'institution_detail' object.donor.pk %}">{{ object.donor }}</a>
+            {% else %}
+                <span>{{ object.donor }}</span>
+            {% endif %}
+        </div>
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_donation and object.status != 'annulled' %}
+        {% if can_create_allocation %}
+            <a class="btn btn-primary" href="{% url 'allocation_create' %}">Nueva asignación</a>
+        {% elif perms.operations.change_donation and object.status != 'annulled' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
+        {% endif %}
+        {% if show_edit_in_more or perms.operations.change_donation and status_transitions or perms.operations.change_donation and can_annul or perms.operations.delete_donation %}
+            <div class="dropdown">
+                <button
+                    class="btn btn-outline-secondary dropdown-toggle"
+                    type="button"
+                    id="donation-actions-{{ object.pk }}"
+                    data-bs-toggle="dropdown"
+                    data-bs-boundary="viewport"
+                    aria-expanded="false"
+                    aria-label="Más acciones para {{ object.code }}"
+                >Más</button>
+                <ul class="dropdown-menu dropdown-menu-end ops-donation-detail-action-menu" aria-labelledby="donation-actions-{{ object.pk }}">
+                    {% if show_edit_in_more %}<li><a class="dropdown-item" href="{% url update_url_name object.pk %}">Editar</a></li>{% endif %}
+                    {% if perms.operations.change_donation and status_transitions %}
+                        {% for transition in status_transitions %}
+                        <li>
+                            <form method="post" action="{% url transition_url_name object.pk transition.value %}">
+                                {% csrf_token %}
+                                <button class="dropdown-item" type="submit">Cambiar a {{ transition.label }}</button>
+                            </form>
+                        </li>
+                        {% endfor %}
+                    {% endif %}
+                    {% if perms.operations.change_donation and can_annul %}<li><a class="dropdown-item text-danger" href="{% url 'donation_annul' object.pk %}">Anular donación</a></li>{% endif %}
+                    {% if perms.operations.delete_donation %}
+                        <li>
+                            <a
+                                class="dropdown-item text-danger"
+                                href="{% url delete_url_name object.pk %}"
+                                data-confirm-action
+                                data-confirm-form="donation-delete-form"
+                                data-confirm-title="¿Eliminar esta donación?"
+                                data-confirm-text="Esta acción no se puede deshacer. Si existen asignaciones vinculadas, el sistema impedirá la eliminación."
+                                data-confirm-confirm-label="Sí, eliminar"
+                                data-confirm-variant="danger"
+                            >Eliminar donación</a>
+                        </li>
+                    {% endif %}
+                </ul>
+                {% if perms.operations.delete_donation %}
+                <form id="donation-delete-form" method="post" action="{% url delete_url_name object.pk %}">
+                    {% csrf_token %}
+                </form>
+                {% endif %}
+            </div>
         {% endif %}
     </div>
 </div>
-{% if perms.operations.change_donation and status_transitions %}
-<div class="d-flex gap-2 mb-4">
-    {% for transition in status_transitions %}
-    <form method="post" action="{% url transition_url_name object.pk transition.value %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Cambiar a {{ transition.label }}</button></form>
-    {% endfor %}
-</div>
-{% endif %}
-{% if perms.operations.change_donation and can_annul %}
-<div class="d-flex gap-2 mb-4">
-    <a class="btn btn-danger" href="{% url 'donation_annul' object.pk %}">Anular donación</a>
-</div>
-{% endif %}
 
-<div class="row g-3 mb-4">
-    <div class="col-md-4">
-        <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
-            <div class="ops-metric-label">Monto total</div>
-            <div class="ops-metric-value">{{ donation_financial_summary.total_amount|money_es }} {{ object.currency }}</div>
-        </div></div>
+<section class="ops-donation-financial-summary" aria-labelledby="donation-financial-summary-title">
+    <div class="ops-donation-financial-heading">
+        <h2 id="donation-financial-summary-title" class="h5 mb-0">Resumen financiero</h2>
+        <span class="small text-muted">Estado de asignación: {{ object.allocation_progress_label }}</span>
     </div>
-    <div class="col-md-4">
-        <div class="card border-0 h-100 ops-metric-card"><div class="card-body">
-            <div class="ops-metric-label">Monto asignado</div>
-            <div class="ops-metric-value">{{ donation_financial_summary.assigned_amount|money_es }} {{ object.currency }}</div>
-        </div></div>
+    <div class="ops-donation-financial-metrics">
+        <div class="ops-donation-financial-metric"><span class="ops-metric-label">Monto recibido</span><strong class="ops-donation-financial-value ops-money text-nowrap">{{ donation_financial_summary.total_amount|money_es }} {{ object.currency }}</strong></div>
+        <div class="ops-donation-financial-metric"><span class="ops-metric-label">Monto asignado</span><strong class="ops-donation-financial-value ops-money text-nowrap">{{ donation_financial_summary.assigned_amount|money_es }} {{ object.currency }}</strong></div>
+        <div class="ops-donation-financial-metric ops-donation-financial-metric-available"><span class="ops-metric-label">Monto disponible</span><strong class="ops-donation-financial-value ops-money text-nowrap">{{ donation_financial_summary.available_amount|money_es }} {{ object.currency }}</strong></div>
     </div>
-    <div class="col-md-4">
-        <div class="card border-0 h-100 ops-metric-card ops-metric-card-available"><div class="card-body">
-            <div class="ops-metric-label">Monto disponible</div>
-            <div class="ops-metric-value">{{ donation_financial_summary.available_amount|money_es }} {{ object.currency }}</div>
-        </div></div>
-    </div>
-</div>
+</section>
 
-{% if object.restrictions %}
-<div class="alert alert-warning" role="note">
-    <strong>Restricciones de uso:</strong> {{ object.restrictions }}
-</div>
-{% endif %}
-
-<div class="row g-4">
-    <div class="col-lg-6">
-        <div class="card border-0 h-100 ops-detail-card">
-            <div class="card-body">
-                <h2 class="h5 mb-3">Detalle de la donación</h2>
-                <dl class="row mb-0">
-                    <dt class="col-sm-4">Tipo</dt>
-                    <dd class="col-sm-8">{{ object.get_donation_type_display }}</dd>
-                    <dt class="col-sm-4">Objetivo</dt>
-                    <dd class="col-sm-8">{{ object.objective|default:"-" }}</dd>
-                    <dt class="col-sm-4">Restricciones</dt>
-                    <dd class="col-sm-8">{{ object.restrictions|default:"-" }}</dd>
-                    <dt class="col-sm-4">Fecha de compromiso</dt>
-                    <dd class="col-sm-8">{{ object.commitment_date|default:"-" }}</dd>
-                    <dt class="col-sm-4">Fecha de recepción</dt>
-                    <dd class="col-sm-8">{{ object.received_date|default:"-" }}</dd>
-                    <dt class="col-sm-4">Referencia de soporte</dt>
-                    <dd class="col-sm-8">{{ object.support_reference|default:"-" }}</dd>
-                    {% if object.terminal_at %}
-                        <dt class="col-sm-4">Motivo terminal</dt>
-                        <dd class="col-sm-8">{{ object.terminal_reason|default:"-" }}</dd>
-                        <dt class="col-sm-4">Procesado por</dt>
-                        <dd class="col-sm-8">{{ object.terminal_by|default:"-" }}</dd>
-                        <dt class="col-sm-4">Fecha terminal</dt>
-                        <dd class="col-sm-8">{{ object.terminal_at }}</dd>
-                    {% endif %}
-                </dl>
-            </div>
+<article class="ops-donation-detail-body">
+    {% if object.donation_type or object.objective or object.restrictions or object.commitment_date or object.support_reference %}
+    <section class="ops-donation-detail-section" aria-labelledby="donation-information-title">
+        <h2 id="donation-information-title" class="h5">Información de la donación</h2>
+        <div class="ops-donation-information-grid">
+            {% if object.donation_type %}<div><span class="ops-detail-label">Tipo</span><span>{{ object.get_donation_type_display }}</span></div>{% endif %}
+            {% if object.commitment_date %}<div><span class="ops-detail-label">Fecha de compromiso</span><span>{{ object.commitment_date }}</span></div>{% endif %}
+            {% if object.support_reference %}<div><span class="ops-detail-label">Referencia de soporte</span><span>{{ object.support_reference }}</span></div>{% endif %}
         </div>
-    </div>
-    <div class="col-lg-6">
-        <h2 class="h5">Asignaciones vinculadas</h2>
-        <div class="list-group">
-            {% for allocation in related_allocations %}
-                <a class="list-group-item list-group-item-action" href="{% url 'allocation_detail' allocation.pk %}">
-                    <div class="fw-semibold">{{ allocation.code }}</div>
-                    <div>{{ allocation.project.name }}</div>
-                    <div class="small text-muted">{{ allocation.project.code }} · {{ allocation.amount|money_es }} · {{ allocation.get_budget_category_display }} · Ciclo {{ allocation.get_status_display }} · Ejecución {{ allocation.execution_progress_label }} · Disponible {{ allocation.available_balance|money_es }}</div>
-                </a>
-            {% empty %}
-                <div class="list-group-item text-muted">Esta donación todavía no tiene asignaciones vinculadas.</div>
-            {% endfor %}
+        {% if object.objective %}<div class="ops-donation-information-text"><h3>Objetivo</h3><p>{{ object.objective }}</p></div>{% endif %}
+        {% if object.restrictions %}<div class="ops-donation-restrictions" role="note"><h3>Restricciones de uso</h3><p>{{ object.restrictions }}</p></div>{% endif %}
+    </section>
+    {% endif %}
+
+    <section class="ops-donation-detail-section" aria-labelledby="donation-allocations-title">
+        <div class="ops-donation-allocations-heading">
+            <h2 id="donation-allocations-title" class="h5 mb-0">Asignaciones vinculadas</h2>
+            {% if has_more_donation_allocations %}<span class="small text-muted">Mostrando 5 de {{ donation_allocation_count }}</span>{% endif %}
         </div>
-    </div>
-</div>
+        {% if recent_donation_allocations %}
+            <ul class="ops-donation-allocation-list">
+                {% for allocation in recent_donation_allocations %}
+                <li>
+                    <a class="fw-semibold" href="{% url 'allocation_detail' allocation.pk %}">{{ allocation.code }}</a>
+                    <span>{{ allocation.project.code }} · {{ allocation.project.name }}</span>
+                    <span class="ops-money text-nowrap">{{ allocation.amount|money_es }} {{ object.currency }}</span>
+                    <span>{{ allocation.get_budget_category_display }}</span>
+                    <span class="badge ops-status-badge">{{ allocation.get_status_display }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% if has_more_donation_allocations %}<a class="btn btn-sm btn-outline-secondary mt-3" href="{% url 'allocation_list' %}?q={{ object.code }}">Ver todas las asignaciones</a>{% endif %}
+        {% else %}
+            <p class="text-muted mb-0">Sin asignaciones vinculadas</p>
+        {% endif %}
+    </section>
+
+    <section class="ops-donation-detail-section ops-donation-detail-metadata" aria-labelledby="donation-metadata-title">
+        <h2 id="donation-metadata-title" class="h5">Información de registro</h2>
+        <div class="ops-donation-metadata-grid">
+            <div><span class="ops-detail-label">Creada</span><span>{{ object.created_at }}</span></div>
+            <div><span class="ops-detail-label">Actualizada</span><span>{{ object.updated_at }}</span></div>
+            {% if object.status == 'annulled' %}
+                {% if object.terminal_reason %}<div><span class="ops-detail-label">Motivo</span><span>{{ object.terminal_reason }}</span></div>{% endif %}
+                {% if object.terminal_at %}<div><span class="ops-detail-label">Fecha de anulación</span><span>{{ object.terminal_at }}</span></div>{% endif %}
+                {% if object.terminal_by %}<div><span class="ops-detail-label">Procesada por</span><span>{{ object.terminal_by }}</span></div>{% endif %}
+            {% endif %}
+        </div>
+    </section>
+</article>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+{% if perms.operations.delete_donation %}<script src="{% static 'web/js/confirm_actions.js' %}" defer></script>{% endif %}
 {% endblock %}

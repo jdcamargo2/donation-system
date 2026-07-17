@@ -1,6 +1,6 @@
 from django.core.exceptions import PermissionDenied
 
-from django.db.models import Prefetch
+from django.db.models import Count
 
 from django.shortcuts import get_object_or_404
 
@@ -96,25 +96,46 @@ class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequir
     transition_url_name = 'donation_status_transition'
 
     def get_queryset(self):
-        # PRE: la vista consulta una donación autorizada por clave primaria.
-        # POST: carga donante, metadata terminal y asignaciones relacionadas con sus destinos.
-        return Donation.objects.select_related('donor', 'terminal_by').prefetch_related(
-            Prefetch(
-                'allocations',
-                queryset=FundAllocation.objects.select_related('project').prefetch_related('expenses'),
-                to_attr='detail_allocations',
-            )
+        """
+        PRE: the requested donation is visible to the current user.
+        POST: returns donor and terminal metadata with an allocation count, without preloading rows or expenses.
+        """
+        return Donation.objects.select_related('donor', 'terminal_by').annotate(
+            donation_allocation_count=Count('allocations'),
         )
 
     def get_context_data(self, **kwargs):
+        """
+        PRE: self.object contains the annotated allocation count from get_queryset.
+        POST: exposes the complete financial summary and at most five latest allocation rows independently.
+        """
         context = super().get_context_data(**kwargs)
         allowed_targets = DONATION_STATUS_TRANSITIONS.get(self.object.status, ())
         context['can_annul'] = (
             Donation.Status.ANNULLED in allowed_targets
             and not self.object.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists()
         )
-        context['donation_financial_summary'] = get_donation_financial_summary(self.object)
-        context['related_allocations'] = self.object.detail_allocations
+        financial_summary = get_donation_financial_summary(self.object)
+        recent_allocations = list(
+            self.object.allocations.select_related('project').order_by(
+                '-allocation_date', '-created_at', '-pk'
+            )[:5]
+        )
+        allocation_count = self.object.donation_allocation_count
+        context['donation_financial_summary'] = financial_summary
+        context['recent_donation_allocations'] = recent_allocations
+        context['donation_allocation_count'] = allocation_count
+        context['has_more_donation_allocations'] = allocation_count > len(recent_allocations)
+        context['can_create_allocation'] = (
+            self.request.user.has_perm('operations.add_fundallocation')
+            and financial_summary['available_amount'] > 0
+            and self.object.status != Donation.Status.ANNULLED
+        )
+        context['show_edit_in_more'] = (
+            context['can_create_allocation']
+            and self.request.user.has_perm('operations.change_donation')
+            and self.object.status != Donation.Status.ANNULLED
+        )
         return context
 
 

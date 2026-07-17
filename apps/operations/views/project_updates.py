@@ -108,9 +108,17 @@ class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMix
     page_title = _('Avance de proyecto')
 
     def get_queryset(self):
+        """
+        PRE: the request has view_projectupdate permission and targets one advance.
+        POST: returns the advance with every relation rendered by its detail preloaded.
+        """
         return ProjectUpdate.objects.select_related(
-            'project', 'created_by', 'reported_by', 'committee_review__reviewed_by'
-        )
+            'project',
+            'created_by',
+            'reported_by',
+            'committee_review__reviewed_by',
+            'committee_review__decision__remediation',
+        ).prefetch_related('attachments')
 
 
 class ProjectUpdateReviewCreateView(OperationsPermissionRequiredMixin, FormView):
