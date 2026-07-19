@@ -212,7 +212,11 @@ class OperationalDetailViewTests(TestCase):
         self.assertContains(response, 'Financiado')
         self.assertContains(response, 'Ejecución')
         self.assertContains(response, 'La Guaira')
-        self.assertContains(response, 'Sin información registrada en esta fase.')
+        self.assertContains(response, 'Sin hitos definidos')
+        self.assertContains(
+            response,
+            'No hay avances publicados ni borradores registrados para este proyecto.',
+        )
         self.assertContains(response, 'Este proyecto todavía no tiene documentos.')
 
     def test_authorized_user_sees_published_and_draft_updates(self):
@@ -262,10 +266,20 @@ class OperationalDetailViewTests(TestCase):
 
         response = self.client.get(reverse('allocation_detail', args=[self.allocation.pk]))
 
-        self.assertContains(response, 'Gastos registrados')
-        self.assertContains(response, registered.reason)
-        self.assertContains(response, 'Gastos anulados')
-        self.assertContains(response, annulled.reason)
+        self.assertContains(response, 'Gastos vinculados')
+        self.assertContains(response, 'Gasto vigente')
+        self.assertContains(response, 'Registrado')
+        self.assertContains(response, reverse('expense_detail', args=[registered.pk]))
+        self.assertContains(response, '10,00')
+        self.assertContains(response, 'Gasto anulado')
+        self.assertContains(response, 'Anulado')
+        self.assertContains(response, reverse('expense_detail', args=[annulled.pk]))
+        self.assertContains(response, '5,00')
+        # El anulado no suma a ejecutado: asignado 60 − ejecutado 10 = disponible 50.
+        self.assertContains(response, '50,00')
+        self.assertNotContains(response, '15,00')
+        self.assertNotContains(response, 'Gastos registrados')
+        self.assertNotContains(response, 'Gastos anulados')
 
     @override_settings(KOBO_ENABLED=True)
     def test_project_without_binding_does_not_render_kobo_section(self):

@@ -19,7 +19,7 @@ EXPECTED_VIEW_MODULES = (
     'projects',
     'supporting_documents',
 )
-EXPECTED_ROUTE_COUNT = 75
+EXPECTED_ROUTE_COUNT = 76
 INCIDENTAL_NAMES_MUST_STAY_PRIVATE = (
     'Donation',
     'CreateView',
@@ -89,13 +89,15 @@ class OperationsViewsPackageArchitectureTests(SimpleTestCase):
 
     def test_urls_reference_explicitly_reexported_view_classes_without_duplicates(self):
         route_keys = [(pattern.name, str(pattern.pattern)) for pattern in urls.urlpatterns]
+        route_names = {pattern.name for pattern in urls.urlpatterns}
 
         self.assertEqual(len(route_keys), EXPECTED_ROUTE_COUNT)
         self.assertEqual(len(route_keys), len(set(route_keys)))
         self.assertEqual(
             len([pattern.name for pattern in urls.urlpatterns]),
-            len({pattern.name for pattern in urls.urlpatterns}),
+            len(route_names),
         )
+        self.assertIn('project_update_chunk', route_names)
         for pattern in urls.urlpatterns:
             view_class = pattern.callback.view_class
             with self.subTest(route=pattern.name):

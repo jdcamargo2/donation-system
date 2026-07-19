@@ -1,75 +1,101 @@
 {% extends "public_portal/public_base.html" %}
 {% load operations_format %}
 
-{% block title %}Proyecto público - SIGEDON{% endblock %}
+{% block title %}{{ project.name }} | Transparencia SIGEDON{% endblock %}
+{% block meta_description %}{{ project.description|default:"Información pública del proyecto en SIGEDON."|striptags|truncatechars:155 }}{% endblock %}
 
 {% block content %}
-<section class="public-hero public-hero-split">
-    <div class="public-hero-copy">
-        <p class="public-eyebrow">{{ project.code }} · {{ project.get_status_display }}</p>
-        <h1 class="public-page-title">{{ project.name }}</h1>
-        <p class="public-lead">{{ project.description|default:"Sin descripción pública." }}</p>
+<a href="{% url 'public_portal:public_project_list' %}" class="public-back-link public-detail-back-link">
+    <span aria-hidden="true">←</span> Volver a proyectos
+</a>
+
+<header class="public-project-header">
+    <p class="public-eyebrow">Proyecto comunitario</p>
+    <h1 class="public-page-title">{{ project.name }}</h1>
+    <p class="public-project-code">{{ project.code }}</p>
+    {% if project.location or project.start_date or project.end_date %}
+        <div class="public-project-meta" aria-label="Datos principales del proyecto">
+            {% if project.location %}<span>{{ project.location }}</span>{% endif %}
+            {% if project.start_date or project.end_date %}
+                <span>{% if project.start_date %}{{ project.start_date|date:"d/m/Y" }}{% endif %}{% if project.start_date and project.end_date %} — {% endif %}{% if project.end_date %}{{ project.end_date|date:"d/m/Y" }}{% endif %}</span>
+            {% endif %}
+        </div>
+    {% endif %}
+    <p class="public-lead public-project-introduction">{{ project.description|default:"Sin descripción pública." }}</p>
+</header>
+
+<section class="public-detail-section public-financial-summary" aria-labelledby="financial-summary-heading">
+    <div class="public-detail-section-heading">
+        <p class="public-eyebrow">Resumen financiero</p>
+        <h2 id="financial-summary-heading">Recursos del proyecto</h2>
     </div>
-    <div class="public-hero-visual" aria-hidden="true">
-        <div class="public-data-card compact">
-            <span class="public-badge">{{ project.get_status_display }}</span>
-            <strong>Ficha pública del proyecto</strong>
-            <div class="data-lines">
-                <span style="--line-width: 78%"></span>
-                <span style="--line-width: 58%"></span>
-                <span style="--line-width: 70%"></span>
-            </div>
+    <div class="public-financial-metrics">
+        <div class="public-financial-metric">
+            <p class="public-card-label">Fondos asignados</p>
+            <p class="public-financial-value"><span class="public-money-value">{{ financial_summary.funded_amount|money_es }} USD</span></p>
+            <p>Recursos destinados formalmente al proyecto.</p>
+        </div>
+        <div class="public-financial-metric">
+            <p class="public-card-label">Recursos ejecutados</p>
+            <p class="public-financial-value"><span class="public-money-value">{{ financial_summary.executed_amount|money_es }} USD</span></p>
+            <p>Gastos registrados durante su ejecución.</p>
+        </div>
+        <div class="public-financial-metric">
+            <p class="public-card-label">Disponible por ejecutar</p>
+            <p class="public-financial-value"><span class="public-money-value">{{ financial_summary.available_amount|money_es }} USD</span></p>
+            <p>Parte asignada que todavía no figura como ejecutada.</p>
         </div>
     </div>
+    <p class="public-financial-note">Las cifras están expresadas en dólares estadounidenses.</p>
 </section>
 
-<section class="public-notice-inline">
-    <p>
-        Esta ficha muestra información pública del proyecto. Los datos personales, contactos internos,
-        datos internos y registros en borrador no se publican.
-    </p>
-</section>
-
-<section class="public-grid metrics" aria-label="Resumen financiero público">
-    <article class="public-card metric-card">
-        <span class="metric-icon" aria-hidden="true">↗</span>
-        <div class="public-card-label">Asignado</div>
-        <div class="public-card-value">{{ financial_summary.funded_amount|money_es }} USD</div>
-    </article>
-    <article class="public-card metric-card">
-        <span class="metric-icon" aria-hidden="true">✓</span>
-        <div class="public-card-label">Ejecutado</div>
-        <div class="public-card-value">{{ financial_summary.executed_amount|money_es }} USD</div>
-    </article>
-    <article class="public-card metric-card">
-        <span class="metric-icon" aria-hidden="true">•</span>
-        <div class="public-card-label">Disponible</div>
-        <div class="public-card-value">{{ financial_summary.available_amount|money_es }} USD</div>
-    </article>
-</section>
-
-<section class="public-section">
-    <div class="public-section-header">
-        <h2>Avances publicados</h2>
-        <a href="{% url 'public_portal:public_project_list' %}" class="public-back-link">
-            <span aria-hidden="true">←</span> Volver a proyectos
-        </a>
-    </div>
-    <div class="public-list public-timeline">
-        {% for update in published_updates %}
-            <article class="public-list-item update-card">
-                <div class="public-section-header">
-                    <div>
-                        <h3>{{ update.title }}</h3>
-                        <div class="public-meta update-meta">{{ update.created_at }}</div>
-                    </div>
-                    <span class="public-badge">{{ update.get_status_display }}</span>
+{% if project.objective or project.description %}
+    <section class="public-detail-section public-project-information" aria-labelledby="project-information-heading">
+        <div class="public-detail-section-heading">
+            <p class="public-eyebrow">Información del proyecto</p>
+            <h2 id="project-information-heading">Contexto y propósito</h2>
+        </div>
+        <div class="public-editorial-content">
+            {% if project.objective %}
+                <div>
+                    <h3>Objetivo</h3>
+                    {{ project.objective|linebreaks }}
                 </div>
-                <p>{{ update.description }}</p>
-            </article>
+            {% endif %}
+            {% if project.description %}
+                <div>
+                    <h3>Descripción</h3>
+                    {{ project.description|linebreaks }}
+                </div>
+            {% endif %}
+        </div>
+    </section>
+{% endif %}
+
+<section class="public-detail-section public-project-updates" aria-labelledby="published-updates-heading">
+    <div class="public-detail-section-heading">
+        <p class="public-eyebrow">Seguimiento</p>
+        <h2 id="published-updates-heading">Avances publicados</h2>
+    </div>
+    <div class="public-detail-timeline">
+        {% for update in published_updates %}
+            <a class="public-detail-update" href="{% url 'public_portal:public_project_update_detail' update.pk %}">
+                <time datetime="{{ update.update_date|date:'c' }}">{{ update.update_date|date:"j \d\e F \d\e Y" }}</time>
+                <h3>{{ update.title }}</h3>
+                <p class="public-detail-update-excerpt">{{ update.description }}</p>
+                <span class="public-detail-update-indicator" aria-hidden="true">→</span>
+            </a>
         {% empty %}
-            <div class="public-list-item public-meta">Este proyecto todavía no tiene avances publicados.</div>
+            <div class="public-detail-empty-state">
+                <p>Este proyecto todavía no tiene avances publicados.</p>
+                <p>Las actualizaciones aparecerán después de ser revisadas y aprobadas.</p>
+            </div>
         {% endfor %}
     </div>
 </section>
+
+<aside class="public-methodology-note" aria-label="Metodología y privacidad">
+    <p>Solo se muestran proyectos activos y avances aprobados. Las cifras financieras son agregadas; no se publican usuarios, archivos privados ni información personal.</p>
+    <a href="{% url 'public_portal:public_home' %}#metodologia">Conoce la metodología</a>
+</aside>
 {% endblock %}

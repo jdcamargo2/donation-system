@@ -83,6 +83,32 @@ def get_recent_published_updates(limit: int = 10):
     ).select_related('project').order_by('-created_at')[:limit]
 
 
+def get_public_project_update_detail(update_id: int):
+    """
+    PRE: update_id identifica un avance que se solicita desde el portal público.
+    POST: retorna únicamente un avance PUBLISHED de un proyecto ACTIVE, con los
+    campos públicos necesarios; cualquier otro avance produce 404.
+    """
+    return get_object_or_404(
+        ProjectUpdate.objects.filter(
+            status=ProjectUpdate.Status.PUBLISHED,
+            project__status=Project.Status.ACTIVE,
+        )
+        .select_related('project')
+        .only(
+            'id',
+            'project_id',
+            'title',
+            'description',
+            'update_date',
+            'project__id',
+            'project__code',
+            'project__name',
+        ),
+        pk=update_id,
+    )
+
+
 def get_public_project_detail(project_id: int):
     """
     PRE: project_id corresponde a un proyecto existente.

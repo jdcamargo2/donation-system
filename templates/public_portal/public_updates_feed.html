@@ -1,49 +1,45 @@
 {% extends "public_portal/public_base.html" %}
 
 {% block title %}Avances publicados - SIGEDON{% endblock %}
+{% block meta_description %}Consulta los avances aprobados y publicados de los proyectos activos de SIGEDON.{% endblock %}
 
 {% block content %}
-<section class="public-hero">
+<section class="public-hero public-secondary-hero">
     <p class="public-eyebrow">Avances</p>
-    <h1 class="public-page-title">Avances publicados para consulta pública</h1>
+    <h1 class="public-page-title">Avances publicados</h1>
     <p class="public-lead">
-        Registro de avances publicados para acompañar la ejecución de los proyectos.
+        Actualizaciones aprobadas sobre la ejecución de los proyectos.
     </p>
 </section>
 
 <section class="public-list public-feed">
     {% for update in updates %}
-        <article class="public-list-item update-card">
-            <div class="public-section-header">
-                <div>
-                    <h2>{{ update.title }}</h2>
-                    <div class="public-meta update-meta">
-                        <a href="{% url 'public_portal:public_project_detail' update.project.pk %}">{{ update.project.name }}</a>
-                        · {{ update.created_at }}
-                    </div>
-                </div>
-                <span class="public-badge">{{ update.get_status_display }}</span>
-            </div>
-            <p>{{ update.description|truncatewords:34 }}</p>
-            <div class="public-card-actions">
-                <a class="public-link-arrow public-action-primary" href="{% url 'public_portal:public_project_detail' update.project.pk %}">
-                    Ver proyecto <span aria-hidden="true">→</span>
-                </a>
-            </div>
-        </article>
+        <a class="public-update-card" href="{% url 'public_portal:public_project_update_detail' update.pk %}">
+            <time class="public-card-date" datetime="{{ update.update_date|date:'c' }}">{{ update.update_date|date:"j \d\e F \d\e Y" }}</time>
+            <h2>{{ update.title }}</h2>
+            <p class="public-card-context">{{ update.project.name }}</p>
+            <p class="public-card-excerpt">{{ update.description }}</p>
+            <span class="public-card-indicator" aria-hidden="true">→</span>
+        </a>
     {% empty %}
-        <div class="public-list-item public-meta">Todavía no hay avances publicados.</div>
+        <div class="public-list-item public-empty-state">
+            <p>No hay avances publicados en este momento.</p>
+        </div>
     {% endfor %}
 </section>
 
 {% if is_paginated %}
     <nav class="public-pagination" aria-label="Paginación">
         {% if page_obj.has_previous %}
-            <a href="?page={{ page_obj.previous_page_number }}">Anterior</a>
+            <a href="{% querystring page=page_obj.previous_page_number %}">Anterior</a>
+        {% else %}
+            <span aria-disabled="true">Anterior</span>
         {% endif %}
-        <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+        <span aria-current="page">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
         {% if page_obj.has_next %}
-            <a href="?page={{ page_obj.next_page_number }}">Siguiente</a>
+            <a href="{% querystring page=page_obj.next_page_number %}">Siguiente</a>
+        {% else %}
+            <span aria-disabled="true">Siguiente</span>
         {% endif %}
     </nav>
 {% endif %}

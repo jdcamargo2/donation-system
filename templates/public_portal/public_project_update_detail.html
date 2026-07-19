@@ -1,0 +1,32 @@
+{% extends "public_portal/public_base.html" %}
+
+{% block title %}{{ update.title }} | Transparencia SIGEDON{% endblock %}
+{% block meta_description %}{{ update.description|striptags|truncatechars:155 }}{% endblock %}
+
+{% block content %}
+<a href="{% url 'public_portal:public_updates_feed' %}" class="public-back-link public-detail-back-link">
+    <span aria-hidden="true">←</span> Volver a avances
+</a>
+
+<header class="public-update-header">
+    <p class="public-eyebrow">Avance del proyecto</p>
+    <h1 class="public-page-title">{{ update.title }}</h1>
+    <time class="public-update-date" datetime="{{ update.update_date|date:'c' }}">{{ update.update_date|date:"j \d\e F \d\e Y" }}</time>
+    <p class="public-update-project-context">{{ update.project.code }} · {{ update.project.name }}</p>
+</header>
+
+<section class="public-update-content" aria-labelledby="update-content-heading">
+    <h2 id="update-content-heading">Detalle del avance</h2>
+    {{ update.description|linebreaks }}
+</section>
+
+<aside class="public-related-project" aria-labelledby="related-project-heading">
+    <p class="public-eyebrow">Proyecto relacionado</p>
+    <h2 id="related-project-heading">{{ update.project.name }}</h2>
+    <a href="{% url 'public_portal:public_project_detail' update.project.pk %}">Ver proyecto relacionado <span aria-hidden="true">→</span></a>
+</aside>
+
+<aside class="public-publication-note">
+    <p>Este avance fue revisado y aprobado para su publicación en el portal.</p>
+</aside>
+{% endblock %}

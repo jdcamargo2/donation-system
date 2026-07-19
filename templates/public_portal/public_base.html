@@ -5,36 +5,37 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}SIGEDON Transparencia{% endblock %}</title>
+    <meta name="description" content="{% block meta_description %}Información pública sobre proyectos, fondos y avances de SIGEDON.{% endblock %}">
     <link href="{% static 'public_portal/css/public_portal.css' %}" rel="stylesheet">
 </head>
 <body>
+    <a class="public-skip-link" href="#main-content">Saltar al contenido principal</a>
     <header class="public-header">
         <div class="public-container public-nav">
             <div class="public-brand-group">
                 <a class="public-brand" href="{% url 'public_portal:public_home' %}">SIGEDON Transparencia</a>
-                <span class="public-tagline">Seguimiento público de proyectos y avances</span>
+                <span class="public-tagline">Información pública sobre proyectos, fondos y avances.</span>
             </div>
             <nav class="public-links" aria-label="Navegación pública">
-                <a href="{% url 'public_portal:public_home' %}">Inicio</a>
-                <a href="{% url 'public_portal:public_project_list' %}">Proyectos</a>
-                <a href="{% url 'public_portal:public_updates_feed' %}">Avances</a>
-                <a href="{% url 'public_portal:public_home' %}#metodologia">Metodología</a>
-                <a href="{% url 'public_portal:public_home' %}#datos-abiertos">Datos abiertos</a>
+                <a href="{% url 'public_portal:public_home' %}"{% if request.resolver_match.url_name == 'public_home' %} aria-current="page"{% endif %}>Inicio</a>
+                <a href="{% url 'public_portal:public_project_list' %}"{% if request.resolver_match.url_name == 'public_project_list' %} aria-current="page"{% endif %}>Proyectos</a>
+                <a href="{% url 'public_portal:public_updates_feed' %}"{% if request.resolver_match.url_name == 'public_updates_feed' %} aria-current="page"{% endif %}>Avances</a>
             </nav>
         </div>
     </header>
 
-    <main class="public-main">
+    <main class="public-main" id="main-content" tabindex="-1">
         {% block content %}{% endblock %}
     </main>
 
     <footer class="public-footer">
-        <div class="public-container">
-            <h2>SIGEDON Transparencia</h2>
-            <p>
-                Portal público con información agregada, avances publicados y resúmenes financieros.
-                No publica datos personales ni contactos internos.
-            </p>
+        <div class="public-container public-footer-content">
+            <p class="public-footer-brand">SIGEDON Transparencia</p>
+            <p>Se publican proyectos activos y avances aprobados.</p>
+            <nav class="public-footer-links" aria-label="Enlaces secundarios">
+                <a href="{% url 'public_portal:public_home' %}#metodologia">Metodología</a>
+            </nav>
+            <p class="public-footer-privacy">El portal no publica datos personales, usuarios internos ni archivos privados.</p>
         </div>
     </footer>
 </body>

@@ -3,6 +3,7 @@ from django.views.generic import ListView, TemplateView
 
 from .selectors import (
     get_public_project_detail,
+    get_public_project_update_detail,
     get_public_projects,
     get_public_transparency_summary,
     get_recent_published_updates,
@@ -34,6 +35,15 @@ class PublicProjectDetailView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.update(get_public_project_detail(self.kwargs['pk']))
+        return context
+
+
+class PublicProjectUpdateDetailView(TemplateView):
+    template_name = 'public_portal/public_project_update_detail.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['update'] = get_public_project_update_detail(self.kwargs['pk'])
         return context
 
 
