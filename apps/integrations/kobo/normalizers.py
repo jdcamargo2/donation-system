@@ -4,21 +4,10 @@ from typing import Mapping
 
 from apps.integrations.kobo.contracts import KoboSubmissionPayload
 from apps.integrations.kobo.errors import KoboPayloadError
-from apps.integrations.kobo.mappings.ficha_01 import (
-    FICHA_01_FORM_ID,
-    FICHA_01_VERSION,
-    normalize_ficha_01,
-)
-from apps.integrations.kobo.mappings.ficha_10 import (
-    FICHA_10_FORM_ID,
-    FICHA_10_VERSION,
-    normalize_ficha_10,
-)
-from apps.integrations.kobo.mappings.ficha_11 import (
-    FICHA_11_FORM_ID,
-    FICHA_11_VERSION,
-    normalize_ficha_11,
-)
+from apps.integrations.kobo.form_registry import KoboFormType, resolve_form_type
+from apps.integrations.kobo.mappings.ficha_01 import normalize_ficha_01
+from apps.integrations.kobo.mappings.ficha_10 import normalize_ficha_10
+from apps.integrations.kobo.mappings.ficha_11 import normalize_ficha_11
 
 
 def adapt_kobo_payload(raw_payload: Mapping[str, object]) -> dict[str, object]:
@@ -66,15 +55,14 @@ def normalize_submission(
     POST: returns the supported immutable contract or raises KoboPayloadError.
     """
     adapted_payload = adapt_kobo_payload(raw_payload)
-    if form_id == FICHA_01_FORM_ID and form_version == FICHA_01_VERSION:
+    form_type = resolve_form_type(form_id, form_version)
+    if form_type == KoboFormType.FICHA_1:
         return normalize_ficha_01(
             adapted_payload,
             default_timezone=default_timezone,
         )
-    if form_id == FICHA_10_FORM_ID and form_version == FICHA_10_VERSION:
+    if form_type == KoboFormType.FICHA_10:
         return normalize_ficha_10(adapted_payload, default_timezone=default_timezone)
-    if form_id == FICHA_11_FORM_ID and form_version == FICHA_11_VERSION:
+    if form_type == KoboFormType.FICHA_11:
         return normalize_ficha_11(adapted_payload, default_timezone=default_timezone)
-    raise KoboPayloadError(
-        f"No Kobo normalizer for form_id={form_id!r}, version={form_version!r}."
-    )
+    raise AssertionError("Every registered Kobo form type must have a normalizer.")
