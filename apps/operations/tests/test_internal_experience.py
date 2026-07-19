@@ -324,7 +324,7 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(detail_response, 'Origen financiero')
         self.assertContains(detail_response, 'Proveedor o destinatario')
         self.assertContains(detail_response, 'Categoría')
-        self.assertContains(detail_response, 'Documentos soporte')
+        self.assertContains(detail_response, 'Documentos de soporte')
 
     def test_expense_detail_compacts_information_and_prefetches_support(self):
         self.expense.payment_method = 'transfer'

@@ -1,134 +1,88 @@
 {% extends "public_portal/public_base.html" %}
 {% load operations_format %}
 
-{% block title %}Portal de transparencia - SIGEDON{% endblock %}
+{% block title %}Transparencia | SIGEDON{% endblock %}
+{% block meta_description %}Consulta proyectos activos, fondos, ejecución financiera y avances publicados de SIGEDON.{% endblock %}
 
 {% block content %}
-<section class="public-hero public-hero-split">
-    <div class="public-hero-copy">
-        <p class="public-eyebrow">SIGEDON Transparencia</p>
-        <h1>Transparencia pública para seguir proyectos y avances</h1>
-        <p class="public-lead">
-            Consulta información agregada sobre proyectos, donaciones, ejecución financiera y avances publicados,
-            sin exponer datos personales ni información interna sensible.
-        </p>
-        <div class="public-actions">
-            <a class="public-button" href="{% url 'public_portal:public_project_list' %}">Ver proyectos</a>
-            <a class="public-button secondary" href="{% url 'public_portal:public_updates_feed' %}">Ver avances</a>
-        </div>
-    </div>
-    <div class="public-hero-visual" aria-hidden="true">
-        <div class="public-data-card">
-            <span class="public-badge">Consulta pública</span>
-            <strong>Información publicada para consulta pública</strong>
-            <div class="data-lines">
-                <span style="--line-width: 86%"></span>
-                <span style="--line-width: 64%"></span>
-                <span style="--line-width: 74%"></span>
-            </div>
-            <div class="data-points">
-                <span>{{ summary.project_count }}</span>
-                <span>{{ summary.published_update_count }}</span>
-                <span>{{ summary.available_balance|money_es }} USD</span>
-            </div>
-        </div>
+<section class="public-hero public-home-hero">
+    <p class="public-eyebrow">Portal público de transparencia</p>
+    <h1>Conoce cómo se gestionan los recursos y proyectos comunitarios.</h1>
+    <p class="public-lead">
+        Consulta fondos recibidos, ejecución financiera y avances publicados de los proyectos activos en SIGEDON.
+    </p>
+    <div class="public-actions">
+        <a class="public-button" href="{% url 'public_portal:public_project_list' %}">Explorar proyectos</a>
+        <a class="public-button secondary" href="{% url 'public_portal:public_updates_feed' %}">Ver avances</a>
     </div>
 </section>
 
-<section class="public-grid metrics public-metrics-overlap" aria-label="Métricas públicas">
-    <article class="public-card metric-card">
-        <span class="metric-icon" aria-hidden="true">◇</span>
-        <div class="public-card-label">Proyectos registrados</div>
+<section class="public-metrics-section" aria-labelledby="public-metrics-heading">
+    <div class="public-section-header">
+        <div>
+            <p class="public-eyebrow">Resumen público</p>
+            <h2 id="public-metrics-heading">Cifras principales</h2>
+        </div>
+    </div>
+    <div class="public-grid public-primary-metrics">
+    <article class="public-metric">
+        <div class="public-card-label">Proyectos activos</div>
         <div class="public-card-value">{{ summary.project_count }}</div>
+        <p>Proyectos actualmente visibles en el portal.</p>
     </article>
-    <article class="public-card metric-card">
-        <span class="metric-icon" aria-hidden="true">$</span>
-        <div class="public-card-label">Total recibido</div>
-        <div class="public-card-value">{{ summary.total_received|money_es }} USD</div>
+    <article class="public-metric">
+        <div class="public-card-label">Fondos recibidos</div>
+        <div class="public-card-value"><span class="public-money-value">{{ summary.total_received|money_es }} USD</span></div>
+        <p>Donaciones vinculadas a proyectos activos.</p>
     </article>
-    <article class="public-card metric-card">
-        <span class="metric-icon" aria-hidden="true">↗</span>
-        <div class="public-card-label">Asignado</div>
-        <div class="public-card-value">{{ summary.total_assigned|money_es }} USD</div>
+    <article class="public-metric">
+        <div class="public-card-label">Recursos ejecutados</div>
+        <div class="public-card-value"><span class="public-money-value">{{ summary.total_executed|money_es }} USD</span></div>
+        <p>Gastos reportados dentro de esos proyectos.</p>
     </article>
-    <article class="public-card metric-card">
-        <span class="metric-icon" aria-hidden="true">✓</span>
-        <div class="public-card-label">Ejecutado</div>
-        <div class="public-card-value">{{ summary.total_executed|money_es }} USD</div>
-    </article>
-    <article class="public-card metric-card">
-        <span class="metric-icon" aria-hidden="true">•</span>
-        <div class="public-card-label">Disponible</div>
-        <div class="public-card-value">{{ summary.available_balance|money_es }} USD</div>
-    </article>
-    <article class="public-card metric-card">
-        <span class="metric-icon" aria-hidden="true">✔</span>
+    <article class="public-metric">
         <div class="public-card-label">Avances publicados</div>
         <div class="public-card-value">{{ summary.published_update_count }}</div>
+        <p>Actualizaciones aprobadas para consulta pública.</p>
     </article>
+    </div>
 </section>
 
-<section class="public-notice-inline">
-    <p>
-        <strong>Privacidad y alcance:</strong>
-        este portal muestra información pública y agregada. No se publican datos personales,
-        contactos internos, datos internos ni información sensible de gestión interna.
-    </p>
+<section class="public-financial-context" aria-labelledby="financial-context-heading">
+    <h2 id="financial-context-heading">Información financiera</h2>
+    <dl>
+        <div><dt>Asignado</dt><dd><span class="public-money-value">{{ summary.total_assigned|money_es }} USD</span></dd></div>
+        <div><dt>Disponible</dt><dd><span class="public-money-value">{{ summary.available_balance|money_es }} USD</span></dd></div>
+    </dl>
+    <p>Disponible representa la parte asignada que aún no se ha registrado como ejecutada.</p>
 </section>
 
 <section class="public-section">
     <div class="public-section-header">
-        <h2>Avances publicados recientes</h2>
-        <a href="{% url 'public_portal:public_updates_feed' %}">Ver todos</a>
+        <h2>Avances recientes</h2>
     </div>
-    <div class="public-list">
-        {% for update in recent_updates %}
-            <article class="public-list-item update-card">
-                <div class="public-card-topline">
-                    <h3>{{ update.title }}</h3>
-                    <span class="public-badge">{{ update.get_status_display }}</span>
-                </div>
-                <div class="public-meta update-meta">{{ update.project.name }} · {{ update.created_at }}</div>
-                <p>{{ update.description|truncatewords:26 }}</p>
-                <div class="public-card-actions">
-                    <a class="public-link-arrow public-action-primary" href="{% url 'public_portal:public_project_detail' update.project.pk %}">
-                        Ver proyecto <span aria-hidden="true">→</span>
-                    </a>
-                </div>
-            </article>
+    <div class="public-list public-home-update-list">
+        {% for update in recent_updates|slice:":5" %}
+            <a class="public-update-card" href="{% url 'public_portal:public_project_update_detail' update.pk %}">
+                <time class="public-card-date" datetime="{{ update.update_date|date:'c' }}">{{ update.update_date|date:"j \d\e F \d\e Y" }}</time>
+                <h3>{{ update.title }}</h3>
+                <p class="public-card-context">{{ update.project.name }}</p>
+                <p class="public-card-excerpt">{{ update.description }}</p>
+                <span class="public-card-indicator" aria-hidden="true">→</span>
+            </a>
         {% empty %}
-            <div class="public-list-item public-meta">Todavía no hay avances publicados.</div>
+            <div class="public-list-item public-empty-state">
+                <p>No hay avances publicados en este momento.</p>
+            </div>
         {% endfor %}
     </div>
+    <p class="public-all-updates"><a href="{% url 'public_portal:public_updates_feed' %}">Ver todos los avances</a></p>
 </section>
 
-<section class="public-editorial-section" id="metodologia">
-    <div class="public-editorial-grid">
-        <article class="public-editorial-item">
-            <p class="public-eyebrow">Metodología</p>
-            <h3>Qué se publica</h3>
-            <p>
-                Se presentan proyectos activos o cerrados, montos agregados, asignaciones financieras,
-                ejecución reportada y avances que fueron publicados explícitamente.
-            </p>
-        </article>
-        <article class="public-editorial-item">
-            <p class="public-eyebrow">Criterio de publicación</p>
-            <h3>Avances publicados</h3>
-            <p>
-                Los avances visibles corresponden a registros publicados para consulta pública.
-                Los borradores permanecen fuera del portal.
-            </p>
-        </article>
-    </div>
+<section class="public-information-section" id="metodologia" aria-labelledby="methodology-heading">
+    <p class="public-eyebrow">Metodología</p>
+    <h2 id="methodology-heading">Cómo se construye esta información</h2>
+    <p>El portal muestra solo proyectos ACTIVE y avances PUBLISHED. Las cifras se presentan en USD y se actualizan según el TTL de caché configurado para cada página.</p>
 </section>
 
-<section class="public-editorial-section public-editorial-item" id="datos-abiertos">
-    <p class="public-eyebrow">Datos abiertos</p>
-    <h3>Información disponible para seguimiento ciudadano</h3>
-    <p>
-        Los datos se muestran en páginas públicas, con paginación y resúmenes agregados.
-        En esta versión del MVP no se expone una API pública ni descargas automatizadas.
-    </p>
-</section>
 {% endblock %}

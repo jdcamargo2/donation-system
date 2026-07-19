@@ -95,7 +95,7 @@ class SupportingDocumentWorkflowTests(TestCase):
 
         response = self.client.get(reverse('expense_detail', args=[self.expense.pk]))
 
-        self.assertContains(response, 'Documentos soporte')
+        self.assertContains(response, 'Documentos de soporte')
         self.assertContains(response, 'Adjuntar soporte')
         self.assertContains(response, 'Recibo visible')
         self.assertContains(response, 'Nota visible del soporte.')
