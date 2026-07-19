@@ -15,6 +15,31 @@ class ValidationSeverity(StrEnum):
     WARNING = "warning"
 
 
+class PastoralZone(StrEnum):
+    CATIA_LA_MAR = "catia_la_mar"
+    CENTRO = "centro"
+    ESTE = "este"
+    MONTANA = "montana"
+    INSULAR = "insular"
+
+
+class TerritorialRoutingStatus(StrEnum):
+    RESOLVED = "resolved"
+    PENDING_IDENTITY = "pending_identity"
+    CONFLICT = "conflict"
+    ERROR = "error"
+
+
+class TerritorialRoutingReasonCode(StrEnum):
+    MISSING_NUCLEO_CODE = "missing_nucleo_code"
+    INVALID_NUCLEO_CODE = "invalid_nucleo_code"
+    MISSING_PASTORAL_ZONE = "missing_pastoral_zone"
+    INVALID_PASTORAL_ZONE = "invalid_pastoral_zone"
+    UNKNOWN_TERRITORIAL_IDENTITY = "unknown_territorial_identity"
+    TERRITORIAL_IDENTITY_CONFLICT = "territorial_identity_conflict"
+    UNSUPPORTED_FORM = "unsupported_form"
+
+
 @dataclass(frozen=True)
 class KoboAttachmentPayload:
     field_name: str
@@ -41,6 +66,20 @@ class KoboSubmissionPayload:
 
     normalized_payload: dict[str, Any] = field(default_factory=dict)
     attachments: tuple[KoboAttachmentPayload, ...] = ()
+
+
+@dataclass(frozen=True)
+class TerritorialRoutingResult:
+    """Project assignment is not import; routing resolution is not import; review approval is not import."""
+
+    status: TerritorialRoutingStatus
+    form_type: str
+    nucleo_code_original: str | None = None
+    nucleo_code_normalized: str | None = None
+    pastoral_zone: PastoralZone | None = None
+    project_id: int | None = None
+    reason_code: TerritorialRoutingReasonCode | None = None
+    message: str | None = None
 
 
 @dataclass(frozen=True)

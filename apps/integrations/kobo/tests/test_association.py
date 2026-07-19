@@ -455,7 +455,7 @@ class KoboFicha11AssociationTests(TestCase):
         self.assertFalse(ProjectUpdate.objects.exists())
         self.assertEqual(Project.objects.count(), 1)
 
-    def test_manipulated_total_fails_processing_before_review(self):
+    def test_manipulated_total_keeps_submission_available_for_review(self):
         submission = KoboSubmission.objects.create(
             form_definition=self.form_definition,
             external_id="ficha-11-invalid-total",
@@ -465,7 +465,11 @@ class KoboFicha11AssociationTests(TestCase):
         process_submission(submission, default_timezone=ZoneInfo("America/Caracas"))
         submission.refresh_from_db()
 
-        self.assertEqual(submission.status, KoboSubmission.Status.VALIDATION_FAILED)
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(
+            submission.normalized_payload["calculation_warnings"][0]["code"],
+            "PRIORITY_TOTAL_MISMATCH",
+        )
         self.assertFalse(ProjectUpdate.objects.exists())
 
     def test_ficha_11_rejects_a_crossed_asset_role(self):

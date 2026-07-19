@@ -12,12 +12,13 @@ from apps.integrations.kobo.mappings.common import (
     parse_optional_datetime,
     require_non_empty_string,
 )
+from apps.integrations.kobo.territorial import normalize_nucleo_code
+from apps.integrations.kobo.territorial import normalize_pastoral_zone
 
 
 FICHA_01_FORM_ID = "ficha_1_identificacion_territorial_depurada"
 FICHA_01_VERSION = "2026-07-12-depurada"
 
-PASTORAL_ZONES = {"catia_la_mar", "centro", "este", "montana", "insular"}
 ACCESS_DIFFICULTIES = {"yes", "no", "unknown"}
 INITIAL_PRIORITY_PERCEPTIONS = {"low", "medium", "high", "critical", "unknown"}
 
@@ -106,8 +107,10 @@ def normalize_ficha_01(
     raw_payload = _canonical_ficha_01_payload(raw_payload)
 
     external_id = require_non_empty_string(raw_payload, "_uuid")
-    nucleo_code = require_non_empty_string(raw_payload, "nucleo_code")
-    pastoral_zone = _require_choice(raw_payload, "pastoral_zone", PASTORAL_ZONES)
+    nucleo_code_original = raw_payload.get("nucleo_code")
+    pastoral_zone_original = raw_payload.get("pastoral_zone")
+    nucleo_code = normalize_nucleo_code(nucleo_code_original)
+    pastoral_zone = normalize_pastoral_zone(pastoral_zone_original)
     parish = require_non_empty_string(raw_payload, "parish")
     community_sector = require_non_empty_string(raw_payload, "community_sector")
     estimated_households = _parse_non_negative_integer(
@@ -117,6 +120,10 @@ def normalize_ficha_01(
 
     normalized_payload = {
         "nucleo_code": nucleo_code,
+        "nucleo_code_original": nucleo_code_original,
+        "nucleo_code_normalized": nucleo_code,
+        "pastoral_zone_original": pastoral_zone_original,
+        "pastoral_zone_normalized": pastoral_zone.value,
         "location": parse_geolocation(raw_payload, location_key="location"),
         "parish_delegate": optional_string(raw_payload, "parish_delegate"),
         "contact_phone": optional_string(raw_payload, "contact_phone"),
@@ -138,7 +145,7 @@ def normalize_ficha_01(
         external_id=external_id,
         form_id=FICHA_01_FORM_ID,
         form_version=FICHA_01_VERSION,
-        pastoral_zone=pastoral_zone,
+        pastoral_zone=pastoral_zone.value,
         parish=parish,
         primary_community=community_sector,
         assessment_date=parse_optional_date(raw_payload.get("today")),

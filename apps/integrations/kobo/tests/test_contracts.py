@@ -1,4 +1,8 @@
 from apps.integrations.kobo.contracts import AttachmentPrivacy
+from apps.integrations.kobo.contracts import PastoralZone
+from apps.integrations.kobo.contracts import TerritorialRoutingReasonCode
+from apps.integrations.kobo.contracts import TerritorialRoutingResult
+from apps.integrations.kobo.contracts import TerritorialRoutingStatus
 from apps.integrations.kobo.contracts import KoboAttachmentPayload
 from apps.integrations.kobo.contracts import KoboSubmissionPayload
 from apps.integrations.kobo.contracts import ProcessingResult
@@ -10,8 +14,12 @@ from apps.integrations.kobo.errors import KoboConfigurationError
 from apps.integrations.kobo.errors import KoboIntegrationError
 from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.errors import KoboProcessingError
+from apps.integrations.kobo.errors import KoboNormalizationError
+from apps.integrations.kobo.errors import KoboUnsupportedFormError
 from apps.integrations.kobo.form_registry import get_registered_form
 from apps.integrations.kobo.form_registry import list_registered_forms
+from apps.integrations.kobo.form_registry import KoboFormType
+from apps.integrations.kobo.form_registry import resolve_form_type
 from apps.integrations.kobo.forms import SUPPORTED_FORM_ROLES
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_VERSION
@@ -22,6 +30,8 @@ from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_VERSION
 from apps.integrations.kobo.models import KoboAsset
 from apps.integrations.kobo.normalizers import adapt_kobo_payload
 from apps.integrations.kobo.normalizers import normalize_submission
+from apps.integrations.kobo.territorial import normalize_nucleo_code
+from apps.integrations.kobo.territorial import normalize_pastoral_zone
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from datetime import date
@@ -33,6 +43,52 @@ import re
 
 
 class KoboContractsTests(SimpleTestCase):
+    def test_normalizes_nucleo_code_without_changing_internal_symbols(self):
+        cases = {
+            " cat-004 ": "CAT-004",
+            "centro 01": "CENTRO 01",
+            "A-B/C": "A-B/C",
+            "Núcleo 1": "NÚCLEO 1",
+        }
+
+        for raw_value, expected_value in cases.items():
+            with self.subTest(raw_value=raw_value):
+                self.assertEqual(normalize_nucleo_code(raw_value), expected_value)
+
+    def test_rejects_invalid_nucleo_code_values(self):
+        for raw_value in ("   ", None, 7):
+            with self.subTest(raw_value=raw_value):
+                with self.assertRaises(KoboNormalizationError):
+                    normalize_nucleo_code(raw_value)
+
+    def test_normalizes_only_the_five_canonical_pastoral_zones(self):
+        for raw_value, expected_value in (
+            ("catia_la_mar", PastoralZone.CATIA_LA_MAR),
+            (" CENTRO ", PastoralZone.CENTRO),
+            ("este", PastoralZone.ESTE),
+            ("montana", PastoralZone.MONTANA),
+            ("insular", PastoralZone.INSULAR),
+        ):
+            with self.subTest(raw_value=raw_value):
+                self.assertEqual(normalize_pastoral_zone(raw_value), expected_value)
+
+    def test_rejects_pastoral_zone_labels_and_unknown_values(self):
+        for raw_value in ("Centro Pastoral", "catia la mar", "montaña", "norte", "", None):
+            with self.subTest(raw_value=raw_value):
+                with self.assertRaises(KoboNormalizationError):
+                    normalize_pastoral_zone(raw_value)
+
+    def test_territorial_routing_contract_is_pure_and_identifier_based(self):
+        result = TerritorialRoutingResult(
+            status=TerritorialRoutingStatus.PENDING_IDENTITY,
+            form_type=KoboFormType.FICHA_10,
+            nucleo_code_original=" nv-010 ",
+            nucleo_code_normalized="NV-010",
+            reason_code=TerritorialRoutingReasonCode.UNKNOWN_TERRITORIAL_IDENTITY,
+        )
+
+        self.assertIsNone(result.project_id)
+        self.assertEqual(result.status, TerritorialRoutingStatus.PENDING_IDENTITY)
     def test_submission_contract_can_be_created(self):
         attachment = KoboAttachmentPayload(
             field_name="temple_front_photo",
@@ -240,6 +296,10 @@ class KoboFicha01NormalizerTests(SimpleTestCase):
         self.assertEqual(result.primary_community, "Tanaguarena")
         self.assertEqual(result.assessment_date, date(2026, 7, 12))
         self.assertEqual(result.normalized_payload["nucleo_code"], "NV-001")
+        self.assertEqual(result.normalized_payload["nucleo_code_original"], " NV-001 ")
+        self.assertEqual(result.normalized_payload["nucleo_code_normalized"], "NV-001")
+        self.assertEqual(result.normalized_payload["pastoral_zone_original"], "catia_la_mar")
+        self.assertEqual(result.normalized_payload["pastoral_zone_normalized"], "catia_la_mar")
         self.assertNotIn("_submitted_by", result.normalized_payload)
         self.assertNotIn("deviceid", result.normalized_payload)
         self.assertNotIn("download_url", result.normalized_payload)
@@ -253,11 +313,17 @@ class KoboFicha01NormalizerTests(SimpleTestCase):
         self.assertEqual(raw_payload, original_payload)
 
     def test_trims_nucleo_code_and_allows_empty_access_notes(self):
-        raw_payload = self.valid_payload(nucleo_code="  NV-010  ")
+        raw_payload = self.valid_payload(
+            nucleo_code="  NV-010  ",
+            pastoral_zone=" CENTRO ",
+        )
 
         result = self.normalize(raw_payload)
 
         self.assertEqual(result.normalized_payload["nucleo_code"], "NV-010")
+        self.assertEqual(result.normalized_payload["nucleo_code_original"], "  NV-010  ")
+        self.assertEqual(result.pastoral_zone, "centro")
+        self.assertEqual(result.normalized_payload["pastoral_zone_original"], " CENTRO ")
         self.assertIsNone(result.normalized_payload["access_difficulties_notes"])
 
     def test_parses_assessment_date_and_aware_submission_time(self):
@@ -364,7 +430,7 @@ class KoboFicha01NormalizerTests(SimpleTestCase):
 
         for overrides in routing_overrides:
             with self.subTest(overrides=overrides):
-                with self.assertRaises(KoboPayloadError):
+                with self.assertRaises(KoboUnsupportedFormError):
                     self.normalize(**overrides)
 
 
@@ -442,6 +508,8 @@ class KoboFicha10NormalizerTests(SimpleTestCase):
         self.assertEqual(result.primary_community, "")
         self.assertEqual(result.assessment_date, date(2026, 7, 12))
         self.assertEqual(result.normalized_payload["nucleo_code"], "NV-010")
+        self.assertEqual(result.normalized_payload["nucleo_code_original"], " NV-010 ")
+        self.assertEqual(result.normalized_payload["nucleo_code_normalized"], "NV-010")
         self.assertEqual(
             result.normalized_payload["beneficiary_group"],
             ["youth", "women", "parish_volunteers"],
@@ -578,6 +646,8 @@ class KoboFicha11NormalizerTests(SimpleTestCase):
         result = self.normalize()
 
         self.assertEqual(result.normalized_payload["nucleo_code"], "NV-011")
+        self.assertEqual(result.normalized_payload["nucleo_code_original"], " NV-011 ")
+        self.assertEqual(result.normalized_payload["nucleo_code_normalized"], "NV-011")
         self.assertTrue(
             all(isinstance(result.normalized_payload[field], int) for field in self.SCORE_FIELDS)
         )
@@ -632,14 +702,12 @@ class KoboFicha11NormalizerTests(SimpleTestCase):
         self.assertEqual(result.normalized_payload["final_priority"], "low")
         self.assertEqual(result.normalized_payload["linked_microprojects"], "MP-01, MP-02")
 
-    def test_rejects_invalid_scores_and_calculated_values(self):
+    def test_rejects_invalid_scores_and_final_values(self):
         for field, value in ((field, value) for field in self.SCORE_FIELDS for value in (None, "", "0", "6", "1.5", True, "no")):
             with self.subTest(field=field, value=value):
                 with self.assertRaises(KoboPayloadError):
                     self.normalize(self.valid_payload(**{field: value}))
         for field, value in (
-            ("priority_total", "11"),
-            ("suggested_semaphore", "red"),
             ("final_semaphore", "blue"),
             ("final_priority", "urgent"),
             ("priority_summary", " "),
@@ -647,6 +715,31 @@ class KoboFicha11NormalizerTests(SimpleTestCase):
             with self.subTest(field=field, value=value):
                 with self.assertRaises(KoboPayloadError):
                     self.normalize(self.valid_payload(**{field: value}))
+
+    def test_keeps_matching_kobo_calculations_without_warnings(self):
+        result = self.normalize(
+            self.valid_payload(priority_total="10", suggested_semaphore="gray")
+        )
+
+        self.assertEqual(result.normalized_payload["priority_total_original"], "10")
+        self.assertEqual(result.normalized_payload["priority_total_calculated"], 10)
+        self.assertEqual(result.normalized_payload["suggested_semaphore_original"], "gray")
+        self.assertEqual(result.normalized_payload["suggested_semaphore_calculated"], "gray")
+        self.assertEqual(result.normalized_payload["calculation_warnings"], [])
+
+    def test_preserves_mismatching_kobo_calculations_as_warnings(self):
+        result = self.normalize(
+            self.valid_payload(priority_total="11", suggested_semaphore="red")
+        )
+
+        self.assertEqual(result.normalized_payload["priority_total_original"], "11")
+        self.assertEqual(result.normalized_payload["priority_total_calculated"], 10)
+        self.assertEqual(result.normalized_payload["suggested_semaphore_original"], "red")
+        self.assertEqual(result.normalized_payload["suggested_semaphore_calculated"], "gray")
+        self.assertEqual(
+            [warning["code"] for warning in result.normalized_payload["calculation_warnings"]],
+            ["PRIORITY_TOTAL_MISMATCH", "SUGGESTED_SEMAPHORE_MISMATCH"],
+        )
 
     def test_accepts_matching_optional_calculations(self):
         result = self.normalize(
@@ -669,6 +762,21 @@ class KoboFormRegistryTests(SimpleTestCase):
         self.assertEqual(
             first_form.title,
             "Ficha 1 - Identificación territorial del Núcleo Vital (depurada)",
+        )
+        self.assertEqual(first_form.form_type, KoboFormType.FICHA_1)
+
+    def test_resolves_each_supported_form_by_stable_identifier(self):
+        self.assertEqual(
+            resolve_form_type(FICHA_01_FORM_ID, FICHA_01_VERSION),
+            KoboFormType.FICHA_1,
+        )
+        self.assertEqual(
+            resolve_form_type(FICHA_10_FORM_ID, FICHA_10_VERSION),
+            KoboFormType.FICHA_10,
+        )
+        self.assertEqual(
+            resolve_form_type(FICHA_11_FORM_ID, FICHA_11_VERSION),
+            KoboFormType.FICHA_11,
         )
 
     def test_registry_contains_only_active_contract_versions(self):
@@ -716,7 +824,7 @@ class KoboFormRegistryTests(SimpleTestCase):
             get_registered_form("ficha_04_servicios_infraestructura_abasto", "20260710")
 
     def test_unknown_form_raises_payload_error(self):
-        with self.assertRaises(KoboPayloadError):
+        with self.assertRaises(KoboUnsupportedFormError):
             get_registered_form("unknown_form", "20260710")
 
     def test_unknown_version_raises_payload_error(self):
