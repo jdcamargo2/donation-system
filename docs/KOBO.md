@@ -40,7 +40,13 @@ KOBO_API_TOKEN=
 KOBO_WEBHOOK_USERNAME=sigedon-kobo
 KOBO_WEBHOOK_SECRET=
 KOBO_FICHA_01_ASSET_UID=
-KOBO_REQUEST_TIMEOUT_SECONDS=15
+KOBO_HTTP_CONNECT_TIMEOUT=5
+KOBO_HTTP_READ_TIMEOUT=15
+KOBO_HTTP_MAX_ATTEMPTS=3
+KOBO_HTTP_RETRY_BASE_DELAY=0.5
+KOBO_HTTP_RETRY_MAX_DELAY=8
+KOBO_HTTP_RETRY_AFTER_MAX_DELAY=60
+KOBO_HTTP_MAX_PAGES=100
 KOBO_MAX_ATTACHMENT_BYTES=10485760
 KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS=900
 KOBO_WEBHOOK_MAX_BYTES=1048576
@@ -53,11 +59,23 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 * `KOBO_API_TOKEN` contiene el token utilizado para acceder a la API.
 * `KOBO_WEBHOOK_USERNAME` define el usuario esperado por el webhook.
 * `KOBO_WEBHOOK_SECRET` contiene el secreto utilizado para autenticar solicitudes entrantes.
-* `KOBO_REQUEST_TIMEOUT_SECONDS` define el tiempo máximo de espera para solicitudes externas.
+* `KOBO_HTTP_CONNECT_TIMEOUT` y `KOBO_HTTP_READ_TIMEOUT` definen límites explícitos y positivos para solicitudes externas.
+* `KOBO_HTTP_MAX_ATTEMPTS`, `KOBO_HTTP_RETRY_BASE_DELAY`, `KOBO_HTTP_RETRY_MAX_DELAY` y `KOBO_HTTP_RETRY_AFTER_MAX_DELAY` controlan reintentos transitorios con backoff.
+* `KOBO_HTTP_MAX_PAGES` limita la paginación remota para evitar recorridos no acotados.
 * `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
 * `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900).
 * `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging.
 * `KOBO_FICHA_01_ASSET_UID` pertenece únicamente al flujo legado de la Ficha 1.
+
+## Sincronización remota segura
+
+El cliente usa `urllib` con autenticación `Token`, HTTPS y redirects desactivados.
+Todos los requests tienen timeout explícito y solo reintentan 429, 500, 502, 503,
+504, timeouts y errores de conexión; los demás 4xx fallan sin retry. Los envelopes
+`count`/`next`/`results` se recorren de forma paginada, con host, ruta, ciclos y
+límite de páginas validados. `KoboSyncRun` conserva únicamente métricas y errores
+seguros: un discovery parcial no marca assets ausentes como no disponibles y un
+sync de submissions no se declara completo tras un fallo remoto.
 
 Los valores secretos no deben versionarse ni registrarse en logs.
 

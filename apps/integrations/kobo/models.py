@@ -240,6 +240,39 @@ class KoboAsset(models.Model):
         return f"{self.name} ({self.asset_uid})"
 
 
+class KoboSyncRun(models.Model):
+    """Safe operational record for one synchronous remote Kobo operation."""
+
+    class Kind(models.TextChoices):
+        DISCOVERY = "discovery", "Discovery"
+        SUBMISSIONS = "submissions", "Submissions"
+
+    class Status(models.TextChoices):
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        PARTIAL = "partial", "Partial"
+        FAILED = "failed", "Failed"
+
+    asset = models.ForeignKey(KoboAsset, null=True, blank=True, on_delete=models.PROTECT, related_name="sync_runs")
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.RUNNING)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    triggered_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="kobo_sync_runs")
+    pages_fetched = models.PositiveIntegerField(default=0)
+    items_seen = models.PositiveIntegerField(default=0)
+    items_created = models.PositiveIntegerField(default=0)
+    items_updated = models.PositiveIntegerField(default=0)
+    items_failed = models.PositiveIntegerField(default=0)
+    partial = models.BooleanField(default=False)
+    error_code = models.CharField(max_length=64, blank=True)
+    safe_error_message = models.CharField(max_length=255, blank=True)
+    metadata = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ("-started_at",)
+
+
 class KoboDiscoveredAsset(models.Model):
     asset_uid = models.CharField(max_length=255, unique=True)
     name = models.CharField(max_length=255)

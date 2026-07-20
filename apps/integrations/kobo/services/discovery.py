@@ -10,12 +10,13 @@ from apps.integrations.kobo.services.common import (
     AssetReadiness,
     FORM_DEFINITION_ROLES,
 )
-from apps.integrations.kobo.errors import KoboPayloadError
+from apps.integrations.kobo.errors import KoboIntegrationError, KoboPayloadError
 from apps.integrations.kobo.form_registry import get_registered_form
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboDiscoveredAsset,
     KoboFormDefinition,
+    KoboSyncRun,
 )
 
 
@@ -46,7 +47,20 @@ def discover_assets(
     POST: after a complete successful fetch, creates/updates discovery staging,
     marks unseen history unavailable unless dry-run, and creates no integrations.
     """
-    listed_assets = client.list_assets(limit=limit)
+    sync_run = None if dry_run else KoboSyncRun.objects.create(
+        kind=KoboSyncRun.Kind.DISCOVERY,
+        status=KoboSyncRun.Status.RUNNING,
+    )
+    try:
+        listed_assets = client.list_assets(limit=limit)
+    except KoboIntegrationError:
+        if sync_run:
+            sync_run.status = KoboSyncRun.Status.FAILED
+            sync_run.error_code = "remote_error"
+            sync_run.safe_error_message = "Kobo remote discovery failed."
+            sync_run.finished_at = timezone.now()
+            sync_run.save()
+        raise
     remote_assets = []
     detail_failures = 0
     for remote_asset in listed_assets:
@@ -84,10 +98,11 @@ def discover_assets(
         updated_count += int(has_changes)
         unchanged_count += int(not has_changes)
 
+    partial = detail_failures > 0
     unavailable_queryset = KoboDiscoveredAsset.objects.filter(
         is_available=True
     ).exclude(asset_uid__in=remote_by_uid)
-    unavailable_count = unavailable_queryset.count()
+    unavailable_count = 0 if partial else unavailable_queryset.count()
     if not dry_run:
         seen_at = timezone.now()
         with transaction.atomic():
@@ -98,7 +113,16 @@ def discover_assets(
                     asset_uid=asset_uid,
                     defaults=values,
                 )
-            unavailable_queryset.update(is_available=False)
+            if not partial:
+                unavailable_queryset.update(is_available=False)
+        sync_run.status = KoboSyncRun.Status.PARTIAL if partial else KoboSyncRun.Status.SUCCEEDED
+        sync_run.partial = partial
+        sync_run.finished_at = timezone.now()
+        sync_run.items_seen = len(remote_assets)
+        sync_run.items_created = created_count
+        sync_run.items_updated = updated_count
+        sync_run.items_failed = detail_failures
+        sync_run.save()
 
     return AssetDiscoveryResult(
         fetched_count=len(remote_assets),
@@ -107,6 +131,7 @@ def discover_assets(
         unchanged_count=unchanged_count,
         unavailable_count=0 if dry_run else unavailable_count,
         failed_count=detail_failures,
+        partial=partial,
     )
 
 

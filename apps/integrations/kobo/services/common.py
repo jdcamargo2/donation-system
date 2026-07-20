@@ -29,6 +29,9 @@ class SyncResult:
     created_count: int
     existing_count: int
     failed_count: int
+    pages_fetched: int = 0
+    updated_count: int = 0
+    partial: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,6 +102,7 @@ class AssetDiscoveryResult:
     unchanged_count: int
     unavailable_count: int
     failed_count: int
+    partial: bool = False
 
 
 @dataclass(frozen=True)

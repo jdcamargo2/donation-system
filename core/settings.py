@@ -106,9 +106,17 @@ KOBO_ENABLED = os.getenv("KOBO_ENABLED", "False").strip().lower() in {
     "on",
 }
 
-KOBO_REQUEST_TIMEOUT_SECONDS = int(
-    os.getenv("KOBO_REQUEST_TIMEOUT_SECONDS", "15")
+KOBO_HTTP_CONNECT_TIMEOUT = float(os.getenv("KOBO_HTTP_CONNECT_TIMEOUT", "5"))
+KOBO_HTTP_READ_TIMEOUT = float(os.getenv("KOBO_HTTP_READ_TIMEOUT", "15"))
+KOBO_HTTP_MAX_ATTEMPTS = int(os.getenv("KOBO_HTTP_MAX_ATTEMPTS", "3"))
+KOBO_HTTP_RETRY_BASE_DELAY = float(os.getenv("KOBO_HTTP_RETRY_BASE_DELAY", "0.5"))
+KOBO_HTTP_RETRY_MAX_DELAY = float(os.getenv("KOBO_HTTP_RETRY_MAX_DELAY", "8"))
+KOBO_HTTP_RETRY_AFTER_MAX_DELAY = float(
+    os.getenv("KOBO_HTTP_RETRY_AFTER_MAX_DELAY", "60")
 )
+KOBO_HTTP_MAX_PAGES = int(os.getenv("KOBO_HTTP_MAX_PAGES", "100"))
+# Compatibility for integrations constructed before split connect/read timeouts.
+KOBO_REQUEST_TIMEOUT_SECONDS = KOBO_HTTP_READ_TIMEOUT
 
 KOBO_MAX_ATTACHMENT_BYTES = int(
     os.getenv("KOBO_MAX_ATTACHMENT_BYTES", "10485760")
