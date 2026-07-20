@@ -11,7 +11,7 @@ from apps.integrations.kobo.services.common import (
     WebhookConvergenceResult,
 )
 from apps.integrations.kobo.errors import KoboConfigurationError, KoboPayloadError
-from apps.integrations.kobo.form_registry import list_registered_forms
+from apps.integrations.kobo.form_registry import KoboFormType, list_registered_forms, resolve_form_type
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.models import (
     KoboAsset,
@@ -24,6 +24,7 @@ from apps.integrations.kobo.processors import PROCESSABLE_STATUSES, process_subm
 from apps.integrations.kobo.services.association import (
     assign_normalized_submission_to_direct_project,
 )
+from apps.integrations.kobo.services.territorial_routing import route_ficha_1_submission
 
 
 def sync_registered_forms() -> int:
@@ -197,6 +198,18 @@ def converge_webhook_submission(
             submission.refresh_from_db()
 
         if submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
+            form_type = resolve_form_type(
+                submission.form_definition.form_id,
+                submission.form_definition.version,
+            )
+            if form_type == KoboFormType.FICHA_1:
+                route_ficha_1_submission(submission)
+                submission.refresh_from_db()
+                return WebhookConvergenceResult(
+                    submission_id=submission.pk,
+                    final_status=submission.status,
+                    completed=submission.project_id is not None,
+                )
             if submission.project_id is None:
                 assign_normalized_submission_to_direct_project(submission)
                 submission.refresh_from_db()

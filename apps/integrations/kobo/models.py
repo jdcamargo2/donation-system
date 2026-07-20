@@ -437,6 +437,20 @@ class KoboTerritorialIdentityConflict(models.Model):
         max_length=32,
         choices=PASTORAL_ZONE_CHOICES,
     )
+    existing_project = models.ForeignKey(
+        "operations.Project",
+        on_delete=models.PROTECT,
+        related_name="existing_kobo_territorial_identity_conflicts",
+        null=True,
+        blank=True,
+    )
+    proposed_project = models.ForeignKey(
+        "operations.Project",
+        on_delete=models.PROTECT,
+        related_name="proposed_kobo_territorial_identity_conflicts",
+        null=True,
+        blank=True,
+    )
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.OPEN)
     resolution = models.CharField(
         max_length=32,
@@ -478,16 +492,21 @@ class KoboTerritorialIdentityConflict(models.Model):
         ordering = ("-created_at",)
 
     def clean(self):
-        # PRE: conflict captures an incoming zone that differs from identity's zone.
-        # POST: rejects same-zone records without modifying identity or project.
+        # PRE: conflict captures an incoming territorial proposal for an identity.
+        # POST: rejects only an identical zone/project proposal without modifying identity.
         super().clean()
         if self.identity_id and self.existing_pastoral_zone != self.identity.pastoral_zone:
             raise ValidationError(
                 {"existing_pastoral_zone": "Must preserve the identity's current zone."}
             )
-        if self.existing_pastoral_zone == self.proposed_pastoral_zone:
+        same_zone = self.existing_pastoral_zone == self.proposed_pastoral_zone
+        same_project = (
+            self.existing_project_id is not None
+            and self.existing_project_id == self.proposed_project_id
+        )
+        if same_zone and (self.proposed_project_id is None or same_project):
             raise ValidationError(
-                {"proposed_pastoral_zone": "Conflict requires a different zone."}
+                {"proposed_pastoral_zone": "Conflict requires a different zone or project."}
             )
 
     def __str__(self):

@@ -37,6 +37,7 @@ from apps.integrations.kobo.services.submissions import (
     sync_ficha_01_submissions,
     sync_registered_forms,
 )
+from apps.integrations.kobo.services.territorial_routing import route_ficha_1_submission
 
 
 __all__ = (
@@ -63,6 +64,7 @@ __all__ = (
     "resolve_routing_field",
     "restore_kobo_submission_to_review",
     "review_submission",
+    "route_ficha_1_submission",
     "sync_ficha_01_submissions",
     "sync_registered_forms",
     "unlink_asset_from_project",

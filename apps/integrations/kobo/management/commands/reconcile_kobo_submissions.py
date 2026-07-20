@@ -4,6 +4,7 @@ from django.utils import timezone
 
 from apps.integrations.kobo.client import KoboApiClient
 from apps.integrations.kobo.errors import KoboIntegrationError, KoboPayloadError
+from apps.integrations.kobo.form_registry import KoboFormType, resolve_form_type
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboProcessingEvent,
@@ -13,6 +14,7 @@ from apps.integrations.kobo.processors import process_submission
 from apps.integrations.kobo.services import (
     assign_normalized_submission_to_direct_project,
     receive_webhook_submission,
+    route_ficha_1_submission,
 )
 
 
@@ -33,6 +35,22 @@ def _is_retryable_normalization_failure(submission: KoboSubmission) -> bool:
         ).count()
         == 1
     )
+
+
+def _route_normalized_submission(submission: KoboSubmission) -> bool:
+    """
+    PRE: submission is normalized and ready for review from an active registered form.
+    POST: uses territorial routing only for Ficha 1; all other forms retain the
+    temporary direct-binding route and neither path imports the submission.
+    """
+    form_type = resolve_form_type(
+        submission.form_definition.form_id,
+        submission.form_definition.version,
+    )
+    if form_type == KoboFormType.FICHA_1:
+        result = route_ficha_1_submission(submission)
+        return result.status.value == KoboSubmission.RoutingStatus.RESOLVED
+    return assign_normalized_submission_to_direct_project(submission)
 
 
 class Command(BaseCommand):
@@ -93,7 +111,7 @@ class Command(BaseCommand):
                         message="Local Kobo submission could not be reprocessed.",
                     )
                     continue
-            if not assign_normalized_submission_to_direct_project(submission):
+            if not _route_normalized_submission(submission):
                 local_failed += 1
                 KoboProcessingEvent.objects.create(
                     submission=submission,
@@ -134,7 +152,7 @@ class Command(BaseCommand):
                             default_timezone=timezone.get_current_timezone(),
                         )
                         if outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW:
-                            assign_normalized_submission_to_direct_project(submission)
+                            _route_normalized_submission(submission)
             except (KoboIntegrationError, KoboPayloadError):
                 failed_assets += 1
         self.stdout.write(

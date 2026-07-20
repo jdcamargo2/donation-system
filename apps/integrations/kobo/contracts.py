@@ -38,6 +38,7 @@ class TerritorialRoutingReasonCode(StrEnum):
     INVALID_PASTORAL_ZONE = "invalid_pastoral_zone"
     UNKNOWN_TERRITORIAL_IDENTITY = "unknown_territorial_identity"
     TERRITORIAL_IDENTITY_CONFLICT = "territorial_identity_conflict"
+    MISSING_ZONE_PROJECT_MAPPING = "missing_zone_project_mapping"
     UNSUPPORTED_FORM = "unsupported_form"
 
 

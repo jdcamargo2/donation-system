@@ -11,6 +11,7 @@ from apps.integrations.kobo.models import KoboDiscoveredAsset
 from apps.integrations.kobo.models import KoboFormDefinition
 from apps.integrations.kobo.models import KoboProcessingEvent
 from apps.integrations.kobo.models import KoboProjectBinding
+from apps.integrations.kobo.models import KoboPastoralZoneProjectMapping
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.services import associate_submission_with_project
 from apps.integrations.kobo.services import receive_webhook_submission
@@ -73,6 +74,10 @@ class KoboWebhookTests(TestCase):
                 project=cls.project,
                 routing_type=KoboProjectBinding.RoutingType.DIRECT,
             )
+        KoboPastoralZoneProjectMapping.objects.create(
+            pastoral_zone="catia_la_mar",
+            project=cls.project,
+        )
 
     def payload(self, form_id, **overrides):
         # PRE: form_id identifies an active webhook asset.
@@ -181,10 +186,10 @@ class KoboWebhookTests(TestCase):
         self.assertEqual(submission.raw_payload, payload)
         self.assertEqual(submission.raw_payload["__version__"], "deployment-opaque-version")
         self.assertEqual(submission.project, self.project)
-        self.assertIsNotNone(submission.processed_at)
+        self.assertIsNone(submission.processed_at)
         self.assertTrue(
             submission.processing_events.filter(
-                stage="project_routing", code="project_assigned"
+                stage="territorial_routing", code="territorial_identity_created"
             ).exists()
         )
         self.assertEqual(submission.parish, "Parroquia sintética")
@@ -245,7 +250,7 @@ class KoboWebhookTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(KoboSubmission.objects.exists())
 
-    def test_slash_payload_uses_the_direct_binding_not_nucleo_code(self):
+    def test_slash_payload_uses_territorial_mapping_not_direct_binding(self):
         project = self.project
         reviewer = get_user_model().objects.create_user("slash-reviewer")
         payload = self.ficha_01_slash_payload(
@@ -330,36 +335,45 @@ class KoboWebhookTests(TestCase):
                 self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
                 self.assertEqual(submission.asset, self.assets[form_id])
                 self.assertEqual(submission.project, self.project)
-                self.assertIsNotNone(submission.processed_at)
-                self.assertTrue(
-                    submission.processing_events.filter(
-                        stage="project_routing", code="project_assigned"
-                    ).exists()
-                )
+                if form_id == FICHA_01_FORM_ID:
+                    self.assertIsNone(submission.processed_at)
+                    self.assertTrue(
+                        submission.processing_events.filter(
+                            stage="territorial_routing",
+                            code="territorial_identity_created",
+                        ).exists()
+                    )
+                else:
+                    self.assertIsNotNone(submission.processed_at)
+                    self.assertTrue(
+                        submission.processing_events.filter(
+                            stage="project_routing", code="project_assigned"
+                        ).exists()
+                    )
                 self.assertNotIn("raw_payload", response.json())
         self.assertEqual(Project.objects.count(), 1)
         self.assertFalse(ProjectUpdate.objects.exists())
 
-    def test_webhook_preserves_staging_when_direct_binding_is_unavailable(self):
+    def test_webhook_ficha_1_ignores_unavailable_direct_binding(self):
         asset = self.assets[FICHA_01_FORM_ID]
         asset.project_bindings.update(is_active=False)
         payload = self.ficha_01_slash_payload()
 
         response = self.post(payload)
 
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 201)
         submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
-        self.assertIsNone(submission.project_id)
+        self.assertEqual(submission.project, self.project)
         self.assertIsNone(submission.processed_at)
-        self.assertEqual(submission.error_code, "routing_configuration_error")
+        self.assertEqual(submission.error_code, "")
         self.assertTrue(
             submission.processing_events.filter(
-                stage="project_routing", code="routing_configuration_error"
+                stage="territorial_routing", code="territorial_identity_created"
             ).exists()
         )
 
-    def test_webhook_rejects_multiple_active_bindings_without_losing_staging(self):
+    def test_webhook_ficha_1_ignores_multiple_active_bindings(self):
         asset = self.assets[FICHA_01_FORM_ID]
         KoboProjectBinding.objects.create(
             asset=asset,
@@ -371,19 +385,25 @@ class KoboWebhookTests(TestCase):
 
         response = self.post(self.ficha_01_slash_payload())
 
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 201)
         submission = KoboSubmission.objects.get(external_id="webhook-ficha-01-slash")
-        self.assertEqual(submission.error_code, "routing_configuration_error")
+        self.assertEqual(submission.project, self.project)
 
-    def test_webhook_rejects_inactive_direct_project_without_losing_staging(self):
-        self.project.status = Project.Status.SUSPENDED
-        self.project.save(update_fields=("status",))
+    def test_webhook_ficha_1_does_not_use_inactive_direct_binding_project(self):
+        inactive_binding_project = Project.objects.create(
+            code="PRJ-WEBHOOK-INACTIVE-BINDING",
+            name="Proyecto de binding inactivo",
+            status=Project.Status.SUSPENDED,
+        )
+        self.assets[FICHA_01_FORM_ID].project_bindings.update(
+            project=inactive_binding_project
+        )
 
         response = self.post(self.ficha_01_slash_payload())
 
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 201)
         submission = KoboSubmission.objects.get(external_id="webhook-ficha-01-slash")
-        self.assertEqual(submission.error_code, "routing_configuration_error")
+        self.assertEqual(submission.project, self.project)
 
     def test_duplicate_preserves_payload_and_events(self):
         payload = self.payload(FICHA_10_FORM_ID)
@@ -426,7 +446,7 @@ class KoboWebhookTests(TestCase):
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
         self.assertEqual(submission.project, self.project)
 
-    def test_retry_recovers_a_ready_submission_after_binding_is_restored(self):
+    def test_retry_keeps_ficha_1_territorial_routing_when_binding_changes(self):
         asset = self.assets[FICHA_01_FORM_ID]
         asset.project_bindings.update(is_active=False)
         payload = self.ficha_01_slash_payload()
@@ -436,7 +456,7 @@ class KoboWebhookTests(TestCase):
         retry = self.post(payload)
 
         submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
-        self.assertEqual(first.status_code, 422)
+        self.assertEqual(first.status_code, 201)
         self.assertEqual(retry.status_code, 200)
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
         self.assertEqual(submission.project, self.project)
@@ -567,7 +587,7 @@ class KoboReconciliationCommandTests(KoboWebhookTests):
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
         self.assertEqual(submission.project, project)
         self.assertTrue(submission.normalized_payload)
-        self.assertIsNotNone(submission.processed_at)
+        self.assertIsNone(submission.processed_at)
         self.assertEqual(submission.error_code, "")
         self.assertEqual(submission.error_message, "")
         self.assertTrue(
