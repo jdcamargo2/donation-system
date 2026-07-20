@@ -198,7 +198,6 @@ python manage.py register_kobo_forms
 python manage.py discover_kobo_assets
 python manage.py process_kobo_submissions
 python manage.py reconcile_kobo_submissions
-python manage.py sync_kobo_ficha_01
 ```
 
 > [!WARNING]
@@ -206,12 +205,6 @@ python manage.py sync_kobo_ficha_01
 > idempotencia parcial y no reproduce toda la trazabilidad ni las reglas del
 > flujo operativo. Nunca debe ejecutarse sobre una base de producción. Consulte
 > [Operación y mantenimiento](docs/OPERATIONS.md#2-datos-de-demostración).
-
-> [!NOTE]
-> El comando `sync_kobo_ficha_01` es una entrada de compatibilidad para Ficha 1:
-> registra el payload en el staging genérico `KoboSubmission`; no escribe en los
-> modelos específicos Ficha01. El procesamiento ordinario debe utilizar activos
-> configurados y el pipeline general de Kobo.
 
 ## Verificación
 

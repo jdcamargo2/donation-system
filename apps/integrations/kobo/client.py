@@ -8,6 +8,8 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Iterator, Protocol
 from urllib import error, parse, request
 
+from django.conf import settings
+
 from apps.integrations.kobo.errors import (
     KoboAttachmentError,
     KoboAuthenticationError,
@@ -225,7 +227,15 @@ class KoboApiClient:
 
         return list(self.iter_submissions(asset_uid, limit=limit))
 
-    def iter_submissions(self, asset_uid: str, *, limit: int = 100, params: dict[str, str | int] | None = None, max_pages: int | None = None) -> Iterator[dict]:
+    def iter_submissions(
+        self,
+        asset_uid: str,
+        *,
+        limit: int = 100,
+        params: dict[str, str | int] | None = None,
+        max_pages: int | None = None,
+        on_page_fetched: Callable[[], None] | None = None,
+    ) -> Iterator[dict]:
         """
         PRE: asset_uid and page size are valid configured values.
         POST: yields all validated Kobo submission results without retaining pages.
@@ -246,6 +256,8 @@ class KoboApiClient:
             current_params = {}
             results, current_url = self._validate_submission_page(payload)
             page_count += 1
+            if on_page_fetched is not None:
+                on_page_fetched()
             yield from results
 
     def get_asset_detail(self, asset_uid: str) -> dict[str, str | None]:
@@ -500,3 +512,21 @@ class KoboApiClient:
         if not isinstance(payload, dict):
             raise KoboInvalidResponseError("Kobo API response must be a JSON object.")
         return payload
+
+
+def build_kobo_api_client() -> KoboApiClient:
+    """
+    PRE: Django Kobo settings contain a valid base URL, token and retry policy.
+    POST: returns the single operational client configuration; urllib applies the
+    read timeout because it has no separate connect/read timeout interface.
+    """
+    return KoboApiClient(
+        base_url=settings.KOBO_BASE_URL,
+        api_token=settings.KOBO_API_TOKEN,
+        timeout_seconds=settings.KOBO_HTTP_READ_TIMEOUT,
+        max_asset_pages=settings.KOBO_HTTP_MAX_PAGES,
+        max_attempts=settings.KOBO_HTTP_MAX_ATTEMPTS,
+        retry_base_delay=settings.KOBO_HTTP_RETRY_BASE_DELAY,
+        retry_max_delay=settings.KOBO_HTTP_RETRY_MAX_DELAY,
+        retry_after_max_delay=settings.KOBO_HTTP_RETRY_AFTER_MAX_DELAY,
+    )

@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.integrations.kobo.client import KoboApiClient, KOBO_MAX_ASSET_PAGES
+from apps.integrations.kobo.client import build_kobo_api_client
 from apps.integrations.kobo.services import discover_assets
 
 
@@ -21,16 +21,7 @@ class Command(BaseCommand):
             raise CommandError("KOBO_BASE_URL is required.")
         if not settings.KOBO_API_TOKEN:
             raise CommandError("KOBO_API_TOKEN is required.")
-        client = KoboApiClient(
-            base_url=settings.KOBO_BASE_URL,
-            api_token=settings.KOBO_API_TOKEN,
-            timeout_seconds=settings.KOBO_REQUEST_TIMEOUT_SECONDS,
-            max_asset_pages=getattr(
-                settings,
-                "KOBO_MAX_ASSET_PAGES",
-                KOBO_MAX_ASSET_PAGES,
-            ),
-        )
+        client = build_kobo_api_client()
         result = discover_assets(
             client,
             limit=options["limit"],

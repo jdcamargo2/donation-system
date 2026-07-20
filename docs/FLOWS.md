@@ -509,29 +509,5 @@ la misma transacción.
 
 ---
 
-## 12. Entrada de compatibilidad de Ficha 1
-
-El mapping `ficha_01` y el comando legado se conservan como compatibilidad de
-entrada al staging genérico. El orden vigente es:
-
-```text
-sync_kobo_ficha_01
-→ obtención y validación del payload Ficha 1
-→ receive_api_submission
-→ KoboSubmission (received, payload crudo)
-→ procesamiento y normalización ficha_01
-→ routing, revisión e importación mediante el pipeline genérico
-```
-
-### Reglas
-
-* No representa el flujo recomendado para nuevas integraciones.
-* No sustituye al pipeline ordinario basado en activos configurados.
-* `Ficha01Territorio` y `Ficha01CoveredCommunity` pertenecen al schema legado,
-  no tienen escritores activos conocidos y no son utilizados por el pipeline
-  vigente.
-* `KoboSubmission` es la fuente de staging activa; recibido, procesado e
-  importado representan etapas diferentes.
-* Su conservación no implica que nuevas fichas deban implementar modelos específicos equivalentes.
 * La eliminación futura de los modelos específicos requiere una decisión de
   producto y una migración dedicada.

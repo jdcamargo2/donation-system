@@ -33,7 +33,7 @@ from apps.integrations.kobo.models import (
     KoboAsset,
     KoboSyncRun,
 )
-from apps.integrations.kobo.client import KoboApiClient
+from apps.integrations.kobo.client import build_kobo_api_client
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID
 from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID
 from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID
@@ -165,7 +165,7 @@ def sync_asset(request, pk, mode):
         from django.core.exceptions import PermissionDenied
         raise PermissionDenied
     asset = get_object_or_404(KoboAsset, pk=pk, is_active=True)
-    client = KoboApiClient(base_url=settings.KOBO_BASE_URL, api_token=settings.KOBO_API_TOKEN, timeout_seconds=settings.KOBO_REQUEST_TIMEOUT_SECONDS)
+    client = build_kobo_api_client()
     result = sync_asset_submissions(asset=asset, client=client, actor=request.user, full=mode == "full")
     level = messages.SUCCESS if result.status == KoboSyncRun.Status.SUCCEEDED else (messages.WARNING if result.status in (KoboSyncRun.Status.PARTIAL, "SYNC_ALREADY_RUNNING") else messages.ERROR)
     messages.add_message(request, level, f"Sincronización {result.status.lower()}: {asset.name}.")

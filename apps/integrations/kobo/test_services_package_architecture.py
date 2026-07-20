@@ -38,7 +38,6 @@ EXPECTED_PUBLIC_API = {
     "import_kobo_submission",
     "process_pending_submissions",
     "observe_territorial_identity",
-    "receive_api_submission",
     "receive_webhook_submission",
     "reject_kobo_submission",
     "reconcile_territorial_identity_submissions",
@@ -48,7 +47,6 @@ EXPECTED_PUBLIC_API = {
     "route_ficha_1_submission",
     "route_normalized_submission",
     "resolve_territorial_identity_conflict",
-    "sync_ficha_01_submissions",
     "sync_asset_submissions",
     "sync_registered_forms",
 }
@@ -71,7 +69,6 @@ EXPECTED_SIGNATURES = {
     "import_kobo_submission": "(submission, *, actor)",
     "process_pending_submissions": "(*, limit=100, default_timezone)",
     "observe_territorial_identity": "(*, identity, actor, reason)",
-    "receive_api_submission": "(form_definition, raw_payload)",
     "receive_webhook_submission": "(*, asset, raw_payload)",
     "reject_kobo_submission": "(submission, *, actor, reason, comment='')",
     "reconcile_territorial_identity_submissions": "(*, identity, actor, limit=100)",
@@ -81,9 +78,6 @@ EXPECTED_SIGNATURES = {
     "route_ficha_1_submission": "(submission)",
     "route_normalized_submission": "(submission)",
     "resolve_territorial_identity_conflict": "(*, conflict, decision, actor, reason)",
-    "sync_ficha_01_submissions": (
-        "(client, asset_uid, limit=100, dry_run=False)"
-    ),
     "sync_asset_submissions": "(*, asset, client, actor=None, full=False, max_pages=None)",
     "sync_registered_forms": "()",
 }
@@ -116,7 +110,6 @@ class KoboServicesPackageArchitectureTests(TestCase):
             "process_kobo_submissions",
             "reconcile_kobo_submissions",
             "register_kobo_forms",
-            "sync_kobo_ficha_01",
         ):
             importlib.import_module(
                 "apps.integrations.kobo.management.commands."
@@ -144,7 +137,6 @@ class KoboServicesPackageArchitectureTests(TestCase):
             "apps.integrations.kobo.services.importers"
         )
 
-        self.assertIs(submissions.KoboConfigurationError, errors.KoboConfigurationError)
         self.assertIs(submissions.KoboPayloadError, errors.KoboPayloadError)
         self.assertIs(importers.KoboPayloadError, errors.KoboPayloadError)
 

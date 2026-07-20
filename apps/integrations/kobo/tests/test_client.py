@@ -1,4 +1,4 @@
-from apps.integrations.kobo.client import KoboApiClient
+from apps.integrations.kobo.client import KoboApiClient, build_kobo_api_client
 from apps.integrations.kobo.errors import KoboAttachmentError
 from apps.integrations.kobo.errors import KoboAuthenticationError
 from apps.integrations.kobo.errors import KoboConfigurationError
@@ -16,7 +16,7 @@ from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID
 from apps.integrations.kobo.tests.helpers import FakeResponse
 from apps.integrations.kobo.tests.helpers import RecordingSleeper
 from apps.integrations.kobo.tests.helpers import SequenceTransport
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from types import SimpleNamespace
 import json
 
@@ -90,6 +90,26 @@ class KoboApiClientTests(SimpleTestCase):
         )
         self.assertEqual(transport.calls[0]["params"], {"limit": 25})
         self.assertEqual(transport.calls[0]["timeout"], 15)
+
+    @override_settings(
+        KOBO_BASE_URL="https://factory.example.test",
+        KOBO_API_TOKEN="factory-token",
+        KOBO_HTTP_READ_TIMEOUT=21,
+        KOBO_HTTP_MAX_ATTEMPTS=4,
+        KOBO_HTTP_RETRY_BASE_DELAY=1,
+        KOBO_HTTP_RETRY_MAX_DELAY=9,
+        KOBO_HTTP_RETRY_AFTER_MAX_DELAY=30,
+        KOBO_HTTP_MAX_PAGES=7,
+    )
+    def test_factory_applies_the_complete_operational_retry_configuration(self):
+        client = build_kobo_api_client()
+
+        self.assertEqual(client._timeout_seconds, 21)
+        self.assertEqual(client._max_attempts, 4)
+        self.assertEqual(client._retry_base_delay, 1)
+        self.assertEqual(client._retry_max_delay, 9)
+        self.assertEqual(client._retry_after_max_delay, 30)
+        self.assertEqual(client._max_asset_pages, 7)
 
     def test_asset_detail_extracts_safe_technical_contract_metadata(self):
         client = self.create_client(

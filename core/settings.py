@@ -98,7 +98,6 @@ KOBO_BASE_URL = os.getenv("KOBO_BASE_URL", "")
 KOBO_API_TOKEN = os.getenv("KOBO_API_TOKEN", "")
 KOBO_WEBHOOK_USERNAME = os.getenv("KOBO_WEBHOOK_USERNAME", "")
 KOBO_WEBHOOK_SECRET = os.getenv("KOBO_WEBHOOK_SECRET", "")
-KOBO_FICHA_01_ASSET_UID = os.getenv("KOBO_FICHA_01_ASSET_UID", "")
 KOBO_ENABLED = os.getenv("KOBO_ENABLED", "False").strip().lower() in {
     "1",
     "true",
@@ -117,8 +116,6 @@ KOBO_HTTP_RETRY_AFTER_MAX_DELAY = float(
 KOBO_HTTP_MAX_PAGES = int(os.getenv("KOBO_HTTP_MAX_PAGES", "100"))
 KOBO_SYNC_OVERLAP_SECONDS = int(os.getenv("KOBO_SYNC_OVERLAP_SECONDS", "300"))
 KOBO_SYNC_LEASE_SECONDS = int(os.getenv("KOBO_SYNC_LEASE_SECONDS", "900"))
-# Compatibility for integrations constructed before split connect/read timeouts.
-KOBO_REQUEST_TIMEOUT_SECONDS = KOBO_HTTP_READ_TIMEOUT
 
 KOBO_MAX_ATTACHMENT_BYTES = int(
     os.getenv("KOBO_MAX_ATTACHMENT_BYTES", "10485760")
