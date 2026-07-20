@@ -285,7 +285,7 @@ class KoboSubmissionProcessorTests(TestCase):
 
         with (
             patch(
-                "apps.integrations.kobo.management.commands.process_kobo_submissions.KoboApiClient",
+                "apps.integrations.kobo.management.commands.process_kobo_submissions.build_kobo_api_client",
                 return_value=client,
             ),
             patch(

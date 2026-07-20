@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
 
-from apps.integrations.kobo.client import KoboApiClient
+from apps.integrations.kobo.client import build_kobo_api_client
 from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.forms import (
     KoboAssetConfigurationForm,
@@ -587,11 +587,7 @@ def retry_normalization_action(request, pk):
 )
 def retry_attachments_action(request, pk):
     submission = get_object_or_404(_submission_queryset(), pk=pk)
-    client = KoboApiClient(
-        base_url=settings.KOBO_BASE_URL,
-        api_token=settings.KOBO_API_TOKEN,
-        timeout_seconds=settings.KOBO_REQUEST_TIMEOUT_SECONDS,
-    )
+    client = build_kobo_api_client()
     result = process_submission_attachments(
         submission,
         client=client,

@@ -39,7 +39,6 @@ KOBO_BASE_URL=
 KOBO_API_TOKEN=
 KOBO_WEBHOOK_USERNAME=sigedon-kobo
 KOBO_WEBHOOK_SECRET=
-KOBO_FICHA_01_ASSET_UID=
 KOBO_HTTP_CONNECT_TIMEOUT=5
 KOBO_HTTP_READ_TIMEOUT=15
 KOBO_HTTP_MAX_ATTEMPTS=3
@@ -59,7 +58,7 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 * `KOBO_API_TOKEN` contiene el token utilizado para acceder a la API.
 * `KOBO_WEBHOOK_USERNAME` define el usuario esperado por el webhook.
 * `KOBO_WEBHOOK_SECRET` contiene el secreto utilizado para autenticar solicitudes entrantes.
-* `KOBO_HTTP_CONNECT_TIMEOUT` y `KOBO_HTTP_READ_TIMEOUT` definen límites explícitos y positivos para solicitudes externas.
+* `KOBO_HTTP_READ_TIMEOUT` define el timeout de `urllib`; el transporte actual no separa conexión y lectura, por lo que `KOBO_HTTP_CONNECT_TIMEOUT` se reserva para un transporte futuro.
 * `KOBO_HTTP_MAX_ATTEMPTS`, `KOBO_HTTP_RETRY_BASE_DELAY`, `KOBO_HTTP_RETRY_MAX_DELAY` y `KOBO_HTTP_RETRY_AFTER_MAX_DELAY` controlan reintentos transitorios con backoff.
 * `KOBO_HTTP_MAX_PAGES` limita la paginación remota para evitar recorridos no acotados.
 * `KOBO_SYNC_OVERLAP_SECONDS` reserva la ventana de solapamiento para el cursor incremental y `KOBO_SYNC_LEASE_SECONDS` limita una ejecución exclusiva por asset.
@@ -72,7 +71,6 @@ una ejecución parcial conserva el cursor anterior y libera su lease.
 * `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
 * `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900).
 * `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging.
-* `KOBO_FICHA_01_ASSET_UID` pertenece únicamente al flujo legado de la Ficha 1.
 
 ## Sincronización remota segura
 
@@ -110,10 +108,8 @@ una ejecución `SUCCEEDED` actualiza atómicamente cursor, watermark y hora del
 una lease atribuida al `KoboSyncRun`; una lease vencida deja el run anterior
 como `ABANDONED` con `SYNC_LEASE_EXPIRED` antes de adquirir la nueva.
 
-`sync_kobo_ficha_01 --asset-uid UID [--full] [--max-pages N]` usa únicamente
-este servicio y retorna 0 para éxito, 1 para fallo y 2 para parcial o lease
-ocupada. Las acciones del Hub son POST con CSRF, requieren permiso de cambio
-del asset y son síncronas; no existe scheduling automático.
+Las acciones del Hub son POST con CSRF, requieren permiso de cambio del asset y
+son síncronas; no existe scheduling automático.
 
 ## 4. Registro de formularios
 
@@ -641,47 +637,7 @@ Requiere permisos `kobo.*`.
 * El acceso técnico no implica permiso para modificar información financiera.
 * Los datos sensibles deben mantenerse protegidos.
 
-## 16. Entrada de compatibilidad de Ficha 1
-
-El mapping `ficha_01` y el comando histórico continúan activos como entrada al
-staging genérico:
-
-```bash
-python manage.py sync_kobo_ficha_01
-```
-
-### Opciones
-
-```text
---limit
---dry-run
-```
-
-### Flujo
-
-```text
-sync_kobo_ficha_01
-→ obtención y validación del payload Ficha 1
-→ receive_api_submission
-→ KoboSubmission (received, payload crudo)
-→ process_submission y normalización ficha_01
-→ routing, revisión e importación mediante el pipeline genérico
-```
-
-Este flujo:
-
-* se conserva por compatibilidad;
-* persiste en `KoboSubmission` y no escribe en los modelos específicos Ficha01;
-* no representa el patrón recomendado para nuevas fichas;
-* no sustituye el pipeline ordinario basado en activos configurados.
-
-`Ficha01Territorio` y `Ficha01CoveredCommunity` permanecen en el schema legado,
-no tienen escritores activos conocidos y no son utilizados por el pipeline
-vigente. No son la fuente de verdad activa. Su eventual eliminación requiere
-una decisión de producto y una migración específica; ninguna integración nueva
-debe escribir en ellos sin una decisión arquitectónica explícita.
-
-## 17. Privacidad
+## 16. Privacidad
 
 Solo los usuarios técnicos autorizados deben acceder a:
 
@@ -701,7 +657,7 @@ Solo los usuarios técnicos autorizados deben acceder a:
 * Las submissions rechazadas no deben exponerse en el portal público.
 * La información no aprobada no debe incorporarse a vistas públicas.
 
-## 18. Trazabilidad
+## 17. Trazabilidad
 
 SIGEDON utiliza dos registros con responsabilidades distintas.
 
@@ -759,21 +715,16 @@ trabaja en lotes de hasta 100 submissions locales `PENDING_IDENTITY`, no usa
 bindings y no cambia revisión, aprobación ni importación. Repetir una llamada
 sin pendientes no produce nuevos eventos.
 
-## 19. Comandos principales
+## 18. Comandos principales
 
 ```bash
 python manage.py register_kobo_forms
 python manage.py discover_kobo_assets
 python manage.py process_kobo_submissions
 python manage.py reconcile_kobo_submissions
-python manage.py sync_kobo_ficha_01
 ```
 
-El comando `sync_kobo_ficha_01` es una entrada de compatibilidad hacia
-`KoboSubmission`. La operación ordinaria debe utilizar los activos configurados
-y el pipeline general de KoboToolbox.
-
-## 20. Hub territorial
+## 19. Hub territorial
 
 Con `KOBO_ENABLED=true`, `/integrations/kobo/` es el Hub para dashboard,
 mappings, identidades, conflictos y routing pendiente. Sus mutaciones usan

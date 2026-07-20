@@ -2,7 +2,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from apps.integrations.kobo.client import KoboApiClient
+from apps.integrations.kobo.client import build_kobo_api_client
 from apps.integrations.kobo.contracts import TerritorialRoutingStatus
 from apps.integrations.kobo.errors import KoboIntegrationError, KoboPayloadError
 from apps.integrations.kobo.models import (
@@ -52,11 +52,7 @@ class Command(BaseCommand):
             raise CommandError("Kobo integration is disabled.")
         if options["limit"] <= 0:
             raise CommandError("--limit must be positive.")
-        client = KoboApiClient(
-            base_url=settings.KOBO_BASE_URL,
-            api_token=settings.KOBO_API_TOKEN,
-            timeout_seconds=settings.KOBO_REQUEST_TIMEOUT_SECONDS,
-        )
+        client = build_kobo_api_client()
         assets = KoboAsset.objects.filter(is_active=True).select_related("form_definition")
         if options["asset_uid"]:
             assets = assets.filter(asset_uid=options["asset_uid"])

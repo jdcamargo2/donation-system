@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from apps.integrations.kobo.errors import KoboTransientRemoteError
 from apps.integrations.kobo.models import KoboAsset, KoboFormDefinition, KoboSubmission, KoboSyncRun
+from apps.operations.models import Project
 from apps.integrations.kobo.services.incremental import (
     _finish_run,
     _start_run,
@@ -19,10 +20,12 @@ class IncrementalClient:
         self.outcomes = outcomes
         self.calls = []
 
-    def iter_submissions(self, asset_uid, *, params, max_pages):
+    def iter_submissions(self, asset_uid, *, params, max_pages, on_page_fetched=None):
         # PRE: synchronization provides its selected asset and safe remote parameters.
         # POST: records the boundary call and yields the configured remote outcomes.
         self.calls.append((asset_uid, params, max_pages))
+        if on_page_fetched is not None:
+            on_page_fetched()
         for outcome in self.outcomes:
             if isinstance(outcome, BaseException):
                 raise outcome
@@ -77,6 +80,16 @@ class KoboIncrementalSynchronizationTests(TestCase):
         self.assertIsNotNone(self.asset.last_successful_sync_at)
         self.assertIsNone(self.asset.sync_lease_run_id)
         self.assertIsNotNone(run.finished_at)
+        self.assertEqual(result.pages_fetched, 1)
+
+    def test_page_metric_counts_callback_pages_not_submission_items(self):
+        result = sync_asset_submissions(
+            asset=self.asset,
+            client=IncrementalClient([self.payload("first"), self.payload("second")]),
+        )
+
+        self.assertEqual(result.pages_fetched, 1)
+        self.assertEqual(result.created, 2)
 
     def test_partial_and_failed_runs_preserve_cursor_and_release_lease(self):
         initial = timezone.now() - timedelta(hours=1)
@@ -130,6 +143,51 @@ class KoboIncrementalSynchronizationTests(TestCase):
         result = sync_asset_submissions(asset=self.asset, client=IncrementalClient([payload]))
 
         self.assertEqual((result.created, result.updated, result.unchanged), (0, 0, 1))
+
+    def test_stale_payload_keeps_the_current_snapshot_and_never_marks_it_pending(self):
+        current = self.payload(edited_at="2026-07-20T12:00:00Z")
+        submission = KoboSubmission.objects.create(
+            form_definition=self.form, asset=self.asset, external_id="remote-1",
+            raw_payload=current, remote_updated_at=datetime(2026, 7, 20, 12, 0, tzinfo=UTC),
+            last_remote_payload_hash=canonical_payload_hash(current),
+        )
+
+        result = sync_asset_submissions(
+            asset=self.asset,
+            client=IncrementalClient([self.payload(edited_at="2026-07-20T11:00:00Z", marker="stale")]),
+        )
+
+        submission.refresh_from_db()
+        self.assertEqual(result.updated, 0)
+        self.assertEqual(submission.raw_payload, current)
+        self.assertFalse(submission.remote_update_pending)
+
+    def test_newer_nonterminal_snapshot_resets_derived_state_before_processing(self):
+        project = Project.objects.create(code="PRJ-SYNC-01", name="Sync")
+        original = self.payload("reset", edited_at="2026-07-20T10:00:00Z")
+        submission = KoboSubmission.objects.create(
+            form_definition=self.form, asset=self.asset, external_id="reset",
+            raw_payload=original, remote_updated_at=datetime(2026, 7, 20, 10, 0, tzinfo=UTC),
+            last_remote_payload_hash="", project=project,
+            status=KoboSubmission.Status.READY_FOR_REVIEW,
+            routing_status=KoboSubmission.RoutingStatus.RESOLVED,
+            routing_resolved_at=timezone.now(), pastoral_zone="centro", parish="x",
+            primary_community="y", nucleo_code_original="NV-1", nucleo_code_normalized="NV-1",
+            normalized_payload={"old": True}, normalized_at=timezone.now(), processed_at=timezone.now(),
+        )
+
+        result = sync_asset_submissions(
+            asset=self.asset,
+            client=IncrementalClient([self.payload("reset", edited_at="2026-07-20T12:00:00Z", marker="new")]),
+        )
+
+        submission.refresh_from_db()
+        revision = submission.remote_revisions.get()
+        self.assertEqual(result.updated, 1)
+        self.assertIsNone(submission.project)
+        self.assertEqual(submission.routing_status, KoboSubmission.RoutingStatus.UNRESOLVED)
+        self.assertEqual(submission.normalized_payload, {})
+        self.assertEqual(revision.payload_hash, canonical_payload_hash(revision.payload))
 
     def test_old_run_cannot_release_a_reassigned_lease(self):
         old_asset, old_run = _start_run(self.asset.pk, None, False)

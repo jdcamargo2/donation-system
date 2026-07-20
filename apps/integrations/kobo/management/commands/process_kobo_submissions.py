@@ -7,7 +7,7 @@ from django.utils import timezone
 from apps.integrations.kobo.attachments import (
     PROCESSABLE_ATTACHMENT_STATUSES,
 )
-from apps.integrations.kobo.client import KoboApiClient
+from apps.integrations.kobo.client import build_kobo_api_client
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.processors import (
     PROCESSABLE_STATUSES,
@@ -69,11 +69,7 @@ class Command(BaseCommand):
         download_attachments = options["download_attachments"]
         client = None
         if download_attachments:
-            client = KoboApiClient(
-                base_url=settings.KOBO_BASE_URL,
-                api_token=settings.KOBO_API_TOKEN,
-                timeout_seconds=settings.KOBO_REQUEST_TIMEOUT_SECONDS,
-            )
+            client = build_kobo_api_client()
         if submission_id is None:
             if download_attachments:
                 if options["limit"] <= 0:

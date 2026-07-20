@@ -11,6 +11,8 @@ from django.utils.dateparse import parse_datetime
 
 from apps.integrations.kobo.errors import KoboIntegrationError, KoboPayloadError
 from apps.integrations.kobo.models import KoboAsset, KoboProcessingEvent, KoboSubmission, KoboSubmissionRemoteRevision, KoboSyncRun
+from apps.integrations.kobo.processors import process_submission
+from apps.integrations.kobo.services.territorial_routing import route_normalized_submission
 
 
 REMOTE_WATERMARK_FIELD = "_last_edited"
@@ -31,6 +33,12 @@ class AssetSyncResult:
     unchanged: int = 0
     remote_updates_detected: int = 0
     failed: int = 0
+    normalized: int = 0
+    routed: int = 0
+    pending: int = 0
+    conflicts: int = 0
+    validation_failed: int = 0
+    processing_failed: int = 0
     partial: bool = False
 
 
@@ -55,6 +63,63 @@ def _remote_timestamp(payload: dict):
     value = payload.get(REMOTE_WATERMARK_FIELD)
     parsed = parse_datetime(value) if isinstance(value, str) else None
     return parsed if parsed is not None and not timezone.is_naive(parsed) else None
+
+
+def _store_remote_revision(submission: KoboSubmission) -> None:
+    """PRE: submission is locked. POST: stores a hash that matches its old payload."""
+    previous_hash = canonical_payload_hash(submission.raw_payload)
+    KoboSubmissionRemoteRevision.objects.get_or_create(
+        submission=submission,
+        payload_hash=previous_hash,
+        defaults={
+            "payload": submission.raw_payload,
+            "remote_updated_at": submission.remote_updated_at,
+            "remote_version": submission.remote_version,
+        },
+    )
+
+
+def _reset_derived_submission_fields(submission: KoboSubmission) -> None:
+    """PRE: submission is locked and not protected. POST: clears only payload-derived state."""
+    submission.status = KoboSubmission.Status.RECEIVED
+    submission.normalized_payload = {}
+    submission.normalized_at = None
+    submission.processed_at = None
+    submission.project = None
+    submission.routing_status = KoboSubmission.RoutingStatus.UNRESOLVED
+    submission.routing_reason_code = ""
+    submission.routing_resolved_at = None
+    submission.pastoral_zone = ""
+    submission.parish = ""
+    submission.primary_community = ""
+    submission.assessment_date = None
+    submission.nucleo_code_original = ""
+    submission.nucleo_code_normalized = ""
+    submission.error_code = ""
+    submission.error_message = ""
+    submission.remote_update_pending = False
+
+
+def _is_protected_submission(submission: KoboSubmission) -> bool:
+    """PRE: submission is persisted. POST: identifies snapshots immutable after human action."""
+    return submission.status in {
+        KoboSubmission.Status.IMPORTED,
+        KoboSubmission.Status.REJECTED,
+        KoboSubmission.Status.APPROVED_FOR_IMPORT,
+    }
+
+
+def _converge_submission(submission: KoboSubmission) -> tuple[str, str]:
+    """PRE: submission was staged or reset to received. POST: normalizes then routes safely."""
+    outcome = process_submission(
+        submission,
+        default_timezone=timezone.get_current_timezone(),
+    )
+    submission.refresh_from_db()
+    if outcome.final_status != KoboSubmission.Status.READY_FOR_REVIEW:
+        return outcome.final_status, KoboSubmission.RoutingStatus.UNRESOLVED
+    routing = route_normalized_submission(submission)
+    return outcome.final_status, routing.status
 
 
 def _start_run(asset_id, actor, full):
@@ -108,24 +173,53 @@ def sync_asset_submissions(*, asset, client, actor=None, full=False, max_pages=N
         return AssetSyncResult("SYNC_ALREADY_RUNNING", "full" if full else "incremental", asset.last_successful_sync_cursor, None, asset.last_remote_watermark, None)
     leased_asset, run = started
     created = updated = unchanged = detected = failed = pages = 0
+    normalized = routed = pending = conflicts = validation_failed = processing_failed = 0
     candidate = leased_asset.last_remote_watermark
     partial = False
     error_code = safe_error = ""
     try:
         params = build_incremental_submission_params(watermark=leased_asset.last_remote_watermark, full=run.mode == KoboSyncRun.Mode.FULL)
-        for payload in client.iter_submissions(leased_asset.asset_uid, params=params, max_pages=max_pages):
+        def count_page():
+            nonlocal pages
             pages += 1
+
+        for payload in client.iter_submissions(
+            leased_asset.asset_uid,
+            params=params,
+            max_pages=max_pages,
+            on_page_fetched=count_page,
+        ):
             external_id = payload.get("_uuid")
             remote_at = _remote_timestamp(payload)
             if not isinstance(external_id, str) or not external_id or remote_at is None:
                 failed += 1
                 continue
             digest = canonical_payload_hash(payload)
+            should_converge = False
             with transaction.atomic():
                 submission, was_created = KoboSubmission.objects.select_for_update().get_or_create(form_definition=leased_asset.form_definition, external_id=external_id, defaults={"asset": leased_asset, "raw_payload": payload, "remote_updated_at": remote_at, "last_remote_payload_hash": digest})
-                if was_created: created += 1
-                elif submission.last_remote_payload_hash == digest: unchanged += 1
-                elif submission.status in (KoboSubmission.Status.IMPORTED, KoboSubmission.Status.REJECTED, KoboSubmission.Status.APPROVED_FOR_IMPORT):
+                if was_created:
+                    submission.remote_version = str(payload.get("version", ""))
+                    submission.save(update_fields=("remote_version",))
+                    created += 1
+                    should_converge = True
+                elif submission.remote_updated_at is None:
+                    failed += 1
+                    KoboProcessingEvent.objects.create(submission=submission, stage="remote_sync", level=KoboProcessingEvent.Level.WARNING, code="REMOTE_TIMESTAMP_INVALID", message="Stored remote timestamp prevents a safe incremental update.")
+                elif remote_at < submission.remote_updated_at:
+                    unchanged += 1
+                elif remote_at == submission.remote_updated_at and submission.last_remote_payload_hash == digest:
+                    unchanged += 1
+                elif remote_at == submission.remote_updated_at:
+                    revision, revision_created = KoboSubmissionRemoteRevision.objects.get_or_create(submission=submission, payload_hash=digest, defaults={"payload": payload, "remote_updated_at": remote_at, "remote_version": str(payload.get("version", ""))})
+                    if revision_created:
+                        detected += 1
+                        conflicts += 1
+                    if _is_protected_submission(submission):
+                        submission.remote_update_pending = True
+                        submission.save(update_fields=("remote_update_pending",))
+                    KoboProcessingEvent.objects.get_or_create(submission=submission, stage="remote_sync", code="REMOTE_EQUAL_TIMESTAMP_CONFLICT", defaults={"level": KoboProcessingEvent.Level.WARNING, "message": "Remote payload conflicts with the stored timestamp."})
+                elif _is_protected_submission(submission):
                     revision, revision_created = KoboSubmissionRemoteRevision.objects.get_or_create(submission=submission, payload_hash=digest, defaults={"payload": payload, "remote_updated_at": remote_at, "remote_version": str(payload.get("version", ""))})
                     if revision_created:
                         detected += 1
@@ -133,15 +227,27 @@ def sync_asset_submissions(*, asset, client, actor=None, full=False, max_pages=N
                     submission.save(update_fields=("remote_update_pending",))
                     KoboProcessingEvent.objects.get_or_create(submission=submission, stage="remote_sync", code="REMOTE_UPDATE_DETECTED", defaults={"level": KoboProcessingEvent.Level.WARNING, "message": "Remote update requires review."})
                 else:
-                    KoboSubmissionRemoteRevision.objects.get_or_create(submission=submission, payload_hash=submission.last_remote_payload_hash or digest, defaults={"payload": submission.raw_payload, "remote_updated_at": submission.remote_updated_at, "remote_version": submission.remote_version})
-                    submission.raw_payload, submission.last_remote_payload_hash, submission.remote_updated_at = payload, digest, remote_at
-                    submission.status, submission.normalized_payload, submission.project = KoboSubmission.Status.RECEIVED, {}, None
-                    submission.save(update_fields=("raw_payload", "last_remote_payload_hash", "remote_updated_at", "status", "normalized_payload", "project"))
+                    _store_remote_revision(submission)
+                    submission.raw_payload = payload
+                    submission.last_remote_payload_hash = digest
+                    submission.remote_updated_at = remote_at
+                    submission.remote_version = str(payload.get("version", ""))
+                    _reset_derived_submission_fields(submission)
+                    submission.save()
                     updated += 1
+                    should_converge = True
+            if should_converge:
+                final_status, routing_status = _converge_submission(submission)
+                normalized += int(final_status == KoboSubmission.Status.READY_FOR_REVIEW)
+                routed += int(routing_status == KoboSubmission.RoutingStatus.RESOLVED)
+                pending += int(routing_status == KoboSubmission.RoutingStatus.PENDING_IDENTITY)
+                conflicts += int(routing_status == KoboSubmission.RoutingStatus.CONFLICT)
+                validation_failed += int(final_status == KoboSubmission.Status.VALIDATION_FAILED)
+                processing_failed += int(final_status == KoboSubmission.Status.PROCESSING_FAILED)
             candidate = max(filter(None, (candidate, remote_at)))
     except KoboIntegrationError:
         partial, error_code, safe_error = True, "REMOTE_SYNC_FAILED", "Remote synchronization did not complete."
     except Exception:
         error_code, safe_error = "SYNC_FAILED", "Synchronization failed safely."
     run = _finish_run(run=run, candidate_watermark=candidate, partial=partial, error_code=error_code, safe_error_message=safe_error, counters=(created, updated, unchanged, detected, failed))
-    return AssetSyncResult(run.status, run.mode, run.cursor_before, run.cursor_after, run.watermark_before, run.watermark_after, pages_fetched=pages, created=created, updated=updated, unchanged=unchanged, remote_updates_detected=detected, failed=failed, partial=run.partial)
+    return AssetSyncResult(run.status, run.mode, run.cursor_before, run.cursor_after, run.watermark_before, run.watermark_after, pages_fetched=pages, created=created, updated=updated, unchanged=unchanged, remote_updates_detected=detected, failed=failed, normalized=normalized, routed=routed, pending=pending, conflicts=conflicts, validation_failed=validation_failed, processing_failed=processing_failed, partial=run.partial)

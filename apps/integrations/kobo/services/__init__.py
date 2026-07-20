@@ -23,9 +23,7 @@ from apps.integrations.kobo.services.processing import (
 )
 from apps.integrations.kobo.services.submissions import (
     converge_webhook_submission,
-    receive_api_submission,
     receive_webhook_submission,
-    sync_ficha_01_submissions,
     sync_registered_forms,
 )
 from apps.integrations.kobo.services.territorial_routing import (
@@ -62,7 +60,6 @@ __all__ = (
     "import_kobo_submission",
     "process_pending_submissions",
     "observe_territorial_identity",
-    "receive_api_submission",
     "receive_webhook_submission",
     "reject_kobo_submission",
     "reconcile_territorial_identity_submissions",
@@ -72,7 +69,6 @@ __all__ = (
     "route_ficha_1_submission",
     "route_normalized_submission",
     "resolve_territorial_identity_conflict",
-    "sync_ficha_01_submissions",
     "sync_asset_submissions",
     "sync_registered_forms",
 )
