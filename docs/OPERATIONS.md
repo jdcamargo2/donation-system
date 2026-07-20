@@ -517,3 +517,9 @@ Después de desplegar:
 10. realizar una comprobación funcional básica sin alterar datos reales.
 
 El despliegue no debe considerarse completo hasta validar el comportamiento básico del sistema.
+
+## Hub territorial Kobo
+
+Con Kobo habilitado, el Hub `/integrations/kobo/` permite revisar y operar
+mappings, identidades, conflictos y reconciliación. Compruebe que los permisos
+Kobo se asignaron antes de habilitar acceso operativo.

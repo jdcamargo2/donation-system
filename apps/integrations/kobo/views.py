@@ -59,6 +59,11 @@ from apps.integrations.kobo.services import (
     route_normalized_submission,
     unlink_asset_from_project,
 )
+from apps.integrations.kobo.hub import (
+    conflict_detail, conflict_list, configure_mapping, deactivate_mapping,
+    hub_dashboard, identity_detail, identity_list, identity_status,
+    mapping_list, pending_submission_list, reconcile_identity, resolve_conflict,
+)
 
 
 WEBHOOK_BASIC_REALM = "SIGEDON Kobo Webhook"

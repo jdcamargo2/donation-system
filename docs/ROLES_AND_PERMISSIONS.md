@@ -32,6 +32,10 @@ delete_auditlog
 * No recibe automáticamente permisos técnicos de KoboToolbox.
 * Los permisos `kobo.*` deben asignarse por separado.
 
+El Hub territorial requiere `kobo.view_territorial_administration`. Las
+operaciones requieren además permisos explícitos de mappings, estado de
+identidad, resolución de conflictos o reconciliación.
+
 ## 2. Operador de campo
 
 ### Permisos

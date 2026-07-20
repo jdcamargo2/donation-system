@@ -42,6 +42,12 @@ Este documento describe los principales flujos operativos de SIGEDON, incluyendo
 
 El progreso por hitos nunca modifica `Project.status` ni se almacena como porcentaje persistido.
 
+### Hub territorial Kobo
+
+El Hub exige `kobo.view_territorial_administration`. Los cambios de mappings,
+estado y conflictos exigen POST con motivo; la reconciliación opera un lote y
+nunca aprueba ni importa submissions.
+
 La interfaz HTTP mantiene las mutaciones en la capa de servicios y exige el
 permiso específico del hito junto con `operations.view_project`:
 

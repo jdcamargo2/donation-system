@@ -739,3 +739,10 @@ python manage.py sync_kobo_ficha_01
 El comando `sync_kobo_ficha_01` es una entrada de compatibilidad hacia
 `KoboSubmission`. La operación ordinaria debe utilizar los activos configurados
 y el pipeline general de KoboToolbox.
+
+## 20. Hub territorial
+
+Con `KOBO_ENABLED=true`, `/integrations/kobo/` es el Hub para dashboard,
+mappings, identidades, conflictos y routing pendiente. Sus mutaciones usan
+POST, CSRF y los servicios administrativos existentes. Cuando Kobo está
+deshabilitado, el enlace y las rutas del Hub no están disponibles.

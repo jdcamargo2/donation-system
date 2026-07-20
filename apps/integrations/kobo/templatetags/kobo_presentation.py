@@ -6,6 +6,9 @@ from apps.integrations.kobo.services import REJECTION_REASON_LABELS
 register = template.Library()
 
 KOBO_PRESENTATION_LABELS = {
+    "pending_identity": "Pendiente de identidad",
+    "conflict": "Conflicto territorial",
+    "error": "Error de routing",
     "ready_for_review": "Pendiente de revisión",
     "imported": "Importada",
     "rejected": "Rechazada",
@@ -24,6 +27,15 @@ KOBO_PRESENTATION_LABELS = {
     "unknown": "Sin determinar",
     **REJECTION_REASON_LABELS,
 }
+
+
+@register.filter
+def get_item(mapping, key):
+    """
+    PRE: mapping is a safe template lookup dictionary.
+    POST: returns its key value or None without raising for absent contextual links.
+    """
+    return mapping.get(key) if mapping else None
 
 
 @register.filter

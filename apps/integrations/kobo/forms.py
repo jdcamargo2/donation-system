@@ -10,6 +10,7 @@ from apps.integrations.kobo.models import (
     KoboFormDefinition,
     KoboProjectBinding,
     KoboSubmission,
+    KoboTerritorialIdentityConflict,
 )
 from apps.integrations.kobo.form_registry import list_registered_forms
 from apps.integrations.kobo.services import validate_routing_source_field
@@ -190,3 +191,42 @@ class KoboRejectionForm(forms.Form):
         ):
             self.add_error("comment", "El comentario es obligatorio para el motivo otro.")
         return cleaned_data
+
+
+class PastoralZoneProjectMappingForm(forms.Form):
+    pastoral_zone = forms.ChoiceField(choices=())
+    project = forms.ModelChoiceField(queryset=None, label="Proyecto")
+
+    def __init__(self, *args, **kwargs):
+        # PRE: the operations Project model is available to the Kobo integration.
+        # POST: accepts only canonical zones and projects the administration service may use.
+        from apps.integrations.kobo.contracts import PastoralZone
+        from apps.operations.models import Project
+
+        super().__init__(*args, **kwargs)
+        self.fields["pastoral_zone"].choices = tuple(
+            (zone.value, zone.value.replace("_", " ").title())
+            for zone in PastoralZone
+        )
+        self.fields["project"].queryset = Project.objects.filter(
+            status__in=(Project.Status.PLANNED, Project.Status.ACTIVE, Project.Status.SUSPENDED)
+        ).order_by("code", "pk")
+
+
+class TerritorialReasonForm(forms.Form):
+    reason = forms.CharField(
+        label="Motivo",
+        max_length=500,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+
+class TerritorialConflictResolutionForm(TerritorialReasonForm):
+    decision = forms.ChoiceField(
+        label="Decisión",
+        choices=(
+            (KoboTerritorialIdentityConflict.Resolution.KEEP_EXISTING, "Conservar identidad actual"),
+            (KoboTerritorialIdentityConflict.Resolution.ACCEPT_PROPOSED, "Aceptar propuesta"),
+            (KoboTerritorialIdentityConflict.Resolution.DISMISSED, "Descartar conflicto"),
+        ),
+    )
