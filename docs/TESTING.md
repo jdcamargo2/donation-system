@@ -325,6 +325,16 @@ La integración debe comprobar:
 * restauración;
 * diferenciación entre `KoboProcessingEvent` y `AuditLog`.
 
+Para transporte remoto, use `FakeResponse`, `SequenceTransport` y
+`RecordingSleeper` en `apps.integrations.kobo.tests.helpers`: el adapter espera
+`status_code`, `body`, metadatos opcionales y `headers`; no `response.json()` ni
+`raise_for_status()`. Las secuencias deben representar cada intento, por ejemplo
+`[500, 500, 200]`, y comprobar número exacto de llamadas y delays.
+
+Las pruebas de locking real de Kobo están marcadas explícitamente con
+`Requires PostgreSQL row-level locking` en `test_concurrency.py` y las clases
+concurrentes de importación, priorización y routing. No se validan con SQLite.
+
 ## 16. Flujo recomendado antes de integrar cambios
 
 Ejecutar:

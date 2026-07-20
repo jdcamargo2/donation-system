@@ -365,26 +365,26 @@ class KoboApiClient:
         payload: dict[str, Any],
     ) -> tuple[list[dict], str | None]:
         # PRE: payload is a decoded candidate API v2 asset envelope.
-        # POST: returns validated results/next or raises KoboPayloadError.
+        # POST: returns validated results/next or raises KoboInvalidResponseError.
         required_fields = {"count", "next", "previous", "results"}
         if not required_fields.issubset(payload):
-            raise KoboPayloadError("Kobo asset response envelope is incomplete.")
+            raise KoboInvalidResponseError("Kobo asset response envelope is incomplete.")
         if type(payload["count"]) is not int or payload["count"] < 0:
-            raise KoboPayloadError("Kobo asset count must be a non-negative integer.")
+            raise KoboInvalidResponseError("Kobo asset count must be a non-negative integer.")
         if not isinstance(payload["results"], list) or not all(
             isinstance(asset, dict) for asset in payload["results"]
         ):
-            raise KoboPayloadError("Kobo asset results must be a list of objects.")
+            raise KoboInvalidResponseError("Kobo asset results must be a list of objects.")
         for field_name in ("next", "previous"):
             page_url = payload[field_name]
             if page_url is not None:
                 if not isinstance(page_url, str):
-                    raise KoboPayloadError(
+                    raise KoboInvalidResponseError(
                         f"Kobo asset {field_name} must be an HTTPS URL or null."
                     )
                 parsed_url = parse.urlsplit(page_url)
                 if parsed_url.scheme.lower() != "https" or not parsed_url.hostname:
-                    raise KoboPayloadError(
+                    raise KoboInvalidResponseError(
                         f"Kobo asset {field_name} must be an HTTPS URL or null."
                     )
         return payload["results"], payload["next"]
@@ -395,9 +395,9 @@ class KoboApiClient:
         parsed_url = parse.urlsplit(url)
         base_url = parse.urlsplit(self._base_url)
         if parsed_url.hostname != base_url.hostname:
-            raise KoboPayloadError(f"Kobo asset {field_name} host is not allowed.")
+            raise KoboInvalidResponseError(f"Kobo asset {field_name} host is not allowed.")
         if not parsed_url.path.startswith("/api/v2/assets"):
-            raise KoboPayloadError(f"Kobo asset {field_name} path is not allowed.")
+            raise KoboInvalidResponseError(f"Kobo asset {field_name} path is not allowed.")
 
     def _validate_submission_page_url(self, url: str, asset_uid: str) -> None:
         # PRE: url is a Kobo pagination candidate.
@@ -421,22 +421,24 @@ class KoboApiClient:
             raise KoboInvalidResponseError("Kobo submission results must be objects.")
         if next_url is not None and not isinstance(next_url, str):
             raise KoboInvalidResponseError("Kobo submission next must be a URL or null.")
+        if payload["previous"] is not None and not isinstance(payload["previous"], str):
+            raise KoboInvalidResponseError("Kobo submission previous must be a URL or null.")
         return results, next_url
 
     @staticmethod
     def _parse_remote_asset(asset: dict[str, Any]) -> KoboRemoteAsset:
         # PRE: asset is one API result object.
-        # POST: returns a safe immutable projection or raises KoboPayloadError.
+        # POST: returns a safe immutable projection or raises KoboInvalidResponseError.
         asset_uid = asset.get("uid")
         if not isinstance(asset_uid, str) or not asset_uid.strip():
-            raise KoboPayloadError("Kobo asset uid must be a non-empty string.")
+            raise KoboInvalidResponseError("Kobo asset uid must be a non-empty string.")
 
         def optional_text(field_name: str) -> str:
             value = asset.get(field_name)
             if value is None:
                 return ""
             if not isinstance(value, str):
-                raise KoboPayloadError(f"Kobo asset {field_name} must be text.")
+                raise KoboInvalidResponseError(f"Kobo asset {field_name} must be text.")
             return value.strip()
 
         owner = asset.get("owner")
@@ -471,30 +473,30 @@ class KoboApiClient:
     @staticmethod
     def _parse_remote_datetime(value: object, *, field_name: str) -> datetime | None:
         # PRE: value is optional remote ISO 8601 datetime data.
-        # POST: returns an aware datetime/None or raises KoboPayloadError.
+        # POST: returns an aware datetime/None or raises KoboInvalidResponseError.
         if value in (None, ""):
             return None
         if not isinstance(value, str):
-            raise KoboPayloadError(f"Kobo asset {field_name} must be ISO 8601 text.")
+            raise KoboInvalidResponseError(f"Kobo asset {field_name} must be ISO 8601 text.")
         try:
             parsed_value = datetime.fromisoformat(value)
         except ValueError as exc:
-            raise KoboPayloadError(
+            raise KoboInvalidResponseError(
                 f"Kobo asset {field_name} must be valid ISO 8601."
             ) from exc
         if parsed_value.tzinfo is None or parsed_value.utcoffset() is None:
-            raise KoboPayloadError(f"Kobo asset {field_name} must include an offset.")
+            raise KoboInvalidResponseError(f"Kobo asset {field_name} must include an offset.")
         return parsed_value
 
     @staticmethod
     def _decode_payload(body: bytes) -> dict[str, Any]:
         # PRE: body is the raw body of a successful Kobo response.
-        # POST: returns a JSON object or raises KoboPayloadError.
+        # POST: returns a JSON object or raises KoboInvalidResponseError.
         try:
             payload = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise KoboPayloadError("Kobo API returned invalid JSON.") from exc
+            raise KoboInvalidResponseError("Kobo API returned invalid JSON.") from exc
 
         if not isinstance(payload, dict):
-            raise KoboPayloadError("Kobo API response must be a JSON object.")
+            raise KoboInvalidResponseError("Kobo API response must be a JSON object.")
         return payload

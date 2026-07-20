@@ -84,6 +84,16 @@ límite de páginas validados. `KoboSyncRun` conserva únicamente métricas y er
 seguros: un discovery parcial no marca assets ausentes como no disponibles y un
 sync de submissions no se declara completo tras un fallo remoto.
 
+`max_attempts` es el número total de solicitudes, incluida la primera. Al
+agotarse, 401, 403 y 404 generan respectivamente `KoboAuthenticationError`,
+`KoboAuthorizationError` y `KoboNotFoundError`; 429 genera
+`KoboRateLimitError` (transitorio), timeout `KoboTimeoutError`, 500/502/503/504
+`KoboTransientRemoteError`, y 400/422/redirect `KoboPermanentRemoteError`.
+JSON, envelopes y estructuras remotas inválidas generan `KoboInvalidResponseError`.
+Todas derivan de `KoboIntegrationError`; los errores de payload local conservan
+`KoboPayloadError`. Un `Retry-After` válido y limitado tiene prioridad sobre el
+backoff; los tests inyectan sleeper y jitter, por lo que nunca esperan realmente.
+
 Los valores secretos no deben versionarse ni registrarse en logs.
 
 ### Sincronización incremental

@@ -18,12 +18,12 @@ class KoboNotFoundError(KoboIntegrationError):
     """El recurso remoto solicitado no existe."""
 
 
-class KoboRateLimitError(KoboIntegrationError):
-    """Kobo limitó temporalmente la solicitud."""
-
-
 class KoboTransientRemoteError(KoboIntegrationError):
     """Un fallo remoto temporal agotó los reintentos seguros."""
+
+
+class KoboRateLimitError(KoboTransientRemoteError):
+    """Kobo limitó temporalmente la solicitud."""
 
 
 class KoboPermanentRemoteError(KoboIntegrationError):

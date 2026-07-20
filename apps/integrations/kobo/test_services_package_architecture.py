@@ -14,6 +14,7 @@ SERVICE_MODULES = (
     "common",
     "discovery",
     "importers",
+    "incremental",
     "processing",
     "submissions",
     "territorial_administration",
@@ -48,6 +49,7 @@ EXPECTED_PUBLIC_API = {
     "route_normalized_submission",
     "resolve_territorial_identity_conflict",
     "sync_ficha_01_submissions",
+    "sync_asset_submissions",
     "sync_registered_forms",
 }
 EXPECTED_SIGNATURES = {
@@ -82,6 +84,7 @@ EXPECTED_SIGNATURES = {
     "sync_ficha_01_submissions": (
         "(client, asset_uid, limit=100, dry_run=False)"
     ),
+    "sync_asset_submissions": "(*, asset, client, actor=None, full=False, max_pages=None)",
     "sync_registered_forms": "()",
 }
 

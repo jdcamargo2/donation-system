@@ -1,8 +1,12 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from apps.integrations.kobo.models import KoboAsset
 from apps.integrations.kobo.models import KoboPastoralZoneProjectMapping
+from apps.integrations.kobo.models import KoboSyncRun
 from apps.integrations.kobo.tests.test_territorial_administration import (
     TerritorialAdministrationFixtureMixin,
 )
@@ -50,3 +54,20 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("kobo:hub"))
         self.assertEqual(response.status_code, 403)
+
+    def test_sync_action_requires_post_and_delegates_to_service(self):
+        asset = KoboAsset.objects.create(
+            asset_uid="hub-sync", name="Hub sync", form_definition=self.ficha_1,
+            form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE,
+        )
+        url = reverse("kobo:sync_asset", args=(asset.pk, "incremental"))
+        self.assertEqual(self.client.get(url).status_code, 405)
+        with patch(
+            "apps.integrations.kobo.hub.sync_asset_submissions",
+            return_value=SimpleNamespace(status=KoboSyncRun.Status.SUCCEEDED),
+        ) as synchronize:
+            response = self.client.post(url)
+
+        self.assertRedirects(response, reverse("kobo:hub"))
+        self.assertEqual(synchronize.call_args.kwargs["asset"], asset)
+        self.assertFalse(synchronize.call_args.kwargs["full"])

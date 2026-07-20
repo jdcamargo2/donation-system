@@ -402,6 +402,15 @@ python manage.py reconcile_kobo_submissions --dry-run
 
 No deben registrarse tokens ni secretos al diagnosticar.
 
+### 12.2.1. PostgreSQL no disponible para pruebas concurrentes Kobo
+
+Primero confirme `DATABASE_ENGINE=postgresql` y las variables de conexión sin
+imprimir sus valores. Si Django informa `connection is bad`, clasifíquelo como
+conexión cerrada o dañada; un error de host/puerto indica servidor inaccesible y
+un rechazo de autenticación indica credenciales inválidas. No use SQLite como
+sustituto de los tests de locking. Una vez restaurado el servidor, ejecute las
+suites focales concurrentes Kobo con `venv/bin/python manage.py test`.
+
 ---
 
 ### 12.3. Respuesta `403 Forbidden`
