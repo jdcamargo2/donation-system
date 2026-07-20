@@ -8,12 +8,10 @@ from apps.integrations.kobo.models import (
     KoboAsset,
     KoboDiscoveredAsset,
     KoboFormDefinition,
-    KoboProjectBinding,
     KoboSubmission,
     KoboTerritorialIdentityConflict,
 )
 from apps.integrations.kobo.form_registry import list_registered_forms
-from apps.integrations.kobo.services import validate_routing_source_field
 from apps.integrations.kobo.services import REJECTION_REASON_LABELS
 
 
@@ -83,57 +81,6 @@ class KoboAssetConfigurationForm(forms.Form):
         self.fields["form_definition"].initial = definition
         self.fields["form_role"].choices = ((form_role, dict(KoboAsset.FormRole.choices)[form_role]),)
         self.fields["form_role"].initial = form_role
-
-
-class KoboProjectBindingForm(forms.Form):
-    routing_type = forms.ChoiceField(choices=KoboProjectBinding.RoutingType.choices)
-    project = forms.ModelChoiceField(queryset=None)
-    source_field = forms.CharField(max_length=255, required=False)
-    source_value = forms.CharField(max_length=255, required=False)
-    is_active = forms.BooleanField(required=False, initial=True)
-
-    def __init__(self, *args, **kwargs):
-        # PRE: the operations Project model is installed.
-        # POST: project choices are constrained by a ModelChoiceField queryset.
-        from apps.operations.models import Project
-
-        super().__init__(*args, **kwargs)
-        self.fields["project"].queryset = Project.objects.order_by("name", "pk")
-
-    def clean(self):
-        # PRE: submitted values are candidate binding configuration.
-        # POST: enforces route shape and delegates source-field domain validation.
-        cleaned_data = super().clean()
-        routing_type = cleaned_data.get("routing_type")
-        source_field = cleaned_data.get("source_field", "").strip()
-        source_value = cleaned_data.get("source_value", "").strip()
-        if routing_type == KoboProjectBinding.RoutingType.DIRECT:
-            if source_field or source_value:
-                raise ValidationError("El routing directo no admite campos de origen.")
-        elif routing_type == KoboProjectBinding.RoutingType.FIELD_VALUE:
-            if not source_field or not source_value:
-                raise ValidationError("El routing por campo exige campo y valor.")
-            try:
-                validate_routing_source_field(source_field)
-            except ValidationError as exc:
-                self.add_error("source_field", exc)
-        cleaned_data["source_field"] = source_field
-        cleaned_data["source_value"] = source_value
-        return cleaned_data
-
-
-class KoboAssetProjectLinkForm(forms.Form):
-    project = forms.ModelChoiceField(queryset=None, label="Proyecto")
-
-    def __init__(self, *args, **kwargs):
-        # PRE: the operations Project model is installed.
-        # POST: exposes only active projects for the simplified operational link.
-        from apps.operations.models import Project
-
-        super().__init__(*args, **kwargs)
-        self.fields["project"].queryset = Project.objects.filter(
-            status=Project.Status.ACTIVE
-        ).order_by("name", "pk")
 
 
 class KoboReviewForm(forms.Form):

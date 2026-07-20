@@ -19,7 +19,6 @@ from apps.integrations.kobo.client import KoboApiClient
 from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.forms import (
     KoboAssetConfigurationForm,
-    KoboAssetProjectLinkForm,
     KoboReviewForm,
     KoboRejectionForm,
     get_compatible_asset_configuration,
@@ -44,20 +43,17 @@ from apps.integrations.kobo.processors import (
 )
 from apps.integrations.kobo.services import (
     REJECTION_REASON_LABELS,
-    associate_submission_with_project,
     activate_kobo_asset,
     configure_discovered_asset,
     converge_webhook_submission,
     get_project_pending_submissions,
     get_project_submission_history,
     import_kobo_submission,
-    link_asset_to_project,
     review_submission,
     reject_kobo_submission,
     receive_webhook_submission,
     restore_kobo_submission_to_review,
     route_normalized_submission,
-    unlink_asset_from_project,
 )
 from apps.integrations.kobo.hub import (
     conflict_detail, conflict_list, configure_mapping, deactivate_mapping,
@@ -214,17 +210,10 @@ def _local_asset_state(asset: KoboAsset | None) -> str:
     return "active" if asset.is_active else "configured_inactive"
 
 
-def _asset_configuration_context(asset, *, binding_form=None):
-    # PRE: asset is loaded with its form definition and bindings are queryable.
-    # POST: returns the non-technical operational-link context without changing state.
-    return {
-        "asset": asset,
-        "active_project_binding": asset.project_bindings.select_related("project").filter(
-            is_active=True,
-            routing_type="direct",
-        ).first(),
-        "binding_form": binding_form or KoboAssetProjectLinkForm(),
-    }
+def _asset_configuration_context(asset):
+    # PRE: asset is loaded with its supported form definition.
+    # POST: returns asset-only configuration context without exposing legacy bindings.
+    return {"asset": asset}
 
 
 def _submission_queryset():
@@ -612,31 +601,6 @@ def retry_attachments_action(request, pk):
     return redirect("kobo:submission_detail", pk=submission.pk)
 
 
-@require_POST
-@login_required
-@permission_required(
-    (
-        "kobo.view_kobosubmission",
-        "kobo.change_kobosubmission",
-        "operations.change_project",
-    ),
-    raise_exception=True,
-)
-def associate_project_action(request, pk):
-    if not settings.KOBO_ENABLED:
-        raise PermissionDenied("Kobo integration is disabled.")
-    submission = get_object_or_404(_submission_queryset(), pk=pk)
-    result = associate_submission_with_project(
-        submission,
-        reviewed_by=request.user,
-    )
-    if result.associated:
-        messages.success(request, "Submission materializada e importada.")
-    else:
-        messages.warning(request, "No fue posible materializar la submission.")
-    return redirect("kobo:submission_detail", pk=submission.pk)
-
-
 @login_required
 @permission_required("kobo.view_kobosubmission", raise_exception=True)
 def project_submission_detail(request, pk):
@@ -987,11 +951,6 @@ def discovered_asset_detail(request, pk):
         {
             "discovered": discovered,
             "asset": asset,
-            "bindings": (
-                asset.project_bindings.select_related("project").order_by("pk")
-                if asset
-                else ()
-            ),
             "local_state": _local_asset_state(asset),
             "compatible_configuration": compatible_configuration,
             "configuration_form": (
@@ -1064,7 +1023,7 @@ def configure_discovered_asset_action(request, pk):
 @permission_required("kobo.view_koboasset", raise_exception=True)
 def asset_configuration_detail(request, pk):
     # PRE: authorized request identifies a configured Kobo asset.
-    # POST: renders readiness and bindings without state changes.
+    # POST: renders territorial-routing asset status without state changes.
     _require_kobo_enabled()
     asset = get_object_or_404(
         KoboAsset.objects.select_related("form_definition"), pk=pk
@@ -1073,39 +1032,6 @@ def asset_configuration_detail(request, pk):
         request,
         "kobo/asset_configuration_detail.html",
         _asset_configuration_context(asset),
-    )
-
-
-@require_POST
-@login_required
-@permission_required("kobo.change_koboasset", raise_exception=True)
-def create_project_binding_action(request, pk):
-    # PRE: authorized POST supplies one selected active project.
-    # POST: creates or updates the sole operational direct binding and activates it.
-    _require_kobo_enabled()
-    asset = get_object_or_404(KoboAsset, pk=pk)
-    form = KoboAssetProjectLinkForm(request.POST)
-    if form.is_valid():
-        try:
-            link_asset_to_project(
-                asset,
-                project=form.cleaned_data["project"],
-                linked_by=request.user,
-            )
-        except ValidationError as exc:
-            form.add_error(None, exc)
-        else:
-            messages.success(
-                request,
-                "Ficha enlazada correctamente. Todas las respuestas nuevas se "
-                "asignarán al proyecto seleccionado.",
-            )
-            return redirect("kobo:asset_configuration", pk=asset.pk)
-    return render(
-        request,
-        "kobo/asset_configuration_detail.html",
-        _asset_configuration_context(asset, binding_form=form),
-        status=400,
     )
 
 
@@ -1131,9 +1057,9 @@ def activate_kobo_asset_action(request, pk):
 @permission_required("kobo.change_koboasset", raise_exception=True)
 def deactivate_kobo_asset_action(request, pk):
     # PRE: authorized POST identifies a configured asset.
-    # POST: unlinks it while preserving historical bindings and submissions.
+    # POST: deactivates it while preserving historical data and submissions.
     _require_kobo_enabled()
     asset = get_object_or_404(KoboAsset, pk=pk)
-    unlink_asset_from_project(asset, unlinked_by=request.user)
-    messages.success(request, "Ficha desenlazada. Sin proyecto enlazado.")
+    deactivate_kobo_asset(asset, deactivated_by=request.user)
+    messages.success(request, "Integración desactivada.")
     return redirect("kobo:asset_configuration", pk=asset.pk)

@@ -157,6 +157,10 @@ change_kobosubmission
 
 La matriz real puede incluir permisos adicionales según los modelos y acciones técnicas disponibles.
 
+Los antiguos permisos de binding no conceden administración territorial. La
+operación vigente se centra en ver la integración, gestionar mappings, resolver
+conflictos, cambiar estados de identidad, reconciliar, revisar e importar.
+
 ### Permisos de administración territorial
 
 ```text

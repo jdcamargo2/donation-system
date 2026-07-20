@@ -44,6 +44,11 @@ El progreso por hitos nunca modifica `Project.status` ni se almacena como porcen
 
 ### Hub territorial Kobo
 
+Las Fichas 1, 10 y 11 nunca usan `KoboProjectBinding`: cada submission pasa
+por `route_normalized_submission()` y un formulario no soportado queda con
+`UNSUPPORTED_FORM`, sin fallback genérico. El Hub territorial es la superficie
+operativa para mappings e identidades.
+
 El Hub exige `kobo.view_territorial_administration`. Los cambios de mappings,
 estado y conflictos exigen POST con motivo; la reconciliación opera un lote y
 nunca aprueba ni importa submissions.

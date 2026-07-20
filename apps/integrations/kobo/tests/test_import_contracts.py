@@ -35,7 +35,6 @@ from apps.integrations.kobo.models import (
     KoboTerritorialProfile,
 )
 from apps.integrations.kobo.services import import_kobo_submission
-from apps.integrations.kobo.services import associate_submission_with_project
 from apps.integrations.kobo.services.importers import (
     _import_kobo_submission_with_handlers,
 )
@@ -177,15 +176,10 @@ class KoboImportContractTests(TestCase):
                 self.assertEqual(get_import_handler(form_type).form_type, form_type)
 
     def test_public_import_routes_delegate_without_direct_imported_assignment(self):
-        association_source = inspect.getsource(associate_submission_with_project)
-        self.assertIn("import_kobo_submission", association_source)
-        self.assertNotIn("Status.IMPORTED", association_source)
-
         views_path = Path(__file__).parents[1] / "views.py"
         views_source = views_path.read_text()
         views_tree = ast.parse(views_source)
         expected_delegates = {
-            "associate_project_action": "associate_submission_with_project",
             "project_pending_submission_import": "import_kobo_submission",
         }
         view_functions = {

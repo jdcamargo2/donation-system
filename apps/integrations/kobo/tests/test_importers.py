@@ -8,7 +8,6 @@ from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_VERSION
 from apps.integrations.kobo.models import KoboAsset
 from apps.integrations.kobo.models import KoboAttachment
 from apps.integrations.kobo.models import KoboFormDefinition
-from apps.integrations.kobo.models import KoboProjectBinding
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.services import get_project_imported_submissions
 from apps.integrations.kobo.services import get_project_pending_submissions
@@ -122,13 +121,6 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             name="Ficha de priorización activa",
             form_definition=self.prioritization_form_definition,
             form_role=KoboAsset.FormRole.PRIORITIZATION_MATRIX,
-        )
-        self.binding = KoboProjectBinding.objects.create(
-            asset=self.asset,
-            project=self.project,
-            routing_type=KoboProjectBinding.RoutingType.FIELD_VALUE,
-            source_field="payload.nucleo_code",
-            source_value="NV-001",
         )
         self.imported = self.create_submission(
             "visible-imported",

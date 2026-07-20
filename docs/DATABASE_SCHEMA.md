@@ -718,7 +718,11 @@ Un activo descubierto no representa automáticamente un activo configurado o hab
 
 ---
 
-### 6.4. `kobo_koboprojectbinding`
+### 6.4. `kobo_koboprojectbinding` (legado conservado)
+
+La tabla permanece por trazabilidad histórica y no recibe escrituras ni
+consultas del runtime territorial. Su eliminación futura depende de auditar la
+base persistente; esta fase no borra ni recalcula datos.
 
 Relaciona un activo Kobo con un proyecto SIGEDON.
 

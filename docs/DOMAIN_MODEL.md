@@ -32,6 +32,10 @@ INACTIVE
 
 ## 2. `Project`
 
+Las relaciones históricas `KoboProjectBinding` no determinan proyectos en el
+runtime. La asociación Kobo vigente se resuelve por zona pastoral e identidad
+territorial de cada submission.
+
 Representa un proyecto, programa o línea de acción.
 
 ### Estados
@@ -348,19 +352,10 @@ Responsabilidades:
 
 ### 14.4. `KoboProjectBinding`
 
-Define cómo una submission de Kobo se resuelve hacia un proyecto.
-
-### Modos de resolución
-
-```text
-DIRECT
-FIELD_VALUE
-```
-
-Donde:
-
-* `DIRECT`: todas las submissions se asocian con un proyecto predefinido.
-* `FIELD_VALUE`: el proyecto se determina a partir del valor de un campo del formulario.
+Registro histórico de configuraciones asset-proyecto. No participa en el
+runtime ni recibe escrituras nuevas: Fichas 1, 10 y 11 resuelven su proyecto
+por zona pastoral e identidad territorial de la submission. La tabla se
+conserva hasta auditar los datos persistentes.
 
 ### 14.5. `KoboSubmission`
 

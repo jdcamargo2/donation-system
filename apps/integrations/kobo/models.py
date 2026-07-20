@@ -261,6 +261,10 @@ class KoboDiscoveredAsset(models.Model):
 
 
 class KoboProjectBinding(models.Model):
+    """Historical asset-to-project configuration retained pending data audit.
+
+    Supported Kobo submissions never read or write this model at runtime.
+    """
     class RoutingType(models.TextChoices):
         DIRECT = "direct", "Direct"
         FIELD_VALUE = "field_value", "Field value"

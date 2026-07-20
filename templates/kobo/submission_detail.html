@@ -67,7 +67,6 @@
             <h2 class="h5">Acciones internas</h2>
             {% if submission.status == "ready_for_review" %}<form method="post" action="{% url 'kobo:submission_review' submission.pk %}" class="mb-3">{% csrf_token %}{{ review_form.as_p }}<button type="submit" class="btn btn-primary">Registrar decisión</button></form>{% endif %}
             <div class="d-flex gap-2">
-                {% if kobo_enabled and submission.status == "approved_for_import" %}<form method="post" action="{% url 'kobo:submission_associate_project' submission.pk %}">{% csrf_token %}<button type="submit" class="btn btn-success">Intentar importación</button></form>{% endif %}
                 <form method="post" action="{% url 'kobo:submission_retry_normalization' submission.pk %}">{% csrf_token %}<button type="submit" class="btn btn-outline-secondary">Reintentar normalización</button></form>
                 <form method="post" action="{% url 'kobo:submission_retry_attachments' submission.pk %}">{% csrf_token %}<button type="submit" class="btn btn-outline-secondary">Reintentar adjuntos</button></form>
             </div>

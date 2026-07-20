@@ -25,8 +25,8 @@ def get_project_detail_context(project, user):
     }
     if not settings.KOBO_ENABLED:
         return empty_context
-    has_binding = project.kobo_bindings.filter(is_active=True).exists()
-    if not has_binding:
+    has_territorial_data = KoboSubmission.objects.filter(project=project).exists()
+    if not has_territorial_data:
         if user.has_perm("kobo.view_territorial_administration"):
             empty_context.update(
                 {

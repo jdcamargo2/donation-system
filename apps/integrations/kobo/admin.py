@@ -67,6 +67,26 @@ class KoboProjectBindingAdmin(admin.ModelAdmin):
         "project__code",
         "project__name",
     )
+    readonly_fields = (
+        "asset", "project", "routing_type", "source_field", "source_value", "is_active"
+    )
+
+    def has_add_permission(self, request):
+        # PRE: request targets legacy binding administration.
+        # POST: prevents new legacy bindings from being created.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # PRE: request targets a historical binding record.
+        # POST: permits only safe historical inspection.
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return super().has_change_permission(request, obj)
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # PRE: request targets a historical binding record.
+        # POST: preserves historical binding evidence.
+        return False
 
 
 @admin.register(KoboFormDefinition)

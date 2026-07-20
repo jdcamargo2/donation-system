@@ -16,9 +16,7 @@ from apps.integrations.kobo.models import (
     KoboAsset,
     KoboDiscoveredAsset,
     KoboFormDefinition,
-    KoboProjectBinding,
 )
-from apps.integrations.kobo.services.routing import validate_routing_source_field
 
 
 def _remote_asset_values(remote_asset: KoboRemoteAsset) -> dict:
@@ -180,151 +178,6 @@ def configure_discovered_asset(
     return asset
 
 
-def create_project_binding(
-    asset: KoboAsset,
-    *,
-    routing_type: str,
-    project,
-    source_field: str,
-    source_value: str,
-    is_active: bool,
-    configured_by,
-) -> KoboProjectBinding:
-    """
-    PRE: asset/project exist, actor is authenticated, and routing is coherent.
-    POST: creates one valid binding without activating the asset or other effects.
-    """
-    _require_authenticated_actor(configured_by, action="create a Kobo binding")
-    if asset is None or asset.pk is None:
-        raise ValidationError("Kobo asset must exist.")
-    if project is None or project.pk is None:
-        raise ValidationError("Project must exist.")
-    if routing_type not in KoboProjectBinding.RoutingType.values:
-        raise ValidationError("Kobo binding routing type is invalid.")
-    source_field = source_field.strip() if isinstance(source_field, str) else ""
-    source_value = source_value.strip() if isinstance(source_value, str) else ""
-    if routing_type == KoboProjectBinding.RoutingType.DIRECT:
-        if source_field or source_value:
-            raise ValidationError("Direct routing requires empty source fields.")
-    else:
-        if not source_field or not source_value:
-            raise ValidationError("Field-value routing requires field and value.")
-        validate_routing_source_field(source_field)
-
-    if is_active:
-        active_routes = set(
-            asset.project_bindings.filter(is_active=True).values_list(
-                "routing_type", flat=True
-            )
-        )
-        if active_routes and routing_type not in active_routes:
-            raise ValidationError("Active Kobo routing strategies cannot be mixed.")
-
-    binding = KoboProjectBinding(
-        asset=asset,
-        project=project,
-        routing_type=routing_type,
-        source_field=source_field,
-        source_value=source_value,
-        is_active=bool(is_active),
-    )
-    binding.full_clean()
-    binding.save()
-    return binding
-
-
-def link_asset_to_project(
-    asset: KoboAsset,
-    *,
-    project,
-    linked_by,
-) -> KoboProjectBinding:
-    """
-    PRE: asset and project are persisted, the actor is authenticated, and the
-    project is active.
-    POST: preserves historical bindings as inactive, keeps exactly one active
-    direct binding, and activates the asset.
-    """
-    _require_authenticated_actor(linked_by, action="link a Kobo asset")
-    if asset is None or asset.pk is None:
-        raise ValidationError("La ficha Kobo no existe.")
-    if project is None or project.pk is None:
-        raise ValidationError("Debe seleccionar un proyecto.")
-
-    from apps.operations.models import Project
-
-    with transaction.atomic():
-        try:
-            locked_project = Project.objects.select_for_update().get(pk=project.pk)
-        except Project.DoesNotExist as exc:
-            raise ValidationError("El proyecto seleccionado no existe.") from exc
-        if locked_project.status != Project.Status.ACTIVE:
-            raise ValidationError("Solo se pueden enlazar proyectos activos.")
-        locked_asset = KoboAsset.objects.select_for_update().select_related(
-            "form_definition"
-        ).get(pk=asset.pk)
-        try:
-            _require_registered_active_definition(locked_asset.form_definition)
-        except ValidationError as exc:
-            raise ValidationError(
-                "La definición de la ficha no está activa o no es compatible."
-            ) from exc
-        expected_role = FORM_DEFINITION_ROLES.get(
-            (
-                locked_asset.form_definition.form_id,
-                locked_asset.form_definition.version,
-            )
-        )
-        if locked_asset.form_role != expected_role:
-            raise ValidationError("La ficha Kobo no es compatible con su definición.")
-
-        locked_asset.project_bindings.select_for_update().filter(
-            is_active=True
-        ).update(is_active=False)
-        binding = locked_asset.project_bindings.filter(
-            routing_type=KoboProjectBinding.RoutingType.DIRECT
-        ).first()
-        if binding is None:
-            binding = KoboProjectBinding(
-                asset=locked_asset,
-                project=locked_project,
-                routing_type=KoboProjectBinding.RoutingType.DIRECT,
-                source_field="",
-                source_value="",
-                is_active=True,
-            )
-        else:
-            binding.project = locked_project
-            binding.source_field = ""
-            binding.source_value = ""
-            binding.is_active = True
-        binding.full_clean()
-        binding.save()
-        locked_asset.is_active = True
-        locked_asset.save(update_fields=("is_active",))
-    return binding
-
-
-def unlink_asset_from_project(asset: KoboAsset, *, unlinked_by) -> KoboAsset:
-    """
-    PRE: asset is persisted and the actor is authenticated.
-    POST: deactivates current bindings and the asset without deleting historical
-    bindings or submissions.
-    """
-    _require_authenticated_actor(unlinked_by, action="unlink a Kobo asset")
-    if asset is None or asset.pk is None:
-        raise ValidationError("La ficha Kobo no existe.")
-
-    with transaction.atomic():
-        locked_asset = KoboAsset.objects.select_for_update().get(pk=asset.pk)
-        locked_asset.project_bindings.select_for_update().filter(
-            is_active=True
-        ).update(is_active=False)
-        locked_asset.is_active = False
-        locked_asset.save(update_fields=("is_active",))
-    return locked_asset
-
-
 def get_asset_readiness(asset: KoboAsset) -> AssetReadiness:
     """
     PRE: asset is a persisted KoboAsset.
@@ -338,34 +191,9 @@ def get_asset_readiness(asset: KoboAsset) -> AssetReadiness:
         return AssetReadiness(
             False, "missing_form_definition", "Definición no disponible.", None, 0
         )
-    routes = tuple(
-        asset.project_bindings.filter(is_active=True).values_list(
-            "routing_type", flat=True
-        )
-    )
-    route_types = set(routes)
-    if asset.is_active and routes and len(route_types) == 1:
-        return AssetReadiness(
-            True, "active", "Integración activa.", next(iter(route_types)), len(routes)
-        )
-    if not routes:
-        return AssetReadiness(False, "no_active_bindings", "Falta routing activo.", None, 0)
-    if len(route_types) != 1:
-        return AssetReadiness(False, "mixed_routing", "Routing activo mezclado.", None, len(routes))
-    routing_type = next(iter(route_types))
-    ready = (
-        routing_type == KoboProjectBinding.RoutingType.FIELD_VALUE
-        or len(routes) == 1
-    )
-    if not ready:
-        return AssetReadiness(False, "mixed_routing", "Routing directo inválido.", routing_type, len(routes))
-    return AssetReadiness(
-        True,
-        "ready_to_activate",
-        "Configuración lista para activar.",
-        routing_type,
-        len(routes),
-    )
+    status_code = "active" if asset.is_active else "ready_to_activate"
+    message = "Integración activa." if asset.is_active else "Configuración lista para activar."
+    return AssetReadiness(True, status_code, message, "territorial", 0)
 
 
 def activate_kobo_asset(asset: KoboAsset, *, activated_by) -> KoboAsset:
@@ -387,7 +215,7 @@ def activate_kobo_asset(asset: KoboAsset, *, activated_by) -> KoboAsset:
 def deactivate_kobo_asset(asset: KoboAsset, *, deactivated_by) -> KoboAsset:
     """
     PRE: asset exists and actor is authenticated.
-    POST: changes only is_active to False, preserving bindings and submissions.
+    POST: changes only is_active to False, preserving historical data and submissions.
     """
     _require_authenticated_actor(deactivated_by, action="deactivate a Kobo asset")
     if asset is None or asset.pk is None:

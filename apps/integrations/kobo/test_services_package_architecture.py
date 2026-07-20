@@ -15,7 +15,6 @@ SERVICE_MODULES = (
     "discovery",
     "importers",
     "processing",
-    "routing",
     "submissions",
     "territorial_administration",
     "territorial_routing",
@@ -24,12 +23,9 @@ EXPECTED_PUBLIC_API = {
     "REJECTION_REASON_LABELS",
     "activate_kobo_asset",
     "activate_observed_territorial_identity",
-    "assign_normalized_submission_to_direct_project",
-    "associate_submission_with_project",
     "configure_discovered_asset",
     "configure_pastoral_zone_project_mapping",
     "converge_webhook_submission",
-    "create_project_binding",
     "deactivate_kobo_asset",
     "deactivate_pastoral_zone_project_mapping",
     "deactivate_territorial_identity",
@@ -39,15 +35,12 @@ EXPECTED_PUBLIC_API = {
     "get_project_pending_submissions",
     "get_project_submission_history",
     "import_kobo_submission",
-    "link_asset_to_project",
     "process_pending_submissions",
     "observe_territorial_identity",
     "receive_api_submission",
     "receive_webhook_submission",
     "reject_kobo_submission",
     "reconcile_territorial_identity_submissions",
-    "resolve_project_binding",
-    "resolve_routing_field",
     "restore_kobo_submission_to_review",
     "review_submission",
     "route_dependent_territorial_submission",
@@ -56,23 +49,15 @@ EXPECTED_PUBLIC_API = {
     "resolve_territorial_identity_conflict",
     "sync_ficha_01_submissions",
     "sync_registered_forms",
-    "unlink_asset_from_project",
-    "validate_routing_source_field",
 }
 EXPECTED_SIGNATURES = {
     "activate_kobo_asset": "(asset, *, activated_by)",
     "activate_observed_territorial_identity": "(*, identity, actor, reason)",
-    "assign_normalized_submission_to_direct_project": "(submission)",
-    "associate_submission_with_project": "(submission, *, reviewed_by)",
     "configure_discovered_asset": (
         "(discovered_asset, *, name, form_definition, form_role, configured_by)"
     ),
     "configure_pastoral_zone_project_mapping": "(*, pastoral_zone, project, actor)",
     "converge_webhook_submission": "(submission_id, *, default_timezone)",
-    "create_project_binding": (
-        "(asset, *, routing_type, project, source_field, source_value, "
-        "is_active, configured_by)"
-    ),
     "deactivate_kobo_asset": "(asset, *, deactivated_by)",
     "deactivate_pastoral_zone_project_mapping": "(*, pastoral_zone, actor, reason)",
     "deactivate_territorial_identity": "(*, identity, actor, reason)",
@@ -82,15 +67,12 @@ EXPECTED_SIGNATURES = {
     "get_project_pending_submissions": "(project)",
     "get_project_submission_history": "(project)",
     "import_kobo_submission": "(submission, *, actor)",
-    "link_asset_to_project": "(asset, *, project, linked_by)",
     "process_pending_submissions": "(*, limit=100, default_timezone)",
     "observe_territorial_identity": "(*, identity, actor, reason)",
     "receive_api_submission": "(form_definition, raw_payload)",
     "receive_webhook_submission": "(*, asset, raw_payload)",
     "reject_kobo_submission": "(submission, *, actor, reason, comment='')",
     "reconcile_territorial_identity_submissions": "(*, identity, actor, limit=100)",
-    "resolve_project_binding": "(submission, asset)",
-    "resolve_routing_field": "(submission, source_field)",
     "restore_kobo_submission_to_review": "(submission, *, actor)",
     "review_submission": "(submission, *, decision, reason, reviewed_by)",
     "route_dependent_territorial_submission": "(submission)",
@@ -101,8 +83,6 @@ EXPECTED_SIGNATURES = {
         "(client, asset_uid, limit=100, dry_run=False)"
     ),
     "sync_registered_forms": "()",
-    "unlink_asset_from_project": "(asset, *, unlinked_by)",
-    "validate_routing_source_field": "(source_field)",
 }
 
 
@@ -157,14 +137,12 @@ class KoboServicesPackageArchitectureTests(TestCase):
         submissions = importlib.import_module(
             "apps.integrations.kobo.services.submissions"
         )
-        routing = importlib.import_module("apps.integrations.kobo.services.routing")
         importers = importlib.import_module(
             "apps.integrations.kobo.services.importers"
         )
 
         self.assertIs(submissions.KoboConfigurationError, errors.KoboConfigurationError)
         self.assertIs(submissions.KoboPayloadError, errors.KoboPayloadError)
-        self.assertIs(routing.KoboPayloadError, errors.KoboPayloadError)
         self.assertIs(importers.KoboPayloadError, errors.KoboPayloadError)
 
     def test_each_definition_has_one_owner_module(self):

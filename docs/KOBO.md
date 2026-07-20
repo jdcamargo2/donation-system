@@ -111,40 +111,19 @@ Para participar en el pipeline ordinario, un activo debe:
 
 Un activo no configurado o inactivo no debe procesar submissions como parte del flujo ordinario.
 
-## 7. Bindings hacia proyectos
+## 7. Bindings hacia proyectos (legado)
 
-`KoboProjectBinding` define cómo una submission se asocia con un proyecto SIGEDON.
+`KoboProjectBinding` se conserva temporalmente solo como evidencia histórica y
+no participa en el runtime. Las Fichas 1, 10 y 11 se enrutan por submission:
+Ficha 1 usa zona pastoral y el mapping territorial; Fichas 10 y 11 usan la
+identidad territorial de `nucleo_code`. El UID del asset identifica la ficha,
+no el proyecto. La tabla se retirará únicamente después de auditar los datos
+persistentes; no hay backfill ni borrado automático en esta fase.
 
-### 7.1. Binding directo
-
-El activo completo se asigna a un proyecto concreto.
-
-```text
-Activo Kobo
-→ Proyecto SIGEDON predefinido
-```
-
-Este flujo se conserva para compatibilidad histórica.
-
-### 7.2. Binding por valor de campo
-
-Un valor del payload se utiliza para resolver el proyecto correspondiente.
-
-```text
-Campo del payload
-→ Valor normalizado
-→ Proyecto SIGEDON
-```
-
-Este modo requiere:
-
-* un campo de routing configurado;
-* valores esperados;
-* correspondencias válidas;
-* manejo de casos sin coincidencia.
-
-Los bindings se conservan para compatibilidad histórica, pero no participan en
-el routing ordinario de Ficha 1, Ficha 10 ni Ficha 11.
+Los valores `direct`, `field_value`, `source_field` y `source_value` pertenecen
+exclusivamente a la configuración histórica almacenada. No hay formularios,
+rutas, comandos ni servicios de runtime que creen, editen o consulten esas
+rutas.
 
 ### 7.3. Routing territorial de las fichas soportadas
 
@@ -533,7 +512,7 @@ Antes de este contrato existían dos escritores de `IMPORTED`:
 
 * `import_kobo_submission()` aceptaba `READY_FOR_REVIEW`, asignaba estado y
   `imported_at`, y creaba `KoboProcessingEvent` y `AuditLog` sin materializar;
-* `associate_submission_with_project()` aceptaba `APPROVED_FOR_IMPORT`, resolvía
+* el retirado `associate_submission_with_project()` aceptaba `APPROVED_FOR_IMPORT`, resolvía
   asset/binding, asignaba proyecto, `processed_at`, `imported_at` y estado, y
   creaba un evento técnico, pero no `AuditLog` ni entidad materializada.
 

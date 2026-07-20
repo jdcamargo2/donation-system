@@ -1,5 +1,9 @@
 # Operación y mantenimiento de SIGEDON
 
+> Kobo: las Fichas 1, 10 y 11 se administran desde el Hub territorial. No
+> configure bindings asset-proyecto: el UID identifica la ficha y el proyecto
+> se resuelve por zona pastoral e identidad territorial.
+
 Este documento describe las tareas habituales de preparación, operación, verificación y mantenimiento de SIGEDON.
 
 ## 1. Preparación local

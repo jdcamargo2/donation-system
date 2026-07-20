@@ -38,11 +38,6 @@ urlpatterns = [
         name="asset_configuration",
     ),
     path(
-        "assets/<int:pk>/bindings/",
-        views.create_project_binding_action,
-        name="create_project_binding",
-    ),
-    path(
         "assets/<int:pk>/activate/",
         views.activate_kobo_asset_action,
         name="activate_asset",
@@ -117,10 +112,5 @@ urlpatterns = [
         "submissions/<int:pk>/retry-attachments/",
         views.retry_attachments_action,
         name="submission_retry_attachments",
-    ),
-    path(
-        "submissions/<int:pk>/associate-project/",
-        views.associate_project_action,
-        name="submission_associate_project",
     ),
 ]
