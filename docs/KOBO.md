@@ -707,6 +707,25 @@ AuditLog
 
 Ninguno de los dos registros sustituye al otro.
 
+### Administración territorial
+
+`KoboTerritorialAdministrationEvent` conserva el evento funcional específico
+de mappings, conflictos, estados de identidad y reconciliaciones. Registra
+actor, acción, entidad, estados anterior/posterior, motivo y fecha sin copiar
+payloads, teléfonos, coordenadas, notas territoriales ni excepciones sensibles.
+Cada evento se acompaña de un `AuditLog` atómico.
+
+Los mappings se configuran por zona canónica y FK a `Project`; no usan nombres
+ni IDs codificados. Una zona usada por cualquier identidad no puede cambiarse o
+quedar sin mapping. `ACCEPT_PROPOSED` tampoco migra historia: se bloquea si la
+identidad ya produjo perfiles, microproyectos, evaluaciones, import records,
+importaciones u otras asignaciones resueltas.
+
+La reconciliación administrativa es distinta de la sincronización remota:
+trabaja en lotes de hasta 100 submissions locales `PENDING_IDENTITY`, no usa
+bindings y no cambia revisión, aprobación ni importación. Repetir una llamada
+sin pendientes no produce nuevos eventos.
+
 ## 19. Comandos principales
 
 ```bash

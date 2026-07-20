@@ -498,10 +498,22 @@ class KoboPastoralZoneProjectMapping(models.Model):
         related_name="kobo_pastoral_zone_mappings",
     )
     is_active = models.BooleanField(default=True)
+    deactivated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="deactivated_kobo_pastoral_zone_mappings",
+        null=True,
+        blank=True,
+    )
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+    deactivation_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        permissions = [
+            ("manage_pastoral_zone_mappings", "Can manage pastoral-zone project mappings"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=("pastoral_zone",),
@@ -548,6 +560,11 @@ class KoboTerritorialIdentity(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        permissions = [
+            ("view_territorial_administration", "Can view territorial administration"),
+            ("change_territorial_identity_status", "Can change territorial identity status"),
+            ("run_territorial_reconciliation", "Can run territorial reconciliation"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=~models.Q(nucleo_code_original=""),
@@ -1198,9 +1215,13 @@ class KoboTerritorialIdentityConflict(models.Model):
         blank=True,
     )
     resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        permissions = [
+            ("resolve_territorial_conflicts", "Can resolve territorial conflicts"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=("identity", "incoming_submission", "proposed_pastoral_zone"),
@@ -1244,6 +1265,27 @@ class KoboTerritorialIdentityConflict(models.Model):
 
     def __str__(self):
         return f"{self.identity}: {self.existing_pastoral_zone} → {self.proposed_pastoral_zone}"
+
+
+class KoboTerritorialAdministrationEvent(models.Model):
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="kobo_territorial_administration_events",
+    )
+    action = models.CharField(max_length=100)
+    entity_type = models.CharField(max_length=100)
+    entity_id = models.PositiveBigIntegerField()
+    previous_state = models.JSONField(default=dict, blank=True)
+    new_state = models.JSONField(default=dict, blank=True)
+    reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+
+    def __str__(self):
+        return f"{self.action}: {self.entity_type}#{self.entity_id}"
 
 
 class KoboAttachment(models.Model):

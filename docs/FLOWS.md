@@ -396,6 +396,36 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 
 ---
 
+## 9.1. Administración territorial Kobo
+
+La configuración zona pastoral → proyecto se realiza únicamente mediante el
+servicio transaccional. Solo admite las cinco zonas canónicas y proyectos no
+terminales. Cambiar o desactivar un mapping queda bloqueado cuando existe
+cualquier identidad de esa zona; nunca reasigna submissions ni materializaciones.
+
+Los conflictos admiten tres decisiones tipadas y motivadas:
+
+* `KEEP_EXISTING` conserva identidad y marca la submission entrante como error
+  `territorial_conflict_rejected`, sin importarla;
+* `ACCEPT_PROPOSED` solo cambia una identidad sin perfiles, microproyectos,
+  evaluaciones, import records, importaciones ni otras submissions resueltas;
+* `DISMISS` conserva intactas identidad y submission cuando el conflicto no
+  representa una decisión territorial.
+
+`PENDING_REVIEW` o `ACTIVE` pueden pasar a `OBSERVED`; solo `OBSERVED` puede
+volver a `ACTIVE`. Una identidad puede pasar a `INACTIVE`, conserva código e
+historia y no se reactiva por recibir otra Ficha 1. `OBSERVED` continúa
+permitiendo routing e importación según el contrato vigente; `INACTIVE` permite
+conservar routing pero bloquea nuevas materializaciones.
+
+La reconciliación administrativa procesa como máximo 100 Fichas 10/11
+`PENDING_IDENTITY` por llamada, bloquea el lote y solo resuelve proyecto/routing.
+No usa bindings, no aprueba, no importa y no modifica submissions importadas.
+Cada mutación produce un evento administrativo territorial y un `AuditLog` en
+la misma transacción.
+
+---
+
 ## 10. Flujo de rechazo y restauración de Kobo
 
 ### 10.1. Rechazo

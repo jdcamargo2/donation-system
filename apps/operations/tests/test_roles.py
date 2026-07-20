@@ -324,7 +324,7 @@ class OperationRoleTests(TestCase):
         self.assertEqual(self.client.get(reverse('project_update_delete', args=[self.project_update.pk])).status_code, 403)
         self.assertEqual(self.client.post(reverse('project_update_publish', args=[self.project_update.pk])).status_code, 403)
 
-    def test_existing_role_permission_matrices_remain_unchanged(self):
+    def test_existing_role_permission_matrices_include_territorial_read_access(self):
         expected_permissions = {
             ROLE_FIELD_OPERATOR: {
                 'view_project',
@@ -339,6 +339,7 @@ class OperationRoleTests(TestCase):
                 'add_projectupdateremediationattachment',
                 'delete_projectupdateremediationattachment',
                 'submit_projectupdateremediation',
+                'view_territorial_administration',
             },
             ROLE_EXTERNAL_AUDITOR: {
                 'view_institution',
@@ -349,6 +350,7 @@ class OperationRoleTests(TestCase):
                 'view_supportingdocument',
                 'view_projectupdate',
                 'view_auditlog',
+                'view_territorial_administration',
             },
         }
 

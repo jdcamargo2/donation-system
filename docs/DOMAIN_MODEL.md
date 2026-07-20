@@ -381,6 +381,29 @@ Representa el código territorial canónico, su zona pastoral y su proyecto. El
 routing de Ficha 1 crea o confirma esta identidad; la importación no crea una
 segunda identidad ni cambia su asignación territorial.
 
+Estados administrativos: `PENDING_REVIEW`, `ACTIVE`, `OBSERVED` e `INACTIVE`.
+La inactivación no libera `nucleo_code_normalized` ni elimina historia.
+
+### 14.6.1. `KoboPastoralZoneProjectMapping`
+
+Configura explícitamente una de las cinco zonas pastorales hacia un `Project`.
+La unicidad parcial permite un solo mapping activo por zona. Las desactivaciones
+conservan actor, fecha y razón; el servicio impide cambiar o desactivar mappings
+usados por identidades.
+
+### 14.6.2. `KoboTerritorialIdentityConflict`
+
+Conserva identidad, submission entrante, zona/proyecto existentes y propuestos.
+Una decisión humana motivada puede conservar lo existente, aceptar una propuesta
+sin historia incompatible o descartar un conflicto técnico. No elimina evidencia
+ni reasigna materializaciones importadas.
+
+### 14.6.3. `KoboTerritorialAdministrationEvent`
+
+Evento append-only y libre de payload para las mutaciones territoriales. Conserva
+actor, acción, entidad, estado anterior, estado posterior, motivo y timestamp; no
+sustituye al `AuditLog` creado en la misma transacción.
+
 ### 14.7. `KoboTerritorialProfile`
 
 Representa el diagnóstico aprobado e inmutable materializado desde una Ficha 1.
@@ -479,6 +502,8 @@ La diferencia principal es:
 
 * `AuditLog` registra acciones funcionales y de negocio;
 * `KoboProcessingEvent` registra eventos técnicos del pipeline Kobo.
+* `KoboTerritorialAdministrationEvent` registra decisiones administrativas
+  territoriales sin depender de una submission concreta.
 
 ## 15. Modelos heredados de Ficha 1
 

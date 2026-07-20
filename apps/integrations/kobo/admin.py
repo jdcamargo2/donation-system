@@ -12,6 +12,7 @@ from apps.integrations.kobo.models import (
     KoboProcessingEvent,
     KoboSubmission,
     KoboTerritorialIdentity,
+    KoboTerritorialAdministrationEvent,
     KoboTerritorialIdentityConflict,
     KoboTerritorialProfile,
 )
@@ -100,7 +101,33 @@ class KoboPastoralZoneProjectMappingAdmin(admin.ModelAdmin):
     list_display = ("pastoral_zone", "project", "is_active", "updated_at")
     list_filter = ("pastoral_zone", "is_active", "project")
     search_fields = ("pastoral_zone", "project__code", "project__name")
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = (
+        "pastoral_zone",
+        "project",
+        "is_active",
+        "deactivated_by",
+        "deactivated_at",
+        "deactivation_reason",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        # PRE: request targets territorial mapping administration.
+        # POST: prevents bypassing the transactional mapping service.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # PRE: request targets mapping history in Django Admin.
+        # POST: permits safe viewing while rejecting direct form mutation.
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return super().has_change_permission(request, obj)
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # PRE: request targets a current or historical zone mapping.
+        # POST: always preserves mapping history.
+        return False
 
 
 @admin.register(KoboTerritorialIdentity)
@@ -108,20 +135,38 @@ class KoboTerritorialIdentityAdmin(admin.ModelAdmin):
     list_display = ("nucleo_code_normalized", "pastoral_zone", "project", "status")
     list_filter = ("pastoral_zone", "status", "project")
     search_fields = ("nucleo_code_original", "nucleo_code_normalized", "project__code")
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = (
+        "nucleo_code_original",
+        "nucleo_code_normalized",
+        "pastoral_zone",
+        "project",
+        "source_submission",
+        "status",
+        "created_at",
+        "updated_at",
+    )
 
     def get_readonly_fields(self, request, obj=None):
         # PRE: obj is either a new identity or its persisted admin instance.
         # POST: protects the identity code, source evidence, zone, and project after creation.
-        if obj is None:
-            return self.readonly_fields
-        return self.readonly_fields + (
-            "nucleo_code_original",
-            "nucleo_code_normalized",
-            "pastoral_zone",
-            "project",
-            "source_submission",
-        )
+        return self.readonly_fields
+
+    def has_add_permission(self, request):
+        # PRE: request targets territorial identity administration.
+        # POST: prevents creating identities outside Ficha 1 routing.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # PRE: request targets an identity whose transitions belong to domain services.
+        # POST: permits safe viewing while rejecting direct form mutation.
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return super().has_change_permission(request, obj)
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # PRE: request targets a territorial identity with retained evidence.
+        # POST: always preserves its immutable nucleus code and history.
+        return False
 
 
 @admin.register(KoboTerritorialIdentityConflict)
@@ -144,12 +189,59 @@ class KoboTerritorialIdentityConflictAdmin(admin.ModelAdmin):
         "resolution",
         "resolved_by",
         "resolved_at",
+        "resolution_reason",
         "created_at",
     )
 
     def has_add_permission(self, request):
         # PRE: request is an authenticated admin request.
         # POST: prevents creating conflicts outside a future idempotent routing service.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # PRE: request targets a conflict whose resolution belongs to domain services.
+        # POST: permits safe viewing while rejecting direct form mutation.
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return super().has_change_permission(request, obj)
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # PRE: request targets a territorial conflict record.
+        # POST: always preserves conflict evidence and human decisions.
+        return False
+
+
+@admin.register(KoboTerritorialAdministrationEvent)
+class KoboTerritorialAdministrationEventAdmin(admin.ModelAdmin):
+    list_display = ("action", "entity_type", "entity_id", "actor", "created_at")
+    list_filter = ("action", "entity_type", "created_at")
+    search_fields = ("entity_type", "entity_id", "actor__username")
+    readonly_fields = (
+        "actor",
+        "action",
+        "entity_type",
+        "entity_id",
+        "previous_state",
+        "new_state",
+        "reason",
+        "created_at",
+    )
+
+    def has_add_permission(self, request):
+        # PRE: request targets territorial administration events.
+        # POST: prevents creating events outside domain services.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # PRE: request targets append-only territorial administration history.
+        # POST: permits safe viewing while rejecting event mutation.
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return super().has_change_permission(request, obj)
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # PRE: request targets territorial administration history.
+        # POST: always preserves the append-only event trail.
         return False
 
 

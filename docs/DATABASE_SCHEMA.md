@@ -883,7 +883,17 @@ AuditLog
 
 ---
 
-### 6.8. `kobo_koboterritorialidentity`
+### 6.8. `kobo_kobopastoralzoneprojectmapping`
+
+Configura una zona pastoral canónica hacia un proyecto protegido. La restricción
+`kobo_unique_active_zone_project_mapping` permite una sola fila activa por zona.
+`deactivated_by_id`, `deactivated_at` y `deactivation_reason` conservan la
+desactivación administrativa; los servicios bloquean cambios cuando la zona ya
+tiene identidades.
+
+---
+
+### 6.9. `kobo_koboterritorialidentity`
 
 Mantiene el código de núcleo normalizado único, la zona pastoral canónica, el
 proyecto protegido, la submission fuente de Ficha 1 y su estado administrativo.
@@ -891,7 +901,23 @@ Routing crea o confirma esta fila; la importación no la duplica.
 
 ---
 
-### 6.9. `kobo_koboimportrecord`
+### 6.10. `kobo_koboterritorialidentityconflict`
+
+Conserva la propuesta territorial entrante y el estado existente mediante FK
+`PROTECT`. La resolución guarda choice estable, actor, fecha y motivo. La
+unicidad parcial impide duplicar el mismo conflicto abierto.
+
+---
+
+### 6.11. `kobo_koboterritorialadministrationevent`
+
+Registra actor, acción, tipo/id de entidad, estados JSON seguros, motivo y fecha
+de cada mutación territorial. No contiene payload Kobo ni sustituye a
+`operations_auditlog`.
+
+---
+
+### 6.12. `kobo_koboimportrecord`
 
 Registra una sola importación completada por submission mediante `OneToOneField`
 y conserva `handler_type`, `target_app_label`, `target_model`,
@@ -899,7 +925,7 @@ y conserva `handler_type`, `target_app_label`, `target_model`,
 
 ---
 
-### 6.10. `kobo_koboterritorialprofile`
+### 6.13. `kobo_koboterritorialprofile`
 
 Representa una versión inmutable del perfil territorial aprobado de una Ficha 1.
 
@@ -936,7 +962,7 @@ históricas requieren un proceso explícito posterior.
 
 ---
 
-### 6.11. `kobo_koboprioritizedmicroproject`
+### 6.14. `kobo_koboprioritizedmicroproject`
 
 Representa una propuesta priorizada histórica e inmutable materializada desde
 una Ficha 10 aprobada.
@@ -972,7 +998,7 @@ desde `raw_payload`, y esta tabla no representa presupuesto o ejecución financi
 
 ---
 
-### 6.12. `kobo_koboprioritizationassessment`
+### 6.15. `kobo_koboprioritizationassessment`
 
 Representa una evaluación histórica e inmutable materializada desde una Ficha
 11 aprobada.
@@ -1009,7 +1035,7 @@ con microproyectos.
 
 ---
 
-### 6.13. `kobo_ficha01territorio`
+### 6.16. `kobo_ficha01territorio`
 
 Tabla heredada de la primera integración de la Ficha 1.
 
@@ -1039,7 +1065,7 @@ no debe recibir nuevas escrituras sin una decisión arquitectónica explícita.
 
 ---
 
-### 6.14. `kobo_ficha01coveredcommunity`
+### 6.17. `kobo_ficha01coveredcommunity`
 
 Representa las comunidades cubiertas dentro de la Ficha 1 heredada.
 

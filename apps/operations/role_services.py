@@ -31,6 +31,18 @@ ADMIN_EXCLUDED_PERMISSION_CODENAMES = (
     AUDIT_MUTATION_PERMISSION_CODENAMES
     | REVIEW_AND_DECISION_MUTATION_PERMISSION_CODENAMES
 )
+KOBO_TERRITORIAL_ADMIN_PERMISSION_CODENAMES = frozenset(
+    {
+        'view_territorial_administration',
+        'manage_pastoral_zone_mappings',
+        'resolve_territorial_conflicts',
+        'change_territorial_identity_status',
+        'run_territorial_reconciliation',
+    }
+)
+KOBO_TERRITORIAL_READ_PERMISSION_CODENAMES = frozenset(
+    {'view_territorial_administration'}
+)
 
 
 # PRE: Django auth permissions for apps.operations have been created by migrations.
@@ -38,11 +50,25 @@ ADMIN_EXCLUDED_PERMISSION_CODENAMES = (
 def sync_operation_roles():
     operations_permissions = Permission.objects.filter(content_type__app_label='operations')
     permissions_by_codename = {permission.codename: permission for permission in operations_permissions}
+    kobo_territorial_permissions = Permission.objects.filter(
+        content_type__app_label='kobo',
+        codename__in=KOBO_TERRITORIAL_ADMIN_PERMISSION_CODENAMES,
+    )
+    kobo_permissions_by_codename = {
+        permission.codename: permission for permission in kobo_territorial_permissions
+    }
+    missing_kobo_permissions = sorted(
+        KOBO_TERRITORIAL_ADMIN_PERMISSION_CODENAMES - kobo_permissions_by_codename.keys()
+    )
+    if missing_kobo_permissions:
+        missing = ', '.join(missing_kobo_permissions)
+        raise ValueError(f'Permisos territoriales Kobo no encontrados: {missing}')
     synced_groups = {}
 
     admin_group, _ = Group.objects.get_or_create(name=ROLE_SIGEDON_ADMIN)
     admin_group.permissions.set(
-        operations_permissions.exclude(codename__in=ADMIN_EXCLUDED_PERMISSION_CODENAMES)
+        list(operations_permissions.exclude(codename__in=ADMIN_EXCLUDED_PERMISSION_CODENAMES))
+        + list(kobo_territorial_permissions)
     )
     synced_groups[ROLE_SIGEDON_ADMIN] = admin_group
 
@@ -53,6 +79,19 @@ def sync_operation_roles():
             raise ValueError(f'Permisos operativos no encontrados: {missing}')
         group, _ = Group.objects.get_or_create(name=role_name)
         group.permissions.set([permissions_by_codename[codename] for codename in sorted(codenames)])
+        if role_name in {
+            ROLE_FIELD_OPERATOR,
+            ROLE_EXTERNAL_AUDITOR,
+            ROLE_PROJECT_COMMITTEE,
+            ROLE_PROJECT_UPDATE_REVIEWER,
+            ROLE_PROJECT_UPDATE_DECIDER,
+        }:
+            group.permissions.add(
+                *[
+                    kobo_permissions_by_codename[codename]
+                    for codename in sorted(KOBO_TERRITORIAL_READ_PERMISSION_CODENAMES)
+                ]
+            )
         synced_groups[role_name] = group
 
     return synced_groups
