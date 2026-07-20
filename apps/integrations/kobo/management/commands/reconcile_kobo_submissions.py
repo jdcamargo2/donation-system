@@ -3,6 +3,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from apps.integrations.kobo.client import KoboApiClient
+from apps.integrations.kobo.contracts import TerritorialRoutingStatus
 from apps.integrations.kobo.errors import KoboIntegrationError, KoboPayloadError
 from apps.integrations.kobo.models import (
     KoboAsset,
@@ -11,8 +12,8 @@ from apps.integrations.kobo.models import (
 )
 from apps.integrations.kobo.processors import process_submission
 from apps.integrations.kobo.services import (
-    assign_normalized_submission_to_direct_project,
     receive_webhook_submission,
+    route_normalized_submission,
 )
 
 
@@ -61,6 +62,7 @@ class Command(BaseCommand):
             assets = assets.filter(asset_uid=options["asset_uid"])
         created = existing = failed_assets = 0
         local_reprocessed = local_failed = local_would_reprocess = 0
+        resolved = still_pending = errors = skipped = 0
         local_submissions = KoboSubmission.objects.filter(
             asset__in=assets,
             asset__is_active=True,
@@ -74,9 +76,11 @@ class Command(BaseCommand):
         for submission in local_submissions:
             needs_normalization = submission.status == KoboSubmission.Status.VALIDATION_FAILED
             if needs_normalization and not _is_retryable_normalization_failure(submission):
+                skipped += 1
                 continue
             if options["dry_run"]:
                 local_would_reprocess += 1
+                skipped += 1
                 continue
             if needs_normalization:
                 outcome = process_submission(
@@ -85,6 +89,7 @@ class Command(BaseCommand):
                 )
                 if outcome.final_status != KoboSubmission.Status.READY_FOR_REVIEW:
                     local_failed += 1
+                    errors += 1
                     KoboProcessingEvent.objects.create(
                         submission=submission,
                         stage="reconciliation",
@@ -93,16 +98,9 @@ class Command(BaseCommand):
                         message="Local Kobo submission could not be reprocessed.",
                     )
                     continue
-            if not assign_normalized_submission_to_direct_project(submission):
-                local_failed += 1
-                KoboProcessingEvent.objects.create(
-                    submission=submission,
-                    stage="reconciliation",
-                    level=KoboProcessingEvent.Level.WARNING,
-                    code="local_failed",
-                    message="Local Kobo submission could not resolve its project.",
-                )
-            else:
+            routing = route_normalized_submission(submission)
+            if routing.status == TerritorialRoutingStatus.RESOLVED:
+                resolved += 1
                 local_reprocessed += 1
                 KoboProcessingEvent.objects.create(
                     submission=submission,
@@ -111,6 +109,11 @@ class Command(BaseCommand):
                     code="local_reprocessed",
                     message="Local Kobo submission reprocessed from stored payload.",
                 )
+            elif routing.status == TerritorialRoutingStatus.PENDING_IDENTITY:
+                still_pending += 1
+            else:
+                errors += 1
+                local_failed += 1
         for asset in assets:
             try:
                 payloads = client.get_submissions(asset.asset_uid, limit=options["limit"])
@@ -134,7 +137,23 @@ class Command(BaseCommand):
                             default_timezone=timezone.get_current_timezone(),
                         )
                         if outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW:
-                            assign_normalized_submission_to_direct_project(submission)
+                            routing = route_normalized_submission(submission)
+                            resolved += int(
+                                routing.status == TerritorialRoutingStatus.RESOLVED
+                            )
+                            still_pending += int(
+                                routing.status
+                                == TerritorialRoutingStatus.PENDING_IDENTITY
+                            )
+                            errors += int(
+                                routing.status
+                                in {
+                                    TerritorialRoutingStatus.CONFLICT,
+                                    TerritorialRoutingStatus.ERROR,
+                                }
+                            )
+                        else:
+                            errors += 1
             except (KoboIntegrationError, KoboPayloadError):
                 failed_assets += 1
         self.stdout.write(
@@ -142,6 +161,8 @@ class Command(BaseCommand):
                 "local_reprocessed={local_reprocessed} local_failed={local_failed} "
                 "local_would_reprocess={local_would_reprocess} created={created} "
                 "existing={existing} failed_assets={failed_assets} "
+                "resolved={resolved} still_pending={still_pending} "
+                "errors={errors} skipped={skipped} "
                 "dry_run={dry_run}".format(
                     local_reprocessed=local_reprocessed,
                     local_failed=local_failed,
@@ -149,6 +170,10 @@ class Command(BaseCommand):
                     created=created,
                     existing=existing,
                     failed_assets=failed_assets,
+                    resolved=resolved,
+                    still_pending=still_pending,
+                    errors=errors,
+                    skipped=skipped,
                     dry_run=options["dry_run"],
                 )
             )

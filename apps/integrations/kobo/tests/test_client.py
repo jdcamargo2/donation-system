@@ -2,11 +2,20 @@ from apps.integrations.kobo.client import KoboApiClient
 from apps.integrations.kobo.errors import KoboAttachmentError
 from apps.integrations.kobo.errors import KoboAuthenticationError
 from apps.integrations.kobo.errors import KoboConfigurationError
+from apps.integrations.kobo.errors import KoboInvalidResponseError
 from apps.integrations.kobo.errors import KoboIntegrationError
+from apps.integrations.kobo.errors import KoboNotFoundError
 from apps.integrations.kobo.errors import KoboPayloadError
+from apps.integrations.kobo.errors import KoboPermanentRemoteError
+from apps.integrations.kobo.errors import KoboRateLimitError
+from apps.integrations.kobo.errors import KoboTimeoutError
+from apps.integrations.kobo.errors import KoboTransientRemoteError
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_VERSION
 from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID
+from apps.integrations.kobo.tests.helpers import FakeResponse
+from apps.integrations.kobo.tests.helpers import RecordingSleeper
+from apps.integrations.kobo.tests.helpers import SequenceTransport
 from django.test import SimpleTestCase
 from types import SimpleNamespace
 import json
@@ -47,26 +56,6 @@ class StubHttpTransport:
             body=self.body,
             content_type=self.content_type,
             content_length=self.content_length,
-        )
-
-
-class SequenceHttpTransport:
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.calls = []
-
-    def get(self, url, *, headers, params, timeout):
-        # PRE: one configured response exists for the paginated request.
-        # POST: records safe request structure and returns/raises the next response.
-        self.calls.append({"url": url, "params": params, "timeout": timeout})
-        response = self.responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return SimpleNamespace(
-            status_code=200,
-            body=json.dumps(response).encode(),
-            content_type="application/json",
-            content_length=None,
         )
 
 
@@ -139,7 +128,7 @@ class KoboApiClientTests(SimpleTestCase):
         for body in bodies:
             with self.subTest(body=body):
                 client = self.create_client(StubHttpTransport(body=body))
-                with self.assertRaises(KoboPayloadError):
+                with self.assertRaises(KoboInvalidResponseError):
                     client.get_submissions("asset-01")
 
     def test_non_object_result_uses_payload_error(self):
@@ -152,7 +141,7 @@ class KoboApiClientTests(SimpleTestCase):
             )
         )
 
-        with self.assertRaises(KoboPayloadError):
+        with self.assertRaises(KoboInvalidResponseError):
             client.get_submissions("asset-01")
 
     def test_invalid_v2_envelope_metadata_uses_payload_error(self):
@@ -165,7 +154,7 @@ class KoboApiClientTests(SimpleTestCase):
         for body in bodies:
             with self.subTest(body=body):
                 client = self.create_client(StubHttpTransport(body=body))
-                with self.assertRaises(KoboPayloadError):
+                with self.assertRaises(KoboInvalidResponseError):
                     client.get_submissions("asset-01")
 
     def test_missing_configuration_fails_before_transport(self):
@@ -211,7 +200,7 @@ class KoboApiClientTests(SimpleTestCase):
     def test_invalid_json_uses_payload_error(self):
         client = self.create_client(StubHttpTransport(body=b"not-json"))
 
-        with self.assertRaises(KoboPayloadError):
+        with self.assertRaises(KoboInvalidResponseError):
             client.get_submissions("asset-01")
 
     def test_token_does_not_appear_in_exceptions(self):
@@ -278,6 +267,86 @@ class KoboApiClientTests(SimpleTestCase):
         self.assertNotIn(token, str(context.exception))
         self.assertNotIn(full_url, str(context.exception))
 
+    def test_retryable_outcomes_use_exactly_max_attempts_and_no_real_sleep(self):
+        for outcome, expected_error in (
+            (FakeResponse(status_code=500), KoboTransientRemoteError),
+            (FakeResponse(status_code=429), KoboRateLimitError),
+            (TimeoutError(), KoboTimeoutError),
+            (OSError(), KoboTransientRemoteError),
+        ):
+            with self.subTest(outcome=outcome):
+                transport = SequenceTransport([outcome, outcome, outcome])
+                sleeper = RecordingSleeper()
+                client = self.create_client(
+                    transport, max_attempts=3, sleeper=sleeper, jitter=lambda: 0
+                )
+
+                with self.assertRaises(expected_error):
+                    client.get_submissions("asset-01")
+
+                self.assertEqual(len(transport.calls), 3)
+                self.assertEqual(sleeper.delays, [0.5, 1.0])
+
+    def test_retry_after_is_bounded_and_precedes_backoff(self):
+        transport = SequenceTransport(
+            [
+                FakeResponse(status_code=429, headers={"Retry-After": "120"}),
+                FakeResponse.json({"count": 0, "next": None, "previous": None, "results": []}),
+            ]
+        )
+        sleeper = RecordingSleeper()
+        client = self.create_client(
+            transport, sleeper=sleeper, jitter=lambda: 0, retry_after_max_delay=10
+        )
+
+        self.assertEqual(client.get_submissions("asset-01"), [])
+        self.assertEqual(sleeper.delays, [10])
+        self.assertEqual(len(transport.calls), 2)
+
+    def test_non_retryable_statuses_preserve_their_typed_error(self):
+        for status, expected_error in (
+            (400, KoboPermanentRemoteError),
+            (401, KoboAuthenticationError),
+            (403, KoboIntegrationError),
+            (404, KoboNotFoundError),
+            (422, KoboPermanentRemoteError),
+            (302, KoboPermanentRemoteError),
+        ):
+            with self.subTest(status=status):
+                transport = SequenceTransport([FakeResponse(status_code=status)])
+                with self.assertRaises(expected_error):
+                    self.create_client(transport).get_submissions("asset-01")
+                self.assertEqual(len(transport.calls), 1)
+
+    def test_submission_pagination_preserves_yielded_results_when_later_page_fails(self):
+        next_page = "https://kf.example.test/api/v2/assets/asset-01/data/?page=2"
+        transport = SequenceTransport(
+            [
+                FakeResponse.json({"count": 2, "next": next_page, "previous": None, "results": [{"_uuid": "first"}]}),
+                FakeResponse(status_code=500),
+                FakeResponse(status_code=500),
+                FakeResponse(status_code=500),
+            ]
+        )
+        iterator = self.create_client(transport, jitter=lambda: 0).iter_submissions("asset-01")
+
+        self.assertEqual(next(iterator), {"_uuid": "first"})
+        with self.assertRaises(KoboTransientRemoteError):
+            next(iterator)
+        self.assertEqual(len(transport.calls), 4)
+
+    def test_submission_pagination_rejects_external_localhost_and_invalid_scheme_before_following(self):
+        for next_page in (
+            "https://external.example.test/api/v2/assets/asset-01/data/?page=2",
+            "https://localhost/api/v2/assets/asset-01/data/?page=2",
+            "http://kf.example.test/api/v2/assets/asset-01/data/?page=2",
+        ):
+            with self.subTest(next_page=next_page):
+                transport = SequenceTransport([{"count": 0, "next": next_page, "previous": None, "results": []}])
+                with self.assertRaises(KoboInvalidResponseError):
+                    list(self.create_client(transport).iter_submissions("asset-01"))
+                self.assertEqual(len(transport.calls), 1)
+
     def asset_result(self, uid="asset-1", **overrides):
         # PRE: uid identifies a simulated remote Kobo asset.
         # POST: returns API metadata containing safe and intentionally unsafe fields.
@@ -307,7 +376,7 @@ class KoboApiClientTests(SimpleTestCase):
         }
 
     def test_list_assets_returns_safe_single_page(self):
-        transport = SequenceHttpTransport(
+        transport = SequenceTransport(
             [self.asset_page([self.asset_result()])]
         )
         client = self.create_client(transport)
@@ -334,7 +403,7 @@ class KoboApiClientTests(SimpleTestCase):
 
     def test_list_assets_follows_multiple_pages(self):
         next_page = "https://kf.example.test/api/v2/assets/?page=2"
-        transport = SequenceHttpTransport(
+        transport = SequenceTransport(
             [
                 self.asset_page([self.asset_result("asset-1")], next_page=next_page),
                 self.asset_page(
@@ -360,17 +429,17 @@ class KoboApiClientTests(SimpleTestCase):
         for invalid_url in invalid_urls:
             with self.subTest(invalid_url=invalid_url):
                 client = self.create_client(
-                    SequenceHttpTransport(
+                    SequenceTransport(
                         [self.asset_page([], next_page=invalid_url)]
                     )
                 )
-                with self.assertRaises(KoboPayloadError):
+                with self.assertRaises(KoboInvalidResponseError):
                     client.list_assets()
 
     def test_list_assets_detects_cycle(self):
         repeated_url = "https://kf.example.test/api/v2/assets/?page=2"
         client = self.create_client(
-            SequenceHttpTransport(
+            SequenceTransport(
                 [
                     self.asset_page([], next_page=repeated_url),
                     self.asset_page([], next_page=repeated_url),
@@ -383,7 +452,7 @@ class KoboApiClientTests(SimpleTestCase):
 
     def test_list_assets_respects_maximum_pages(self):
         client = self.create_client(
-            SequenceHttpTransport(
+            SequenceTransport(
                 [
                     self.asset_page(
                         [],
@@ -412,14 +481,14 @@ class KoboApiClientTests(SimpleTestCase):
 
         for page in pages:
             with self.subTest(page=page):
-                client = self.create_client(SequenceHttpTransport([page]))
-                with self.assertRaises(KoboPayloadError):
+                client = self.create_client(SequenceTransport([page]))
+                with self.assertRaises(KoboInvalidResponseError):
                     client.list_assets()
 
     def test_list_asset_error_does_not_expose_token(self):
         token = "asset-discovery-secret-token"
         client = self.create_client(
-            SequenceHttpTransport([OSError(token)]),
+            SequenceTransport([OSError(token), OSError(token), OSError(token)]),
             api_token=token,
         )
 

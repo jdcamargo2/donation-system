@@ -42,6 +42,17 @@ Este documento describe los principales flujos operativos de SIGEDON, incluyendo
 
 El progreso por hitos nunca modifica `Project.status` ni se almacena como porcentaje persistido.
 
+### Hub territorial Kobo
+
+Las Fichas 1, 10 y 11 nunca usan `KoboProjectBinding`: cada submission pasa
+por `route_normalized_submission()` y un formulario no soportado queda con
+`UNSUPPORTED_FORM`, sin fallback genérico. El Hub territorial es la superficie
+operativa para mappings e identidades.
+
+El Hub exige `kobo.view_territorial_administration`. Los cambios de mappings,
+estado y conflictos exigen POST con motivo; la reconciliación opera un lote y
+nunca aprueba ni importa submissions.
+
 La interfaz HTTP mantiene las mutaciones en la capa de servicios y exige el
 permiso específico del hito junto con `operations.view_project`:
 
@@ -316,14 +327,16 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 
 * Existe una definición de formulario compatible.
 * El activo Kobo ha sido descubierto y configurado.
-* Existe un binding válido hacia un proyecto.
 * El activo se encuentra habilitado.
+* Para Ficha 1 existe un mapping de zona pastoral hacia proyecto.
+* Para Ficha 10/11 puede existir ya una identidad territorial; su ausencia no
+  impide conservar la submission en staging.
 
 ### Pasos
 
 1. Un activo remoto de Kobo se descubre.
 2. Se registra o asocia su definición compatible.
-3. Se configura un `KoboProjectBinding`.
+3. Se configura el activo y, para Ficha 1, el mapping territorial de zona.
 4. El activo se activa.
 5. Kobo envía un webhook o se ejecuta una sincronización.
 6. El sistema crea o actualiza una `KoboSubmission` en staging.
@@ -334,23 +347,93 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
    * Ficha 1;
    * Ficha 10;
    * Ficha 11.
-10. El sistema resuelve el proyecto asociado.
-11. La submission queda disponible para revisión humana.
-12. Un usuario autorizado consulta la información normalizada.
-13. El usuario puede:
+10. El dispatcher resuelve el proyecto: Ficha 1 crea o confirma la identidad;
+    Ficha 10/11 consulta exclusivamente esa identidad por `nucleo_code`.
+11. Si una Ficha 10/11 aún no tiene identidad, queda `PENDING_IDENTITY`, sin
+    proyecto y fuera de bandejas de proyecto; no se usa binding como fallback.
+12. Una submission con routing resuelto queda disponible para revisión humana.
+13. Un usuario autorizado consulta la información normalizada.
+14. El usuario puede:
 
-* importar;
-* rechazar.
+    * aprobar para importación;
+    * rechazar.
 
-14. Si se importa, la información normalizada se vincula al proyecto.
-15. La acción queda registrada en el historial técnico y, cuando corresponda, en la auditoría funcional.
+15. La aprobación cambia `READY_FOR_REVIEW` a `APPROVED_FOR_IMPORT`; todavía no
+    constituye una importación.
+16. El servicio común bloquea la submission, revalida routing, proyecto,
+    normalización, payload preservado, revisión y permisos, y selecciona el
+    handler cerrado de Ficha 1, 10 u 11.
+17. Solo una materialización específica exitosa crea `KoboImportRecord`, cambia
+    la submission a `IMPORTED`, completa `processed_at` e `imported_at` y registra
+    evento y auditoría.
+18. El handler de Ficha 1 localiza la identidad ya creada por routing, valida
+    código, zona, proyecto, conflictos y datos normalizados, y crea un
+    `KoboTerritorialProfile` inmutable por submission.
+19. Si la identidad estaba `PENDING_REVIEW`, pasa a `ACTIVE`; `OBSERVED`
+    permanece observada e `INACTIVE` bloquea la importación.
+20. El handler de Ficha 10 localiza la identidad sin crearla, valida código,
+    proyecto, estado, conflictos, campos requeridos y catálogos, y crea un
+    `KoboPrioritizedMicroproject` inmutable por submission.
+21. La Ficha 10 conserva `beneficiary_group` como lista canónica y
+    `main_activities` como texto libre; no interpreta de nuevo `raw_payload`.
+22. El handler de Ficha 11 localiza la identidad sin crearla, valida código,
+    proyecto, estado, conflictos, diez scores, cálculos, catálogos, decisiones
+    humanas y warnings, y crea un `KoboPrioritizationAssessment` inmutable por
+    submission.
+23. La Ficha 11 conserva por separado total y semáforo originales, total y
+    semáforo recalculados, semáforo final humano y prioridad final. Las
+    discrepancias son warnings y `linked_microprojects` permanece como snapshot
+    textual, sin relaciones automáticas por nombre.
 
 ### POST
 
 * El payload original permanece conservado.
-* La importación se realiza únicamente después de la revisión autorizada.
-* Los datos normalizados quedan asociados al proyecto correspondiente.
+* Routing resuelto no implica revisión aprobada.
+* Revisión aprobada no implica importación.
+* Importación significa materialización exitosa y resultado persistido.
+* Una Ficha 1 importada produce exactamente un perfil territorial y un import
+  record; otra Ficha 1 válida del mismo núcleo conserva un perfil histórico nuevo.
+* Una Ficha 10 importada produce exactamente un microproyecto priorizado y un
+  import record; otra submission con el mismo nombre conserva otra propuesta.
+* El routing de Ficha 10 identifica el proyecto Núcleo Vital; su importación crea
+  la propuesta subordinada y no crea otro `Project`.
+* Una Ficha 11 importada produce exactamente una evaluación histórica y un
+  import record; otra Ficha 11 válida del mismo núcleo crea otra evaluación.
+* El routing de Ficha 11 identifica el proyecto Núcleo Vital; su importación no
+  cambia el estado ni la prioridad institucional del proyecto, la identidad o
+  los microproyectos.
 * La integración no modifica directamente saldos financieros.
+* Las Fichas 10 y 11 no crean presupuesto, donación, asignación de fondos ni gasto.
+
+---
+
+## 9.1. Administración territorial Kobo
+
+La configuración zona pastoral → proyecto se realiza únicamente mediante el
+servicio transaccional. Solo admite las cinco zonas canónicas y proyectos no
+terminales. Cambiar o desactivar un mapping queda bloqueado cuando existe
+cualquier identidad de esa zona; nunca reasigna submissions ni materializaciones.
+
+Los conflictos admiten tres decisiones tipadas y motivadas:
+
+* `KEEP_EXISTING` conserva identidad y marca la submission entrante como error
+  `territorial_conflict_rejected`, sin importarla;
+* `ACCEPT_PROPOSED` solo cambia una identidad sin perfiles, microproyectos,
+  evaluaciones, import records, importaciones ni otras submissions resueltas;
+* `DISMISS` conserva intactas identidad y submission cuando el conflicto no
+  representa una decisión territorial.
+
+`PENDING_REVIEW` o `ACTIVE` pueden pasar a `OBSERVED`; solo `OBSERVED` puede
+volver a `ACTIVE`. Una identidad puede pasar a `INACTIVE`, conserva código e
+historia y no se reactiva por recibir otra Ficha 1. `OBSERVED` continúa
+permitiendo routing e importación según el contrato vigente; `INACTIVE` permite
+conservar routing pero bloquea nuevas materializaciones.
+
+La reconciliación administrativa procesa como máximo 100 Fichas 10/11
+`PENDING_IDENTITY` por llamada, bloquea el lote y solo resuelve proyecto/routing.
+No usa bindings, no aprueba, no importa y no modifica submissions importadas.
+Cada mutación produce un evento administrativo territorial y un `AuditLog` en
+la misma transacción.
 
 ---
 

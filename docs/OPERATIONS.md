@@ -1,5 +1,9 @@
 # Operación y mantenimiento de SIGEDON
 
+> Kobo: las Fichas 1, 10 y 11 se administran desde el Hub territorial. No
+> configure bindings asset-proyecto: el UID identifica la ficha y el proyecto
+> se resuelve por zona pastoral e identidad territorial.
+
 Este documento describe las tareas habituales de preparación, operación, verificación y mantenimiento de SIGEDON.
 
 ## 1. Preparación local
@@ -398,6 +402,15 @@ python manage.py reconcile_kobo_submissions --dry-run
 
 No deben registrarse tokens ni secretos al diagnosticar.
 
+### 12.2.1. PostgreSQL no disponible para pruebas concurrentes Kobo
+
+Primero confirme `DATABASE_ENGINE=postgresql` y las variables de conexión sin
+imprimir sus valores. Si Django informa `connection is bad`, clasifíquelo como
+conexión cerrada o dañada; un error de host/puerto indica servidor inaccesible y
+un rechazo de autenticación indica credenciales inválidas. No use SQLite como
+sustituto de los tests de locking. Una vez restaurado el servidor, ejecute las
+suites focales concurrentes Kobo con `venv/bin/python manage.py test`.
+
 ---
 
 ### 12.3. Respuesta `403 Forbidden`
@@ -517,3 +530,9 @@ Después de desplegar:
 10. realizar una comprobación funcional básica sin alterar datos reales.
 
 El despliegue no debe considerarse completo hasta validar el comportamiento básico del sistema.
+
+## Hub territorial Kobo
+
+Con Kobo habilitado, el Hub `/integrations/kobo/` permite revisar y operar
+mappings, identidades, conflictos y reconciliación. Compruebe que los permisos
+Kobo se asignaron antes de habilitar acceso operativo.

@@ -121,14 +121,21 @@ operations_project ──< operations_projectdocument             │
 
 operations_project
         ├──< kobo_koboprojectbinding >── kobo_koboasset
-        └──< kobo_kobosubmission
+        ├──< kobo_kobosubmission
+        ├──< kobo_koboterritorialidentity
+        └──< kobo_koboterritorialprofile
 
 kobo_koboformdefinition
         ├──< kobo_koboasset
         └──< kobo_kobosubmission
                     │
                     ├──< kobo_koboattachment
-                    └──< kobo_koboprocessingevent
+                    ├──< kobo_koboprocessingevent
+                    ├──1 kobo_koboimportrecord
+                    └──1 kobo_koboterritorialprofile >── kobo_koboterritorialidentity
+
+kobo_koboterritorialidentity
+        └──< kobo_koboterritorialprofile
 
 kobo_ficha01territorio
         └──< kobo_ficha01coveredcommunity
@@ -711,7 +718,11 @@ Un activo descubierto no representa automáticamente un activo configurado o hab
 
 ---
 
-### 6.4. `kobo_koboprojectbinding`
+### 6.4. `kobo_koboprojectbinding` (legado conservado)
+
+La tabla permanece por trazabilidad histórica y no recibe escrituras ni
+consultas del runtime territorial. Su eliminación futura depende de auditar la
+base persistente; esta fase no borra ni recalcula datos.
 
 Relaciona un activo Kobo con un proyecto SIGEDON.
 
@@ -861,6 +872,7 @@ Registra eventos técnicos del pipeline Kobo.
 | `level`         | `CharField`     | Obligatorio                        |
 | `code`          | `CharField`     | Opcional                           |
 | `message`       | `TextField`     | Obligatorio                        |
+| `metadata`      | `JSONField`     | Objeto, sin datos sensibles        |
 | `created_at`    | `DateTimeField` | Automático                         |
 
 No sustituye a `operations_auditlog`.
@@ -875,7 +887,159 @@ AuditLog
 
 ---
 
-### 6.8. `kobo_ficha01territorio`
+### 6.8. `kobo_kobopastoralzoneprojectmapping`
+
+Configura una zona pastoral canónica hacia un proyecto protegido. La restricción
+`kobo_unique_active_zone_project_mapping` permite una sola fila activa por zona.
+`deactivated_by_id`, `deactivated_at` y `deactivation_reason` conservan la
+desactivación administrativa; los servicios bloquean cambios cuando la zona ya
+tiene identidades.
+
+---
+
+### 6.9. `kobo_koboterritorialidentity`
+
+Mantiene el código de núcleo normalizado único, la zona pastoral canónica, el
+proyecto protegido, la submission fuente de Ficha 1 y su estado administrativo.
+Routing crea o confirma esta fila; la importación no la duplica.
+
+---
+
+### 6.10. `kobo_koboterritorialidentityconflict`
+
+Conserva la propuesta territorial entrante y el estado existente mediante FK
+`PROTECT`. La resolución guarda choice estable, actor, fecha y motivo. La
+unicidad parcial impide duplicar el mismo conflicto abierto.
+
+---
+
+### 6.11. `kobo_koboterritorialadministrationevent`
+
+Registra actor, acción, tipo/id de entidad, estados JSON seguros, motivo y fecha
+de cada mutación territorial. No contiene payload Kobo ni sustituye a
+`operations_auditlog`.
+
+---
+
+### 6.12. `kobo_koboimportrecord`
+
+Registra una sola importación completada por submission mediante `OneToOneField`
+y conserva `handler_type`, `target_app_label`, `target_model`,
+`target_object_id`, creador, fecha y metadata segura del resultado.
+
+---
+
+### 6.13. `kobo_koboterritorialprofile`
+
+Representa una versión inmutable del perfil territorial aprobado de una Ficha 1.
+
+| Columna                       | Tipo lógico            | Reglas                                      |
+| ----------------------------- | ---------------------- | ------------------------------------------- |
+| `territorial_identity_id`     | `ForeignKey`           | `PROTECT`, identidad canónica               |
+| `project_id`                  | `ForeignKey`           | `PROTECT`, proyecto coherente                |
+| `source_submission_id`        | `OneToOneField`        | `PROTECT`, una submission por perfil         |
+| `parish`                      | `CharField`            | Obligatorio                                  |
+| `community_sector`            | `CharField`            | Obligatorio                                  |
+| `location`                    | `JSONField`            | Opcional, coordenadas canónicas validadas    |
+| `parish_delegate`             | `CharField`            | Opcional                                     |
+| `contact_phone`               | `CharField`            | Opcional, privado                            |
+| `main_informant_role`         | `CharField`            | Opcional                                     |
+| `communities_covered`         | `TextField`            | Texto libre normalizado                      |
+| `estimated_households`        | `PositiveIntegerField` | Opcional, no negativo                        |
+| `access_difficulties`         | `CharField`            | `yes`, `no` o `unknown`                      |
+| `access_difficulties_notes`   | `TextField`            | Opcional                                     |
+| `initial_priority_perception` | `CharField`            | Catálogo cerrado                             |
+| `general_notes`               | `TextField`            | Opcional                                     |
+| `created_by_id`               | `ForeignKey`           | `PROTECT`                                    |
+| `created_at`                  | `DateTimeField`        | Automático                                   |
+| `updated_at`                  | `DateTimeField`        | Automático                                   |
+
+Relaciones:
+
+```text
+KoboTerritorialIdentity 1 ──< KoboTerritorialProfile
+KoboSubmission 1 ── 1 KoboTerritorialProfile
+```
+
+No existe backfill automático: la migración crea el esquema y las importaciones
+históricas requieren un proceso explícito posterior.
+
+---
+
+### 6.14. `kobo_koboprioritizedmicroproject`
+
+Representa una propuesta priorizada histórica e inmutable materializada desde
+una Ficha 10 aprobada.
+
+| Columna                    | Tipo lógico     | Reglas                                      |
+| -------------------------- | --------------- | ------------------------------------------- |
+| `territorial_identity_id`  | `ForeignKey`    | `PROTECT`, identidad canónica               |
+| `project_id`               | `ForeignKey`    | `PROTECT`, proyecto Núcleo Vital coherente  |
+| `source_submission_id`     | `OneToOneField` | `PROTECT`, una submission por microproyecto |
+| `name`                     | `CharField`     | Obligatorio; no deduplica                   |
+| `component`                | `CharField`     | Catálogo cerrado                            |
+| `problem_summary`          | `TextField`     | Texto libre obligatorio                     |
+| `specific_objective`       | `TextField`     | Texto libre obligatorio                     |
+| `beneficiary_group`        | `JSONField`     | Lista canónica no vacía                     |
+| `main_activities`          | `TextField`     | Texto libre obligatorio                     |
+| `estimated_cost_range`     | `CharField`     | Código de rango, no monto exacto            |
+| `implementation_urgency`   | `CharField`     | Catálogo cerrado                            |
+| `technical_viability`      | `CharField`     | Catálogo cerrado                            |
+| `expected_result`          | `TextField`     | Texto libre obligatorio                     |
+| `created_by_id`            | `ForeignKey`    | `PROTECT`                                   |
+| `created_at`               | `DateTimeField` | Automático                                  |
+| `updated_at`               | `DateTimeField` | Automático                                  |
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizedMicroproject
+Project 1 ──< KoboPrioritizedMicroproject
+KoboSubmission 1 ── 1 KoboPrioritizedMicroproject
+```
+
+Los constraints protegen textos requeridos y los cuatro catálogos cerrados. La
+lista de beneficiarios se valida en el modelo. No hay backfill ni inferencia
+desde `raw_payload`, y esta tabla no representa presupuesto o ejecución financiera.
+
+---
+
+### 6.15. `kobo_koboprioritizationassessment`
+
+Representa una evaluación histórica e inmutable materializada desde una Ficha
+11 aprobada.
+
+| Columna                              | Tipo lógico            | Reglas                                      |
+| ------------------------------------ | ---------------------- | ------------------------------------------- |
+| `territorial_identity_id`            | `ForeignKey`           | `PROTECT`, identidad canónica               |
+| `project_id`                         | `ForeignKey`           | `PROTECT`, proyecto Núcleo Vital coherente  |
+| `source_submission_id`               | `OneToOneField`        | `PROTECT`, una submission por evaluación    |
+| diez campos `*_score`                | `PositiveSmallInteger` | Cada score entre 1 y 5                      |
+| `priority_total_original`            | `PositiveSmallInteger` | Opcional, total recibido                    |
+| `priority_total_calculated`          | `PositiveSmallInteger` | Suma exacta de los diez scores              |
+| `suggested_semaphore_original`       | `CharField`            | Opcional, catálogo canónico                 |
+| `suggested_semaphore_calculated`     | `CharField`            | Cálculo SIGEDON, catálogo canónico          |
+| `final_semaphore`                    | `CharField`            | Decisión humana, catálogo canónico          |
+| `final_priority`                     | `CharField`            | Decisión humana, catálogo cerrado           |
+| `priority_summary`                   | `TextField`            | Resumen requerido                           |
+| `calculation_warnings`               | `JSONField`            | Lista estructurada y validada               |
+| `linked_microprojects_snapshot`      | `TextField`            | Texto libre; no crea relaciones por nombre  |
+| `created_by_id`                      | `ForeignKey`           | `PROTECT`                                   |
+| `created_at`                         | `DateTimeField`        | Automático                                  |
+| `updated_at`                         | `DateTimeField`        | Automático                                  |
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizationAssessment
+Project 1 ──< KoboPrioritizationAssessment
+KoboSubmission 1 ── 1 KoboPrioritizationAssessment
+```
+
+Los constraints protegen el rango de los scores, la igualdad entre la suma y el
+total calculado, los catálogos de semáforo/prioridad y el resumen requerido. No
+hay backfill, puntero redundante al registro vigente ni relaciones automáticas
+con microproyectos.
+
+---
+
+### 6.16. `kobo_ficha01territorio`
 
 Tabla heredada de la primera integración de la Ficha 1.
 
@@ -905,7 +1069,7 @@ no debe recibir nuevas escrituras sin una decisión arquitectónica explícita.
 
 ---
 
-### 6.9. `kobo_ficha01coveredcommunity`
+### 6.17. `kobo_ficha01coveredcommunity`
 
 Representa las comunidades cubiertas dentro de la Ficha 1 heredada.
 
@@ -1046,6 +1210,8 @@ Restricciones explícitas vigentes:
 | `kobo_koboprojectbinding`   | Un binding directo por activo           |
 | `kobo_koboprojectbinding`   | Ruta por campo no duplicada             |
 | `kobo_kobosubmission`       | Submission externa única por formulario |
+| `kobo_koboimportrecord`     | Una fila por submission y target positivo |
+| `kobo_koboterritorialprofile` | Una fila por submission, catálogos y hogares válidos |
 
 Además, Django y PostgreSQL crean índices automáticos para:
 
@@ -1177,9 +1343,14 @@ kobo_koboasset
 kobo_koboattachment
 kobo_kobodiscoveredasset
 kobo_koboformdefinition
+kobo_koboimportrecord
+kobo_kobopastoralzoneprojectmapping
 kobo_koboprocessingevent
 kobo_koboprojectbinding
 kobo_kobosubmission
+kobo_koboterritorialidentity
+kobo_koboterritorialidentityconflict
+kobo_koboterritorialprofile
 operations_auditlog
 operations_donation
 operations_expense

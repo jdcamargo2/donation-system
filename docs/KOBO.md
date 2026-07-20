@@ -40,7 +40,13 @@ KOBO_API_TOKEN=
 KOBO_WEBHOOK_USERNAME=sigedon-kobo
 KOBO_WEBHOOK_SECRET=
 KOBO_FICHA_01_ASSET_UID=
-KOBO_REQUEST_TIMEOUT_SECONDS=15
+KOBO_HTTP_CONNECT_TIMEOUT=5
+KOBO_HTTP_READ_TIMEOUT=15
+KOBO_HTTP_MAX_ATTEMPTS=3
+KOBO_HTTP_RETRY_BASE_DELAY=0.5
+KOBO_HTTP_RETRY_MAX_DELAY=8
+KOBO_HTTP_RETRY_AFTER_MAX_DELAY=60
+KOBO_HTTP_MAX_PAGES=100
 KOBO_MAX_ATTACHMENT_BYTES=10485760
 KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS=900
 KOBO_WEBHOOK_MAX_BYTES=1048576
@@ -53,13 +59,61 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 * `KOBO_API_TOKEN` contiene el token utilizado para acceder a la API.
 * `KOBO_WEBHOOK_USERNAME` define el usuario esperado por el webhook.
 * `KOBO_WEBHOOK_SECRET` contiene el secreto utilizado para autenticar solicitudes entrantes.
-* `KOBO_REQUEST_TIMEOUT_SECONDS` define el tiempo máximo de espera para solicitudes externas.
+* `KOBO_HTTP_CONNECT_TIMEOUT` y `KOBO_HTTP_READ_TIMEOUT` definen límites explícitos y positivos para solicitudes externas.
+* `KOBO_HTTP_MAX_ATTEMPTS`, `KOBO_HTTP_RETRY_BASE_DELAY`, `KOBO_HTTP_RETRY_MAX_DELAY` y `KOBO_HTTP_RETRY_AFTER_MAX_DELAY` controlan reintentos transitorios con backoff.
+* `KOBO_HTTP_MAX_PAGES` limita la paginación remota para evitar recorridos no acotados.
+* `KOBO_SYNC_OVERLAP_SECONDS` reserva la ventana de solapamiento para el cursor incremental y `KOBO_SYNC_LEASE_SECONDS` limita una ejecución exclusiva por asset.
+
+Las revisiones remotas se identifican por `_uuid` dentro del asset y hash canónico
+del payload. Una revisión de una submission aprobada, importada o rechazada nunca
+sobrescribe staging ni materialización: queda privada, marcada como pendiente y
+requiere revisión humana posterior. Solo una ejecución completa avanza el cursor;
+una ejecución parcial conserva el cursor anterior y libera su lease.
 * `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
 * `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900).
 * `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging.
 * `KOBO_FICHA_01_ASSET_UID` pertenece únicamente al flujo legado de la Ficha 1.
 
+## Sincronización remota segura
+
+El cliente usa `urllib` con autenticación `Token`, HTTPS y redirects desactivados.
+Todos los requests tienen timeout explícito y solo reintentan 429, 500, 502, 503,
+504, timeouts y errores de conexión; los demás 4xx fallan sin retry. Los envelopes
+`count`/`next`/`results` se recorren de forma paginada, con host, ruta, ciclos y
+límite de páginas validados. `KoboSyncRun` conserva únicamente métricas y errores
+seguros: un discovery parcial no marca assets ausentes como no disponibles y un
+sync de submissions no se declara completo tras un fallo remoto.
+
+`max_attempts` es el número total de solicitudes, incluida la primera. Al
+agotarse, 401, 403 y 404 generan respectivamente `KoboAuthenticationError`,
+`KoboAuthorizationError` y `KoboNotFoundError`; 429 genera
+`KoboRateLimitError` (transitorio), timeout `KoboTimeoutError`, 500/502/503/504
+`KoboTransientRemoteError`, y 400/422/redirect `KoboPermanentRemoteError`.
+JSON, envelopes y estructuras remotas inválidas generan `KoboInvalidResponseError`.
+Todas derivan de `KoboIntegrationError`; los errores de payload local conservan
+`KoboPayloadError`. Un `Retry-After` válido y limitado tiene prioridad sobre el
+backoff; los tests inyectan sleeper y jitter, por lo que nunca esperan realmente.
+
 Los valores secretos no deben versionarse ni registrarse en logs.
+
+### Sincronización incremental
+
+La consulta incremental usa el parámetro Kobo `query` con
+`{"_last_edited":{"$gte":"..."}}`. El inicio es el watermark remoto
+confirmado menos `KOBO_SYNC_OVERLAP_SECONDS`; el overlap solo amplía la
+consulta y nunca cambia el valor persistido. Las respuestas repetidas se
+absorben por hash canónico. Un sync completo ignora cursor y overlap.
+
+El mayor `_last_edited` válido de la ejecución es candidato a watermark. Solo
+una ejecución `SUCCEEDED` actualiza atómicamente cursor, watermark y hora del
+último éxito; `PARTIAL` y `FAILED` conservan ambos valores. Cada asset posee
+una lease atribuida al `KoboSyncRun`; una lease vencida deja el run anterior
+como `ABANDONED` con `SYNC_LEASE_EXPIRED` antes de adquirir la nueva.
+
+`sync_kobo_ficha_01 --asset-uid UID [--full] [--max-pages N]` usa únicamente
+este servicio y retorna 0 para éxito, 1 para fallo y 2 para parcial o lease
+ocupada. Las acciones del Hub son POST con CSRF, requieren permiso de cambio
+del asset y son síncronas; no existe scheduling automático.
 
 ## 4. Registro de formularios
 
@@ -98,7 +152,7 @@ python manage.py discover_kobo_assets
 * El descubrimiento crea o actualiza el inventario local de activos encontrados.
 * Un activo descubierto no queda habilitado automáticamente.
 * `--dry-run` permite inspeccionar los cambios sin persistirlos.
-* El descubrimiento no sustituye la configuración ni el binding hacia un proyecto.
+* El descubrimiento no sustituye la configuración ni la estrategia de routing.
 
 ## 6. Configuración de activos
 
@@ -106,42 +160,63 @@ Para participar en el pipeline ordinario, un activo debe:
 
 1. existir en el inventario de activos descubiertos;
 2. asociarse con una definición de formulario soportada;
-3. configurar su mecanismo de routing;
+3. disponer de la configuración técnica exigida por su formulario;
 4. activarse explícitamente.
 
 Un activo no configurado o inactivo no debe procesar submissions como parte del flujo ordinario.
 
-## 7. Bindings hacia proyectos
+## 7. Bindings hacia proyectos (legado)
 
-`KoboProjectBinding` define cómo una submission se asocia con un proyecto SIGEDON.
+`KoboProjectBinding` se conserva temporalmente solo como evidencia histórica y
+no participa en el runtime. Las Fichas 1, 10 y 11 se enrutan por submission:
+Ficha 1 usa zona pastoral y el mapping territorial; Fichas 10 y 11 usan la
+identidad territorial de `nucleo_code`. El UID del asset identifica la ficha,
+no el proyecto. La tabla se retirará únicamente después de auditar los datos
+persistentes; no hay backfill ni borrado automático en esta fase.
 
-### 7.1. Binding directo
+Los valores `direct`, `field_value`, `source_field` y `source_value` pertenecen
+exclusivamente a la configuración histórica almacenada. No hay formularios,
+rutas, comandos ni servicios de runtime que creen, editen o consulten esas
+rutas.
 
-El activo completo se asigna a un proyecto concreto.
+### 7.3. Routing territorial de las fichas soportadas
+
+El dispatcher `route_normalized_submission()` aplica estrategias explícitas:
 
 ```text
-Activo Kobo
-→ Proyecto SIGEDON predefinido
+Ficha 1
+→ nucleo_code normalizado + zona pastoral
+→ identidad territorial maestra
+→ proyecto configurado para la zona
+
+Ficha 10 / Ficha 11
+→ nucleo_code normalizado
+→ identidad territorial existente
+→ proyecto de la identidad
 ```
 
-Este es el flujo ordinario principal del MVP.
+Ficha 10 y Ficha 11 nunca crean identidades ni usan un binding como fallback.
+Cuando la identidad todavía no existe, la submission conserva
+`READY_FOR_REVIEW` como estado de procesamiento, queda sin proyecto y usa
+`PENDING_IDENTITY` como estado independiente de routing. Por ello no aparece en
+una bandeja de proyecto ni puede importarse hasta ser reconciliada.
 
-### 7.2. Binding por valor de campo
+Todos los estados persistidos de `KoboTerritorialIdentity`, incluidos
+`PENDING_REVIEW`, `OBSERVED` e `INACTIVE`, son utilizables para routing. En el
+contrato vigente esos estados describen revisión administrativa de la identidad
+y no revocan su asociación territorial; bloquearlos requeriría una transición y
+una política de negocio nuevas.
 
-Un valor del payload se utiliza para resolver el proyecto correspondiente.
+La materialización aplica una política más restrictiva que el routing: una
+identidad `INACTIVE` no admite nuevos perfiles, `OBSERVED` conserva ese estado y
+`PENDING_REVIEW` pasa a `ACTIVE` únicamente después de importar exitosamente una
+Ficha 1 aprobada y sin conflictos abiertos.
 
-```text
-Campo del payload
-→ Valor normalizado
-→ Proyecto SIGEDON
-```
-
-Este modo requiere:
-
-* un campo de routing configurado;
-* valores esperados;
-* correspondencias válidas;
-* manejo de casos sin coincidencia.
+La recepción ordinaria conserva first-write-wins: un webhook repetido no
+reemplaza el payload ni la normalización existentes. Si una modificación técnica
+posterior cambia el código de una submission ya resuelta hacia otra identidad o
+hacia una identidad inexistente, el servicio conserva el proyecto anterior y
+registra un conflicto; nunca mueve silenciosamente la submission.
 
 ## 8. Webhook
 
@@ -194,7 +269,16 @@ PROCESSING_FAILED
 ```text
 RECEIVED
 → READY_FOR_REVIEW
+→ APPROVED_FOR_IMPORT
 → IMPORTED
+```
+
+Las transiciones tienen significados independientes:
+
+```text
+routing resuelto ≠ revisión aprobada
+revisión aprobada ≠ importación
+IMPORTED = materialización exitosa + KoboImportRecord trazable
 ```
 
 ### Ramas de validación
@@ -225,9 +309,15 @@ REJECTED
 
 ### Estados de compatibilidad
 
-`APPROVED_FOR_IMPORT` permanece principalmente asociado a la consola administrativa heredada.
+`APPROVED_FOR_IMPORT` es el único estado revisado desde el que el servicio común
+puede iniciar materialización. La acción histórica de importación desde la
+bandeja de proyecto conserva su URL, pero primero registra explícitamente la
+aprobación y después invoca el mismo servicio común que la consola técnica.
 
-`NORMALIZED`, `PARTIALLY_IMPORTED` y `DUPLICATE` pueden utilizarse según el resultado técnico del procesamiento y las condiciones históricas del pipeline.
+`NORMALIZED` y `DUPLICATE` permanecen declarados por compatibilidad histórica.
+`PARTIALLY_IMPORTED` no tiene escritores, lectores de negocio ni una semántica
+operativa vigente: no se usa para fallos normales y debe evaluarse su retirada
+en una migración posterior, sin eliminarlo en esta fase.
 
 ## 10. Procesamiento de submissions
 
@@ -257,6 +347,7 @@ El comando puede:
 * descargar adjuntos cuando se solicita;
 * registrar eventos técnicos;
 * dejar la submission lista para revisión;
+* ejecutar el mismo dispatcher territorial utilizado por el webhook;
 * registrar errores de validación o procesamiento.
 
 El procesamiento no debe importar automáticamente información operativa cuando el flujo exige revisión humana.
@@ -287,6 +378,10 @@ La reconciliación permite:
 * crear las submissions ausentes;
 * evitar duplicados;
 * continuar posteriormente mediante el pipeline normal.
+* reintentar Fichas 10/11 en `PENDING_IDENTITY` sin convertir la ausencia de
+  Ficha 1 en un error.
+
+El resumen del comando separa `resolved`, `still_pending`, `errors` y `skipped`.
 
 `--dry-run` permite inspeccionar el resultado sin persistir cambios.
 
@@ -353,14 +448,135 @@ El acceso al payload crudo y a la información técnica sensible continúa prote
 
 Cuando una submission se importa:
 
-1. se valida nuevamente su estado;
-2. se confirma el proyecto asociado;
-3. se crean o vinculan los datos normalizados;
-4. se actualiza el estado de la submission;
-5. se registra el evento técnico;
-6. se registra auditoría funcional cuando corresponda.
+1. se bloquea exclusivamente la fila de `KoboSubmission`;
+2. se valida formulario soportado, normalización, routing `RESOLVED`, proyecto,
+   revisión `APPROVED_FOR_IMPORT`, permisos y payload original preservado;
+3. se selecciona uno de los handlers cerrados para Ficha 1, 10 u 11;
+4. el handler materializa su entidad dentro de la misma transacción;
+5. se crea un único `KoboImportRecord` con el tipo de handler y la referencia
+   lógica mínima al resultado, sin payload ni datos sensibles;
+6. solo entonces se asignan `IMPORTED`, `processed_at` e `imported_at`;
+7. se registran una vez el evento técnico y la auditoría funcional.
+
+`KoboImportRecord` usa una relación `OneToOne` con la submission en lugar de una
+`GenericForeignKey`. Esta estrategia garantiza una sola importación completada,
+mantiene la dependencia polimórfica fuera de `KoboSubmission` y conserva una
+referencia auditable mediante `target_app_label`, `target_model` y
+`target_object_id`. La base de datos no puede imponer una constraint entre el
+estado de una tabla y la existencia de una fila en otra; por ello el servicio
+transaccional es la frontera que establece `IMPORTED`.
+
+El handler de Ficha 1 crea un `KoboTerritorialProfile` inmutable por submission.
+La relación es histórica:
+
+```text
+KoboTerritorialIdentity 1 ──< KoboTerritorialProfile
+KoboSubmission 1 ── 1 KoboTerritorialProfile
+```
+
+No se copian el código ni la zona al perfil: se consultan en la identidad
+canónica. `location` conserva el objeto normalizado con latitud, longitud,
+altitud y precisión; `communities_covered` conserva el texto libre confirmado
+por el XLSForm, y `access_difficulties` usa el catálogo cerrado
+`yes/no/unknown`. El handler nunca reinterpreta `raw_payload`.
+
+El handler de Ficha 10 crea un `KoboPrioritizedMicroproject` inmutable por
+submission y conserva la relación histórica:
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizedMicroproject
+KoboSubmission 1 ── 1 KoboPrioritizedMicroproject
+```
+
+La auditoría del dominio operativo descartó reutilizar `ProjectMilestone` y
+`ProjectUpdate`: el primero representa un resultado verificable ordenado y el
+segundo un avance histórico, mientras que ninguno conserva el contrato completo
+de problema, objetivo, beneficiarios, actividades, costo categórico, urgencia y
+viabilidad. Tampoco se reutiliza `Project`, porque representa el Núcleo Vital
+completo. Por ello la entidad permanece en la integración Kobo y Operations no
+adquiere una dependencia hacia Kobo.
+
+El routing identifica la identidad y su proyecto Núcleo Vital; la importación
+crea únicamente la propuesta subordinada. No deduplica por nombre, no vuelve a
+normalizar el código y no lee `raw_payload`. Todos los campos de negocio de la
+Ficha 10 depurada son requeridos. `component`, `estimated_cost_range`,
+`implementation_urgency` y `technical_viability` usan los códigos cerrados del
+normalizador; `beneficiary_group` es un `select_multiple` persistido como lista
+JSON estable y `main_activities` es texto libre.
+
+La importación no cambia el estado de la identidad y acepta identidades
+`PENDING_REVIEW`, `ACTIVE` u `OBSERVED`; `INACTIVE` y los conflictos territoriales
+abiertos bloquean. No crea otro `Project`, presupuesto, donación, asignación,
+gasto ni movimiento financiero. Si ya existe el microproyecto sin su import
+record, responde `FICHA_10_MICROPROJECT_STATE_CONFLICT` y no repara ni duplica.
+
+El handler de Ficha 11 crea un `KoboPrioritizationAssessment` inmutable por
+submission y conserva la relación histórica:
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizationAssessment
+KoboSubmission 1 ── 1 KoboPrioritizationAssessment
+```
+
+Los diez scores canónicos se guardan individualmente y SIGEDON deriva de ellos,
+sin confiar en totales enviados, `priority_total_calculated` y
+`suggested_semaphore_calculated`. Se conservan aparte
+`priority_total_original`, `suggested_semaphore_original`, el semáforo final
+humano y la prioridad final. `PRIORITY_TOTAL_MISMATCH` y
+`SUGGESTED_SEMAPHORE_MISMATCH` son warnings estructurados, aparecen también en
+el resultado de importación y no sobrescriben decisiones humanas. Scores,
+cálculos persistidos o catálogos inválidos sí bloquean.
+
+El campo Kobo `linked_microprojects` es texto libre en el contrato depurado y se
+persiste como `linked_microprojects_snapshot`. No contiene identificadores
+estables verificables, por lo que no crea FK, M2M ni coincidencias automáticas
+por nombre con `KoboPrioritizedMicroproject`; esa vinculación estructurada queda
+pendiente de un contrato futuro con identificadores estables.
+
+La importación acepta identidades `PENDING_REVIEW`, `ACTIVE` u `OBSERVED`,
+bloquea `INACTIVE` y conflictos abiertos, y no cambia identidad, proyecto,
+prioridad institucional, microproyectos, presupuesto ni movimientos
+financieros. Si ya existe la evaluación sin import record, responde
+`FICHA_11_ASSESSMENT_STATE_CONFLICT` y no repara ni duplica silenciosamente.
+
+Un fallo técnico revierte materialización, import record, estado, timestamp,
+evento y auditoría de éxito. Después se registra, cuando la base de datos lo
+permite, un error seguro fuera de la transacción y la submission queda
+reintentable. Un reintento de una importación completada devuelve
+`ALREADY_IMPORTED` con la referencia original, sin repetir efectos.
+
+Si existe un perfil para la submission pero falta su import record, el sistema
+considera el estado corrupto, responde `FICHA_1_PROFILE_STATE_CONFLICT` y no crea
+un segundo perfil ni intenta una reparación implícita.
+
+Las filas históricas que ya estaban en `IMPORTED` antes de esta migración no se
+rellenan con referencias ficticias. Un reintento sigue siendo idempotente y
+devuelve `ALREADY_IMPORTED`, pero identifica la deuda mediante
+`LEGACY_IMPORT_RECORD_MISSING`; su reconciliación exige una fase posterior con
+conocimiento de las entidades realmente creadas.
+
+Una Ficha 1, 10 u 11 con routing `PENDING_IDENTITY`, `CONFLICT` o `ERROR` no es
+importable, aunque conserve `READY_FOR_REVIEW` como estado de procesamiento.
 
 La importación no debe modificar directamente saldos financieros.
+
+### Auditoría del flujo sustituido
+
+Antes de este contrato existían dos escritores de `IMPORTED`:
+
+* `import_kobo_submission()` aceptaba `READY_FOR_REVIEW`, asignaba estado y
+  `imported_at`, y creaba `KoboProcessingEvent` y `AuditLog` sin materializar;
+* el retirado `associate_submission_with_project()` aceptaba `APPROVED_FOR_IMPORT`, resolvía
+  asset/binding, asignaba proyecto, `processed_at`, `imported_at` y estado, y
+  creaba un evento técnico, pero no `AuditLog` ni entidad materializada.
+
+La bandeja por proyecto invocaba la primera ruta; la consola técnica ejecutaba
+`review_submission()` y después la segunda. Los reintentos sobre `IMPORTED` no
+duplicaban eventos, pero tampoco podían responder qué entidad había producido
+la importación. Como el cambio de estado y sus eventos estaban dentro de
+`transaction.atomic()`, una excepción de base de datos posterior al `save()`
+revertía esas escrituras; la deuda era semántica, no un commit parcial conocido.
+Ambas rutas terminan ahora en el servicio materializador común.
 
 ## 14. Rechazo y restauración
 
@@ -524,6 +740,25 @@ AuditLog
 
 Ninguno de los dos registros sustituye al otro.
 
+### Administración territorial
+
+`KoboTerritorialAdministrationEvent` conserva el evento funcional específico
+de mappings, conflictos, estados de identidad y reconciliaciones. Registra
+actor, acción, entidad, estados anterior/posterior, motivo y fecha sin copiar
+payloads, teléfonos, coordenadas, notas territoriales ni excepciones sensibles.
+Cada evento se acompaña de un `AuditLog` atómico.
+
+Los mappings se configuran por zona canónica y FK a `Project`; no usan nombres
+ni IDs codificados. Una zona usada por cualquier identidad no puede cambiarse o
+quedar sin mapping. `ACCEPT_PROPOSED` tampoco migra historia: se bloquea si la
+identidad ya produjo perfiles, microproyectos, evaluaciones, import records,
+importaciones u otras asignaciones resueltas.
+
+La reconciliación administrativa es distinta de la sincronización remota:
+trabaja en lotes de hasta 100 submissions locales `PENDING_IDENTITY`, no usa
+bindings y no cambia revisión, aprobación ni importación. Repetir una llamada
+sin pendientes no produce nuevos eventos.
+
 ## 19. Comandos principales
 
 ```bash
@@ -537,3 +772,10 @@ python manage.py sync_kobo_ficha_01
 El comando `sync_kobo_ficha_01` es una entrada de compatibilidad hacia
 `KoboSubmission`. La operación ordinaria debe utilizar los activos configurados
 y el pipeline general de KoboToolbox.
+
+## 20. Hub territorial
+
+Con `KOBO_ENABLED=true`, `/integrations/kobo/` es el Hub para dashboard,
+mappings, identidades, conflictos y routing pendiente. Sus mutaciones usan
+POST, CSRF y los servicios administrativos existentes. Cuando Kobo está
+deshabilitado, el enlace y las rutas del Hub no están disponibles.

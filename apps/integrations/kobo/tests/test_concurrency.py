@@ -7,6 +7,7 @@ from apps.integrations.kobo.models import KoboAttachment
 from apps.integrations.kobo.models import KoboDiscoveredAsset
 from apps.integrations.kobo.models import KoboFormDefinition
 from apps.integrations.kobo.models import KoboProjectBinding
+from apps.integrations.kobo.models import KoboPastoralZoneProjectMapping
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.tests.helpers import RecordingAttachmentStorage
 from apps.integrations.kobo.tests.helpers import StubAttachmentClient
@@ -326,6 +327,10 @@ class KoboWebhookConcurrencyTests(TransactionTestCase):
             asset=self.asset,
             project=self.project,
             routing_type=KoboProjectBinding.RoutingType.DIRECT,
+        )
+        KoboPastoralZoneProjectMapping.objects.create(
+            pastoral_zone="catia_la_mar",
+            project=self.project,
         )
 
     def test_simultaneous_webhooks_stage_and_converge_once(self):

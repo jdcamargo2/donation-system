@@ -137,6 +137,12 @@ def process_submission(
     try:
         with transaction.atomic():
             submission.normalized_payload = normalized.normalized_payload
+            submission.nucleo_code_original = (
+                normalized.normalized_payload.get("nucleo_code_original", "")
+            )
+            submission.nucleo_code_normalized = (
+                normalized.normalized_payload.get("nucleo_code_normalized", "")
+            )
             submission.pastoral_zone = normalized.pastoral_zone
             submission.parish = normalized.parish
             submission.primary_community = normalized.primary_community or ""
@@ -148,6 +154,8 @@ def process_submission(
             submission.save(
                 update_fields=(
                     "normalized_payload",
+                    "nucleo_code_original",
+                    "nucleo_code_normalized",
                     "pastoral_zone",
                     "parish",
                     "primary_community",

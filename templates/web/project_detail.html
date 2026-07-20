@@ -94,6 +94,15 @@
 
 {% include "web/includes/project_milestones.html" %}
 
+{% if kobo_hub_project_url %}
+<section class="card card-body mb-4" aria-labelledby="project-kobo-title">
+    <div class="d-flex justify-content-between align-items-center gap-3">
+        <div><h2 id="project-kobo-title" class="h5 mb-1">KoboToolbox</h2><p class="mb-0 text-muted">{{ kobo_project_identity_count }} identidades territoriales · {{ kobo_project_pending_count }} pendientes o incidencias.</p></div>
+        <a class="btn btn-outline-primary" href="{{ kobo_hub_project_url }}">Administrar integración →</a>
+    </div>
+</section>
+{% endif %}
+
 <div class="row g-4">
     <div class="col-lg-7">
         <section class="card border-0 h-100 ops-detail-card ops-project-general-info" aria-labelledby="project-general-info-title">

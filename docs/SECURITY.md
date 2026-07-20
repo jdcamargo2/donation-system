@@ -382,3 +382,9 @@ La protección final también depende de:
 * gestión segura de cuentas administrativas.
 
 La seguridad de la aplicación no sustituye la seguridad de la infraestructura donde se despliega.
+
+## Hub territorial Kobo
+
+Las rutas mutables del Hub exigen autenticación, permiso en servidor, CSRF y
+POST. Las vistas muestran datos territoriales resumidos; no exponen payloads,
+tokens, teléfonos o coordenadas por defecto.

@@ -6,7 +6,7 @@
   <h1 class="h3 mt-2">{{ discovered.name }}</h1>
   {% if not discovered.is_available %}<div class="alert alert-warning">Activo remoto no disponible</div>
   {% elif asset and asset.is_active %}<div class="alert alert-success">Integración activa</div>
-  {% elif asset %}<div class="alert alert-info">Activo configurado, falta definir routing o activar</div>
+  {% elif asset %}<div class="alert alert-info">Activo configurado, listo para activar</div>
   {% else %}<div class="alert alert-secondary">Activo descubierto, aún no configurado</div>{% endif %}
   <dl class="row"><dt class="col-sm-3">UID</dt><dd class="col-sm-9">{{ discovered.asset_uid }}</dd>
     <dt class="col-sm-3">Tipo</dt><dd class="col-sm-9">{{ discovered.asset_type|default:"—" }}</dd>
@@ -16,7 +16,7 @@
   {% if asset %}
     <p><a class="btn btn-primary" href="{% url 'kobo:asset_configuration' asset.pk %}">Ver configuración</a></p>
     <p>Definición: {{ asset.form_definition }} · Rol: {{ asset.get_form_role_display }} · {% if asset.is_active %}Activo{% else %}Inactivo{% endif %}</p>
-    <ul>{% for binding in bindings %}<li>{{ binding.routing_type }} — {{ binding.project }}</li>{% empty %}<li>Sin bindings.</li>{% endfor %}</ul>
+    <p>El proyecto se determina por zona pastoral e identidad territorial.</p>
   {% elif discovered.is_available and not compatible_configuration %}
     <div class="alert alert-warning">Este activo fue descubierto, pero todavía no tiene una definición soportada en SIGEDON.</div>
   {% elif discovered.is_available and perms.kobo.change_koboasset %}

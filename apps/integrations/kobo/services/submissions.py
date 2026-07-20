@@ -2,6 +2,7 @@ from datetime import tzinfo
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 from django.db.models import Q
 
 from apps.integrations.kobo.client import KoboApiClient
@@ -10,8 +11,8 @@ from apps.integrations.kobo.services.common import (
     SyncResult,
     WebhookConvergenceResult,
 )
-from apps.integrations.kobo.errors import KoboConfigurationError, KoboPayloadError
-from apps.integrations.kobo.form_registry import list_registered_forms
+from apps.integrations.kobo.errors import KoboConfigurationError, KoboIntegrationError, KoboPayloadError
+from apps.integrations.kobo.form_registry import KoboFormType, list_registered_forms
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.models import (
     KoboAsset,
@@ -19,11 +20,10 @@ from apps.integrations.kobo.models import (
     KoboFormDefinition,
     KoboProcessingEvent,
     KoboSubmission,
+    KoboSyncRun,
 )
 from apps.integrations.kobo.processors import PROCESSABLE_STATUSES, process_submission
-from apps.integrations.kobo.services.association import (
-    assign_normalized_submission_to_direct_project,
-)
+from apps.integrations.kobo.services.territorial_routing import route_normalized_submission
 
 
 def sync_registered_forms() -> int:
@@ -187,8 +187,8 @@ def converge_webhook_submission(
 ) -> WebhookConvergenceResult:
     """
     PRE: submission_id identifies a staged webhook submission and no remote work is required.
-    POST: serializes processing and direct-project assignment until the persisted row is
-    complete or has a durable, retryable failure.
+    POST: serializes processing and explicit per-form routing until the persisted
+    row is normalized with a durable routing outcome.
     """
     with transaction.atomic():
         submission = KoboSubmission.objects.select_for_update().get(pk=submission_id)
@@ -197,13 +197,19 @@ def converge_webhook_submission(
             submission.refresh_from_db()
 
         if submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
-            if submission.project_id is None:
-                assign_normalized_submission_to_direct_project(submission)
-                submission.refresh_from_db()
+            routing = route_normalized_submission(submission)
+            submission.refresh_from_db()
             return WebhookConvergenceResult(
                 submission_id=submission.pk,
                 final_status=submission.status,
-                completed=submission.project_id is not None,
+                completed=(
+                    routing.status.value
+                    != KoboSubmission.RoutingStatus.UNRESOLVED
+                    and (
+                        routing.form_type != KoboFormType.FICHA_1
+                        or submission.project_id is not None
+                    )
+                ),
             )
 
         return WebhookConvergenceResult(
@@ -266,34 +272,60 @@ def sync_ficha_01_submissions(
             "Registered Ficha 1 definition must be synchronized first."
         ) from exc
 
-    raw_submissions = client.get_submissions(configured_asset_uid, limit=limit)
+    asset = KoboAsset.objects.filter(asset_uid=configured_asset_uid).first()
+    sync_run = None if dry_run else KoboSyncRun.objects.create(
+        asset=asset,
+        kind=KoboSyncRun.Kind.SUBMISSIONS,
+        status=KoboSyncRun.Status.RUNNING,
+    )
     created_count = 0
     existing_count = 0
     failed_count = 0
-
-    for raw_payload in raw_submissions:
-        try:
-            external_id = _validate_api_submission(form_definition, raw_payload)
-            if dry_run:
-                exists = KoboSubmission.objects.filter(
-                    form_definition=form_definition,
-                    external_id=external_id,
-                ).exists()
-                existing_count += int(exists)
-                created_count += int(not exists)
-                continue
-
-            _, created = receive_api_submission(form_definition, raw_payload)
-            created_count += int(created)
-            existing_count += int(not created)
-        except KoboPayloadError:
-            failed_count += 1
-            if not dry_run:
-                _record_invalid_payload_event(form_definition, raw_payload)
+    fetched_count = 0
+    partial = False
+    try:
+        raw_submissions = client.iter_submissions(configured_asset_uid, limit=limit) if hasattr(client, "iter_submissions") else iter(client.get_submissions(configured_asset_uid, limit=limit))
+        for raw_payload in raw_submissions:
+            fetched_count += 1
+            try:
+                external_id = _validate_api_submission(form_definition, raw_payload)
+                if dry_run:
+                    exists = KoboSubmission.objects.filter(form_definition=form_definition, external_id=external_id).exists()
+                    existing_count += int(exists)
+                    created_count += int(not exists)
+                    continue
+                _, created = receive_api_submission(form_definition, raw_payload)
+                created_count += int(created)
+                existing_count += int(not created)
+            except KoboPayloadError:
+                failed_count += 1
+                if not dry_run:
+                    _record_invalid_payload_event(form_definition, raw_payload)
+    except KoboIntegrationError:
+        partial = fetched_count > 0
+        if not partial:
+            if sync_run:
+                sync_run.status = KoboSyncRun.Status.FAILED
+                sync_run.error_code = "remote_error"
+                sync_run.safe_error_message = "Kobo remote synchronization failed."
+                sync_run.finished_at = timezone.now()
+                sync_run.save()
+            raise
+    if sync_run:
+        sync_run.status = KoboSyncRun.Status.PARTIAL if partial else KoboSyncRun.Status.SUCCEEDED
+        sync_run.partial = partial
+        sync_run.finished_at = timezone.now()
+        sync_run.items_seen = fetched_count
+        sync_run.items_created = created_count
+        sync_run.items_updated = existing_count
+        sync_run.items_failed = failed_count
+        sync_run.save()
 
     return SyncResult(
-        fetched_count=len(raw_submissions),
+        fetched_count=fetched_count,
         created_count=created_count,
         existing_count=existing_count,
         failed_count=failed_count,
+        pages_fetched=0 if not fetched_count else 1,
+        partial=partial,
     )

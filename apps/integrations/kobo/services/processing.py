@@ -4,6 +4,7 @@ from apps.integrations.kobo.services.common import ProcessingBatchResult, Review
 from apps.integrations.kobo.errors import KoboConfigurationError, KoboPayloadError
 from apps.integrations.kobo.models import KoboProcessingEvent, KoboSubmission
 from apps.integrations.kobo.processors import PROCESSABLE_STATUSES, process_submission
+from apps.integrations.kobo.services.territorial_routing import route_normalized_submission
 
 
 def process_pending_submissions(
@@ -39,6 +40,8 @@ def process_pending_submissions(
             processing_failed_count += 1
             continue
         processed_count += int(outcome.processed)
+        if outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW:
+            route_normalized_submission(submission)
         skipped_count += int(not outcome.processed)
         ready_count += int(
             outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW

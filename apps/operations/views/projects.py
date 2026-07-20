@@ -70,6 +70,7 @@ from .project_milestone_context import (
     build_project_milestone_context,
     project_milestone_prefetch,
 )
+from ..integrations import get_project_detail_integration_context
 
 
 RECENT_PROJECT_UPDATES_LIMIT = 5
@@ -189,52 +190,14 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
             (summary['executed_amount'] / summary['funded_amount']) * Decimal('100')
             if summary['funded_amount'] > 0 else Decimal('0')
         )
-        has_kobo_binding = settings.KOBO_ENABLED and self.object.kobo_bindings.filter(
-            is_active=True
-        ).exists()
-        context['show_kobo_section'] = has_kobo_binding
-        if has_kobo_binding:
-            from apps.integrations.kobo.models import KoboAsset
-            from apps.integrations.kobo.services import (
-                get_project_imported_submissions,
-                get_project_pending_submissions,
-            )
-
-            context['kobo_territorial_submissions'] = get_project_imported_submissions(
-                self.object,
-                form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE,
-            )
-            context['kobo_microproject_submissions'] = get_project_imported_submissions(
-                self.object,
-                form_role=KoboAsset.FormRole.PRIORITIZED_MICROPROJECT,
-            )
-            context['kobo_prioritization_submissions'] = get_project_imported_submissions(
-                self.object,
-                form_role=KoboAsset.FormRole.PRIORITIZATION_MATRIX,
-            )
-            context['kobo_submissions'] = context['kobo_territorial_submissions']
-            context['kobo_pending_submissions'] = get_project_pending_submissions(
-                self.object
-            )
-            context['kobo_pending_submission_count'] = context[
-                'kobo_pending_submissions'
-            ].count()
-            context['can_import_kobo_submissions'] = self.request.user.has_perm(
-                'operations.change_project'
-            )
-        else:
-            context['kobo_territorial_submissions'] = ()
-            context['kobo_microproject_submissions'] = ()
-            context['kobo_prioritization_submissions'] = ()
-            context['kobo_submissions'] = ()
-            context['kobo_pending_submissions'] = ()
-            context['kobo_pending_submission_count'] = 0
-            context['can_import_kobo_submissions'] = False
+        context.update(
+            get_project_detail_integration_context(self.object, self.request.user)
+        )
         return context
 
     def get_template_names(self):
         # PRE: project detail routing and settings are available.
-        # POST: uses Kobo-aware UI only while enabled, preserving legacy UI otherwise.
+        # POST: retains the existing Kobo wrapper while enabled without importing Kobo.
         if settings.KOBO_ENABLED:
             return ['operations/project_detail.html']
         return super().get_template_names()

@@ -11,6 +11,7 @@ from apps.integrations.kobo.mappings.common import (
     optional_string,
     require_non_empty_string,
 )
+from apps.integrations.kobo.territorial import normalize_nucleo_code
 
 
 FICHA_10_FORM_ID = "ficha_10_microproyecto_priorizado_depurada"
@@ -75,8 +76,12 @@ def normalize_ficha_10(
     if not isinstance(microproject, Mapping) or not microproject:
         raise KoboPayloadError("Ficha 10 microproject section is required.")
 
+    nucleo_code_original = raw_payload.get("nucleo_code")
+    nucleo_code_normalized = normalize_nucleo_code(nucleo_code_original)
     normalized_payload = {
-        "nucleo_code": require_non_empty_string(raw_payload, "nucleo_code"),
+        "nucleo_code": nucleo_code_normalized,
+        "nucleo_code_original": nucleo_code_original,
+        "nucleo_code_normalized": nucleo_code_normalized,
         "microproject_name": require_non_empty_string(microproject, "microproject_name"),
         "component": _require_choice(microproject, "component", COMPONENTS),
         "problem_summary": require_non_empty_string(microproject, "problem_summary"),

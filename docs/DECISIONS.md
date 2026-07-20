@@ -1,5 +1,12 @@
 # Decisiones técnicas de SIGEDON
 
+## 2026-07-20 — Retiro del binding Kobo en runtime
+
+`KoboProjectBinding` queda deprecado y conservado como dato histórico hasta una
+auditoría persistente. Fichas 1, 10 y 11 se enrutan exclusivamente por
+submission mediante `route_normalized_submission()`; no existe fallback a
+binding ni se eliminan datos históricos en esta fase.
+
 Este documento registra las principales decisiones arquitectónicas, funcionales y operativas adoptadas durante el desarrollo de SIGEDON.
 
 ## 2026-07-08 — Django y Bootstrap

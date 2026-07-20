@@ -4,11 +4,10 @@
 <div class="container py-3">
   <h1 class="h3">{{ asset.name }}</h1>
   <p>Definición: {{ asset.form_definition }} · Rol: {{ asset.get_form_role_display }}</p>
-  <p>Estado: {% if asset.is_active %}Activa{% else %}Sin proyecto enlazado{% endif %}</p>
-  <p>Proyecto actualmente enlazado: {% if active_project_binding %}{{ active_project_binding.project }}{% else %}Sin proyecto enlazado.{% endif %}</p>
+  <p>Estado: {% if asset.is_active %}Activa{% else %}Inactiva{% endif %}</p>
+  <p>El proyecto se determina por zona pastoral e identidad territorial.</p>
   {% if perms.kobo.change_koboasset %}
-    <form method="post" action="{% url 'kobo:create_project_binding' asset.pk %}" class="card card-body mb-3">{% csrf_token %}{{ binding_form.as_p }}<button class="btn btn-primary" type="submit">{% if active_project_binding %}Cambiar proyecto{% else %}Enlazar proyecto{% endif %}</button></form>
-    {% if active_project_binding %}<form method="post" action="{% url 'kobo:deactivate_asset' asset.pk %}">{% csrf_token %}<button class="btn btn-warning" type="submit">Desenlazar</button></form>{% endif %}
+    {% if asset.is_active %}<form method="post" action="{% url 'kobo:deactivate_asset' asset.pk %}">{% csrf_token %}<button class="btn btn-warning" type="submit">Desactivar integración</button></form>{% else %}<form method="post" action="{% url 'kobo:activate_asset' asset.pk %}">{% csrf_token %}<button class="btn btn-primary" type="submit">Activar integración</button></form>{% endif %}
   {% endif %}
 </div>
 {% endblock %}

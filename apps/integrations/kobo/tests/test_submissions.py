@@ -7,6 +7,7 @@ from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_VERSION
 from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID
 from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_VERSION
 from apps.integrations.kobo.models import KoboAttachment
+from apps.integrations.kobo.models import KoboAsset
 from apps.integrations.kobo.models import KoboFormDefinition
 from apps.integrations.kobo.models import KoboProcessingEvent
 from apps.integrations.kobo.models import KoboSubmission
@@ -22,6 +23,7 @@ from django.test import override_settings
 from django.utils import timezone as django_timezone
 from io import StringIO
 from unittest.mock import patch
+from types import SimpleNamespace
 
 
 class StubKoboClient:
@@ -347,63 +349,34 @@ class KoboSubmissionSynchronizationTests(TestCase):
 class KoboFicha01SyncCommandTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        KoboFormDefinition.objects.create(
+        cls.form_definition = KoboFormDefinition.objects.create(
             form_id=FICHA_01_FORM_ID,
             title="Ficha 1 - Identificación territorial del Núcleo Vital (depurada)",
             version=FICHA_01_VERSION,
         )
+        cls.asset = KoboAsset.objects.create(
+            asset_uid="ficha-01-asset",
+            name="Ficha 1",
+            form_definition=cls.form_definition,
+            form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE,
+        )
 
-    def test_command_queries_only_ficha_01_and_prints_safe_counts(self):
-        sensitive_values = (
-            "command-secret-token",
-            "+58-sensitive-phone",
-            "responsible-person",
-            "sensitive-coordinates",
-            "https://files.example.test/private.jpg",
-        )
-        client = StubKoboClient(
-            [
-                {
-                    "_uuid": "command-submission",
-                    "_xform_id_string": "ficha-01-asset",
-                    "contact_phone": sensitive_values[1],
-                    "survey_responsible": sensitive_values[2],
-                    "gps_coordinates": sensitive_values[3],
-                    "attachment_url": sensitive_values[4],
-                }
-            ]
-        )
+    def test_command_delegates_incremental_sync_and_prints_safe_summary(self):
         output = StringIO()
-
         with patch(
-            "apps.integrations.kobo.management.commands.sync_kobo_ficha_01.KoboApiClient",
-            return_value=client,
-        ):
-            call_command("sync_kobo_ficha_01", limit=25, stdout=output)
+            "apps.integrations.kobo.management.commands.sync_kobo_ficha_01.sync_asset_submissions",
+            return_value=SimpleNamespace(mode="incremental", status="succeeded", pages_fetched=1, created=1, updated=0, unchanged=0, remote_updates_detected=0, failed=0, partial=False, cursor_before=None, cursor_after=None, watermark_before=None, watermark_after=None),
+        ) as synchronize:
+            call_command("sync_kobo_ficha_01", asset_uid=self.asset.asset_uid, max_pages=25, stdout=output)
 
-        self.assertEqual(client.calls, [("ficha-01-asset", 25)])
-        self.assertIn("fetched=1 created=1 existing=0 failed=0", output.getvalue())
-        for sensitive_value in sensitive_values:
-            self.assertNotIn(sensitive_value, output.getvalue())
+        self.assertEqual(synchronize.call_args.kwargs["asset"], self.asset)
+        self.assertEqual(synchronize.call_args.kwargs["max_pages"], 25)
+        self.assertIn("status=succeeded", output.getvalue())
+        self.assertNotIn("command-secret-token", output.getvalue())
 
-    def test_dry_run_prints_explicit_projection_without_persisting(self):
-        client = StubKoboClient(
-            [
-                {
-                    "_uuid": "dry-run-submission",
-                    "_xform_id_string": "ficha-01-asset",
-                }
-            ]
-        )
-        output = StringIO()
-
+    def test_command_rejects_invalid_page_limit_before_client_or_service(self):
         with patch(
-            "apps.integrations.kobo.management.commands.sync_kobo_ficha_01.KoboApiClient",
-            return_value=client,
+            "apps.integrations.kobo.management.commands.sync_kobo_ficha_01.sync_asset_submissions",
         ):
-            call_command("sync_kobo_ficha_01", dry_run=True, stdout=output)
-
-        self.assertFalse(KoboSubmission.objects.exists())
-        self.assertNotIn("created=", output.getvalue())
-        self.assertIn("would_create=1", output.getvalue())
-        self.assertIn("would_exist=0", output.getvalue())
+            with self.assertRaisesMessage(Exception, "--max-pages must be a positive integer"):
+                call_command("sync_kobo_ficha_01", asset_uid=self.asset.asset_uid, max_pages=0)

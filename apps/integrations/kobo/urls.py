@@ -4,6 +4,19 @@ from apps.integrations.kobo import views
 
 app_name = "kobo"
 urlpatterns = [
+    path("", views.hub_dashboard, name="hub"),
+    path("sync/<int:pk>/<str:mode>/", views.sync_asset, name="sync_asset"),
+    path("mappings/", views.mapping_list, name="mapping_list"),
+    path("mappings/configure/", views.configure_mapping, name="configure_mapping"),
+    path("mappings/<str:zone>/deactivate/", views.deactivate_mapping, name="deactivate_mapping"),
+    path("identities/", views.identity_list, name="identity_list"),
+    path("identities/<int:pk>/", views.identity_detail, name="identity_detail"),
+    path("identities/<int:pk>/status/<str:action>/", views.identity_status, name="identity_status"),
+    path("identities/<int:pk>/reconcile/", views.reconcile_identity, name="reconcile_identity"),
+    path("conflicts/", views.conflict_list, name="conflict_list"),
+    path("conflicts/<int:pk>/", views.conflict_detail, name="conflict_detail"),
+    path("conflicts/<int:pk>/resolve/", views.resolve_conflict, name="resolve_conflict"),
+    path("submissions/pending/", views.pending_submission_list, name="pending_submission_list"),
     path("webhook/", views.webhook_submission, name="webhook_submission"),
     path(
         "discovered-assets/",
@@ -24,11 +37,6 @@ urlpatterns = [
         "assets/<int:pk>/configuration/",
         views.asset_configuration_detail,
         name="asset_configuration",
-    ),
-    path(
-        "assets/<int:pk>/bindings/",
-        views.create_project_binding_action,
-        name="create_project_binding",
     ),
     path(
         "assets/<int:pk>/activate/",
@@ -105,10 +113,5 @@ urlpatterns = [
         "submissions/<int:pk>/retry-attachments/",
         views.retry_attachments_action,
         name="submission_retry_attachments",
-    ),
-    path(
-        "submissions/<int:pk>/associate-project/",
-        views.associate_project_action,
-        name="submission_associate_project",
     ),
 ]

@@ -10,6 +10,7 @@ from apps.integrations.kobo.mappings.common import (
     parse_optional_datetime,
     require_non_empty_string,
 )
+from apps.integrations.kobo.territorial import normalize_nucleo_code
 
 
 FICHA_11_FORM_ID = "ficha_11_priorizacion_semaforo_depurada"
@@ -27,6 +28,8 @@ SCORE_FIELDS = (
     "rapid_impact_score",
     "financial_viability_score",
 )
+SCORE_MIN = 1
+SCORE_MAX = 5
 FINAL_SEMAPHORES = {"red", "yellow", "green", "gray"}
 FINAL_PRIORITIES = {"low", "medium", "high", "critical", "unknown"}
 
@@ -43,14 +46,16 @@ def _parse_score(scoring: Mapping[str, object], key: str) -> int:
         score = int(value.strip())
     else:
         raise KoboPayloadError(f"Field {key!r} must be an integer from 1 to 5.")
-    if not 1 <= score <= 5:
+    if not SCORE_MIN <= score <= SCORE_MAX:
         raise KoboPayloadError(f"Field {key!r} must be an integer from 1 to 5.")
     return score
 
 
-def _calculate_suggested_semaphore(priority_total: int) -> str:
-    # PRE: priority_total is the exact sum of ten scores from 1 to 5.
-    # POST: returns the canonical suggested semaphore for that total.
+def calculate_ficha_11_suggested_semaphore(priority_total: int) -> str:
+    """
+    PRE: priority_total is the exact sum of the ten canonical Ficha 11 scores.
+    POST: returns the independent SIGEDON semaphore for every supported boundary.
+    """
     if priority_total >= 40:
         return "red"
     if priority_total >= 28:
@@ -60,25 +65,37 @@ def _calculate_suggested_semaphore(priority_total: int) -> str:
     return "gray"
 
 
-def _validate_optional_calculation(
+def _calculation_warning(
     scoring: Mapping[str, object],
     *,
     key: str,
     expected_value: int | str,
-) -> None:
+) -> dict[str, str] | None:
     # PRE: expected_value is calculated by SIGEDON from validated scores.
-    # POST: accepts absent values or an exact matching Kobo calculation only.
+    # POST: returns a structured warning for a supplied differing value without
+    # invalidating otherwise valid individual scores.
     value = scoring.get(key)
     if value is None or value == "":
-        return
-    if isinstance(expected_value, int):
-        if isinstance(value, bool) or not (
-            isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit())
-        ):
-            raise KoboPayloadError(f"Field {key!r} must match the calculated value.")
-        value = int(value)
-    if value != expected_value:
-        raise KoboPayloadError(f"Field {key!r} must match the calculated value.")
+        return None
+    if value == expected_value or (
+        isinstance(expected_value, int)
+        and not isinstance(value, bool)
+        and isinstance(value, (int, str))
+        and str(value).strip().isdigit()
+        and int(str(value).strip()) == expected_value
+    ):
+        return None
+    warning_code = (
+        "PRIORITY_TOTAL_MISMATCH"
+        if key == "priority_total"
+        else "SUGGESTED_SEMAPHORE_MISMATCH"
+    )
+    return {
+        "code": warning_code,
+        "message": f"Kobo {key} differs from the SIGEDON calculation.",
+        "original_value": value,
+        "calculated_value": expected_value,
+    }
 
 
 def _require_choice(scoring: Mapping[str, object], key: str, choices: set[str]) -> str:
@@ -107,22 +124,38 @@ def normalize_ficha_11(
 
     scores = {key: _parse_score(scoring, key) for key in SCORE_FIELDS}
     priority_total = sum(scores.values())
-    suggested_semaphore = _calculate_suggested_semaphore(priority_total)
-    _validate_optional_calculation(
-        scoring,
-        key="priority_total",
-        expected_value=priority_total,
-    )
-    _validate_optional_calculation(
-        scoring,
-        key="suggested_semaphore",
-        expected_value=suggested_semaphore,
-    )
+    suggested_semaphore = calculate_ficha_11_suggested_semaphore(priority_total)
+    calculation_warnings = [
+        warning
+        for warning in (
+            _calculation_warning(
+                scoring,
+                key="priority_total",
+                expected_value=priority_total,
+            ),
+            _calculation_warning(
+                scoring,
+                key="suggested_semaphore",
+                expected_value=suggested_semaphore,
+            ),
+        )
+        if warning is not None
+    ]
+    nucleo_code_original = raw_payload.get("nucleo_code")
+    nucleo_code_normalized = normalize_nucleo_code(nucleo_code_original)
     normalized_payload = {
-        "nucleo_code": require_non_empty_string(raw_payload, "nucleo_code"),
+        "nucleo_code": nucleo_code_normalized,
+        "nucleo_code_original": nucleo_code_original,
+        "nucleo_code_normalized": nucleo_code_normalized,
         **scores,
+        # Keep legacy calculated aliases during the staged routing migration.
         "priority_total": priority_total,
         "suggested_semaphore": suggested_semaphore,
+        "priority_total_original": scoring.get("priority_total"),
+        "priority_total_calculated": priority_total,
+        "suggested_semaphore_original": scoring.get("suggested_semaphore"),
+        "suggested_semaphore_calculated": suggested_semaphore,
+        "calculation_warnings": calculation_warnings,
         "final_semaphore": _require_choice(
             scoring, "final_semaphore", FINAL_SEMAPHORES
         ),

@@ -32,6 +32,10 @@ delete_auditlog
 * No recibe automáticamente permisos técnicos de KoboToolbox.
 * Los permisos `kobo.*` deben asignarse por separado.
 
+El Hub territorial requiere `kobo.view_territorial_administration`. Las
+operaciones requieren además permisos explícitos de mappings, estado de
+identidad, resolución de conflictos o reconciliación.
+
 ## 2. Operador de campo
 
 ### Permisos
@@ -153,6 +157,26 @@ change_kobosubmission
 
 La matriz real puede incluir permisos adicionales según los modelos y acciones técnicas disponibles.
 
+Los antiguos permisos de binding no conceden administración territorial. La
+operación vigente se centra en ver la integración, gestionar mappings, resolver
+conflictos, cambiar estados de identidad, reconciliar, revisar e importar.
+
+### Permisos de administración territorial
+
+```text
+view_territorial_administration
+manage_pastoral_zone_mappings
+resolve_territorial_conflicts
+change_territorial_identity_status
+run_territorial_reconciliation
+```
+
+`Administrador SIGEDON` recibe los cinco permisos al sincronizar roles. Operador
+de campo, Auditor externo y Comité reciben únicamente
+`view_territorial_administration`; no pueden configurar mappings, resolver
+conflictos, cambiar estados ni ejecutar reconciliación. Ninguna acción se concede
+por poseer solamente `change_kobosubmission`.
+
 ### Permite
 
 * descubrir activos;
@@ -167,7 +191,8 @@ La matriz real puede incluir permisos adicionales según los modelos y acciones 
 ### Restricciones
 
 * Estos permisos deben asignarse únicamente a personal técnico autorizado.
-* No forman parte automática de ningún rol operativo.
+* Los permisos técnicos generales no forman parte automática de ningún rol
+  operativo; la excepción explícita son los permisos territoriales descritos arriba.
 * El acceso técnico a Kobo no implica permiso para modificar información financiera.
 * Los payloads crudos y los adjuntos sensibles permanecen protegidos.
 

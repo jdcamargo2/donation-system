@@ -32,6 +32,10 @@ INACTIVE
 
 ## 2. `Project`
 
+Las relaciones históricas `KoboProjectBinding` no determinan proyectos en el
+runtime. La asociación Kobo vigente se resuelve por zona pastoral e identidad
+territorial de cada submission.
+
 Representa un proyecto, programa o línea de acción.
 
 ### Estados
@@ -348,19 +352,10 @@ Responsabilidades:
 
 ### 14.4. `KoboProjectBinding`
 
-Define cómo una submission de Kobo se resuelve hacia un proyecto.
-
-### Modos de resolución
-
-```text
-DIRECT
-FIELD_VALUE
-```
-
-Donde:
-
-* `DIRECT`: todas las submissions se asocian con un proyecto predefinido.
-* `FIELD_VALUE`: el proyecto se determina a partir del valor de un campo del formulario.
+Registro histórico de configuraciones asset-proyecto. No participa en el
+runtime ni recibe escrituras nuevas: Fichas 1, 10 y 11 resuelven su proyecto
+por zona pastoral e identidad territorial de la submission. La tabla se
+conserva hasta auditar los datos persistentes.
 
 ### 14.5. `KoboSubmission`
 
@@ -375,7 +370,104 @@ Responsabilidades:
 * soportar rechazo, restauración e importación;
 * evitar la pérdida de información original.
 
-### 14.6. `KoboAttachment`
+### 14.6. `KoboTerritorialIdentity`
+
+Representa el código territorial canónico, su zona pastoral y su proyecto. El
+routing de Ficha 1 crea o confirma esta identidad; la importación no crea una
+segunda identidad ni cambia su asignación territorial.
+
+Estados administrativos: `PENDING_REVIEW`, `ACTIVE`, `OBSERVED` e `INACTIVE`.
+La inactivación no libera `nucleo_code_normalized` ni elimina historia.
+
+### 14.6.1. `KoboPastoralZoneProjectMapping`
+
+Configura explícitamente una de las cinco zonas pastorales hacia un `Project`.
+La unicidad parcial permite un solo mapping activo por zona. Las desactivaciones
+conservan actor, fecha y razón; el servicio impide cambiar o desactivar mappings
+usados por identidades.
+
+### 14.6.2. `KoboTerritorialIdentityConflict`
+
+Conserva identidad, submission entrante, zona/proyecto existentes y propuestos.
+Una decisión humana motivada puede conservar lo existente, aceptar una propuesta
+sin historia incompatible o descartar un conflicto técnico. No elimina evidencia
+ni reasigna materializaciones importadas.
+
+### 14.6.3. `KoboTerritorialAdministrationEvent`
+
+Evento append-only y libre de payload para las mutaciones territoriales. Conserva
+actor, acción, entidad, estado anterior, estado posterior, motivo y timestamp; no
+sustituye al `AuditLog` creado en la misma transacción.
+
+### 14.7. `KoboTerritorialProfile`
+
+Representa el diagnóstico aprobado e inmutable materializado desde una Ficha 1.
+Cada submission puede originar un solo perfil, mientras una identidad puede
+tener varios perfiles históricos. El perfil vigente se deriva por fecha y no se
+guarda como puntero redundante.
+
+```text
+KoboTerritorialIdentity 1 ──< KoboTerritorialProfile
+Project 1 ──< KoboTerritorialProfile
+KoboSubmission 1 ── 1 KoboTerritorialProfile
+KoboImportRecord 1 ── referencia lógica ──> KoboTerritorialProfile
+```
+
+El perfil conserva la ubicación canónica como JSON validado y los campos
+revisados del payload normalizado, pero no duplica código ni zona pastoral.
+
+### 14.8. `KoboPrioritizedMicroproject`
+
+Representa una propuesta priorizada, aprobada e inmutable materializada desde
+una Ficha 10. No es otro `Project`: pertenece a la identidad territorial y al
+proyecto Núcleo Vital ya resuelto por routing.
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizedMicroproject
+Project 1 ──< KoboPrioritizedMicroproject
+KoboSubmission 1 ── 1 KoboPrioritizedMicroproject
+KoboImportRecord 1 ── referencia lógica ──> KoboPrioritizedMicroproject
+```
+
+Cada submission produce como máximo un microproyecto. Dos submissions con el
+mismo nombre conservan dos propuestas históricas distintas: el nombre no es una
+clave de deduplicación. `component`, `estimated_cost_range`,
+`implementation_urgency` y `technical_viability` conservan códigos canónicos de
+catálogo; `beneficiary_group` conserva el `select_multiple` como lista JSON
+ordenada y `main_activities` permanece texto libre.
+
+La propuesta no crea presupuesto ejecutable, donaciones, asignaciones, gastos ni
+movimientos financieros, y tampoco activa ni modifica la identidad territorial.
+
+### 14.9. `KoboPrioritizationAssessment`
+
+Representa una evaluación territorial histórica, aprobada e inmutable,
+materializada desde una Ficha 11. Cada submission produce como máximo una
+evaluación, mientras una identidad conserva todas sus evaluaciones históricas.
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizationAssessment
+Project 1 ──< KoboPrioritizationAssessment
+KoboSubmission 1 ── 1 KoboPrioritizationAssessment
+KoboImportRecord 1 ── referencia lógica ──> KoboPrioritizationAssessment
+```
+
+La evaluación conserva individualmente los diez scores de 1 a 5, el total y
+semáforo sugerido recibidos, el total y semáforo recalculados por SIGEDON, y las
+decisiones humanas `final_semaphore` y `final_priority`. Las discrepancias se
+guardan como warnings estructurados y no sustituyen la decisión humana.
+
+`linked_microprojects_snapshot` conserva el texto libre normalizado recibido.
+No crea relaciones por coincidencia de nombre ni modifica microproyectos. La
+evaluación tampoco cambia el estado o la prioridad institucional del proyecto,
+la identidad territorial, presupuestos ni movimientos financieros.
+
+### 14.10. `KoboImportRecord`
+
+Registra el resultado único de una importación completada y apunta lógicamente
+a la entidad materializada sin introducir una relación genérica en la submission.
+
+### 14.11. `KoboAttachment`
 
 Representa un archivo adjunto descargado desde Kobo.
 
@@ -387,7 +479,7 @@ Reglas:
 * su descarga debe estar protegida;
 * no se publica automáticamente en el portal público.
 
-### 14.7. `KoboProcessingEvent`
+### 14.12. `KoboProcessingEvent`
 
 Representa un evento técnico ocurrido durante el procesamiento de una submission.
 
@@ -396,7 +488,8 @@ Responsabilidades:
 * registrar etapas del pipeline;
 * conservar errores y resultados técnicos;
 * apoyar la trazabilidad de la integración;
-* permitir el diagnóstico de fallos.
+* permitir el diagnóstico de fallos;
+* conservar metadata estructurada limitada a identificadores no sensibles.
 
 `KoboProcessingEvent` no sustituye a `AuditLog`.
 
@@ -404,6 +497,8 @@ La diferencia principal es:
 
 * `AuditLog` registra acciones funcionales y de negocio;
 * `KoboProcessingEvent` registra eventos técnicos del pipeline Kobo.
+* `KoboTerritorialAdministrationEvent` registra decisiones administrativas
+  territoriales sin depender de una submission concreta.
 
 ## 15. Modelos heredados de Ficha 1
 
