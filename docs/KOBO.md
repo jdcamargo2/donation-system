@@ -86,6 +86,25 @@ sync de submissions no se declara completo tras un fallo remoto.
 
 Los valores secretos no deben versionarse ni registrarse en logs.
 
+### Sincronización incremental
+
+La consulta incremental usa el parámetro Kobo `query` con
+`{"_last_edited":{"$gte":"..."}}`. El inicio es el watermark remoto
+confirmado menos `KOBO_SYNC_OVERLAP_SECONDS`; el overlap solo amplía la
+consulta y nunca cambia el valor persistido. Las respuestas repetidas se
+absorben por hash canónico. Un sync completo ignora cursor y overlap.
+
+El mayor `_last_edited` válido de la ejecución es candidato a watermark. Solo
+una ejecución `SUCCEEDED` actualiza atómicamente cursor, watermark y hora del
+último éxito; `PARTIAL` y `FAILED` conservan ambos valores. Cada asset posee
+una lease atribuida al `KoboSyncRun`; una lease vencida deja el run anterior
+como `ABANDONED` con `SYNC_LEASE_EXPIRED` antes de adquirir la nueva.
+
+`sync_kobo_ficha_01 --asset-uid UID [--full] [--max-pages N]` usa únicamente
+este servicio y retorna 0 para éxito, 1 para fallo y 2 para parcial o lease
+ocupada. Las acciones del Hub son POST con CSRF, requieren permiso de cambio
+del asset y son síncronas; no existe scheduling automático.
+
 ## 4. Registro de formularios
 
 Las definiciones versionadas conocidas por el normalizador se registran mediante:

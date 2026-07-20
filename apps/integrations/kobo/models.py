@@ -231,6 +231,13 @@ class KoboAsset(models.Model):
     last_remote_watermark = models.DateTimeField(null=True, blank=True)
     sync_lease_started_at = models.DateTimeField(null=True, blank=True)
     sync_lease_expires_at = models.DateTimeField(null=True, blank=True)
+    sync_lease_run = models.ForeignKey(
+        "KoboSyncRun",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="leased_assets",
+    )
 
     class Meta:
         constraints = [

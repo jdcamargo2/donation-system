@@ -5,6 +5,7 @@ from apps.integrations.kobo import views
 app_name = "kobo"
 urlpatterns = [
     path("", views.hub_dashboard, name="hub"),
+    path("sync/<int:pk>/<str:mode>/", views.sync_asset, name="sync_asset"),
     path("mappings/", views.mapping_list, name="mapping_list"),
     path("mappings/configure/", views.configure_mapping, name="configure_mapping"),
     path("mappings/<str:zone>/deactivate/", views.deactivate_mapping, name="deactivate_mapping"),

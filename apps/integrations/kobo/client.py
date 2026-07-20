@@ -225,7 +225,7 @@ class KoboApiClient:
 
         return list(self.iter_submissions(asset_uid, limit=limit))
 
-    def iter_submissions(self, asset_uid: str, *, limit: int = 100) -> Iterator[dict]:
+    def iter_submissions(self, asset_uid: str, *, limit: int = 100, params: dict[str, str | int] | None = None, max_pages: int | None = None) -> Iterator[dict]:
         """
         PRE: asset_uid and page size are valid configured values.
         POST: yields all validated Kobo submission results without retaining pages.
@@ -233,11 +233,12 @@ class KoboApiClient:
         if not asset_uid or not asset_uid.strip() or limit <= 0:
             raise KoboConfigurationError("Kobo asset UID and page size must be positive.")
         current_url = f"{self._base_url}/api/v2/assets/{asset_uid}/data/"
-        current_params = {"limit": limit}
+        current_params = {"limit": limit, **(params or {})}
         seen_urls: set[str] = set()
         page_count = 0
+        page_limit = min(self._max_asset_pages, max_pages) if max_pages else self._max_asset_pages
         while current_url is not None:
-            if current_url in seen_urls or page_count >= self._max_asset_pages:
+            if current_url in seen_urls or page_count >= page_limit:
                 raise KoboInvalidResponseError("Kobo submission pagination cycle or page limit detected.")
             self._validate_submission_page_url(current_url, asset_uid)
             seen_urls.add(current_url)

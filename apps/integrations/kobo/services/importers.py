@@ -447,6 +447,8 @@ def _import_kobo_submission_with_handlers(
                 raise KoboImportBlocked("FICHA_11_ASSESSMENT_STATE_CONFLICT")
             if locked_submission.status == KoboSubmission.Status.IMPORTED:
                 return _already_imported_result(locked_submission, existing_record)
+            if locked_submission.remote_update_pending:
+                raise KoboImportBlocked("REMOTE_UPDATE_REVIEW_REQUIRED")
             if existing_record is not None:
                 raise KoboImportBlocked("IMPORT_RECORD_STATE_CONFLICT")
 
