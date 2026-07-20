@@ -610,7 +610,11 @@ def retry_attachments_action(request, pk):
 @require_POST
 @login_required
 @permission_required(
-    ("kobo.view_kobosubmission", "kobo.change_kobosubmission"),
+    (
+        "kobo.view_kobosubmission",
+        "kobo.change_kobosubmission",
+        "operations.change_project",
+    ),
     raise_exception=True,
 )
 def associate_project_action(request, pk):
@@ -622,9 +626,9 @@ def associate_project_action(request, pk):
         reviewed_by=request.user,
     )
     if result.associated:
-        messages.success(request, "Submission asociada al proyecto configurado.")
+        messages.success(request, "Submission materializada e importada.")
     else:
-        messages.warning(request, "No fue posible asociar la submission.")
+        messages.warning(request, "No fue posible materializar la submission.")
     return redirect("kobo:submission_detail", pk=submission.pk)
 
 
@@ -744,12 +748,20 @@ def project_pending_submission_review(request, project_pk, pk):
 )
 def project_pending_submission_import(request, project_pk, pk):
     # PRE: request user can operate on the selected project and Kobo is enabled.
-    # POST: imports exactly one pending submission or reports a safe outcome.
+    # POST: explicitly approves one ready submission, then delegates import to the
+    # common materialization service and reports its safe outcome.
     _require_kobo_enabled()
     from apps.operations.models import Project
 
     project = get_object_or_404(Project, pk=project_pk)
     submission = get_object_or_404(KoboSubmission, pk=pk, project=project)
+    if submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
+        review_submission(
+            submission,
+            decision=KoboSubmission.Status.APPROVED_FOR_IMPORT,
+            reason="Aprobada desde la revisión operativa del proyecto.",
+            reviewed_by=request.user,
+        )
     result = import_kobo_submission(submission, actor=request.user)
     if result.imported:
         messages.success(request, "Ficha Kobo importada al proyecto.")

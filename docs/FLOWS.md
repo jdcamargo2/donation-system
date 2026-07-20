@@ -344,17 +344,25 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 13. Un usuario autorizado consulta la información normalizada.
 14. El usuario puede:
 
-    * importar;
+    * aprobar para importación;
     * rechazar.
 
-15. Si se importa, la información normalizada se vincula al proyecto.
-16. La acción queda registrada en el historial técnico y, cuando corresponda, en la auditoría funcional.
+15. La aprobación cambia `READY_FOR_REVIEW` a `APPROVED_FOR_IMPORT`; todavía no
+    constituye una importación.
+16. El servicio común bloquea la submission, revalida routing, proyecto,
+    normalización, payload preservado, revisión y permisos, y selecciona el
+    handler cerrado de Ficha 1, 10 u 11.
+17. Solo una materialización específica exitosa crea `KoboImportRecord`, cambia
+    la submission a `IMPORTED`, asigna `imported_at` y registra evento y auditoría.
+18. En esta fase los tres handlers son stubs explícitos: responden
+    `MATERIALIZATION_NOT_IMPLEMENTED` y no cambian el estado a `IMPORTED`.
 
 ### POST
 
 * El payload original permanece conservado.
-* La importación se realiza únicamente después de la revisión autorizada.
-* Los datos normalizados quedan asociados al proyecto correspondiente.
+* Routing resuelto no implica revisión aprobada.
+* Revisión aprobada no implica importación.
+* Importación significa materialización exitosa y resultado persistido.
 * La integración no modifica directamente saldos financieros.
 
 ---

@@ -23,6 +23,7 @@ from apps.integrations.kobo.territorial import normalize_nucleo_code
 from apps.operations.models import Project
 from apps.operations.models import ProjectUpdate
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
@@ -313,6 +314,12 @@ class KoboWebhookTests(TestCase):
     def test_slash_payload_uses_territorial_mapping_not_direct_binding(self):
         project = self.project
         reviewer = get_user_model().objects.create_user("slash-reviewer")
+        reviewer.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="operations",
+                codename="change_project",
+            )
+        )
         payload = self.ficha_01_slash_payload(
             **{"identification/nucleo_code": "NOT-A-PROJECT-CODE"}
         )
@@ -325,12 +332,15 @@ class KoboWebhookTests(TestCase):
         submission.refresh_from_db()
 
         self.assertEqual(response.status_code, 201)
-        self.assertTrue(result.associated)
+        self.assertFalse(result.associated)
         self.assertEqual(submission.project, project)
-        self.assertEqual(submission.status, KoboSubmission.Status.IMPORTED)
-        self.assertIsNotNone(submission.processed_at)
-        self.assertEqual(submission.error_code, "")
-        self.assertEqual(submission.error_message, "")
+        self.assertEqual(
+            submission.status,
+            KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        )
+        self.assertIsNone(submission.imported_at)
+        self.assertIsNone(submission.processed_at)
+        self.assertEqual(submission.error_code, "MATERIALIZATION_NOT_IMPLEMENTED")
 
     def test_basic_authentication_rejects_invalid_or_malformed_credentials(self):
         url = reverse("kobo:webhook_submission")

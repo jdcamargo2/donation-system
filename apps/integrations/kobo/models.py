@@ -298,6 +298,40 @@ class KoboSubmission(models.Model):
         return f"{self.form_definition.form_id}: {self.external_id} [{self.status}]"
 
 
+class KoboImportRecord(models.Model):
+    submission = models.OneToOneField(
+        KoboSubmission,
+        on_delete=models.PROTECT,
+        related_name="import_record",
+    )
+    handler_type = models.CharField(max_length=32)
+    target_app_label = models.CharField(max_length=100)
+    target_model = models.CharField(max_length=100)
+    target_object_id = models.PositiveBigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="kobo_import_records",
+    )
+    result_metadata = models.JSONField(default=dict)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(target_object_id__gt=0),
+                name="kobo_import_record_positive_target_id",
+            ),
+        ]
+        ordering = ("-created_at", "-pk")
+
+    def __str__(self):
+        return (
+            f"{self.handler_type}: "
+            f"{self.target_app_label}.{self.target_model}#{self.target_object_id}"
+        )
+
+
 class KoboPastoralZoneProjectMapping(models.Model):
     pastoral_zone = models.CharField(max_length=32, choices=PASTORAL_ZONE_CHOICES)
     project = models.ForeignKey(

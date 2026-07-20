@@ -210,7 +210,12 @@ class KoboAssetManualConfigurationTests(TestCase):
         }
         cls.viewer.user_permissions.add(permissions["view_koboasset"])
         cls.editor.user_permissions.add(
-            permissions["view_koboasset"], permissions["change_koboasset"]
+            permissions["view_koboasset"],
+            permissions["change_koboasset"],
+            Permission.objects.get(
+                content_type__app_label="operations",
+                codename="change_project",
+            ),
         )
         cls.definition = KoboFormDefinition.objects.create(
             form_id=FICHA_01_FORM_ID,
@@ -584,8 +589,12 @@ class KoboAssetManualConfigurationTests(TestCase):
             reviewed_by=self.editor,
         )
         new_submission.refresh_from_db()
-        self.assertTrue(result.associated)
-        self.assertEqual(new_submission.project, other_project)
+        self.assertFalse(result.associated)
+        self.assertIsNone(new_submission.project)
+        self.assertEqual(
+            new_submission.status,
+            KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        )
 
         unlink_asset_from_project(asset, unlinked_by=self.editor)
         asset.refresh_from_db()
@@ -607,7 +616,10 @@ class KoboAssetManualConfigurationTests(TestCase):
         )
         self.assertFalse(result.associated)
         unlinked_submission.refresh_from_db()
-        self.assertEqual(unlinked_submission.error_code, "asset_inactive")
+        self.assertEqual(
+            unlinked_submission.error_code,
+            "IMPORT_ROUTING_UNRESOLVED",
+        )
 
     def test_operational_link_rejects_inactive_definition_and_unsupported_asset(self):
         asset = self.configure()

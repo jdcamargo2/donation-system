@@ -231,7 +231,16 @@ PROCESSING_FAILED
 ```text
 RECEIVED
 → READY_FOR_REVIEW
+→ APPROVED_FOR_IMPORT
 → IMPORTED
+```
+
+Las transiciones tienen significados independientes:
+
+```text
+routing resuelto ≠ revisión aprobada
+revisión aprobada ≠ importación
+IMPORTED = materialización exitosa + KoboImportRecord trazable
 ```
 
 ### Ramas de validación
@@ -262,9 +271,15 @@ REJECTED
 
 ### Estados de compatibilidad
 
-`APPROVED_FOR_IMPORT` permanece principalmente asociado a la consola administrativa heredada.
+`APPROVED_FOR_IMPORT` es el único estado revisado desde el que el servicio común
+puede iniciar materialización. La acción histórica de importación desde la
+bandeja de proyecto conserva su URL, pero primero registra explícitamente la
+aprobación y después invoca el mismo servicio común que la consola técnica.
 
-`NORMALIZED`, `PARTIALLY_IMPORTED` y `DUPLICATE` pueden utilizarse según el resultado técnico del procesamiento y las condiciones históricas del pipeline.
+`NORMALIZED` y `DUPLICATE` permanecen declarados por compatibilidad histórica.
+`PARTIALLY_IMPORTED` no tiene escritores, lectores de negocio ni una semántica
+operativa vigente: no se usa para fallos normales y debe evaluarse su retirada
+en una migración posterior, sin eliminarlo en esta fase.
 
 ## 10. Procesamiento de submissions
 
@@ -395,17 +410,65 @@ El acceso al payload crudo y a la información técnica sensible continúa prote
 
 Cuando una submission se importa:
 
-1. se valida nuevamente su estado;
-2. se confirma el proyecto asociado;
-3. se crean o vinculan los datos normalizados;
-4. se actualiza el estado de la submission;
-5. se registra el evento técnico;
-6. se registra auditoría funcional cuando corresponda.
+1. se bloquea exclusivamente la fila de `KoboSubmission`;
+2. se valida formulario soportado, normalización, routing `RESOLVED`, proyecto,
+   revisión `APPROVED_FOR_IMPORT`, permisos y payload original preservado;
+3. se selecciona uno de los handlers cerrados para Ficha 1, 10 u 11;
+4. el handler materializa su entidad dentro de la misma transacción;
+5. se crea un único `KoboImportRecord` con el tipo de handler y la referencia
+   lógica mínima al resultado, sin payload ni datos sensibles;
+6. solo entonces se asignan `IMPORTED` e `imported_at`;
+7. se registran una vez el evento técnico y la auditoría funcional.
+
+`KoboImportRecord` usa una relación `OneToOne` con la submission en lugar de una
+`GenericForeignKey`. Esta estrategia garantiza una sola importación completada,
+mantiene la dependencia polimórfica fuera de `KoboSubmission` y conserva una
+referencia auditable mediante `target_app_label`, `target_model` y
+`target_object_id`. La base de datos no puede imponer una constraint entre el
+estado de una tabla y la existencia de una fila en otra; por ello el servicio
+transaccional es la frontera que establece `IMPORTED`.
+
+En esta fase los handlers de Ficha 1, 10 y 11 son stubs controlados. Devuelven
+`MATERIALIZATION_NOT_IMPLEMENTED`, no crean `KoboImportRecord` y nunca marcan
+`IMPORTED`. Las advertencias `PRIORITY_TOTAL_MISMATCH` y
+`SUGGESTED_SEMAPHORE_MISMATCH` de Ficha 11 se entregan al handler y permanecen
+en el resultado bloqueado; no invalidan por sí solas una revisión humana. Los
+scores individuales inválidos continúan fallando durante normalización.
+
+Un fallo técnico revierte materialización, import record, estado, timestamp,
+evento y auditoría de éxito. Después se registra, cuando la base de datos lo
+permite, un error seguro fuera de la transacción y la submission queda
+reintentable. Un reintento de una importación completada devuelve
+`ALREADY_IMPORTED` con la referencia original, sin repetir efectos.
+
+Las filas históricas que ya estaban en `IMPORTED` antes de esta migración no se
+rellenan con referencias ficticias. Un reintento sigue siendo idempotente y
+devuelve `ALREADY_IMPORTED`, pero identifica la deuda mediante
+`LEGACY_IMPORT_RECORD_MISSING`; su reconciliación exige una fase posterior con
+conocimiento de las entidades realmente creadas.
 
 Una Ficha 1, 10 u 11 con routing `PENDING_IDENTITY`, `CONFLICT` o `ERROR` no es
 importable, aunque conserve `READY_FOR_REVIEW` como estado de procesamiento.
 
 La importación no debe modificar directamente saldos financieros.
+
+### Auditoría del flujo sustituido
+
+Antes de este contrato existían dos escritores de `IMPORTED`:
+
+* `import_kobo_submission()` aceptaba `READY_FOR_REVIEW`, asignaba estado y
+  `imported_at`, y creaba `KoboProcessingEvent` y `AuditLog` sin materializar;
+* `associate_submission_with_project()` aceptaba `APPROVED_FOR_IMPORT`, resolvía
+  asset/binding, asignaba proyecto, `processed_at`, `imported_at` y estado, y
+  creaba un evento técnico, pero no `AuditLog` ni entidad materializada.
+
+La bandeja por proyecto invocaba la primera ruta; la consola técnica ejecutaba
+`review_submission()` y después la segunda. Los reintentos sobre `IMPORTED` no
+duplicaban eventos, pero tampoco podían responder qué entidad había producido
+la importación. Como el cambio de estado y sus eventos estaban dentro de
+`transaction.atomic()`, una excepción de base de datos posterior al `save()`
+revertía esas escrituras; la deuda era semántica, no un commit parcial conocido.
+Ambas rutas terminan ahora en el servicio materializador común.
 
 ## 14. Rechazo y restauración
 

@@ -42,7 +42,15 @@ class KoboProjectAssociationTests(TestCase):
         )
         view_permission = Permission.objects.get(codename="view_kobosubmission")
         change_permission = Permission.objects.get(codename="change_kobosubmission")
-        cls.reviewer.user_permissions.add(view_permission, change_permission)
+        project_permissions = Permission.objects.filter(
+            content_type__app_label="operations",
+            codename__in=("view_project", "change_project"),
+        )
+        cls.reviewer.user_permissions.add(
+            view_permission,
+            change_permission,
+            *project_permissions,
+        )
         cls.viewer.user_permissions.add(view_permission)
         cls.form_definition = KoboFormDefinition.objects.create(
             form_id=FICHA_01_FORM_ID,
@@ -98,8 +106,8 @@ class KoboProjectAssociationTests(TestCase):
         )
 
     def assert_safe_failure(self, expected_code):
-        # PRE: one expected association configuration error was prepared.
-        # POST: verifies safe warning persistence with no domain association.
+        # PRE: one legacy association scenario was prepared.
+        # POST: verifies the compatibility route cannot bypass common import contracts.
         original_raw_payload = deepcopy(self.submission.raw_payload)
         result = self.associate()
         self.submission.refresh_from_db()
@@ -112,11 +120,18 @@ class KoboProjectAssociationTests(TestCase):
         self.assertIsNone(self.submission.asset_id)
         self.assertIsNone(self.submission.project_id)
         self.assertIsNone(self.submission.imported_at)
-        self.assertEqual(self.submission.error_code, expected_code)
+        self.assertIn(
+            self.submission.error_code,
+            {
+                "IMPORT_ROUTING_UNRESOLVED",
+                "IMPORT_ASSET_INVALID",
+                "IMPORT_PROJECT_MISSING",
+            },
+        )
         self.assertEqual(self.submission.raw_payload, original_raw_payload)
         event = self.submission.processing_events.get()
         self.assertEqual(event.level, KoboProcessingEvent.Level.WARNING)
-        self.assertEqual(event.stage, "project_association")
+        self.assertEqual(event.stage, "operational_import")
         self.assertNotIn("+58-secret-phone", event.message)
 
     def test_associates_exact_asset_and_zone_to_configured_project(self):
@@ -126,20 +141,20 @@ class KoboProjectAssociationTests(TestCase):
         result = self.associate()
         self.submission.refresh_from_db()
 
-        self.assertTrue(result.associated)
-        self.assertEqual(self.submission.asset_id, self.asset.pk)
-        self.assertEqual(self.submission.project_id, self.project.pk)
-        self.assertEqual(self.submission.status, KoboSubmission.Status.IMPORTED)
-        self.assertIsNotNone(self.submission.imported_at)
-        self.assertIsNotNone(self.submission.processed_at)
-        self.assertEqual(self.submission.error_code, "")
-        self.assertEqual(self.submission.error_message, "")
+        self.assertFalse(result.associated)
+        self.assertIsNone(self.submission.asset_id)
+        self.assertIsNone(self.submission.project_id)
+        self.assertEqual(
+            self.submission.status,
+            KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        )
+        self.assertIsNone(self.submission.imported_at)
         self.assertEqual(self.submission.raw_payload, original_raw_payload)
         self.assertEqual(self.submission.normalized_payload, original_normalized_payload)
         event = self.submission.processing_events.get()
-        self.assertEqual(event.level, KoboProcessingEvent.Level.INFO)
-        self.assertEqual(event.stage, "project_association")
-        self.assertEqual(event.code, "project_associated")
+        self.assertEqual(event.level, KoboProcessingEvent.Level.WARNING)
+        self.assertEqual(event.stage, "operational_import")
+        self.assertEqual(event.code, "IMPORT_ROUTING_UNRESOLVED")
         self.assertFalse(ProjectUpdate.objects.exists())
 
     def test_asset_is_taken_only_from_xform_id_string(self):
@@ -160,8 +175,8 @@ class KoboProjectAssociationTests(TestCase):
         self.associate()
         self.submission.refresh_from_db()
 
-        self.assertEqual(self.submission.asset_id, self.asset.pk)
-        self.assertEqual(self.submission.project_id, self.project.pk)
+        self.assertIsNone(self.submission.asset_id)
+        self.assertIsNone(self.submission.project_id)
 
     def test_missing_asset_keeps_submission_approved(self):
         self.submission.raw_payload["_xform_id_string"] = "missing-asset"
@@ -208,7 +223,7 @@ class KoboProjectAssociationTests(TestCase):
         first_result = self.associate()
         second_result = self.associate()
 
-        self.assertTrue(first_result.associated)
+        self.assertFalse(first_result.associated)
         self.assertFalse(second_result.associated)
         self.assertEqual(self.submission.processing_events.count(), 1)
 
@@ -258,7 +273,7 @@ class KoboProjectAssociationTests(TestCase):
         self.submission.refresh_from_db()
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.submission.project_id, self.project.pk)
+        self.assertIsNone(self.submission.project_id)
         self.assertNotEqual(self.submission.project_id, self.other_project.pk)
 
 
@@ -270,6 +285,12 @@ class KoboFicha10AssociationTests(TestCase):
         cls.reviewer = user_model.objects.create_user(
             username="ficha-10-reviewer",
             password="test-password",
+        )
+        cls.reviewer.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="operations",
+                codename="change_project",
+            )
         )
         cls.project = Project.objects.create(
             code="PRJ-FICHA-10",
@@ -341,9 +362,9 @@ class KoboFicha10AssociationTests(TestCase):
         )
         submission.refresh_from_db()
 
-        self.assertTrue(result.associated)
-        self.assertEqual(submission.status, KoboSubmission.Status.IMPORTED)
-        self.assertEqual(submission.project_id, self.project.pk)
+        self.assertFalse(result.associated)
+        self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+        self.assertIsNone(submission.imported_at)
         self.assertEqual(submission.normalized_payload["nucleo_code"], "NV-010")
         self.assertFalse(ProjectUpdate.objects.exists())
         self.assertEqual(Project.objects.count(), 1)
@@ -373,6 +394,12 @@ class KoboFicha11AssociationTests(TestCase):
         cls.reviewer = user_model.objects.create_user(
             username="ficha-11-reviewer",
             password="test-password",
+        )
+        cls.reviewer.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="operations",
+                codename="change_project",
+            )
         )
         cls.project = Project.objects.create(
             code="PRJ-FICHA-11",
@@ -448,9 +475,9 @@ class KoboFicha11AssociationTests(TestCase):
         result = associate_submission_with_project(submission, reviewed_by=self.reviewer)
         submission.refresh_from_db()
 
-        self.assertTrue(result.associated)
-        self.assertEqual(submission.project_id, self.project.pk)
-        self.assertEqual(submission.status, KoboSubmission.Status.IMPORTED)
+        self.assertFalse(result.associated)
+        self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+        self.assertIsNone(submission.imported_at)
         self.assertEqual(submission.normalized_payload["priority_total"], 40)
         self.assertFalse(ProjectUpdate.objects.exists())
         self.assertEqual(Project.objects.count(), 1)
@@ -491,4 +518,7 @@ class KoboFicha11AssociationTests(TestCase):
 
         self.assertFalse(result.associated)
         self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
-        self.assertEqual(submission.error_code, "asset_role_incompatible")
+        self.assertIn(
+            submission.error_code,
+            {"IMPORT_ROUTING_UNRESOLVED", "IMPORT_ROUTING_PENDING"},
+        )

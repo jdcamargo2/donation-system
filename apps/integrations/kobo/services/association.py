@@ -6,8 +6,7 @@ from apps.integrations.kobo.services.common import (
     FORM_DEFINITION_ROLES,
     ProjectAssociationResult,
 )
-from apps.integrations.kobo.errors import KoboConfigurationError, KoboPayloadError
-from apps.integrations.kobo.form_registry import KoboFormType, resolve_form_type
+from apps.integrations.kobo.errors import KoboConfigurationError
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboAttachment,
@@ -15,36 +14,7 @@ from apps.integrations.kobo.models import (
     KoboProjectBinding,
     KoboSubmission,
 )
-from apps.integrations.kobo.services.routing import resolve_project_binding
-
-
-def _association_failure(
-    submission: KoboSubmission,
-    *,
-    previous_status: str,
-    error_code: str,
-    error_message: str,
-) -> ProjectAssociationResult:
-    # PRE: submission is locked inside an atomic association attempt.
-    # POST: preserves review status, records a safe warning, and returns failure.
-    submission.error_code = error_code
-    submission.error_message = error_message
-    submission.save(update_fields=("error_code", "error_message"))
-    KoboProcessingEvent.objects.create(
-        submission=submission,
-        stage="project_association",
-        level=KoboProcessingEvent.Level.WARNING,
-        code=error_code,
-        message=error_message,
-    )
-    return ProjectAssociationResult(
-        submission_id=submission.pk,
-        asset_id=None,
-        project_id=None,
-        previous_status=previous_status,
-        final_status=submission.status,
-        associated=False,
-    )
+from apps.integrations.kobo.services.importers import import_kobo_submission
 
 
 def assign_normalized_submission_to_direct_project(
@@ -155,167 +125,21 @@ def associate_submission_with_project(
     reviewed_by,
 ) -> ProjectAssociationResult:
     """
-    PRE: feature enablement was checked at the view boundary; submission is
-    approved with dict payload/zone and reviewed_by is authenticated.
-    POST: atomically resolves exact active asset/binding, imports the association,
-    or records a safe expected warning without modifying either payload.
+    PRE: feature enablement was checked and territorial routing already assigned
+    the supported, approved submission to its project.
+    POST: delegates the legacy UI action to the sole materializing import service;
+    it never marks IMPORTED through project association alone.
     """
-    if not getattr(reviewed_by, "is_authenticated", False):
-        raise KoboConfigurationError("An authenticated reviewer is required.")
-
-    with transaction.atomic():
-        locked_submission = KoboSubmission.objects.select_for_update().get(
-            pk=submission.pk
-        )
-        previous_status = locked_submission.status
-        if previous_status == KoboSubmission.Status.IMPORTED:
-            return ProjectAssociationResult(
-                submission_id=locked_submission.pk,
-                asset_id=locked_submission.asset_id,
-                project_id=locked_submission.project_id,
-                previous_status=previous_status,
-                final_status=previous_status,
-                associated=False,
-            )
-        if previous_status != KoboSubmission.Status.APPROVED_FOR_IMPORT:
-            raise KoboPayloadError("Submission is not approved for project association.")
-
-        if not isinstance(locked_submission.raw_payload, dict):
-            return _association_failure(
-                locked_submission,
-                previous_status=previous_status,
-                error_code="invalid_raw_payload",
-                error_message="Submission payload is unavailable for association.",
-            )
-        asset_uid = locked_submission.raw_payload.get("_xform_id_string")
-        if not isinstance(asset_uid, str) or not asset_uid.strip():
-            return _association_failure(
-                locked_submission,
-                previous_status=previous_status,
-                error_code="asset_uid_missing",
-                error_message="Kobo asset identifier is missing.",
-            )
-        try:
-            asset = KoboAsset.objects.get(asset_uid=asset_uid)
-        except KoboAsset.DoesNotExist:
-            return _association_failure(
-                locked_submission,
-                previous_status=previous_status,
-                error_code="asset_not_found",
-                error_message="Configured Kobo asset was not found.",
-            )
-        if not asset.is_active:
-            return _association_failure(
-                locked_submission,
-                previous_status=previous_status,
-                error_code="asset_inactive",
-                error_message="Configured Kobo asset is inactive.",
-            )
-        expected_role = FORM_DEFINITION_ROLES.get(
-            (asset.form_definition.form_id, asset.form_definition.version)
-        )
-        if asset.form_role != expected_role:
-            return _association_failure(
-                locked_submission,
-                previous_status=previous_status,
-                error_code="asset_role_incompatible",
-                error_message="Kobo asset role is incompatible with this submission.",
-            )
-
-        try:
-            form_type = resolve_form_type(
-                locked_submission.form_definition.form_id,
-                locked_submission.form_definition.version,
-            )
-        except KoboPayloadError:
-            form_type = None
-        uses_territorial_routing = (
-            form_type
-            in {
-                KoboFormType.FICHA_1,
-                KoboFormType.FICHA_10,
-                KoboFormType.FICHA_11,
-            }
-            and locked_submission.routing_status
-            != KoboSubmission.RoutingStatus.UNRESOLVED
-        )
-        if uses_territorial_routing:
-            if (
-                locked_submission.routing_status
-                != KoboSubmission.RoutingStatus.RESOLVED
-                or locked_submission.project_id is None
-            ):
-                return _association_failure(
-                    locked_submission,
-                    previous_status=previous_status,
-                    error_code="territorial_routing_unresolved",
-                    error_message="Submission territorial routing is not resolved.",
-                )
-            routing_project_id = locked_submission.project_id
-        else:
-            try:
-                routing = resolve_project_binding(locked_submission, asset)
-                routing_project_id = routing.project_id
-            except KoboConfigurationError as exc:
-                error_code = str(exc)
-                if error_code not in {"routing_not_found", "routing_ambiguous"}:
-                    error_code = "routing_configuration_error"
-                return _association_failure(
-                    locked_submission,
-                    previous_status=previous_status,
-                    error_code=error_code,
-                    error_message="No unique active project route matches this submission.",
-                )
-            except KoboPayloadError:
-                return _association_failure(
-                    locked_submission,
-                    previous_status=previous_status,
-                    error_code="routing_value_invalid",
-                    error_message="Submission routing data is invalid or unavailable.",
-                )
-
-        associated_at = timezone.now()
-        locked_submission.asset = asset
-        locked_submission.project_id = routing_project_id
-        locked_submission.imported_at = associated_at
-        if locked_submission.processed_at is None:
-            locked_submission.processed_at = associated_at
-        locked_submission.status = KoboSubmission.Status.IMPORTED
-        locked_submission.error_code = ""
-        locked_submission.error_message = ""
-        locked_submission.save(
-            update_fields=(
-                "asset",
-                "project",
-                "imported_at",
-                "processed_at",
-                "status",
-                "error_code",
-                "error_message",
-            )
-        )
-        KoboProcessingEvent.objects.create(
-            submission=locked_submission,
-            stage="project_association",
-            level=KoboProcessingEvent.Level.INFO,
-            code="project_associated",
-            message="Submission associated with its configured project.",
-        )
-
-    submission.asset_id = asset.pk
-    submission.project_id = routing_project_id
-    submission.imported_at = associated_at
-    submission.processed_at = locked_submission.processed_at
-    submission.status = locked_submission.status
-    submission.error_code = ""
-    submission.error_message = ""
+    previous_status = submission.status
+    result = import_kobo_submission(submission, actor=reviewed_by)
+    submission.refresh_from_db()
     return ProjectAssociationResult(
         submission_id=submission.pk,
-        asset_id=asset.pk,
-        project_id=routing_project_id,
+        asset_id=submission.asset_id,
+        project_id=submission.project_id,
         previous_status=previous_status,
         final_status=submission.status,
-        associated=True,
+        associated=result.imported,
     )
 
 
