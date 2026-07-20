@@ -1,5 +1,12 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+
+from apps.integrations.kobo.contracts import PastoralZone
+from apps.integrations.kobo.contracts import TerritorialRoutingReasonCode
+from apps.integrations.kobo.errors import KoboNormalizationError
+from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID
+from apps.integrations.kobo.territorial import normalize_nucleo_code
 
 
 SIGNATURE_FIELD_MARKERS = ("signature", "firma")
@@ -9,6 +16,13 @@ KOBO_ASSET_FORM_ROLES = (
     "prioritization_matrix",
 )
 KOBO_ROUTING_TYPES = ("direct", "field_value")
+PASTORAL_ZONE_CODES = tuple(zone.value for zone in PastoralZone)
+PASTORAL_ZONE_CHOICES = tuple(
+    (zone.value, zone.value.replace("_", " ").title()) for zone in PastoralZone
+)
+TERRITORIAL_ROUTING_REASON_CODES = tuple(
+    reason.value for reason in TerritorialRoutingReasonCode
+)
 
 
 class KoboFormDefinition(models.Model):
@@ -178,6 +192,13 @@ class KoboProjectBinding(models.Model):
 
 
 class KoboSubmission(models.Model):
+    class RoutingStatus(models.TextChoices):
+        UNRESOLVED = "unresolved", "Unresolved"
+        PENDING_IDENTITY = "pending_identity", "Pending identity"
+        RESOLVED = "resolved", "Resolved"
+        CONFLICT = "conflict", "Conflict"
+        ERROR = "error", "Error"
+
     class Status(models.TextChoices):
         RECEIVED = "received", "Received"
         NORMALIZED = "normalized", "Normalized"
@@ -227,12 +248,39 @@ class KoboSubmission(models.Model):
     imported_at = models.DateTimeField(null=True, blank=True)
     error_code = models.CharField(max_length=100, blank=True)
     error_message = models.TextField(blank=True)
+    routing_status = models.CharField(
+        max_length=32,
+        choices=RoutingStatus.choices,
+        default=RoutingStatus.UNRESOLVED,
+    )
+    routing_reason_code = models.CharField(
+        max_length=100,
+        choices=[(code, code) for code in TERRITORIAL_ROUTING_REASON_CODES],
+        blank=True,
+    )
+    routing_resolved_at = models.DateTimeField(null=True, blank=True)
+    nucleo_code_original = models.CharField(max_length=255, blank=True)
+    nucleo_code_normalized = models.CharField(max_length=255, blank=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
                 fields=("form_definition", "external_id"),
                 name="kobo_unique_external_submission_per_form",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(routing_status="resolved")
+                    | models.Q(project__isnull=False)
+                ),
+                name="kobo_resolved_routing_requires_project",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(routing_status="pending_identity")
+                    | models.Q(project__isnull=True)
+                ),
+                name="kobo_pending_identity_has_no_project",
             ),
         ]
         ordering = ("-received_at",)
@@ -248,6 +296,202 @@ class KoboSubmission(models.Model):
 
     def __str__(self):
         return f"{self.form_definition.form_id}: {self.external_id} [{self.status}]"
+
+
+class KoboPastoralZoneProjectMapping(models.Model):
+    pastoral_zone = models.CharField(max_length=32, choices=PASTORAL_ZONE_CHOICES)
+    project = models.ForeignKey(
+        "operations.Project",
+        on_delete=models.PROTECT,
+        related_name="kobo_pastoral_zone_mappings",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("pastoral_zone",),
+                condition=models.Q(is_active=True),
+                name="kobo_unique_active_zone_project_mapping",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(pastoral_zone__in=PASTORAL_ZONE_CODES),
+                name="kobo_mapping_valid_pastoral_zone",
+            ),
+        ]
+        ordering = ("pastoral_zone", "-is_active")
+
+    def __str__(self):
+        return f"{self.pastoral_zone} → {self.project}"
+
+
+class KoboTerritorialIdentity(models.Model):
+    class Status(models.TextChoices):
+        PENDING_REVIEW = "pending_review", "Pending review"
+        ACTIVE = "active", "Active"
+        OBSERVED = "observed", "Observed"
+        INACTIVE = "inactive", "Inactive"
+
+    nucleo_code_original = models.CharField(max_length=255)
+    nucleo_code_normalized = models.CharField(max_length=255, unique=True)
+    pastoral_zone = models.CharField(max_length=32, choices=PASTORAL_ZONE_CHOICES)
+    project = models.ForeignKey(
+        "operations.Project",
+        on_delete=models.PROTECT,
+        related_name="kobo_territorial_identities",
+    )
+    source_submission = models.ForeignKey(
+        KoboSubmission,
+        on_delete=models.PROTECT,
+        related_name="confirmed_territorial_identities",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.PENDING_REVIEW,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(nucleo_code_original=""),
+                name="kobo_identity_original_code_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(nucleo_code_normalized=""),
+                name="kobo_identity_normalized_code_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(pastoral_zone__in=PASTORAL_ZONE_CODES),
+                name="kobo_identity_valid_pastoral_zone",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("pastoral_zone", "status"),
+                name="kobo_identity_zone_status_idx",
+            ),
+        ]
+        ordering = ("nucleo_code_normalized",)
+
+    def clean(self):
+        """
+        PRE: the source submission is a persisted Kobo Ficha 1 submission.
+        POST: accepts only an exact canonical code derived by the shared pure
+        normalizer and a source submission from the supported Ficha 1 form.
+        """
+        super().clean()
+        errors = {}
+        try:
+            expected_normalized = normalize_nucleo_code(self.nucleo_code_original)
+        except KoboNormalizationError as exc:
+            errors["nucleo_code_original"] = str(exc)
+        else:
+            if self.nucleo_code_normalized != expected_normalized:
+                errors["nucleo_code_normalized"] = (
+                    "Normalized code must use the shared territorial contract."
+                )
+        if (
+            self.source_submission_id
+            and self.source_submission.form_definition.form_id != FICHA_01_FORM_ID
+        ):
+            errors["source_submission"] = "Identity sources must be Ficha 1 submissions."
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return self.nucleo_code_normalized
+
+
+class KoboTerritorialIdentityConflict(models.Model):
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        RESOLVED_KEEP_EXISTING = "resolved_keep_existing", "Resolved: keep existing"
+        RESOLVED_ACCEPT_PROPOSED = "resolved_accept_proposed", "Resolved: accept proposed"
+        DISMISSED = "dismissed", "Dismissed"
+
+    class Resolution(models.TextChoices):
+        KEEP_EXISTING = "keep_existing", "Keep existing"
+        ACCEPT_PROPOSED = "accept_proposed", "Accept proposed"
+        DISMISSED = "dismissed", "Dismissed"
+
+    identity = models.ForeignKey(
+        KoboTerritorialIdentity,
+        on_delete=models.PROTECT,
+        related_name="conflicts",
+    )
+    incoming_submission = models.ForeignKey(
+        KoboSubmission,
+        on_delete=models.PROTECT,
+        related_name="territorial_identity_conflicts",
+    )
+    existing_pastoral_zone = models.CharField(
+        max_length=32,
+        choices=PASTORAL_ZONE_CHOICES,
+    )
+    proposed_pastoral_zone = models.CharField(
+        max_length=32,
+        choices=PASTORAL_ZONE_CHOICES,
+    )
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.OPEN)
+    resolution = models.CharField(
+        max_length=32,
+        choices=Resolution.choices,
+        blank=True,
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="resolved_kobo_territorial_conflicts",
+        null=True,
+        blank=True,
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("identity", "incoming_submission", "proposed_pastoral_zone"),
+                condition=models.Q(status="open"),
+                name="kobo_unique_open_territorial_conflict",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(existing_pastoral_zone__in=PASTORAL_ZONE_CODES),
+                name="kobo_conflict_valid_existing_zone",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(proposed_pastoral_zone__in=PASTORAL_ZONE_CODES),
+                name="kobo_conflict_valid_proposed_zone",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("status", "proposed_pastoral_zone"),
+                name="kobo_conflict_status_zone_idx",
+            ),
+        ]
+        ordering = ("-created_at",)
+
+    def clean(self):
+        # PRE: conflict captures an incoming zone that differs from identity's zone.
+        # POST: rejects same-zone records without modifying identity or project.
+        super().clean()
+        if self.identity_id and self.existing_pastoral_zone != self.identity.pastoral_zone:
+            raise ValidationError(
+                {"existing_pastoral_zone": "Must preserve the identity's current zone."}
+            )
+        if self.existing_pastoral_zone == self.proposed_pastoral_zone:
+            raise ValidationError(
+                {"proposed_pastoral_zone": "Conflict requires a different zone."}
+            )
+
+    def __str__(self):
+        return f"{self.identity}: {self.existing_pastoral_zone} → {self.proposed_pastoral_zone}"
 
 
 class KoboAttachment(models.Model):

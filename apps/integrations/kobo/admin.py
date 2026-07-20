@@ -5,9 +5,12 @@ from apps.integrations.kobo.models import (
     KoboAsset,
     KoboDiscoveredAsset,
     KoboFormDefinition,
+    KoboPastoralZoneProjectMapping,
     KoboProjectBinding,
     KoboProcessingEvent,
     KoboSubmission,
+    KoboTerritorialIdentity,
+    KoboTerritorialIdentityConflict,
 )
 
 
@@ -79,7 +82,7 @@ class KoboSubmissionAdmin(admin.ModelAdmin):
         "received_at",
     )
     search_fields = ("external_id", "parish", "primary_community")
-    list_filter = ("status", "form_definition", "pastoral_zone", "asset", "project")
+    list_filter = ("status", "routing_status", "form_definition", "pastoral_zone", "asset", "project")
     readonly_fields = (
         "raw_payload",
         "normalized_payload",
@@ -87,6 +90,64 @@ class KoboSubmissionAdmin(admin.ModelAdmin):
         "project",
         "imported_at",
     )
+
+
+@admin.register(KoboPastoralZoneProjectMapping)
+class KoboPastoralZoneProjectMappingAdmin(admin.ModelAdmin):
+    list_display = ("pastoral_zone", "project", "is_active", "updated_at")
+    list_filter = ("pastoral_zone", "is_active", "project")
+    search_fields = ("pastoral_zone", "project__code", "project__name")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(KoboTerritorialIdentity)
+class KoboTerritorialIdentityAdmin(admin.ModelAdmin):
+    list_display = ("nucleo_code_normalized", "pastoral_zone", "project", "status")
+    list_filter = ("pastoral_zone", "status", "project")
+    search_fields = ("nucleo_code_original", "nucleo_code_normalized", "project__code")
+    readonly_fields = ("created_at", "updated_at")
+
+    def get_readonly_fields(self, request, obj=None):
+        # PRE: obj is either a new identity or its persisted admin instance.
+        # POST: protects the identity code, source evidence, zone, and project after creation.
+        if obj is None:
+            return self.readonly_fields
+        return self.readonly_fields + (
+            "nucleo_code_original",
+            "nucleo_code_normalized",
+            "pastoral_zone",
+            "project",
+            "source_submission",
+        )
+
+
+@admin.register(KoboTerritorialIdentityConflict)
+class KoboTerritorialIdentityConflictAdmin(admin.ModelAdmin):
+    list_display = (
+        "identity",
+        "existing_pastoral_zone",
+        "proposed_pastoral_zone",
+        "status",
+        "created_at",
+    )
+    list_filter = ("status", "existing_pastoral_zone", "proposed_pastoral_zone")
+    search_fields = ("identity__nucleo_code_normalized", "incoming_submission__external_id")
+    readonly_fields = (
+        "identity",
+        "incoming_submission",
+        "existing_pastoral_zone",
+        "proposed_pastoral_zone",
+        "status",
+        "resolution",
+        "resolved_by",
+        "resolved_at",
+        "created_at",
+    )
+
+    def has_add_permission(self, request):
+        # PRE: request is an authenticated admin request.
+        # POST: prevents creating conflicts outside a future idempotent routing service.
+        return False
 
 
 @admin.register(KoboAttachment)

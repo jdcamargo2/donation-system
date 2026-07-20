@@ -24,6 +24,7 @@ class PastoralZone(StrEnum):
 
 
 class TerritorialRoutingStatus(StrEnum):
+    UNRESOLVED = "unresolved"
     RESOLVED = "resolved"
     PENDING_IDENTITY = "pending_identity"
     CONFLICT = "conflict"
