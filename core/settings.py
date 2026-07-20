@@ -115,6 +115,8 @@ KOBO_HTTP_RETRY_AFTER_MAX_DELAY = float(
     os.getenv("KOBO_HTTP_RETRY_AFTER_MAX_DELAY", "60")
 )
 KOBO_HTTP_MAX_PAGES = int(os.getenv("KOBO_HTTP_MAX_PAGES", "100"))
+KOBO_SYNC_OVERLAP_SECONDS = int(os.getenv("KOBO_SYNC_OVERLAP_SECONDS", "300"))
+KOBO_SYNC_LEASE_SECONDS = int(os.getenv("KOBO_SYNC_LEASE_SECONDS", "900"))
 # Compatibility for integrations constructed before split connect/read timeouts.
 KOBO_REQUEST_TIMEOUT_SECONDS = KOBO_HTTP_READ_TIMEOUT
 

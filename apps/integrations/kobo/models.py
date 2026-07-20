@@ -226,6 +226,11 @@ class KoboAsset(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    last_successful_sync_cursor = models.DateTimeField(null=True, blank=True)
+    last_successful_sync_at = models.DateTimeField(null=True, blank=True)
+    last_remote_watermark = models.DateTimeField(null=True, blank=True)
+    sync_lease_started_at = models.DateTimeField(null=True, blank=True)
+    sync_lease_expires_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -252,10 +257,16 @@ class KoboSyncRun(models.Model):
         SUCCEEDED = "succeeded", "Succeeded"
         PARTIAL = "partial", "Partial"
         FAILED = "failed", "Failed"
+        ABANDONED = "abandoned", "Abandoned"
+
+    class Mode(models.TextChoices):
+        FULL = "full", "Full"
+        INCREMENTAL = "incremental", "Incremental"
 
     asset = models.ForeignKey(KoboAsset, null=True, blank=True, on_delete=models.PROTECT, related_name="sync_runs")
     kind = models.CharField(max_length=16, choices=Kind.choices)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.RUNNING)
+    mode = models.CharField(max_length=16, choices=Mode.choices, default=Mode.FULL)
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     triggered_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="kobo_sync_runs")
@@ -263,11 +274,18 @@ class KoboSyncRun(models.Model):
     items_seen = models.PositiveIntegerField(default=0)
     items_created = models.PositiveIntegerField(default=0)
     items_updated = models.PositiveIntegerField(default=0)
+    items_unchanged = models.PositiveIntegerField(default=0)
+    remote_updates_detected = models.PositiveIntegerField(default=0)
     items_failed = models.PositiveIntegerField(default=0)
     partial = models.BooleanField(default=False)
     error_code = models.CharField(max_length=64, blank=True)
     safe_error_message = models.CharField(max_length=255, blank=True)
     metadata = models.JSONField(default=dict)
+    cursor_before = models.DateTimeField(null=True, blank=True)
+    cursor_after = models.DateTimeField(null=True, blank=True)
+    watermark_before = models.DateTimeField(null=True, blank=True)
+    watermark_after = models.DateTimeField(null=True, blank=True)
+    lease_recovered = models.BooleanField(default=False)
 
     class Meta:
         ordering = ("-started_at",)
@@ -427,6 +445,11 @@ class KoboSubmission(models.Model):
     )
     external_id = models.CharField(max_length=255)
     raw_payload = models.JSONField()
+    remote_created_at = models.DateTimeField(null=True, blank=True)
+    remote_updated_at = models.DateTimeField(null=True, blank=True)
+    remote_version = models.CharField(max_length=255, blank=True)
+    last_remote_payload_hash = models.CharField(max_length=64, blank=True)
+    remote_update_pending = models.BooleanField(default=False)
     normalized_payload = models.JSONField(default=dict)
     status = models.CharField(
         max_length=32,
@@ -491,6 +514,21 @@ class KoboSubmission(models.Model):
 
     def __str__(self):
         return f"{self.form_definition.form_id}: {self.external_id} [{self.status}]"
+
+
+class KoboSubmissionRemoteRevision(models.Model):
+    """Immutable, private remote snapshot retained when Kobo changes a submission."""
+    submission = models.ForeignKey(KoboSubmission, on_delete=models.PROTECT, related_name="remote_revisions")
+    remote_version = models.CharField(max_length=255, blank=True)
+    remote_updated_at = models.DateTimeField(null=True, blank=True)
+    payload_hash = models.CharField(max_length=64)
+    payload = models.JSONField()
+    received_at = models.DateTimeField(auto_now_add=True)
+    applied = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("submission", "payload_hash"), name="kobo_unique_remote_revision_hash")]
+        ordering = ("-received_at",)
 
 
 class KoboImportRecord(models.Model):

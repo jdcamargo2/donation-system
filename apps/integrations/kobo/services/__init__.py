@@ -16,6 +16,7 @@ from apps.integrations.kobo.services.importers import (
     reject_kobo_submission,
     restore_kobo_submission_to_review,
 )
+from apps.integrations.kobo.services.incremental import sync_asset_submissions
 from apps.integrations.kobo.services.processing import (
     process_pending_submissions,
     review_submission,
@@ -72,5 +73,6 @@ __all__ = (
     "route_normalized_submission",
     "resolve_territorial_identity_conflict",
     "sync_ficha_01_submissions",
+    "sync_asset_submissions",
     "sync_registered_forms",
 )

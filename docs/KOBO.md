@@ -62,6 +62,13 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 * `KOBO_HTTP_CONNECT_TIMEOUT` y `KOBO_HTTP_READ_TIMEOUT` definen límites explícitos y positivos para solicitudes externas.
 * `KOBO_HTTP_MAX_ATTEMPTS`, `KOBO_HTTP_RETRY_BASE_DELAY`, `KOBO_HTTP_RETRY_MAX_DELAY` y `KOBO_HTTP_RETRY_AFTER_MAX_DELAY` controlan reintentos transitorios con backoff.
 * `KOBO_HTTP_MAX_PAGES` limita la paginación remota para evitar recorridos no acotados.
+* `KOBO_SYNC_OVERLAP_SECONDS` reserva la ventana de solapamiento para el cursor incremental y `KOBO_SYNC_LEASE_SECONDS` limita una ejecución exclusiva por asset.
+
+Las revisiones remotas se identifican por `_uuid` dentro del asset y hash canónico
+del payload. Una revisión de una submission aprobada, importada o rechazada nunca
+sobrescribe staging ni materialización: queda privada, marcada como pendiente y
+requiere revisión humana posterior. Solo una ejecución completa avanza el cursor;
+una ejecución parcial conserva el cursor anterior y libera su lease.
 * `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
 * `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900).
 * `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging.
