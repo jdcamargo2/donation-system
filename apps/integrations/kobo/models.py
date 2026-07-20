@@ -2,6 +2,7 @@ from math import isfinite
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from apps.integrations.kobo.contracts import PastoralZone
@@ -15,6 +16,15 @@ from apps.integrations.kobo.mappings.ficha_10 import (
     FICHA_10_FORM_ID,
     IMPLEMENTATION_URGENCIES,
     TECHNICAL_VIABILITIES,
+)
+from apps.integrations.kobo.mappings.ficha_11 import (
+    FINAL_PRIORITIES,
+    FINAL_SEMAPHORES,
+    FICHA_11_FORM_ID,
+    SCORE_FIELDS,
+    SCORE_MAX,
+    SCORE_MIN,
+    calculate_ficha_11_suggested_semaphore,
 )
 from apps.integrations.kobo.territorial import normalize_nucleo_code
 
@@ -65,6 +75,27 @@ PRIORITIZED_MICROPROJECT_VIABILITY_CHOICES = tuple(
     (value, value.replace("_", " ").title())
     for value in sorted(TECHNICAL_VIABILITIES)
 )
+PRIORITIZATION_SEMAPHORE_CHOICES = tuple(
+    (value, value.title()) for value in sorted(FINAL_SEMAPHORES)
+)
+PRIORITIZATION_PRIORITY_CHOICES = tuple(
+    (value, value.title()) for value in sorted(FINAL_PRIORITIES)
+)
+PRIORITIZATION_WARNING_MESSAGES = {
+    "PRIORITY_TOTAL_MISMATCH": (
+        "Kobo priority_total differs from the SIGEDON calculation."
+    ),
+    "SUGGESTED_SEMAPHORE_MISMATCH": (
+        "Kobo suggested_semaphore differs from the SIGEDON calculation."
+    ),
+}
+PRIORITIZATION_WARNING_KEYS = frozenset(
+    {"code", "message", "original_value", "calculated_value"}
+)
+PRIORITIZATION_SCORE_VALIDATORS = (
+    MinValueValidator(SCORE_MIN),
+    MaxValueValidator(SCORE_MAX),
+)
 
 
 def validate_prioritized_microproject_beneficiary_groups(value):
@@ -78,6 +109,50 @@ def validate_prioritized_microproject_beneficiary_groups(value):
         raise ValidationError("Beneficiary groups contain an unsupported value.")
     if len(value) != len(set(value)):
         raise ValidationError("Beneficiary groups cannot contain duplicates.")
+
+
+def validate_prioritization_calculation_warnings(value):
+    """
+    PRE: value is the persisted warning snapshot produced by Ficha 11 normalization.
+    POST: accepts only the two known calculation discrepancies with safe scalar values.
+    """
+    if not isinstance(value, list):
+        raise ValidationError("Calculation warnings must be a list.")
+    seen_codes = set()
+    for warning in value:
+        if not isinstance(warning, dict) or set(warning) != PRIORITIZATION_WARNING_KEYS:
+            raise ValidationError("Calculation warnings use an invalid structure.")
+        code = warning.get("code")
+        if code not in PRIORITIZATION_WARNING_MESSAGES or code in seen_codes:
+            raise ValidationError("Calculation warnings contain an unsupported code.")
+        if warning.get("message") != PRIORITIZATION_WARNING_MESSAGES[code]:
+            raise ValidationError("Calculation warnings contain an unsafe message.")
+        for key in ("original_value", "calculated_value"):
+            compared_value = warning.get(key)
+            if isinstance(compared_value, bool) or not isinstance(
+                compared_value, (int, str)
+            ):
+                raise ValidationError(
+                    "Calculation warning values must be safe scalar codes."
+                )
+            if isinstance(compared_value, str) and len(compared_value) > 32:
+                raise ValidationError("Calculation warning values are too long.")
+        original_value = warning["original_value"]
+        calculated_value = warning["calculated_value"]
+        if code == "PRIORITY_TOTAL_MISMATCH" and (
+            not (
+                isinstance(original_value, int)
+                or (isinstance(original_value, str) and original_value.isdigit())
+            )
+            or not isinstance(calculated_value, int)
+        ):
+            raise ValidationError("Priority total warnings require numeric values.")
+        if code == "SUGGESTED_SEMAPHORE_MISMATCH" and (
+            original_value not in FINAL_SEMAPHORES
+            or calculated_value not in FINAL_SEMAPHORES
+        ):
+            raise ValidationError("Semaphore warnings require canonical codes.")
+        seen_codes.add(code)
 
 
 def validate_territorial_profile_location(value):
@@ -532,6 +607,17 @@ class KoboTerritorialIdentity(models.Model):
             return None
         return self.territorial_profiles.order_by("-created_at", "-pk").first()
 
+    def latest_prioritization_assessment(self):
+        """
+        PRE: this identity is persisted.
+        POST: returns its newest immutable prioritization assessment or None.
+        """
+        if self.pk is None:
+            return None
+        return self.prioritization_assessments.order_by(
+            "-created_at", "-pk"
+        ).first()
+
 
 class KoboTerritorialProfile(models.Model):
     territorial_identity = models.ForeignKey(
@@ -825,6 +911,233 @@ class KoboPrioritizedMicroproject(models.Model):
 
     def __str__(self):
         return f"{self.territorial_identity.nucleo_code_normalized} - {self.name}"
+
+
+class KoboPrioritizationAssessment(models.Model):
+    territorial_identity = models.ForeignKey(
+        KoboTerritorialIdentity,
+        on_delete=models.PROTECT,
+        related_name="prioritization_assessments",
+    )
+    project = models.ForeignKey(
+        "operations.Project",
+        on_delete=models.PROTECT,
+        related_name="kobo_prioritization_assessments",
+    )
+    source_submission = models.OneToOneField(
+        KoboSubmission,
+        on_delete=models.PROTECT,
+        related_name="prioritization_assessment",
+    )
+    physical_damage_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    affected_families_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    social_vulnerability_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    services_interruption_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    livelihood_loss_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    parish_capacity_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    territorial_accessibility_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    allies_availability_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    rapid_impact_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    financial_viability_score = models.PositiveSmallIntegerField(
+        validators=PRIORITIZATION_SCORE_VALIDATORS
+    )
+    priority_total_original = models.PositiveSmallIntegerField(null=True, blank=True)
+    priority_total_calculated = models.PositiveSmallIntegerField()
+    suggested_semaphore_original = models.CharField(
+        max_length=16,
+        choices=PRIORITIZATION_SEMAPHORE_CHOICES,
+        blank=True,
+    )
+    suggested_semaphore_calculated = models.CharField(
+        max_length=16,
+        choices=PRIORITIZATION_SEMAPHORE_CHOICES,
+    )
+    final_semaphore = models.CharField(
+        max_length=16,
+        choices=PRIORITIZATION_SEMAPHORE_CHOICES,
+    )
+    final_priority = models.CharField(
+        max_length=16,
+        choices=PRIORITIZATION_PRIORITY_CHOICES,
+    )
+    priority_summary = models.TextField()
+    calculation_warnings = models.JSONField(
+        blank=True,
+        default=list,
+        validators=(validate_prioritization_calculation_warnings,),
+    )
+    linked_microprojects_snapshot = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_kobo_prioritization_assessments",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    physical_damage_score__range=(SCORE_MIN, SCORE_MAX),
+                    affected_families_score__range=(SCORE_MIN, SCORE_MAX),
+                    social_vulnerability_score__range=(SCORE_MIN, SCORE_MAX),
+                    services_interruption_score__range=(SCORE_MIN, SCORE_MAX),
+                    livelihood_loss_score__range=(SCORE_MIN, SCORE_MAX),
+                    parish_capacity_score__range=(SCORE_MIN, SCORE_MAX),
+                    territorial_accessibility_score__range=(SCORE_MIN, SCORE_MAX),
+                    allies_availability_score__range=(SCORE_MIN, SCORE_MAX),
+                    rapid_impact_score__range=(SCORE_MIN, SCORE_MAX),
+                    financial_viability_score__range=(SCORE_MIN, SCORE_MAX),
+                ),
+                name="kobo_assessment_scores_in_range",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    priority_total_calculated=(
+                        models.F("physical_damage_score")
+                        + models.F("affected_families_score")
+                        + models.F("social_vulnerability_score")
+                        + models.F("services_interruption_score")
+                        + models.F("livelihood_loss_score")
+                        + models.F("parish_capacity_score")
+                        + models.F("territorial_accessibility_score")
+                        + models.F("allies_availability_score")
+                        + models.F("rapid_impact_score")
+                        + models.F("financial_viability_score")
+                    )
+                ),
+                name="kobo_assessment_total_matches_scores",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(suggested_semaphore_original="")
+                    | models.Q(
+                        suggested_semaphore_original__in=tuple(
+                            sorted(FINAL_SEMAPHORES)
+                        )
+                    )
+                ),
+                name="kobo_assessment_valid_original_semaphore",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    suggested_semaphore_calculated__in=tuple(
+                        sorted(FINAL_SEMAPHORES)
+                    )
+                ),
+                name="kobo_assessment_valid_calculated_semaphore",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(final_semaphore__in=tuple(sorted(FINAL_SEMAPHORES))),
+                name="kobo_assessment_valid_final_semaphore",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(final_priority__in=tuple(sorted(FINAL_PRIORITIES))),
+                name="kobo_assessment_valid_final_priority",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(priority_summary=""),
+                name="kobo_assessment_summary_not_empty",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("territorial_identity", "-created_at"),
+                name="kobo_assess_identity_date_idx",
+            ),
+            models.Index(
+                fields=("project", "-created_at"),
+                name="kobo_assess_project_date_idx",
+            ),
+        ]
+
+    def clean(self):
+        """
+        PRE: fields represent one reviewed Ficha 11 submission and canonical identity.
+        POST: accepts only coherent relations, scores, calculations, and human decisions.
+        """
+        super().clean()
+        errors = {}
+        scores = [getattr(self, field_name) for field_name in SCORE_FIELDS]
+        if all(
+            isinstance(score, int)
+            and not isinstance(score, bool)
+            and SCORE_MIN <= score <= SCORE_MAX
+            for score in scores
+        ):
+            expected_total = sum(scores)
+            if self.priority_total_calculated != expected_total:
+                errors["priority_total_calculated"] = (
+                    "Calculated total must equal the ten persisted scores."
+                )
+            expected_semaphore = calculate_ficha_11_suggested_semaphore(
+                expected_total
+            )
+            if self.suggested_semaphore_calculated != expected_semaphore:
+                errors["suggested_semaphore_calculated"] = (
+                    "Calculated semaphore must use the SIGEDON score thresholds."
+                )
+        if not isinstance(self.priority_summary, str) or not self.priority_summary.strip():
+            errors["priority_summary"] = "Priority summary is required."
+        if not isinstance(self.linked_microprojects_snapshot, str):
+            errors["linked_microprojects_snapshot"] = (
+                "Linked microprojects snapshot must remain text."
+            )
+        if self.source_submission_id and self.territorial_identity_id:
+            submission = self.source_submission
+            identity = self.territorial_identity
+            if submission.form_definition.form_id != FICHA_11_FORM_ID:
+                errors["source_submission"] = (
+                    "Prioritization assessments require a Ficha 11 source."
+                )
+            if (
+                submission.project_id != self.project_id
+                or identity.project_id != self.project_id
+            ):
+                errors["project"] = (
+                    "Submission, identity, and assessment must share one project."
+                )
+            if submission.nucleo_code_normalized != identity.nucleo_code_normalized:
+                errors["territorial_identity"] = (
+                    "Submission and identity nucleus codes must match."
+                )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """
+        PRE: a new row passed the Ficha 11 materialization invariants.
+        POST: inserts it once and rejects every later mutation through model save.
+        """
+        if self.pk is not None:
+            raise ValidationError("Imported prioritization assessments are immutable.")
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return (
+            f"{self.territorial_identity.nucleo_code_normalized} - "
+            f"{self.priority_total_calculated} ({self.final_semaphore})"
+        )
 
 
 class KoboTerritorialIdentityConflict(models.Model):

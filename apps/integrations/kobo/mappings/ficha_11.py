@@ -28,6 +28,8 @@ SCORE_FIELDS = (
     "rapid_impact_score",
     "financial_viability_score",
 )
+SCORE_MIN = 1
+SCORE_MAX = 5
 FINAL_SEMAPHORES = {"red", "yellow", "green", "gray"}
 FINAL_PRIORITIES = {"low", "medium", "high", "critical", "unknown"}
 
@@ -44,14 +46,16 @@ def _parse_score(scoring: Mapping[str, object], key: str) -> int:
         score = int(value.strip())
     else:
         raise KoboPayloadError(f"Field {key!r} must be an integer from 1 to 5.")
-    if not 1 <= score <= 5:
+    if not SCORE_MIN <= score <= SCORE_MAX:
         raise KoboPayloadError(f"Field {key!r} must be an integer from 1 to 5.")
     return score
 
 
-def _calculate_suggested_semaphore(priority_total: int) -> str:
-    # PRE: priority_total is the exact sum of ten scores from 1 to 5.
-    # POST: returns the canonical suggested semaphore for that total.
+def calculate_ficha_11_suggested_semaphore(priority_total: int) -> str:
+    """
+    PRE: priority_total is the exact sum of the ten canonical Ficha 11 scores.
+    POST: returns the independent SIGEDON semaphore for every supported boundary.
+    """
     if priority_total >= 40:
         return "red"
     if priority_total >= 28:
@@ -89,6 +93,8 @@ def _calculation_warning(
     return {
         "code": warning_code,
         "message": f"Kobo {key} differs from the SIGEDON calculation.",
+        "original_value": value,
+        "calculated_value": expected_value,
     }
 
 
@@ -118,7 +124,7 @@ def normalize_ficha_11(
 
     scores = {key: _parse_score(scoring, key) for key in SCORE_FIELDS}
     priority_total = sum(scores.values())
-    suggested_semaphore = _calculate_suggested_semaphore(priority_total)
+    suggested_semaphore = calculate_ficha_11_suggested_semaphore(priority_total)
     calculation_warnings = [
         warning
         for warning in (

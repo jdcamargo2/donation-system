@@ -477,12 +477,34 @@ abiertos bloquean. No crea otro `Project`, presupuesto, donación, asignación,
 gasto ni movimiento financiero. Si ya existe el microproyecto sin su import
 record, responde `FICHA_10_MICROPROJECT_STATE_CONFLICT` y no repara ni duplica.
 
-El handler de Ficha 11 sigue siendo un stub controlado. Devuelve
-`MATERIALIZATION_NOT_IMPLEMENTED`, no crea `KoboImportRecord` y nunca marca
-`IMPORTED`. Las advertencias `PRIORITY_TOTAL_MISMATCH` y
-`SUGGESTED_SEMAPHORE_MISMATCH` de Ficha 11 se entregan al handler y permanecen
-en el resultado bloqueado; no invalidan por sí solas una revisión humana. Los
-scores individuales inválidos continúan fallando durante normalización.
+El handler de Ficha 11 crea un `KoboPrioritizationAssessment` inmutable por
+submission y conserva la relación histórica:
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizationAssessment
+KoboSubmission 1 ── 1 KoboPrioritizationAssessment
+```
+
+Los diez scores canónicos se guardan individualmente y SIGEDON deriva de ellos,
+sin confiar en totales enviados, `priority_total_calculated` y
+`suggested_semaphore_calculated`. Se conservan aparte
+`priority_total_original`, `suggested_semaphore_original`, el semáforo final
+humano y la prioridad final. `PRIORITY_TOTAL_MISMATCH` y
+`SUGGESTED_SEMAPHORE_MISMATCH` son warnings estructurados, aparecen también en
+el resultado de importación y no sobrescriben decisiones humanas. Scores,
+cálculos persistidos o catálogos inválidos sí bloquean.
+
+El campo Kobo `linked_microprojects` es texto libre en el contrato depurado y se
+persiste como `linked_microprojects_snapshot`. No contiene identificadores
+estables verificables, por lo que no crea FK, M2M ni coincidencias automáticas
+por nombre con `KoboPrioritizedMicroproject`; esa vinculación estructurada queda
+pendiente de un contrato futuro con identificadores estables.
+
+La importación acepta identidades `PENDING_REVIEW`, `ACTIVE` u `OBSERVED`,
+bloquea `INACTIVE` y conflictos abiertos, y no cambia identidad, proyecto,
+prioridad institucional, microproyectos, presupuesto ni movimientos
+financieros. Si ya existe la evaluación sin import record, responde
+`FICHA_11_ASSESSMENT_STATE_CONFLICT` y no repara ni duplica silenciosamente.
 
 Un fallo técnico revierte materialización, import record, estado, timestamp,
 evento y auditoría de éxito. Después se registra, cuando la base de datos lo

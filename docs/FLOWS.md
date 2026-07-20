@@ -365,8 +365,14 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
     `KoboPrioritizedMicroproject` inmutable por submission.
 21. La Ficha 10 conserva `beneficiary_group` como lista canónica y
     `main_activities` como texto libre; no interpreta de nuevo `raw_payload`.
-22. El handler de Ficha 11 continúa como stub explícito y responde
-    `MATERIALIZATION_NOT_IMPLEMENTED`.
+22. El handler de Ficha 11 localiza la identidad sin crearla, valida código,
+    proyecto, estado, conflictos, diez scores, cálculos, catálogos, decisiones
+    humanas y warnings, y crea un `KoboPrioritizationAssessment` inmutable por
+    submission.
+23. La Ficha 11 conserva por separado total y semáforo originales, total y
+    semáforo recalculados, semáforo final humano y prioridad final. Las
+    discrepancias son warnings y `linked_microprojects` permanece como snapshot
+    textual, sin relaciones automáticas por nombre.
 
 ### POST
 
@@ -380,8 +386,13 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
   import record; otra submission con el mismo nombre conserva otra propuesta.
 * El routing de Ficha 10 identifica el proyecto Núcleo Vital; su importación crea
   la propuesta subordinada y no crea otro `Project`.
+* Una Ficha 11 importada produce exactamente una evaluación histórica y un
+  import record; otra Ficha 11 válida del mismo núcleo crea otra evaluación.
+* El routing de Ficha 11 identifica el proyecto Núcleo Vital; su importación no
+  cambia el estado ni la prioridad institucional del proyecto, la identidad o
+  los microproyectos.
 * La integración no modifica directamente saldos financieros.
-* La Ficha 10 no crea presupuesto, donación, asignación de fondos ni gasto.
+* Las Fichas 10 y 11 no crean presupuesto, donación, asignación de fondos ni gasto.
 
 ---
 

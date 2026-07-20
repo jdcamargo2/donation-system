@@ -972,7 +972,44 @@ desde `raw_payload`, y esta tabla no representa presupuesto o ejecución financi
 
 ---
 
-### 6.12. `kobo_ficha01territorio`
+### 6.12. `kobo_koboprioritizationassessment`
+
+Representa una evaluación histórica e inmutable materializada desde una Ficha
+11 aprobada.
+
+| Columna                              | Tipo lógico            | Reglas                                      |
+| ------------------------------------ | ---------------------- | ------------------------------------------- |
+| `territorial_identity_id`            | `ForeignKey`           | `PROTECT`, identidad canónica               |
+| `project_id`                         | `ForeignKey`           | `PROTECT`, proyecto Núcleo Vital coherente  |
+| `source_submission_id`               | `OneToOneField`        | `PROTECT`, una submission por evaluación    |
+| diez campos `*_score`                | `PositiveSmallInteger` | Cada score entre 1 y 5                      |
+| `priority_total_original`            | `PositiveSmallInteger` | Opcional, total recibido                    |
+| `priority_total_calculated`          | `PositiveSmallInteger` | Suma exacta de los diez scores              |
+| `suggested_semaphore_original`       | `CharField`            | Opcional, catálogo canónico                 |
+| `suggested_semaphore_calculated`     | `CharField`            | Cálculo SIGEDON, catálogo canónico          |
+| `final_semaphore`                    | `CharField`            | Decisión humana, catálogo canónico          |
+| `final_priority`                     | `CharField`            | Decisión humana, catálogo cerrado           |
+| `priority_summary`                   | `TextField`            | Resumen requerido                           |
+| `calculation_warnings`               | `JSONField`            | Lista estructurada y validada               |
+| `linked_microprojects_snapshot`      | `TextField`            | Texto libre; no crea relaciones por nombre  |
+| `created_by_id`                      | `ForeignKey`           | `PROTECT`                                   |
+| `created_at`                         | `DateTimeField`        | Automático                                  |
+| `updated_at`                         | `DateTimeField`        | Automático                                  |
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizationAssessment
+Project 1 ──< KoboPrioritizationAssessment
+KoboSubmission 1 ── 1 KoboPrioritizationAssessment
+```
+
+Los constraints protegen el rango de los scores, la igualdad entre la suma y el
+total calculado, los catálogos de semáforo/prioridad y el resumen requerido. No
+hay backfill, puntero redundante al registro vigente ni relaciones automáticas
+con microproyectos.
+
+---
+
+### 6.13. `kobo_ficha01territorio`
 
 Tabla heredada de la primera integración de la Ficha 1.
 
@@ -1002,7 +1039,7 @@ no debe recibir nuevas escrituras sin una decisión arquitectónica explícita.
 
 ---
 
-### 6.12. `kobo_ficha01coveredcommunity`
+### 6.14. `kobo_ficha01coveredcommunity`
 
 Representa las comunidades cubiertas dentro de la Ficha 1 heredada.
 

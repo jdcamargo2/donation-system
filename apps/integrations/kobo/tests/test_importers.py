@@ -422,7 +422,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             1,
         )
 
-    def test_ficha_11_stub_handler_never_marks_imported(self):
+    def test_ficha_11_handler_never_imports_without_territorial_coherence(self):
         prioritization_pending = KoboSubmission.objects.create(
             form_definition=self.prioritization_form_definition,
             asset=self.prioritization_asset,
@@ -447,7 +447,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertTrue(
             prioritization_pending.processing_events.filter(
                 stage="operational_import",
-                code="MATERIALIZATION_NOT_IMPLEMENTED",
+                code="FICHA_11_IDENTITY_MISMATCH",
             ).exists()
         )
 

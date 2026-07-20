@@ -421,12 +421,35 @@ ordenada y `main_activities` permanece texto libre.
 La propuesta no crea presupuesto ejecutable, donaciones, asignaciones, gastos ni
 movimientos financieros, y tampoco activa ni modifica la identidad territorial.
 
-### 14.9. `KoboImportRecord`
+### 14.9. `KoboPrioritizationAssessment`
+
+Representa una evaluación territorial histórica, aprobada e inmutable,
+materializada desde una Ficha 11. Cada submission produce como máximo una
+evaluación, mientras una identidad conserva todas sus evaluaciones históricas.
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizationAssessment
+Project 1 ──< KoboPrioritizationAssessment
+KoboSubmission 1 ── 1 KoboPrioritizationAssessment
+KoboImportRecord 1 ── referencia lógica ──> KoboPrioritizationAssessment
+```
+
+La evaluación conserva individualmente los diez scores de 1 a 5, el total y
+semáforo sugerido recibidos, el total y semáforo recalculados por SIGEDON, y las
+decisiones humanas `final_semaphore` y `final_priority`. Las discrepancias se
+guardan como warnings estructurados y no sustituyen la decisión humana.
+
+`linked_microprojects_snapshot` conserva el texto libre normalizado recibido.
+No crea relaciones por coincidencia de nombre ni modifica microproyectos. La
+evaluación tampoco cambia el estado o la prioridad institucional del proyecto,
+la identidad territorial, presupuestos ni movimientos financieros.
+
+### 14.10. `KoboImportRecord`
 
 Registra el resultado único de una importación completada y apunta lógicamente
 a la entidad materializada sin introducir una relación genérica en la submission.
 
-### 14.10. `KoboAttachment`
+### 14.11. `KoboAttachment`
 
 Representa un archivo adjunto descargado desde Kobo.
 
@@ -438,7 +461,7 @@ Reglas:
 * su descarga debe estar protegida;
 * no se publica automáticamente en el portal público.
 
-### 14.11. `KoboProcessingEvent`
+### 14.12. `KoboProcessingEvent`
 
 Representa un evento técnico ocurrido durante el procesamiento de una submission.
 

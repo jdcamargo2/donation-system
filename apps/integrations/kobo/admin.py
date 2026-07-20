@@ -6,6 +6,7 @@ from apps.integrations.kobo.models import (
     KoboDiscoveredAsset,
     KoboFormDefinition,
     KoboPastoralZoneProjectMapping,
+    KoboPrioritizationAssessment,
     KoboPrioritizedMicroproject,
     KoboProjectBinding,
     KoboProcessingEvent,
@@ -269,6 +270,76 @@ class KoboPrioritizedMicroprojectAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         # PRE: request targets an imported prioritized microproject.
         # POST: always preserves the immutable proposal and its traceability.
+        return False
+
+
+@admin.register(KoboPrioritizationAssessment)
+class KoboPrioritizationAssessmentAdmin(admin.ModelAdmin):
+    list_display = (
+        "territorial_identity",
+        "project",
+        "priority_total_calculated",
+        "final_semaphore",
+        "final_priority",
+        "created_at",
+    )
+    list_filter = (
+        "territorial_identity__pastoral_zone",
+        "final_semaphore",
+        "final_priority",
+        "project",
+        "created_at",
+    )
+    search_fields = (
+        "territorial_identity__nucleo_code_normalized",
+        "project__code",
+        "project__name",
+        "priority_summary",
+    )
+    readonly_fields = (
+        "territorial_identity",
+        "project",
+        "source_submission",
+        "physical_damage_score",
+        "affected_families_score",
+        "social_vulnerability_score",
+        "services_interruption_score",
+        "livelihood_loss_score",
+        "parish_capacity_score",
+        "territorial_accessibility_score",
+        "allies_availability_score",
+        "rapid_impact_score",
+        "financial_viability_score",
+        "priority_total_original",
+        "priority_total_calculated",
+        "suggested_semaphore_original",
+        "suggested_semaphore_calculated",
+        "final_semaphore",
+        "final_priority",
+        "priority_summary",
+        "calculation_warnings",
+        "linked_microprojects_snapshot",
+        "created_by",
+        "created_at",
+        "updated_at",
+    )
+    actions = ()
+
+    def has_add_permission(self, request):
+        # PRE: request targets prioritization assessment administration.
+        # POST: prevents creation outside the transactional Ficha 11 importer.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # PRE: request targets immutable imported prioritization evidence.
+        # POST: permits safe viewing while rejecting every admin mutation request.
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return super().has_change_permission(request, obj)
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # PRE: request targets an imported prioritization assessment.
+        # POST: always preserves the assessment and its traceability.
         return False
 
 

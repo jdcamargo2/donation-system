@@ -21,7 +21,6 @@ from apps.integrations.kobo.import_contracts import (
 )
 from apps.integrations.kobo.import_handlers import (
     KOBO_IMPORT_HANDLERS,
-    MATERIALIZATION_NOT_IMPLEMENTED,
     get_import_handler,
 )
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
@@ -201,37 +200,20 @@ class KoboImportContractTests(TestCase):
                 self.assertIn(expected_delegate, source)
                 self.assertNotIn("Status.IMPORTED", source)
 
-    def test_unmaterialized_ficha_11_handler_blocks_and_exposes_warnings(self):
-        warning_payload = {
-            "nucleo_code": "NV-11",
-            "calculation_warnings": [
-                {
-                    "code": "PRIORITY_TOTAL_MISMATCH",
-                    "message": "Kobo priority_total differs from the SIGEDON calculation.",
-                },
-                {
-                    "code": "SUGGESTED_SEMAPHORE_MISMATCH",
-                    "message": "Kobo suggested_semaphore differs from the SIGEDON calculation.",
-                },
-            ],
-        }
+    def test_ficha_11_handler_rejects_incomplete_normalized_assessment(self):
         submission = self.create_submission(
             KoboFormType.FICHA_11,
-            normalized_payload=warning_payload,
+            normalized_payload={"nucleo_code": "NV-11"},
         )
 
         result = import_kobo_submission(submission, actor=self.importer)
         submission.refresh_from_db()
 
         self.assertEqual(result.outcome, ImportOutcome.BLOCKED)
-        self.assertEqual(result.reason_code, MATERIALIZATION_NOT_IMPLEMENTED)
+        self.assertEqual(result.reason_code, "FICHA_11_IDENTITY_MISMATCH")
         self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
         self.assertIsNone(submission.imported_at)
         self.assertFalse(KoboImportRecord.objects.filter(submission=submission).exists())
-        self.assertEqual(
-            [warning.code for warning in result.warnings],
-            ["PRIORITY_TOTAL_MISMATCH", "SUGGESTED_SEMAPHORE_MISMATCH"],
-        )
 
     def test_common_preconditions_block_invalid_state_routing_project_and_rejection(self):
         cases = (
@@ -382,7 +364,7 @@ class KoboImportContractTests(TestCase):
         )
 
     @override_settings(KOBO_ENABLED=True)
-    def test_project_ui_explicitly_approves_then_calls_ficha_11_stub(self):
+    def test_project_ui_explicitly_approves_then_calls_ficha_11_handler(self):
         submission = self.create_submission(
             KoboFormType.FICHA_11,
             status=KoboSubmission.Status.READY_FOR_REVIEW,
@@ -409,7 +391,7 @@ class KoboImportContractTests(TestCase):
         self.assertTrue(
             submission.processing_events.filter(
                 stage="operational_import",
-                code=MATERIALIZATION_NOT_IMPLEMENTED,
+                code="FICHA_11_IDENTITY_MISMATCH",
             ).exists()
         )
 
