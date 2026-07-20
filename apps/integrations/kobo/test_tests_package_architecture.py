@@ -8,7 +8,7 @@ from django.test.runner import DiscoverRunner
 from apps.integrations.kobo import tests as kobo_tests
 
 
-FUNCTIONAL_TEST_COUNT = 354
+FUNCTIONAL_TEST_COUNT = 372
 TEST_MODULES = (
     "test_association",
     "test_attachments",
@@ -19,6 +19,7 @@ TEST_MODULES = (
     "test_importers",
     "test_import_contracts",
     "test_processing",
+    "test_prioritized_microprojects",
     "test_review",
     "test_routing",
     "test_submissions",
@@ -33,6 +34,7 @@ MODULES_ALLOWED_TO_IMPORT_SERVICES = {
     "test_importers",
     "test_import_contracts",
     "test_processing",
+    "test_prioritized_microprojects",
     "test_routing",
     "test_submissions",
     "test_territorial_profiles",

@@ -8,6 +8,14 @@ from apps.integrations.kobo.contracts import PastoralZone
 from apps.integrations.kobo.contracts import TerritorialRoutingReasonCode
 from apps.integrations.kobo.errors import KoboNormalizationError
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID
+from apps.integrations.kobo.mappings.ficha_10 import (
+    BENEFICIARY_GROUPS,
+    COMPONENTS,
+    ESTIMATED_COST_RANGES,
+    FICHA_10_FORM_ID,
+    IMPLEMENTATION_URGENCIES,
+    TECHNICAL_VIABILITIES,
+)
 from apps.integrations.kobo.territorial import normalize_nucleo_code
 
 
@@ -42,6 +50,34 @@ TERRITORIAL_PROFILE_PRIORITY_CHOICES = tuple(
 TERRITORIAL_PROFILE_LOCATION_KEYS = frozenset(
     {"latitude", "longitude", "altitude", "accuracy"}
 )
+PRIORITIZED_MICROPROJECT_COMPONENT_CHOICES = tuple(
+    (value, value.replace("_", " ").title()) for value in sorted(COMPONENTS)
+)
+PRIORITIZED_MICROPROJECT_COST_RANGE_CHOICES = tuple(
+    (value, value.replace("_", " ").title())
+    for value in sorted(ESTIMATED_COST_RANGES)
+)
+PRIORITIZED_MICROPROJECT_URGENCY_CHOICES = tuple(
+    (value, value.replace("_", " ").title())
+    for value in sorted(IMPLEMENTATION_URGENCIES)
+)
+PRIORITIZED_MICROPROJECT_VIABILITY_CHOICES = tuple(
+    (value, value.replace("_", " ").title())
+    for value in sorted(TECHNICAL_VIABILITIES)
+)
+
+
+def validate_prioritized_microproject_beneficiary_groups(value):
+    """
+    PRE: value is the persisted normalized Ficha 10 select-multiple value.
+    POST: accepts only a non-empty, ordered, duplicate-free list of canonical codes.
+    """
+    if not isinstance(value, list) or not value:
+        raise ValidationError("Beneficiary groups must be a non-empty list.")
+    if any(not isinstance(item, str) or item not in BENEFICIARY_GROUPS for item in value):
+        raise ValidationError("Beneficiary groups contain an unsupported value.")
+    if len(value) != len(set(value)):
+        raise ValidationError("Beneficiary groups cannot contain duplicates.")
 
 
 def validate_territorial_profile_location(value):
@@ -630,6 +666,165 @@ class KoboTerritorialProfile(models.Model):
 
     def __str__(self):
         return f"{self.territorial_identity.nucleo_code_normalized} - {self.parish}"
+
+
+class KoboPrioritizedMicroproject(models.Model):
+    territorial_identity = models.ForeignKey(
+        KoboTerritorialIdentity,
+        on_delete=models.PROTECT,
+        related_name="prioritized_microprojects",
+    )
+    project = models.ForeignKey(
+        "operations.Project",
+        on_delete=models.PROTECT,
+        related_name="kobo_prioritized_microprojects",
+    )
+    source_submission = models.OneToOneField(
+        KoboSubmission,
+        on_delete=models.PROTECT,
+        related_name="prioritized_microproject",
+    )
+    name = models.CharField(max_length=255)
+    component = models.CharField(
+        max_length=32,
+        choices=PRIORITIZED_MICROPROJECT_COMPONENT_CHOICES,
+    )
+    problem_summary = models.TextField()
+    specific_objective = models.TextField()
+    beneficiary_group = models.JSONField(
+        validators=(validate_prioritized_microproject_beneficiary_groups,),
+    )
+    main_activities = models.TextField()
+    estimated_cost_range = models.CharField(
+        max_length=32,
+        choices=PRIORITIZED_MICROPROJECT_COST_RANGE_CHOICES,
+    )
+    implementation_urgency = models.CharField(
+        max_length=32,
+        choices=PRIORITIZED_MICROPROJECT_URGENCY_CHOICES,
+    )
+    technical_viability = models.CharField(
+        max_length=32,
+        choices=PRIORITIZED_MICROPROJECT_VIABILITY_CHOICES,
+    )
+    expected_result = models.TextField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_kobo_prioritized_microprojects",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(name=""),
+                name="kobo_microproject_name_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(problem_summary=""),
+                name="kobo_microproject_problem_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(specific_objective=""),
+                name="kobo_microproject_objective_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(main_activities=""),
+                name="kobo_microproject_activities_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(expected_result=""),
+                name="kobo_microproject_result_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(component__in=tuple(sorted(COMPONENTS))),
+                name="kobo_microproject_valid_component",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    estimated_cost_range__in=tuple(sorted(ESTIMATED_COST_RANGES))
+                ),
+                name="kobo_microproject_valid_cost_range",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    implementation_urgency__in=tuple(
+                        sorted(IMPLEMENTATION_URGENCIES)
+                    )
+                ),
+                name="kobo_microproject_valid_urgency",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    technical_viability__in=tuple(sorted(TECHNICAL_VIABILITIES))
+                ),
+                name="kobo_microproject_valid_viability",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("territorial_identity", "-created_at"),
+                name="kobo_micro_identity_date_idx",
+            ),
+            models.Index(
+                fields=("project", "-created_at"),
+                name="kobo_micro_project_date_idx",
+            ),
+        ]
+
+    def clean(self):
+        """
+        PRE: relations and imported fields represent one reviewed Ficha 10 proposal.
+        POST: accepts only required canonical data coherent with one identity and project.
+        """
+        super().clean()
+        errors = {}
+        required_text_fields = (
+            "name",
+            "problem_summary",
+            "specific_objective",
+            "main_activities",
+            "expected_result",
+        )
+        for field_name in required_text_fields:
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                errors[field_name] = "This imported field is required."
+        if self.source_submission_id and self.territorial_identity_id:
+            submission = self.source_submission
+            identity = self.territorial_identity
+            if submission.form_definition.form_id != FICHA_10_FORM_ID:
+                errors["source_submission"] = (
+                    "Prioritized microprojects require a Ficha 10 source."
+                )
+            if (
+                submission.project_id != self.project_id
+                or identity.project_id != self.project_id
+            ):
+                errors["project"] = (
+                    "Submission, identity, and microproject must share one project."
+                )
+            if submission.nucleo_code_normalized != identity.nucleo_code_normalized:
+                errors["territorial_identity"] = (
+                    "Submission and identity nucleus codes must match."
+                )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """
+        PRE: a new row already passed the Ficha 10 materialization invariants.
+        POST: inserts it once and rejects every later mutation through model save.
+        """
+        if self.pk is not None:
+            raise ValidationError("Imported prioritized microprojects are immutable.")
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.territorial_identity.nucleo_code_normalized} - {self.name}"
 
 
 class KoboTerritorialIdentityConflict(models.Model):

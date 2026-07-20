@@ -21,6 +21,7 @@ from apps.integrations.kobo.import_contracts import (
 from apps.integrations.kobo.import_handlers import KOBO_IMPORT_HANDLERS
 from apps.integrations.kobo.models import (
     KoboImportRecord,
+    KoboPrioritizedMicroproject,
     KoboProcessingEvent,
     KoboSubmission,
 )
@@ -429,6 +430,13 @@ def _import_kobo_submission_with_handlers(
             existing_record = KoboImportRecord.objects.filter(
                 submission=locked_submission
             ).first()
+            if (
+                existing_record is None
+                and KoboPrioritizedMicroproject.objects.filter(
+                    source_submission=locked_submission
+                ).exists()
+            ):
+                raise KoboImportBlocked("FICHA_10_MICROPROJECT_STATE_CONFLICT")
             if locked_submission.status == KoboSubmission.Status.IMPORTED:
                 return _already_imported_result(locked_submission, existing_record)
             if existing_record is not None:

@@ -398,12 +398,35 @@ KoboImportRecord 1 ── referencia lógica ──> KoboTerritorialProfile
 El perfil conserva la ubicación canónica como JSON validado y los campos
 revisados del payload normalizado, pero no duplica código ni zona pastoral.
 
-### 14.8. `KoboImportRecord`
+### 14.8. `KoboPrioritizedMicroproject`
+
+Representa una propuesta priorizada, aprobada e inmutable materializada desde
+una Ficha 10. No es otro `Project`: pertenece a la identidad territorial y al
+proyecto Núcleo Vital ya resuelto por routing.
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizedMicroproject
+Project 1 ──< KoboPrioritizedMicroproject
+KoboSubmission 1 ── 1 KoboPrioritizedMicroproject
+KoboImportRecord 1 ── referencia lógica ──> KoboPrioritizedMicroproject
+```
+
+Cada submission produce como máximo un microproyecto. Dos submissions con el
+mismo nombre conservan dos propuestas históricas distintas: el nombre no es una
+clave de deduplicación. `component`, `estimated_cost_range`,
+`implementation_urgency` y `technical_viability` conservan códigos canónicos de
+catálogo; `beneficiary_group` conserva el `select_multiple` como lista JSON
+ordenada y `main_activities` permanece texto libre.
+
+La propuesta no crea presupuesto ejecutable, donaciones, asignaciones, gastos ni
+movimientos financieros, y tampoco activa ni modifica la identidad territorial.
+
+### 14.9. `KoboImportRecord`
 
 Registra el resultado único de una importación completada y apunta lógicamente
 a la entidad materializada sin introducir una relación genérica en la submission.
 
-### 14.9. `KoboAttachment`
+### 14.10. `KoboAttachment`
 
 Representa un archivo adjunto descargado desde Kobo.
 
@@ -415,7 +438,7 @@ Reglas:
 * su descarga debe estar protegida;
 * no se publica automáticamente en el portal público.
 
-### 14.10. `KoboProcessingEvent`
+### 14.11. `KoboProcessingEvent`
 
 Representa un evento técnico ocurrido durante el procesamiento de una submission.
 

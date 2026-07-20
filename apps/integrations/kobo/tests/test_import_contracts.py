@@ -201,7 +201,7 @@ class KoboImportContractTests(TestCase):
                 self.assertIn(expected_delegate, source)
                 self.assertNotIn("Status.IMPORTED", source)
 
-    def test_unmaterialized_ficha_10_and_11_handlers_block_and_expose_warnings(self):
+    def test_unmaterialized_ficha_11_handler_blocks_and_exposes_warnings(self):
         warning_payload = {
             "nucleo_code": "NV-11",
             "calculation_warnings": [
@@ -215,29 +215,23 @@ class KoboImportContractTests(TestCase):
                 },
             ],
         }
-        for form_type in (KoboFormType.FICHA_10, KoboFormType.FICHA_11):
-            with self.subTest(form_type=form_type):
-                submission = self.create_submission(
-                    form_type,
-                    normalized_payload=(
-                        warning_payload
-                        if form_type == KoboFormType.FICHA_11
-                        else None
-                    ),
-                )
-                result = import_kobo_submission(submission, actor=self.importer)
-                submission.refresh_from_db()
+        submission = self.create_submission(
+            KoboFormType.FICHA_11,
+            normalized_payload=warning_payload,
+        )
 
-                self.assertEqual(result.outcome, ImportOutcome.BLOCKED)
-                self.assertEqual(result.reason_code, MATERIALIZATION_NOT_IMPLEMENTED)
-                self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
-                self.assertIsNone(submission.imported_at)
-                self.assertFalse(KoboImportRecord.objects.filter(submission=submission).exists())
-                if form_type == KoboFormType.FICHA_11:
-                    self.assertEqual(
-                        [warning.code for warning in result.warnings],
-                        ["PRIORITY_TOTAL_MISMATCH", "SUGGESTED_SEMAPHORE_MISMATCH"],
-                    )
+        result = import_kobo_submission(submission, actor=self.importer)
+        submission.refresh_from_db()
+
+        self.assertEqual(result.outcome, ImportOutcome.BLOCKED)
+        self.assertEqual(result.reason_code, MATERIALIZATION_NOT_IMPLEMENTED)
+        self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+        self.assertIsNone(submission.imported_at)
+        self.assertFalse(KoboImportRecord.objects.filter(submission=submission).exists())
+        self.assertEqual(
+            [warning.code for warning in result.warnings],
+            ["PRIORITY_TOTAL_MISMATCH", "SUGGESTED_SEMAPHORE_MISMATCH"],
+        )
 
     def test_common_preconditions_block_invalid_state_routing_project_and_rejection(self):
         cases = (
@@ -388,9 +382,9 @@ class KoboImportContractTests(TestCase):
         )
 
     @override_settings(KOBO_ENABLED=True)
-    def test_project_ui_explicitly_approves_then_calls_stub_without_importing(self):
+    def test_project_ui_explicitly_approves_then_calls_ficha_11_stub(self):
         submission = self.create_submission(
-            KoboFormType.FICHA_10,
+            KoboFormType.FICHA_11,
             status=KoboSubmission.Status.READY_FOR_REVIEW,
         )
         self.client.force_login(self.importer)

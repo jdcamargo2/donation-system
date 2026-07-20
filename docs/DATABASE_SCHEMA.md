@@ -936,7 +936,43 @@ históricas requieren un proceso explícito posterior.
 
 ---
 
-### 6.11. `kobo_ficha01territorio`
+### 6.11. `kobo_koboprioritizedmicroproject`
+
+Representa una propuesta priorizada histórica e inmutable materializada desde
+una Ficha 10 aprobada.
+
+| Columna                    | Tipo lógico     | Reglas                                      |
+| -------------------------- | --------------- | ------------------------------------------- |
+| `territorial_identity_id`  | `ForeignKey`    | `PROTECT`, identidad canónica               |
+| `project_id`               | `ForeignKey`    | `PROTECT`, proyecto Núcleo Vital coherente  |
+| `source_submission_id`     | `OneToOneField` | `PROTECT`, una submission por microproyecto |
+| `name`                     | `CharField`     | Obligatorio; no deduplica                   |
+| `component`                | `CharField`     | Catálogo cerrado                            |
+| `problem_summary`          | `TextField`     | Texto libre obligatorio                     |
+| `specific_objective`       | `TextField`     | Texto libre obligatorio                     |
+| `beneficiary_group`        | `JSONField`     | Lista canónica no vacía                     |
+| `main_activities`          | `TextField`     | Texto libre obligatorio                     |
+| `estimated_cost_range`     | `CharField`     | Código de rango, no monto exacto            |
+| `implementation_urgency`   | `CharField`     | Catálogo cerrado                            |
+| `technical_viability`      | `CharField`     | Catálogo cerrado                            |
+| `expected_result`          | `TextField`     | Texto libre obligatorio                     |
+| `created_by_id`            | `ForeignKey`    | `PROTECT`                                   |
+| `created_at`               | `DateTimeField` | Automático                                  |
+| `updated_at`               | `DateTimeField` | Automático                                  |
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizedMicroproject
+Project 1 ──< KoboPrioritizedMicroproject
+KoboSubmission 1 ── 1 KoboPrioritizedMicroproject
+```
+
+Los constraints protegen textos requeridos y los cuatro catálogos cerrados. La
+lista de beneficiarios se valida en el modelo. No hay backfill ni inferencia
+desde `raw_payload`, y esta tabla no representa presupuesto o ejecución financiera.
+
+---
+
+### 6.12. `kobo_ficha01territorio`
 
 Tabla heredada de la primera integración de la Ficha 1.
 

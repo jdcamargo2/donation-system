@@ -422,19 +422,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             1,
         )
 
-    def test_ficha_10_and_11_stub_handlers_never_mark_imported(self):
-        microproject_pending = KoboSubmission.objects.create(
-            form_definition=self.microproject_form_definition,
-            asset=self.microproject_asset,
-            project=self.project,
-            external_id="pending-microproject",
-            raw_payload={"_uuid": "pending-microproject"},
-            normalized_payload=self.microproject_imported.normalized_payload,
-            status=KoboSubmission.Status.APPROVED_FOR_IMPORT,
-            normalized_at=django_timezone.now(),
-            processed_at=django_timezone.now(),
-            routing_status=KoboSubmission.RoutingStatus.RESOLVED,
-        )
+    def test_ficha_11_stub_handler_never_marks_imported(self):
         prioritization_pending = KoboSubmission.objects.create(
             form_definition=self.prioritization_form_definition,
             asset=self.prioritization_asset,
@@ -447,36 +435,34 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             processed_at=django_timezone.now(),
             routing_status=KoboSubmission.RoutingStatus.RESOLVED,
         )
-        for submission in (microproject_pending, prioritization_pending):
-            with self.subTest(submission=submission.external_id):
-                result = import_kobo_submission(submission, actor=self.reviewer)
-                submission.refresh_from_db()
-                self.assertFalse(result.imported)
-                self.assertEqual(
-                    submission.status,
-                    KoboSubmission.Status.APPROVED_FOR_IMPORT,
-                )
-                self.assertEqual(submission.project, self.project)
-                self.assertIsNone(submission.imported_at)
-                self.assertTrue(
-                    submission.processing_events.filter(
-                        stage="operational_import",
-                        code="MATERIALIZATION_NOT_IMPLEMENTED",
-                    ).exists()
-                )
+        result = import_kobo_submission(prioritization_pending, actor=self.reviewer)
+        prioritization_pending.refresh_from_db()
+        self.assertFalse(result.imported)
+        self.assertEqual(
+            prioritization_pending.status,
+            KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        )
+        self.assertEqual(prioritization_pending.project, self.project)
+        self.assertIsNone(prioritization_pending.imported_at)
+        self.assertTrue(
+            prioritization_pending.processing_events.filter(
+                stage="operational_import",
+                code="MATERIALIZATION_NOT_IMPLEMENTED",
+            ).exists()
+        )
 
-        repeated = import_kobo_submission(microproject_pending, actor=self.reviewer)
+        repeated = import_kobo_submission(prioritization_pending, actor=self.reviewer)
         self.assertFalse(repeated.imported)
         self.assertFalse(repeated.already_imported)
         self.assertEqual(
             AuditLog.objects.filter(
-                entity_id=str(microproject_pending.pk),
+                entity_id=str(prioritization_pending.pk),
                 action=AuditLog.Action.CREATED,
                 user=self.reviewer,
             ).count(),
             0,
         )
-        self.assertEqual(microproject_pending.processing_events.count(), 1)
+        self.assertEqual(prioritization_pending.processing_events.count(), 1)
 
     def test_pending_territorial_submission_is_not_importable_or_in_project_queue(self):
         pending = KoboSubmission.objects.create(

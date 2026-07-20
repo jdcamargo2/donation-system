@@ -360,7 +360,12 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
     `KoboTerritorialProfile` inmutable por submission.
 19. Si la identidad estaba `PENDING_REVIEW`, pasa a `ACTIVE`; `OBSERVED`
     permanece observada e `INACTIVE` bloquea la importación.
-20. Los handlers de Ficha 10 y 11 continúan como stubs explícitos y responden
+20. El handler de Ficha 10 localiza la identidad sin crearla, valida código,
+    proyecto, estado, conflictos, campos requeridos y catálogos, y crea un
+    `KoboPrioritizedMicroproject` inmutable por submission.
+21. La Ficha 10 conserva `beneficiary_group` como lista canónica y
+    `main_activities` como texto libre; no interpreta de nuevo `raw_payload`.
+22. El handler de Ficha 11 continúa como stub explícito y responde
     `MATERIALIZATION_NOT_IMPLEMENTED`.
 
 ### POST
@@ -371,7 +376,12 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 * Importación significa materialización exitosa y resultado persistido.
 * Una Ficha 1 importada produce exactamente un perfil territorial y un import
   record; otra Ficha 1 válida del mismo núcleo conserva un perfil histórico nuevo.
+* Una Ficha 10 importada produce exactamente un microproyecto priorizado y un
+  import record; otra submission con el mismo nombre conserva otra propuesta.
+* El routing de Ficha 10 identifica el proyecto Núcleo Vital; su importación crea
+  la propuesta subordinada y no crea otro `Project`.
 * La integración no modifica directamente saldos financieros.
+* La Ficha 10 no crea presupuesto, donación, asignación de fondos ni gasto.
 
 ---
 

@@ -447,8 +447,38 @@ altitud y precisión; `communities_covered` conserva el texto libre confirmado
 por el XLSForm, y `access_difficulties` usa el catálogo cerrado
 `yes/no/unknown`. El handler nunca reinterpreta `raw_payload`.
 
-Los handlers de Ficha 10 y 11 siguen siendo stubs controlados. Devuelven
-`MATERIALIZATION_NOT_IMPLEMENTED`, no crean `KoboImportRecord` y nunca marcan
+El handler de Ficha 10 crea un `KoboPrioritizedMicroproject` inmutable por
+submission y conserva la relación histórica:
+
+```text
+KoboTerritorialIdentity 1 ──< KoboPrioritizedMicroproject
+KoboSubmission 1 ── 1 KoboPrioritizedMicroproject
+```
+
+La auditoría del dominio operativo descartó reutilizar `ProjectMilestone` y
+`ProjectUpdate`: el primero representa un resultado verificable ordenado y el
+segundo un avance histórico, mientras que ninguno conserva el contrato completo
+de problema, objetivo, beneficiarios, actividades, costo categórico, urgencia y
+viabilidad. Tampoco se reutiliza `Project`, porque representa el Núcleo Vital
+completo. Por ello la entidad permanece en la integración Kobo y Operations no
+adquiere una dependencia hacia Kobo.
+
+El routing identifica la identidad y su proyecto Núcleo Vital; la importación
+crea únicamente la propuesta subordinada. No deduplica por nombre, no vuelve a
+normalizar el código y no lee `raw_payload`. Todos los campos de negocio de la
+Ficha 10 depurada son requeridos. `component`, `estimated_cost_range`,
+`implementation_urgency` y `technical_viability` usan los códigos cerrados del
+normalizador; `beneficiary_group` es un `select_multiple` persistido como lista
+JSON estable y `main_activities` es texto libre.
+
+La importación no cambia el estado de la identidad y acepta identidades
+`PENDING_REVIEW`, `ACTIVE` u `OBSERVED`; `INACTIVE` y los conflictos territoriales
+abiertos bloquean. No crea otro `Project`, presupuesto, donación, asignación,
+gasto ni movimiento financiero. Si ya existe el microproyecto sin su import
+record, responde `FICHA_10_MICROPROJECT_STATE_CONFLICT` y no repara ni duplica.
+
+El handler de Ficha 11 sigue siendo un stub controlado. Devuelve
+`MATERIALIZATION_NOT_IMPLEMENTED`, no crea `KoboImportRecord` y nunca marca
 `IMPORTED`. Las advertencias `PRIORITY_TOTAL_MISMATCH` y
 `SUGGESTED_SEMAPHORE_MISMATCH` de Ficha 11 se entregan al handler y permanecen
 en el resultado bloqueado; no invalidan por sí solas una revisión humana. Los

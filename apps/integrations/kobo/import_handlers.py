@@ -12,6 +12,7 @@ from apps.integrations.kobo.import_contracts import (
     KoboMaterializationResult,
 )
 from apps.integrations.kobo.models import (
+    KoboPrioritizedMicroproject,
     KoboProcessingEvent,
     KoboTerritorialIdentity,
     KoboTerritorialIdentityConflict,
@@ -19,6 +20,13 @@ from apps.integrations.kobo.models import (
     TERRITORIAL_PROFILE_ACCESS_DIFFICULTIES,
     TERRITORIAL_PROFILE_PRIORITY_PERCEPTIONS,
     validate_territorial_profile_location,
+)
+from apps.integrations.kobo.mappings.ficha_10 import (
+    BENEFICIARY_GROUPS,
+    COMPONENTS,
+    ESTIMATED_COST_RANGES,
+    IMPLEMENTATION_URGENCIES,
+    TECHNICAL_VIABILITIES,
 )
 
 
@@ -29,6 +37,12 @@ FICHA_1_IDENTITY_MISMATCH = "FICHA_1_IDENTITY_MISMATCH"
 FICHA_1_IDENTITY_INACTIVE = "FICHA_1_IDENTITY_INACTIVE"
 FICHA_1_TERRITORIAL_CONFLICT = "FICHA_1_TERRITORIAL_CONFLICT"
 FICHA_1_PROFILE_STATE_CONFLICT = "FICHA_1_PROFILE_STATE_CONFLICT"
+FICHA_10_MICROPROJECT_INVALID = "FICHA_10_MICROPROJECT_INVALID"
+FICHA_10_IDENTITY_MISSING = "FICHA_10_IDENTITY_MISSING"
+FICHA_10_IDENTITY_MISMATCH = "FICHA_10_IDENTITY_MISMATCH"
+FICHA_10_IDENTITY_INACTIVE = "FICHA_10_IDENTITY_INACTIVE"
+FICHA_10_TERRITORIAL_CONFLICT = "FICHA_10_TERRITORIAL_CONFLICT"
+FICHA_10_MICROPROJECT_STATE_CONFLICT = "FICHA_10_MICROPROJECT_STATE_CONFLICT"
 
 
 def _optional_profile_text(payload, key) -> str:
@@ -205,6 +219,152 @@ class Ficha1TerritorialProfileImportHandler:
         )
 
 
+def _required_microproject_text(payload, key) -> str:
+    # PRE: payload is the persisted normalized Ficha 10 mapping.
+    # POST: returns its required text unchanged or blocks malformed stored data.
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise KoboImportBlocked(FICHA_10_MICROPROJECT_INVALID)
+    return value
+
+
+def _required_microproject_choice(payload, key, choices) -> str:
+    # PRE: key names one persisted normalized Ficha 10 select-one field.
+    # POST: returns its canonical code or blocks unknown stored data.
+    value = payload.get(key)
+    if value not in choices:
+        raise KoboImportBlocked(FICHA_10_MICROPROJECT_INVALID)
+    return value
+
+
+def _validated_ficha_10_microproject_data(submission) -> dict[str, object]:
+    """
+    PRE: common checks accepted the locked, approved, routed Ficha 10 submission.
+    POST: returns model-ready canonical data solely from normalized_payload.
+    """
+    payload = submission.normalized_payload
+    if not isinstance(payload, dict):
+        raise KoboImportBlocked(FICHA_10_MICROPROJECT_INVALID)
+    if (
+        payload.get("nucleo_code") != submission.nucleo_code_normalized
+        or payload.get("nucleo_code_normalized") != submission.nucleo_code_normalized
+    ):
+        raise KoboImportBlocked(FICHA_10_IDENTITY_MISMATCH)
+    beneficiary_group = payload.get("beneficiary_group")
+    if (
+        not isinstance(beneficiary_group, list)
+        or not beneficiary_group
+        or len(beneficiary_group) != len(set(beneficiary_group))
+        or any(
+            not isinstance(value, str) or value not in BENEFICIARY_GROUPS
+            for value in beneficiary_group
+        )
+    ):
+        raise KoboImportBlocked(FICHA_10_MICROPROJECT_INVALID)
+    return {
+        "name": _required_microproject_text(payload, "microproject_name"),
+        "component": _required_microproject_choice(payload, "component", COMPONENTS),
+        "problem_summary": _required_microproject_text(payload, "problem_summary"),
+        "specific_objective": _required_microproject_text(payload, "specific_objective"),
+        "beneficiary_group": beneficiary_group,
+        "main_activities": _required_microproject_text(payload, "main_activities"),
+        "estimated_cost_range": _required_microproject_choice(
+            payload, "estimated_cost_range", ESTIMATED_COST_RANGES
+        ),
+        "implementation_urgency": _required_microproject_choice(
+            payload, "implementation_urgency", IMPLEMENTATION_URGENCIES
+        ),
+        "technical_viability": _required_microproject_choice(
+            payload, "technical_viability", TECHNICAL_VIABILITIES
+        ),
+        "expected_result": _required_microproject_text(payload, "expected_result"),
+    }
+
+
+@dataclass(frozen=True)
+class Ficha10PrioritizedMicroprojectImportHandler:
+    form_type: KoboFormType = KoboFormType.FICHA_10
+
+    def validate_for_import(self, *, submission) -> tuple[ImportWarning, ...]:
+        """
+        PRE: common checks accepted a locked, approved, routed Ficha 10 submission.
+        POST: validates every persisted normalized proposal field without side effects.
+        """
+        _validated_ficha_10_microproject_data(submission)
+        return ()
+
+    def materialize(self, *, submission, actor) -> KoboMaterializationResult:
+        """
+        PRE: validation passed and the caller owns the import transaction and row lock.
+        POST: creates exactly one immutable prioritized microproject and its safe audit events.
+        """
+        microproject_data = _validated_ficha_10_microproject_data(submission)
+        try:
+            identity = KoboTerritorialIdentity.objects.select_for_update().get(
+                nucleo_code_normalized=submission.nucleo_code_normalized
+            )
+        except KoboTerritorialIdentity.DoesNotExist as exc:
+            raise KoboImportBlocked(FICHA_10_IDENTITY_MISSING) from exc
+        if identity.status == KoboTerritorialIdentity.Status.INACTIVE:
+            raise KoboImportBlocked(FICHA_10_IDENTITY_INACTIVE)
+        if identity.project_id != submission.project_id:
+            raise KoboImportBlocked(FICHA_10_IDENTITY_MISMATCH)
+        if KoboTerritorialIdentityConflict.objects.filter(
+            identity=identity,
+            status=KoboTerritorialIdentityConflict.Status.OPEN,
+        ).exists():
+            raise KoboImportBlocked(FICHA_10_TERRITORIAL_CONFLICT)
+        if KoboPrioritizedMicroproject.objects.filter(
+            source_submission=submission
+        ).exists():
+            raise KoboImportBlocked(FICHA_10_MICROPROJECT_STATE_CONFLICT)
+
+        microproject = KoboPrioritizedMicroproject(
+            territorial_identity=identity,
+            project=submission.project,
+            source_submission=submission,
+            created_by=actor,
+            **microproject_data,
+        )
+        try:
+            microproject.full_clean()
+        except ValidationError as exc:
+            raise KoboImportBlocked(FICHA_10_MICROPROJECT_INVALID) from exc
+        microproject.save()
+
+        from apps.operations.models import AuditLog
+        from apps.operations.services import log_action
+
+        event_metadata = {
+            "microproject_id": microproject.pk,
+            "identity_id": identity.pk,
+            "project_id": submission.project_id,
+            "nucleo_code_normalized": identity.nucleo_code_normalized,
+            "component": microproject.component,
+        }
+        KoboProcessingEvent.objects.create(
+            submission=submission,
+            stage="operational_import",
+            level=KoboProcessingEvent.Level.INFO,
+            code="prioritized_microproject_created",
+            message="Approved Ficha 10 prioritized microproject created.",
+            metadata=event_metadata,
+        )
+        log_action(
+            actor,
+            AuditLog.Action.CREATED,
+            microproject,
+            "Microproyecto priorizado Kobo creado desde una Ficha 10 aprobada.",
+        )
+        return KoboMaterializationResult(
+            materialization_type="prioritized_microproject",
+            target_app_label="kobo",
+            target_model="KoboPrioritizedMicroproject",
+            target_object_id=microproject.pk,
+            created=True,
+        )
+
+
 def _calculation_warnings(submission) -> tuple[ImportWarning, ...]:
     """
     PRE: submission has passed common normalized-payload validation.
@@ -251,7 +411,7 @@ class StubKoboImportHandler:
 KOBO_IMPORT_HANDLERS: Mapping[KoboFormType, KoboImportHandler] = MappingProxyType(
     {
         KoboFormType.FICHA_1: Ficha1TerritorialProfileImportHandler(),
-        KoboFormType.FICHA_10: StubKoboImportHandler(KoboFormType.FICHA_10),
+        KoboFormType.FICHA_10: Ficha10PrioritizedMicroprojectImportHandler(),
         KoboFormType.FICHA_11: StubKoboImportHandler(KoboFormType.FICHA_11),
     }
 )

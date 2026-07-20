@@ -6,6 +6,7 @@ from apps.integrations.kobo.models import (
     KoboDiscoveredAsset,
     KoboFormDefinition,
     KoboPastoralZoneProjectMapping,
+    KoboPrioritizedMicroproject,
     KoboProjectBinding,
     KoboProcessingEvent,
     KoboSubmission,
@@ -206,6 +207,68 @@ class KoboTerritorialProfileAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         # PRE: request targets imported territorial evidence.
         # POST: always preserves the immutable profile and its traceability.
+        return False
+
+
+@admin.register(KoboPrioritizedMicroproject)
+class KoboPrioritizedMicroprojectAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "territorial_identity",
+        "project",
+        "component",
+        "implementation_urgency",
+        "technical_viability",
+        "created_at",
+    )
+    list_filter = (
+        "component",
+        "implementation_urgency",
+        "technical_viability",
+        "project",
+        "created_at",
+    )
+    search_fields = (
+        "name",
+        "territorial_identity__nucleo_code_normalized",
+        "source_submission__primary_community",
+        "project__code",
+        "project__name",
+    )
+    readonly_fields = (
+        "territorial_identity",
+        "project",
+        "source_submission",
+        "name",
+        "component",
+        "problem_summary",
+        "specific_objective",
+        "beneficiary_group",
+        "main_activities",
+        "estimated_cost_range",
+        "implementation_urgency",
+        "technical_viability",
+        "expected_result",
+        "created_by",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        # PRE: request targets prioritized microproject administration.
+        # POST: prevents creation outside the transactional Ficha 10 importer.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # PRE: request targets immutable imported proposal evidence.
+        # POST: permits safe viewing while rejecting every admin mutation request.
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return super().has_change_permission(request, obj)
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # PRE: request targets an imported prioritized microproject.
+        # POST: always preserves the immutable proposal and its traceability.
         return False
 
 
