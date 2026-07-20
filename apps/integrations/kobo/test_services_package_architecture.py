@@ -43,7 +43,9 @@ EXPECTED_PUBLIC_API = {
     "resolve_routing_field",
     "restore_kobo_submission_to_review",
     "review_submission",
+    "route_dependent_territorial_submission",
     "route_ficha_1_submission",
+    "route_normalized_submission",
     "sync_ficha_01_submissions",
     "sync_registered_forms",
     "unlink_asset_from_project",
@@ -77,7 +79,9 @@ EXPECTED_SIGNATURES = {
     "resolve_routing_field": "(submission, source_field)",
     "restore_kobo_submission_to_review": "(submission, *, actor)",
     "review_submission": "(submission, *, decision, reason, reviewed_by)",
+    "route_dependent_territorial_submission": "(submission)",
     "route_ficha_1_submission": "(submission)",
+    "route_normalized_submission": "(submission)",
     "sync_ficha_01_submissions": (
         "(client, asset_uid, limit=100, dry_run=False)"
     ),

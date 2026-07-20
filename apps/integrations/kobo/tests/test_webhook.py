@@ -13,11 +13,13 @@ from apps.integrations.kobo.models import KoboProcessingEvent
 from apps.integrations.kobo.models import KoboProjectBinding
 from apps.integrations.kobo.models import KoboPastoralZoneProjectMapping
 from apps.integrations.kobo.models import KoboSubmission
+from apps.integrations.kobo.models import KoboTerritorialIdentity
 from apps.integrations.kobo.services import associate_submission_with_project
 from apps.integrations.kobo.services import receive_webhook_submission
 from apps.integrations.kobo.tests.test_contracts import KoboFicha01NormalizerTests
 from apps.integrations.kobo.tests.test_contracts import KoboFicha10NormalizerTests
 from apps.integrations.kobo.tests.test_contracts import KoboFicha11NormalizerTests
+from apps.integrations.kobo.territorial import normalize_nucleo_code
 from apps.operations.models import Project
 from apps.operations.models import ProjectUpdate
 from django.contrib.auth import get_user_model
@@ -135,6 +137,32 @@ class KoboWebhookTests(TestCase):
             HTTP_X_KOBO_WEBHOOK_SECRET=secret,
         )
 
+    def create_territorial_identity(self, code, *, project=None):
+        # PRE: code is canonical and project is a valid synthetic destination.
+        # POST: creates an explicit Ficha 1-sourced identity without using bindings.
+        project = project or self.project
+        source = KoboSubmission.objects.create(
+            form_definition=self.assets[FICHA_01_FORM_ID].form_definition,
+            asset=self.assets[FICHA_01_FORM_ID],
+            external_id=f"identity-source-{code}-{KoboSubmission.objects.count()}",
+            raw_payload={"_uuid": f"identity-source-{code}"},
+            normalized_payload={"nucleo_code_normalized": code},
+            status=KoboSubmission.Status.READY_FOR_REVIEW,
+            project=project,
+            nucleo_code_original=code,
+            nucleo_code_normalized=code,
+            pastoral_zone="catia_la_mar",
+            routing_status=KoboSubmission.RoutingStatus.RESOLVED,
+            routing_resolved_at=django_timezone.now(),
+        )
+        return KoboTerritorialIdentity.objects.create(
+            nucleo_code_original=code,
+            nucleo_code_normalized=code,
+            pastoral_zone="catia_la_mar",
+            project=project,
+            source_submission=source,
+        )
+
     def post_basic(
         self,
         payload,
@@ -195,33 +223,65 @@ class KoboWebhookTests(TestCase):
         self.assertEqual(submission.parish, "Parroquia sintética")
         self.assertEqual(submission.normalized_payload["nucleo_code"], "NV-SYNTHETIC")
 
-    def test_webhook_normalizes_ficha_10_slash_payload_and_assigns_direct_project(self):
+    def test_webhook_ficha_10_uses_identity_over_contrary_direct_binding(self):
         payload = self.ficha_10_slash_payload()
+        territorial_project = Project.objects.create(
+            code="PRJ-F10-TERRITORIAL",
+            name="Proyecto territorial Ficha 10",
+            status=Project.Status.ACTIVE,
+        )
+        self.create_territorial_identity(
+            normalize_nucleo_code(payload["nucleo_code"]),
+            project=territorial_project,
+        )
 
         response = self.post(payload)
 
         self.assertEqual(response.status_code, 201)
         submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
-        self.assertEqual(submission.project, self.project)
-        self.assertIsNotNone(submission.processed_at)
+        self.assertEqual(submission.project, territorial_project)
+        self.assertIsNone(submission.processed_at)
+        self.assertEqual(
+            submission.routing_status, KoboSubmission.RoutingStatus.RESOLVED
+        )
+        self.assertFalse(
+            submission.processing_events.filter(code="project_assigned").exists()
+        )
         self.assertEqual(
             submission.normalized_payload["microproject_name"],
             "Rehabilitación del centro comunitario",
         )
 
-    def test_webhook_normalizes_ficha_11_slash_payload_and_assigns_direct_project(self):
-        payload = self.ficha_11_slash_payload()
+    def test_webhook_ficha_11_uses_identity_and_preserves_calculation_values(self):
+        payload = self.ficha_11_slash_payload(
+            **{
+                "scoring/priority_total": "41",
+                "scoring/suggested_semaphore": "red",
+            }
+        )
+        territorial_project = Project.objects.create(
+            code="PRJ-F11-TERRITORIAL",
+            name="Proyecto territorial Ficha 11",
+            status=Project.Status.ACTIVE,
+        )
+        self.create_territorial_identity(
+            normalize_nucleo_code(payload["nucleo_code"]),
+            project=territorial_project,
+        )
 
         response = self.post(payload)
 
         self.assertEqual(response.status_code, 201)
         submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
-        self.assertEqual(submission.project, self.project)
+        self.assertEqual(submission.project, territorial_project)
         self.assertIsNotNone(submission.normalized_at)
-        self.assertIsNotNone(submission.processed_at)
+        self.assertIsNone(submission.processed_at)
         self.assertEqual(submission.normalized_payload["priority_total"], 10)
+        self.assertEqual(submission.normalized_payload["priority_total_original"], "41")
+        self.assertEqual(submission.normalized_payload["priority_total_calculated"], 10)
+        self.assertTrue(submission.normalized_payload["calculation_warnings"])
 
     def test_webhook_rejects_incompatible_discovered_asset_metadata_without_staging(self):
         discovered = KoboDiscoveredAsset.objects.get(
@@ -329,13 +389,17 @@ class KoboWebhookTests(TestCase):
     def test_stages_and_processes_each_supported_form_without_operations_effects(self):
         for form_id in self.assets:
             with self.subTest(form_id=form_id):
-                response = self.post(self.payload(form_id))
+                payload = self.payload(form_id)
+                if form_id == FICHA_11_FORM_ID:
+                    payload["scoring"]["priority_total"] = "99"
+                response = self.post(payload)
                 submission = KoboSubmission.objects.get(external_id=f"webhook-{form_id}")
+                self.assertEqual(response.status_code, 201)
                 self.assertEqual(response.status_code, 201)
                 self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
                 self.assertEqual(submission.asset, self.assets[form_id])
-                self.assertEqual(submission.project, self.project)
                 if form_id == FICHA_01_FORM_ID:
+                    self.assertEqual(submission.project, self.project)
                     self.assertIsNone(submission.processed_at)
                     self.assertTrue(
                         submission.processing_events.filter(
@@ -344,12 +408,22 @@ class KoboWebhookTests(TestCase):
                         ).exists()
                     )
                 else:
-                    self.assertIsNotNone(submission.processed_at)
+                    self.assertIsNone(submission.project)
+                    self.assertIsNone(submission.processed_at)
+                    self.assertEqual(
+                        submission.routing_status,
+                        KoboSubmission.RoutingStatus.PENDING_IDENTITY,
+                    )
                     self.assertTrue(
                         submission.processing_events.filter(
-                            stage="project_routing", code="project_assigned"
+                            stage="territorial_routing",
+                            code="territorial_identity_pending",
                         ).exists()
                     )
+                    if form_id == FICHA_11_FORM_ID:
+                        self.assertTrue(
+                            submission.normalized_payload["calculation_warnings"]
+                        )
                 self.assertNotIn("raw_payload", response.json())
         self.assertEqual(Project.objects.count(), 1)
         self.assertFalse(ProjectUpdate.objects.exists())
@@ -689,10 +763,13 @@ class KoboReconciliationCommandTests(KoboWebhookTests):
         submission.refresh_from_db()
         self.assertEqual(KoboSubmission.objects.count(), 1)
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
-        self.assertEqual(submission.project, self.project)
+        self.assertIsNone(submission.project)
+        self.assertEqual(
+            submission.routing_status, KoboSubmission.RoutingStatus.PENDING_IDENTITY
+        )
         self.assertTrue(submission.normalized_payload)
         self.assertIsNotNone(submission.normalized_at)
-        self.assertIsNotNone(submission.processed_at)
+        self.assertIsNone(submission.processed_at)
         self.assertEqual(submission.error_code, "")
         self.assertEqual(submission.error_message, "")
 
@@ -732,10 +809,13 @@ class KoboReconciliationCommandTests(KoboWebhookTests):
         submission.refresh_from_db()
         self.assertEqual(KoboSubmission.objects.count(), 1)
         self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
-        self.assertEqual(submission.project, self.project)
+        self.assertIsNone(submission.project)
+        self.assertEqual(
+            submission.routing_status, KoboSubmission.RoutingStatus.PENDING_IDENTITY
+        )
         self.assertTrue(submission.normalized_payload)
         self.assertIsNotNone(submission.normalized_at)
-        self.assertIsNotNone(submission.processed_at)
+        self.assertIsNone(submission.processed_at)
         self.assertEqual(submission.error_code, "")
         self.assertEqual(submission.error_message, "")
 
@@ -751,3 +831,49 @@ class KoboReconciliationCommandTests(KoboWebhookTests):
                 stdout=StringIO(),
             )
         self.assertEqual(KoboSubmission.objects.count(), 1)
+
+    def test_command_resolves_a_pending_ficha_10_when_identity_appears(self):
+        asset = self.assets[FICHA_10_FORM_ID]
+        payload = self.ficha_10_slash_payload(_uuid="reconcile-pending-ficha-10")
+        client = SimpleNamespace(get_submissions=lambda asset_uid, limit: [payload])
+
+        with patch(
+            "apps.integrations.kobo.management.commands."
+            "reconcile_kobo_submissions.KoboApiClient",
+            return_value=client,
+        ):
+            first_output = StringIO()
+            call_command(
+                "reconcile_kobo_submissions",
+                "--asset-uid",
+                asset.asset_uid,
+                stdout=first_output,
+            )
+        submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
+        self.assertEqual(
+            submission.routing_status, KoboSubmission.RoutingStatus.PENDING_IDENTITY
+        )
+        self.assertIn("still_pending=1", first_output.getvalue())
+
+        self.create_territorial_identity(
+            normalize_nucleo_code(payload["nucleo_code"])
+        )
+        with patch(
+            "apps.integrations.kobo.management.commands."
+            "reconcile_kobo_submissions.KoboApiClient",
+            return_value=SimpleNamespace(get_submissions=lambda asset_uid, limit: []),
+        ):
+            second_output = StringIO()
+            call_command(
+                "reconcile_kobo_submissions",
+                "--asset-uid",
+                asset.asset_uid,
+                stdout=second_output,
+            )
+
+        submission.refresh_from_db()
+        self.assertEqual(submission.project, self.project)
+        self.assertEqual(
+            submission.routing_status, KoboSubmission.RoutingStatus.RESOLVED
+        )
+        self.assertIn("resolved=1", second_output.getvalue())

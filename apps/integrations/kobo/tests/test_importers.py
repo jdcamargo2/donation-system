@@ -484,6 +484,28 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             ),
         )
 
+    def test_pending_territorial_submission_is_not_importable_or_in_project_queue(self):
+        pending = KoboSubmission.objects.create(
+            form_definition=self.microproject_form_definition,
+            asset=self.microproject_asset,
+            external_id="pending-territorial-identity",
+            raw_payload={"_uuid": "pending-territorial-identity"},
+            normalized_payload={"nucleo_code_normalized": "NV-PENDING"},
+            status=KoboSubmission.Status.READY_FOR_REVIEW,
+            routing_status=KoboSubmission.RoutingStatus.PENDING_IDENTITY,
+            routing_reason_code="unknown_territorial_identity",
+            nucleo_code_original="NV-PENDING",
+            nucleo_code_normalized="NV-PENDING",
+        )
+
+        result = import_kobo_submission(pending, actor=self.reviewer)
+        pending.refresh_from_db()
+
+        self.assertFalse(result.imported)
+        self.assertEqual(pending.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(pending.error_code, "import_routing_unresolved")
+        self.assertNotIn(pending, get_project_pending_submissions(self.project))
+
     def test_operational_import_lock_query_has_no_nullable_join(self):
         with transaction.atomic():
             with CaptureQueriesContext(connection) as queries:

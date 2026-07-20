@@ -8,7 +8,7 @@ from django.test.runner import DiscoverRunner
 from apps.integrations.kobo import tests as kobo_tests
 
 
-FUNCTIONAL_TEST_COUNT = 320
+FUNCTIONAL_TEST_COUNT = 331
 TEST_MODULES = (
     "test_association",
     "test_attachments",

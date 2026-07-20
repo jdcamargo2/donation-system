@@ -15,7 +15,10 @@ from apps.integrations.kobo.processors import (
     process_submission,
     process_submission_attachments,
 )
-from apps.integrations.kobo.services import process_pending_submissions
+from apps.integrations.kobo.services import (
+    process_pending_submissions,
+    route_normalized_submission,
+)
 
 
 def _aggregate_outcomes(
@@ -96,6 +99,8 @@ class Command(BaseCommand):
                     )
                     outcomes.append(outcome)
                     if outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW:
+                        if outcome.processed:
+                            route_normalized_submission(submission)
                         attachment_results.append(
                             process_submission_attachments(
                                 submission,
@@ -134,6 +139,11 @@ class Command(BaseCommand):
                 submission,
                 default_timezone=default_timezone,
             )
+            if (
+                outcome.processed
+                and outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW
+            ):
+                route_normalized_submission(submission)
             attachment_results = []
             if (
                 download_attachments

@@ -7,6 +7,7 @@ from apps.integrations.kobo.services.common import (
     ProjectAssociationResult,
 )
 from apps.integrations.kobo.errors import KoboConfigurationError, KoboPayloadError
+from apps.integrations.kobo.form_registry import KoboFormType, resolve_form_type
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboAttachment,
@@ -222,28 +223,60 @@ def associate_submission_with_project(
             )
 
         try:
-            routing = resolve_project_binding(locked_submission, asset)
-        except KoboConfigurationError as exc:
-            error_code = str(exc)
-            if error_code not in {"routing_not_found", "routing_ambiguous"}:
-                error_code = "routing_configuration_error"
-            return _association_failure(
-                locked_submission,
-                previous_status=previous_status,
-                error_code=error_code,
-                error_message="No unique active project route matches this submission.",
+            form_type = resolve_form_type(
+                locked_submission.form_definition.form_id,
+                locked_submission.form_definition.version,
             )
         except KoboPayloadError:
-            return _association_failure(
-                locked_submission,
-                previous_status=previous_status,
-                error_code="routing_value_invalid",
-                error_message="Submission routing data is invalid or unavailable.",
-            )
+            form_type = None
+        uses_territorial_routing = (
+            form_type
+            in {
+                KoboFormType.FICHA_1,
+                KoboFormType.FICHA_10,
+                KoboFormType.FICHA_11,
+            }
+            and locked_submission.routing_status
+            != KoboSubmission.RoutingStatus.UNRESOLVED
+        )
+        if uses_territorial_routing:
+            if (
+                locked_submission.routing_status
+                != KoboSubmission.RoutingStatus.RESOLVED
+                or locked_submission.project_id is None
+            ):
+                return _association_failure(
+                    locked_submission,
+                    previous_status=previous_status,
+                    error_code="territorial_routing_unresolved",
+                    error_message="Submission territorial routing is not resolved.",
+                )
+            routing_project_id = locked_submission.project_id
+        else:
+            try:
+                routing = resolve_project_binding(locked_submission, asset)
+                routing_project_id = routing.project_id
+            except KoboConfigurationError as exc:
+                error_code = str(exc)
+                if error_code not in {"routing_not_found", "routing_ambiguous"}:
+                    error_code = "routing_configuration_error"
+                return _association_failure(
+                    locked_submission,
+                    previous_status=previous_status,
+                    error_code=error_code,
+                    error_message="No unique active project route matches this submission.",
+                )
+            except KoboPayloadError:
+                return _association_failure(
+                    locked_submission,
+                    previous_status=previous_status,
+                    error_code="routing_value_invalid",
+                    error_message="Submission routing data is invalid or unavailable.",
+                )
 
         associated_at = timezone.now()
         locked_submission.asset = asset
-        locked_submission.project_id = routing.project_id
+        locked_submission.project_id = routing_project_id
         locked_submission.imported_at = associated_at
         if locked_submission.processed_at is None:
             locked_submission.processed_at = associated_at
@@ -270,7 +303,7 @@ def associate_submission_with_project(
         )
 
     submission.asset_id = asset.pk
-    submission.project_id = routing.project_id
+    submission.project_id = routing_project_id
     submission.imported_at = associated_at
     submission.processed_at = locked_submission.processed_at
     submission.status = locked_submission.status
@@ -279,7 +312,7 @@ def associate_submission_with_project(
     return ProjectAssociationResult(
         submission_id=submission.pk,
         asset_id=asset.pk,
-        project_id=routing.project_id,
+        project_id=routing_project_id,
         previous_status=previous_status,
         final_status=submission.status,
         associated=True,
@@ -342,6 +375,13 @@ def get_project_pending_submissions(project):
             status=KoboSubmission.Status.READY_FOR_REVIEW,
             imported_at__isnull=True,
             asset__is_active=True,
+        )
+        .exclude(
+            routing_status__in=(
+                KoboSubmission.RoutingStatus.PENDING_IDENTITY,
+                KoboSubmission.RoutingStatus.CONFLICT,
+                KoboSubmission.RoutingStatus.ERROR,
+            )
         )
         .select_related("form_definition", "asset", "project")
         .annotate(

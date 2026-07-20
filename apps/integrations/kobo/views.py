@@ -56,6 +56,7 @@ from apps.integrations.kobo.services import (
     reject_kobo_submission,
     receive_webhook_submission,
     restore_kobo_submission_to_review,
+    route_normalized_submission,
     unlink_asset_from_project,
 )
 
@@ -577,6 +578,8 @@ def retry_normalization_action(request, pk):
         submission,
         default_timezone=timezone.get_current_timezone(),
     )
+    if outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW:
+        route_normalized_submission(submission)
     messages.info(request, f"Normalización finalizada: {outcome.final_status}.")
     return redirect("kobo:submission_detail", pk=submission.pk)
 

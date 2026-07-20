@@ -10,6 +10,7 @@ from apps.integrations.kobo.services.common import (
     REJECTION_REASON_LABELS,
 )
 from apps.integrations.kobo.errors import KoboConfigurationError, KoboPayloadError
+from apps.integrations.kobo.form_registry import KoboFormType, resolve_form_type
 from apps.integrations.kobo.models import KoboProcessingEvent, KoboSubmission
 
 
@@ -208,6 +209,32 @@ def import_kobo_submission(
                 locked_submission,
                 error_code="import_timestamp_invalid",
                 error_message="Submission already has an import timestamp.",
+            )
+        try:
+            form_type = resolve_form_type(
+                locked_submission.form_definition.form_id,
+                locked_submission.form_definition.version,
+            )
+        except KoboPayloadError:
+            form_type = None
+        if (
+            form_type
+            in {
+                KoboFormType.FICHA_1,
+                KoboFormType.FICHA_10,
+                KoboFormType.FICHA_11,
+            }
+            and locked_submission.routing_status
+            in {
+                KoboSubmission.RoutingStatus.PENDING_IDENTITY,
+                KoboSubmission.RoutingStatus.CONFLICT,
+                KoboSubmission.RoutingStatus.ERROR,
+            }
+        ):
+            return _operational_import_failure(
+                locked_submission,
+                error_code="import_routing_unresolved",
+                error_message="Submission territorial routing is not resolved for import.",
             )
         if locked_submission.project is None:
             return _operational_import_failure(

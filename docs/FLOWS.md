@@ -316,14 +316,16 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 
 * Existe una definición de formulario compatible.
 * El activo Kobo ha sido descubierto y configurado.
-* Existe un binding válido hacia un proyecto.
 * El activo se encuentra habilitado.
+* Para Ficha 1 existe un mapping de zona pastoral hacia proyecto.
+* Para Ficha 10/11 puede existir ya una identidad territorial; su ausencia no
+  impide conservar la submission en staging.
 
 ### Pasos
 
 1. Un activo remoto de Kobo se descubre.
 2. Se registra o asocia su definición compatible.
-3. Se configura un `KoboProjectBinding`.
+3. Se configura el activo y, para Ficha 1, el mapping territorial de zona.
 4. El activo se activa.
 5. Kobo envía un webhook o se ejecuta una sincronización.
 6. El sistema crea o actualiza una `KoboSubmission` en staging.
@@ -334,16 +336,19 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
    * Ficha 1;
    * Ficha 10;
    * Ficha 11.
-10. El sistema resuelve el proyecto asociado.
-11. La submission queda disponible para revisión humana.
-12. Un usuario autorizado consulta la información normalizada.
-13. El usuario puede:
+10. El dispatcher resuelve el proyecto: Ficha 1 crea o confirma la identidad;
+    Ficha 10/11 consulta exclusivamente esa identidad por `nucleo_code`.
+11. Si una Ficha 10/11 aún no tiene identidad, queda `PENDING_IDENTITY`, sin
+    proyecto y fuera de bandejas de proyecto; no se usa binding como fallback.
+12. Una submission con routing resuelto queda disponible para revisión humana.
+13. Un usuario autorizado consulta la información normalizada.
+14. El usuario puede:
 
-* importar;
-* rechazar.
+    * importar;
+    * rechazar.
 
-14. Si se importa, la información normalizada se vincula al proyecto.
-15. La acción queda registrada en el historial técnico y, cuando corresponda, en la auditoría funcional.
+15. Si se importa, la información normalizada se vincula al proyecto.
+16. La acción queda registrada en el historial técnico y, cuando corresponda, en la auditoría funcional.
 
 ### POST
 

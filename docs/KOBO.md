@@ -98,7 +98,7 @@ python manage.py discover_kobo_assets
 * El descubrimiento crea o actualiza el inventario local de activos encontrados.
 * Un activo descubierto no queda habilitado automáticamente.
 * `--dry-run` permite inspeccionar los cambios sin persistirlos.
-* El descubrimiento no sustituye la configuración ni el binding hacia un proyecto.
+* El descubrimiento no sustituye la configuración ni la estrategia de routing.
 
 ## 6. Configuración de activos
 
@@ -106,7 +106,7 @@ Para participar en el pipeline ordinario, un activo debe:
 
 1. existir en el inventario de activos descubiertos;
 2. asociarse con una definición de formulario soportada;
-3. configurar su mecanismo de routing;
+3. disponer de la configuración técnica exigida por su formulario;
 4. activarse explícitamente.
 
 Un activo no configurado o inactivo no debe procesar submissions como parte del flujo ordinario.
@@ -124,7 +124,7 @@ Activo Kobo
 → Proyecto SIGEDON predefinido
 ```
 
-Este es el flujo ordinario principal del MVP.
+Este flujo se conserva para compatibilidad histórica.
 
 ### 7.2. Binding por valor de campo
 
@@ -142,6 +142,43 @@ Este modo requiere:
 * valores esperados;
 * correspondencias válidas;
 * manejo de casos sin coincidencia.
+
+Los bindings se conservan para compatibilidad histórica, pero no participan en
+el routing ordinario de Ficha 1, Ficha 10 ni Ficha 11.
+
+### 7.3. Routing territorial de las fichas soportadas
+
+El dispatcher `route_normalized_submission()` aplica estrategias explícitas:
+
+```text
+Ficha 1
+→ nucleo_code normalizado + zona pastoral
+→ identidad territorial maestra
+→ proyecto configurado para la zona
+
+Ficha 10 / Ficha 11
+→ nucleo_code normalizado
+→ identidad territorial existente
+→ proyecto de la identidad
+```
+
+Ficha 10 y Ficha 11 nunca crean identidades ni usan un binding como fallback.
+Cuando la identidad todavía no existe, la submission conserva
+`READY_FOR_REVIEW` como estado de procesamiento, queda sin proyecto y usa
+`PENDING_IDENTITY` como estado independiente de routing. Por ello no aparece en
+una bandeja de proyecto ni puede importarse hasta ser reconciliada.
+
+Todos los estados persistidos de `KoboTerritorialIdentity`, incluidos
+`PENDING_REVIEW`, `OBSERVED` e `INACTIVE`, son utilizables para routing. En el
+contrato vigente esos estados describen revisión administrativa de la identidad
+y no revocan su asociación territorial; bloquearlos requeriría una transición y
+una política de negocio nuevas.
+
+La recepción ordinaria conserva first-write-wins: un webhook repetido no
+reemplaza el payload ni la normalización existentes. Si una modificación técnica
+posterior cambia el código de una submission ya resuelta hacia otra identidad o
+hacia una identidad inexistente, el servicio conserva el proyecto anterior y
+registra un conflicto; nunca mueve silenciosamente la submission.
 
 ## 8. Webhook
 
@@ -257,6 +294,7 @@ El comando puede:
 * descargar adjuntos cuando se solicita;
 * registrar eventos técnicos;
 * dejar la submission lista para revisión;
+* ejecutar el mismo dispatcher territorial utilizado por el webhook;
 * registrar errores de validación o procesamiento.
 
 El procesamiento no debe importar automáticamente información operativa cuando el flujo exige revisión humana.
@@ -287,6 +325,10 @@ La reconciliación permite:
 * crear las submissions ausentes;
 * evitar duplicados;
 * continuar posteriormente mediante el pipeline normal.
+* reintentar Fichas 10/11 en `PENDING_IDENTITY` sin convertir la ausencia de
+  Ficha 1 en un error.
+
+El resumen del comando separa `resolved`, `still_pending`, `errors` y `skipped`.
 
 `--dry-run` permite inspeccionar el resultado sin persistir cambios.
 
@@ -359,6 +401,9 @@ Cuando una submission se importa:
 4. se actualiza el estado de la submission;
 5. se registra el evento técnico;
 6. se registra auditoría funcional cuando corresponda.
+
+Una Ficha 1, 10 u 11 con routing `PENDING_IDENTITY`, `CONFLICT` o `ERROR` no es
+importable, aunque conserve `READY_FOR_REVIEW` como estado de procesamiento.
 
 La importación no debe modificar directamente saldos financieros.
 

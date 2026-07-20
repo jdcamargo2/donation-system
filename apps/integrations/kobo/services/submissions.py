@@ -11,7 +11,7 @@ from apps.integrations.kobo.services.common import (
     WebhookConvergenceResult,
 )
 from apps.integrations.kobo.errors import KoboConfigurationError, KoboPayloadError
-from apps.integrations.kobo.form_registry import KoboFormType, list_registered_forms, resolve_form_type
+from apps.integrations.kobo.form_registry import KoboFormType, list_registered_forms
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.models import (
     KoboAsset,
@@ -21,10 +21,7 @@ from apps.integrations.kobo.models import (
     KoboSubmission,
 )
 from apps.integrations.kobo.processors import PROCESSABLE_STATUSES, process_submission
-from apps.integrations.kobo.services.association import (
-    assign_normalized_submission_to_direct_project,
-)
-from apps.integrations.kobo.services.territorial_routing import route_ficha_1_submission
+from apps.integrations.kobo.services.territorial_routing import route_normalized_submission
 
 
 def sync_registered_forms() -> int:
@@ -188,8 +185,8 @@ def converge_webhook_submission(
 ) -> WebhookConvergenceResult:
     """
     PRE: submission_id identifies a staged webhook submission and no remote work is required.
-    POST: serializes processing and direct-project assignment until the persisted row is
-    complete or has a durable, retryable failure.
+    POST: serializes processing and explicit per-form routing until the persisted
+    row is normalized with a durable routing outcome.
     """
     with transaction.atomic():
         submission = KoboSubmission.objects.select_for_update().get(pk=submission_id)
@@ -198,25 +195,19 @@ def converge_webhook_submission(
             submission.refresh_from_db()
 
         if submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
-            form_type = resolve_form_type(
-                submission.form_definition.form_id,
-                submission.form_definition.version,
-            )
-            if form_type == KoboFormType.FICHA_1:
-                route_ficha_1_submission(submission)
-                submission.refresh_from_db()
-                return WebhookConvergenceResult(
-                    submission_id=submission.pk,
-                    final_status=submission.status,
-                    completed=submission.project_id is not None,
-                )
-            if submission.project_id is None:
-                assign_normalized_submission_to_direct_project(submission)
-                submission.refresh_from_db()
+            routing = route_normalized_submission(submission)
+            submission.refresh_from_db()
             return WebhookConvergenceResult(
                 submission_id=submission.pk,
                 final_status=submission.status,
-                completed=submission.project_id is not None,
+                completed=(
+                    routing.status.value
+                    != KoboSubmission.RoutingStatus.UNRESOLVED
+                    and (
+                        routing.form_type != KoboFormType.FICHA_1
+                        or submission.project_id is not None
+                    )
+                ),
             )
 
         return WebhookConvergenceResult(
