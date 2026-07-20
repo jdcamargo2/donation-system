@@ -1,3 +1,5 @@
+from math import isfinite
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -23,6 +25,51 @@ PASTORAL_ZONE_CHOICES = tuple(
 TERRITORIAL_ROUTING_REASON_CODES = tuple(
     reason.value for reason in TerritorialRoutingReasonCode
 )
+TERRITORIAL_PROFILE_ACCESS_DIFFICULTIES = ("yes", "no", "unknown")
+TERRITORIAL_PROFILE_PRIORITY_PERCEPTIONS = (
+    "low",
+    "medium",
+    "high",
+    "critical",
+    "unknown",
+)
+TERRITORIAL_PROFILE_ACCESS_DIFFICULTY_CHOICES = tuple(
+    (value, value.title()) for value in TERRITORIAL_PROFILE_ACCESS_DIFFICULTIES
+)
+TERRITORIAL_PROFILE_PRIORITY_CHOICES = tuple(
+    (value, value.title()) for value in TERRITORIAL_PROFILE_PRIORITY_PERCEPTIONS
+)
+TERRITORIAL_PROFILE_LOCATION_KEYS = frozenset(
+    {"latitude", "longitude", "altitude", "accuracy"}
+)
+
+
+def validate_territorial_profile_location(value):
+    """
+    PRE: value is the persisted normalized Ficha 1 location or None.
+    POST: accepts only the canonical coordinate object with bounded latitude and
+    longitude and numeric optional altitude/accuracy values.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict) or set(value) != TERRITORIAL_PROFILE_LOCATION_KEYS:
+        raise ValidationError("Location must use the canonical coordinate structure.")
+    for field_name in TERRITORIAL_PROFILE_LOCATION_KEYS:
+        component = value[field_name]
+        if component is not None and (
+            isinstance(component, bool) or not isinstance(component, (int, float))
+        ):
+            raise ValidationError(f"Location {field_name} must be numeric or null.")
+        if component is not None and not isfinite(component):
+            raise ValidationError(f"Location {field_name} must be finite.")
+    latitude = value["latitude"]
+    longitude = value["longitude"]
+    if latitude is None or not -90 <= latitude <= 90:
+        raise ValidationError("Location latitude must be between -90 and 90.")
+    if longitude is None or not -180 <= longitude <= 180:
+        raise ValidationError("Location longitude must be between -180 and 180.")
+    if value["accuracy"] is not None and value["accuracy"] < 0:
+        raise ValidationError("Location accuracy cannot be negative.")
 
 
 class KoboFormDefinition(models.Model):
@@ -440,6 +487,150 @@ class KoboTerritorialIdentity(models.Model):
     def __str__(self):
         return self.nucleo_code_normalized
 
+    def latest_profile(self):
+        """
+        PRE: this identity is persisted.
+        POST: returns its newest immutable profile by creation order or None.
+        """
+        if self.pk is None:
+            return None
+        return self.territorial_profiles.order_by("-created_at", "-pk").first()
+
+
+class KoboTerritorialProfile(models.Model):
+    territorial_identity = models.ForeignKey(
+        KoboTerritorialIdentity,
+        on_delete=models.PROTECT,
+        related_name="territorial_profiles",
+    )
+    project = models.ForeignKey(
+        "operations.Project",
+        on_delete=models.PROTECT,
+        related_name="kobo_territorial_profiles",
+    )
+    source_submission = models.OneToOneField(
+        KoboSubmission,
+        on_delete=models.PROTECT,
+        related_name="territorial_profile",
+    )
+    parish = models.CharField(max_length=255)
+    community_sector = models.CharField(max_length=255)
+    location = models.JSONField(
+        null=True,
+        blank=True,
+        validators=(validate_territorial_profile_location,),
+    )
+    parish_delegate = models.CharField(max_length=255, blank=True)
+    contact_phone = models.CharField(max_length=100, blank=True)
+    main_informant_role = models.CharField(max_length=255, blank=True)
+    communities_covered = models.TextField(blank=True)
+    estimated_households = models.PositiveIntegerField(null=True, blank=True)
+    access_difficulties = models.CharField(
+        max_length=16,
+        choices=TERRITORIAL_PROFILE_ACCESS_DIFFICULTY_CHOICES,
+    )
+    access_difficulties_notes = models.TextField(blank=True)
+    initial_priority_perception = models.CharField(
+        max_length=16,
+        choices=TERRITORIAL_PROFILE_PRIORITY_CHOICES,
+    )
+    general_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_kobo_territorial_profiles",
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(estimated_households__isnull=True)
+                    | models.Q(estimated_households__gte=0)
+                ),
+                name="kobo_profile_households_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    access_difficulties__in=TERRITORIAL_PROFILE_ACCESS_DIFFICULTIES
+                ),
+                name="kobo_profile_valid_access_difficulty",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    initial_priority_perception__in=(
+                        TERRITORIAL_PROFILE_PRIORITY_PERCEPTIONS
+                    )
+                ),
+                name="kobo_profile_valid_priority",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("territorial_identity", "-created_at"),
+                name="kobo_prof_identity_date_idx",
+            ),
+            models.Index(
+                fields=("project", "-created_at"),
+                name="kobo_prof_project_date_idx",
+            ),
+        ]
+        ordering = ("-created_at", "-pk")
+
+    def clean(self):
+        """
+        PRE: profile relations identify an existing Ficha 1 submission and identity.
+        POST: accepts only canonical, non-empty reviewed fields whose project,
+        source form, nucleus code, and pastoral zone agree exactly.
+        """
+        super().clean()
+        errors = {}
+        if not isinstance(self.parish, str) or not self.parish.strip():
+            errors["parish"] = "Parish is required."
+        if (
+            not isinstance(self.community_sector, str)
+            or not self.community_sector.strip()
+        ):
+            errors["community_sector"] = "Community sector is required."
+        if self.source_submission_id and self.territorial_identity_id:
+            submission = self.source_submission
+            identity = self.territorial_identity
+            if submission.form_definition.form_id != FICHA_01_FORM_ID:
+                errors["source_submission"] = (
+                    "Territorial profiles require a Ficha 1 source."
+                )
+            if (
+                submission.project_id != self.project_id
+                or identity.project_id != self.project_id
+            ):
+                errors["project"] = (
+                    "Submission, identity, and profile must share one project."
+                )
+            if submission.nucleo_code_normalized != identity.nucleo_code_normalized:
+                errors["territorial_identity"] = (
+                    "Submission and identity nucleus codes must match."
+                )
+            if submission.pastoral_zone != identity.pastoral_zone:
+                errors["territorial_identity"] = (
+                    "Submission and identity pastoral zones must match."
+                )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """
+        PRE: new profiles already passed the materialization service invariants.
+        POST: inserts a profile once and rejects later mutation through model save.
+        """
+        if self.pk is not None:
+            raise ValidationError("Imported territorial profiles are immutable.")
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.territorial_identity.nucleo_code_normalized} - {self.parish}"
+
 
 class KoboTerritorialIdentityConflict(models.Model):
     class Status(models.TextChoices):
@@ -625,6 +816,7 @@ class KoboProcessingEvent(models.Model):
     level = models.CharField(max_length=16, choices=Level.choices)
     code = models.CharField(max_length=100, blank=True)
     message = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

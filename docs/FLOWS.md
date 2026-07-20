@@ -353,9 +353,15 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
     normalización, payload preservado, revisión y permisos, y selecciona el
     handler cerrado de Ficha 1, 10 u 11.
 17. Solo una materialización específica exitosa crea `KoboImportRecord`, cambia
-    la submission a `IMPORTED`, asigna `imported_at` y registra evento y auditoría.
-18. En esta fase los tres handlers son stubs explícitos: responden
-    `MATERIALIZATION_NOT_IMPLEMENTED` y no cambian el estado a `IMPORTED`.
+    la submission a `IMPORTED`, completa `processed_at` e `imported_at` y registra
+    evento y auditoría.
+18. El handler de Ficha 1 localiza la identidad ya creada por routing, valida
+    código, zona, proyecto, conflictos y datos normalizados, y crea un
+    `KoboTerritorialProfile` inmutable por submission.
+19. Si la identidad estaba `PENDING_REVIEW`, pasa a `ACTIVE`; `OBSERVED`
+    permanece observada e `INACTIVE` bloquea la importación.
+20. Los handlers de Ficha 10 y 11 continúan como stubs explícitos y responden
+    `MATERIALIZATION_NOT_IMPLEMENTED`.
 
 ### POST
 
@@ -363,6 +369,8 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 * Routing resuelto no implica revisión aprobada.
 * Revisión aprobada no implica importación.
 * Importación significa materialización exitosa y resultado persistido.
+* Una Ficha 1 importada produce exactamente un perfil territorial y un import
+  record; otra Ficha 1 válida del mismo núcleo conserva un perfil histórico nuevo.
 * La integración no modifica directamente saldos financieros.
 
 ---

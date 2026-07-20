@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import inspect
 from pathlib import Path
 from queue import Queue
-from threading import Barrier, Lock, Thread
+from threading import Barrier, Thread
 from unittest import skipUnless
 
 from django.contrib.auth import get_user_model
@@ -32,6 +32,8 @@ from apps.integrations.kobo.models import (
     KoboFormDefinition,
     KoboImportRecord,
     KoboSubmission,
+    KoboTerritorialIdentity,
+    KoboTerritorialProfile,
 )
 from apps.integrations.kobo.services import import_kobo_submission
 from apps.integrations.kobo.services import associate_submission_with_project
@@ -199,7 +201,7 @@ class KoboImportContractTests(TestCase):
                 self.assertIn(expected_delegate, source)
                 self.assertNotIn("Status.IMPORTED", source)
 
-    def test_every_stub_blocks_without_marking_imported_and_exposes_ficha_11_warnings(self):
+    def test_unmaterialized_ficha_10_and_11_handlers_block_and_expose_warnings(self):
         warning_payload = {
             "nucleo_code": "NV-11",
             "calculation_warnings": [
@@ -213,7 +215,7 @@ class KoboImportContractTests(TestCase):
                 },
             ],
         }
-        for form_type, *_ in FORM_CASES:
+        for form_type in (KoboFormType.FICHA_10, KoboFormType.FICHA_11):
             with self.subTest(form_type=form_type):
                 submission = self.create_submission(
                     form_type,
@@ -387,7 +389,10 @@ class KoboImportContractTests(TestCase):
 
     @override_settings(KOBO_ENABLED=True)
     def test_project_ui_explicitly_approves_then_calls_stub_without_importing(self):
-        submission = self.create_submission(status=KoboSubmission.Status.READY_FOR_REVIEW)
+        submission = self.create_submission(
+            KoboFormType.FICHA_10,
+            status=KoboSubmission.Status.READY_FOR_REVIEW,
+        )
         self.client.force_login(self.importer)
 
         response = self.client.post(
@@ -447,37 +452,41 @@ class KoboImportConcurrencyTests(TransactionTestCase):
             project=self.project,
             external_id="concurrent-import",
             raw_payload={"_uuid": "concurrent-import"},
-            normalized_payload={"nucleo_code": "NV-CONCURRENT"},
+            normalized_payload={
+                "nucleo_code": "NV-CONCURRENT",
+                "nucleo_code_normalized": "NV-CONCURRENT",
+                "pastoral_zone_normalized": "catia_la_mar",
+                "location": None,
+                "parish_delegate": None,
+                "contact_phone": None,
+                "main_informant_role": None,
+                "communities_covered": "Comunidad concurrente",
+                "estimated_households": 20,
+                "access_difficulties": "no",
+                "access_difficulties_notes": None,
+                "initial_priority_perception": "medium",
+                "general_notes": None,
+            },
             normalized_at=timezone.now(),
             processed_at=timezone.now(),
             status=KoboSubmission.Status.APPROVED_FOR_IMPORT,
             routing_status=KoboSubmission.RoutingStatus.RESOLVED,
+            pastoral_zone="catia_la_mar",
+            parish="Parroquia concurrente",
+            primary_community="Sector concurrente",
+            nucleo_code_original="NV-CONCURRENT",
+            nucleo_code_normalized="NV-CONCURRENT",
+        )
+        self.identity = KoboTerritorialIdentity.objects.create(
+            nucleo_code_original="NV-CONCURRENT",
+            nucleo_code_normalized="NV-CONCURRENT",
+            pastoral_zone="catia_la_mar",
+            project=self.project,
+            source_submission=self.submission,
         )
 
     def test_two_workers_materialize_once(self):
         barrier = Barrier(2)
-        calls_lock = Lock()
-        calls = []
-
-        @dataclass(frozen=True)
-        class ConcurrentHandler:
-            form_type: KoboFormType = KoboFormType.FICHA_1
-
-            def validate_for_import(self, *, submission):
-                return ()
-
-            def materialize(self, *, submission, actor):
-                with calls_lock:
-                    calls.append(submission.pk)
-                return KoboMaterializationResult(
-                    materialization_type="test_project_reference",
-                    target_app_label="operations",
-                    target_model="project",
-                    target_object_id=submission.project_id,
-                    created=False,
-                )
-
-        registry = {KoboFormType.FICHA_1: ConcurrentHandler()}
         results = Queue()
 
         def worker():
@@ -488,13 +497,7 @@ class KoboImportConcurrencyTests(TransactionTestCase):
                 actor = get_user_model().objects.get(pk=self.importer.pk)
                 candidate = KoboSubmission.objects.get(pk=self.submission.pk)
                 barrier.wait(timeout=10)
-                results.put(
-                    _import_kobo_submission_with_handlers(
-                        candidate,
-                        actor=actor,
-                        handler_registry=registry,
-                    )
-                )
+                results.put(import_kobo_submission(candidate, actor=actor))
             finally:
                 connections.close_all()
 
@@ -510,10 +513,21 @@ class KoboImportConcurrencyTests(TransactionTestCase):
             outcomes,
             [ImportOutcome.IMPORTED, ImportOutcome.ALREADY_IMPORTED],
         )
-        self.assertEqual(calls, [self.submission.pk])
+        self.assertEqual(KoboTerritorialProfile.objects.count(), 1)
         self.assertEqual(KoboImportRecord.objects.count(), 1)
         self.assertEqual(self.submission.status, KoboSubmission.Status.IMPORTED)
+        self.identity.refresh_from_db()
+        self.assertEqual(
+            self.identity.status,
+            KoboTerritorialIdentity.Status.ACTIVE,
+        )
         self.assertEqual(
             self.submission.processing_events.filter(code="imported").count(),
+            1,
+        )
+        self.assertEqual(
+            self.submission.processing_events.filter(
+                code="territorial_profile_created"
+            ).count(),
             1,
         )

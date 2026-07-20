@@ -11,6 +11,7 @@ from apps.integrations.kobo.models import (
     KoboSubmission,
     KoboTerritorialIdentity,
     KoboTerritorialIdentityConflict,
+    KoboTerritorialProfile,
 )
 
 
@@ -147,6 +148,64 @@ class KoboTerritorialIdentityConflictAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         # PRE: request is an authenticated admin request.
         # POST: prevents creating conflicts outside a future idempotent routing service.
+        return False
+
+
+@admin.register(KoboTerritorialProfile)
+class KoboTerritorialProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        "territorial_identity",
+        "parish",
+        "community_sector",
+        "project",
+        "created_at",
+    )
+    list_filter = (
+        "territorial_identity__pastoral_zone",
+        "project",
+        "created_at",
+    )
+    search_fields = (
+        "territorial_identity__nucleo_code_normalized",
+        "parish",
+        "community_sector",
+    )
+    readonly_fields = (
+        "territorial_identity",
+        "project",
+        "source_submission",
+        "parish",
+        "community_sector",
+        "location",
+        "parish_delegate",
+        "contact_phone",
+        "main_informant_role",
+        "communities_covered",
+        "estimated_households",
+        "access_difficulties",
+        "access_difficulties_notes",
+        "initial_priority_perception",
+        "general_notes",
+        "created_by",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        # PRE: request targets the territorial profile administration.
+        # POST: prevents creating profiles outside the transactional import service.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # PRE: request targets an immutable imported territorial profile.
+        # POST: permits safe viewing while rejecting every admin mutation request.
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return super().has_change_permission(request, obj)
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # PRE: request targets imported territorial evidence.
+        # POST: always preserves the immutable profile and its traceability.
         return False
 
 

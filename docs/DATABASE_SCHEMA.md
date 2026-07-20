@@ -121,14 +121,21 @@ operations_project ──< operations_projectdocument             │
 
 operations_project
         ├──< kobo_koboprojectbinding >── kobo_koboasset
-        └──< kobo_kobosubmission
+        ├──< kobo_kobosubmission
+        ├──< kobo_koboterritorialidentity
+        └──< kobo_koboterritorialprofile
 
 kobo_koboformdefinition
         ├──< kobo_koboasset
         └──< kobo_kobosubmission
                     │
                     ├──< kobo_koboattachment
-                    └──< kobo_koboprocessingevent
+                    ├──< kobo_koboprocessingevent
+                    ├──1 kobo_koboimportrecord
+                    └──1 kobo_koboterritorialprofile >── kobo_koboterritorialidentity
+
+kobo_koboterritorialidentity
+        └──< kobo_koboterritorialprofile
 
 kobo_ficha01territorio
         └──< kobo_ficha01coveredcommunity
@@ -861,6 +868,7 @@ Registra eventos técnicos del pipeline Kobo.
 | `level`         | `CharField`     | Obligatorio                        |
 | `code`          | `CharField`     | Opcional                           |
 | `message`       | `TextField`     | Obligatorio                        |
+| `metadata`      | `JSONField`     | Objeto, sin datos sensibles        |
 | `created_at`    | `DateTimeField` | Automático                         |
 
 No sustituye a `operations_auditlog`.
@@ -875,7 +883,60 @@ AuditLog
 
 ---
 
-### 6.8. `kobo_ficha01territorio`
+### 6.8. `kobo_koboterritorialidentity`
+
+Mantiene el código de núcleo normalizado único, la zona pastoral canónica, el
+proyecto protegido, la submission fuente de Ficha 1 y su estado administrativo.
+Routing crea o confirma esta fila; la importación no la duplica.
+
+---
+
+### 6.9. `kobo_koboimportrecord`
+
+Registra una sola importación completada por submission mediante `OneToOneField`
+y conserva `handler_type`, `target_app_label`, `target_model`,
+`target_object_id`, creador, fecha y metadata segura del resultado.
+
+---
+
+### 6.10. `kobo_koboterritorialprofile`
+
+Representa una versión inmutable del perfil territorial aprobado de una Ficha 1.
+
+| Columna                       | Tipo lógico            | Reglas                                      |
+| ----------------------------- | ---------------------- | ------------------------------------------- |
+| `territorial_identity_id`     | `ForeignKey`           | `PROTECT`, identidad canónica               |
+| `project_id`                  | `ForeignKey`           | `PROTECT`, proyecto coherente                |
+| `source_submission_id`        | `OneToOneField`        | `PROTECT`, una submission por perfil         |
+| `parish`                      | `CharField`            | Obligatorio                                  |
+| `community_sector`            | `CharField`            | Obligatorio                                  |
+| `location`                    | `JSONField`            | Opcional, coordenadas canónicas validadas    |
+| `parish_delegate`             | `CharField`            | Opcional                                     |
+| `contact_phone`               | `CharField`            | Opcional, privado                            |
+| `main_informant_role`         | `CharField`            | Opcional                                     |
+| `communities_covered`         | `TextField`            | Texto libre normalizado                      |
+| `estimated_households`        | `PositiveIntegerField` | Opcional, no negativo                        |
+| `access_difficulties`         | `CharField`            | `yes`, `no` o `unknown`                      |
+| `access_difficulties_notes`   | `TextField`            | Opcional                                     |
+| `initial_priority_perception` | `CharField`            | Catálogo cerrado                             |
+| `general_notes`               | `TextField`            | Opcional                                     |
+| `created_by_id`               | `ForeignKey`           | `PROTECT`                                    |
+| `created_at`                  | `DateTimeField`        | Automático                                   |
+| `updated_at`                  | `DateTimeField`        | Automático                                   |
+
+Relaciones:
+
+```text
+KoboTerritorialIdentity 1 ──< KoboTerritorialProfile
+KoboSubmission 1 ── 1 KoboTerritorialProfile
+```
+
+No existe backfill automático: la migración crea el esquema y las importaciones
+históricas requieren un proceso explícito posterior.
+
+---
+
+### 6.11. `kobo_ficha01territorio`
 
 Tabla heredada de la primera integración de la Ficha 1.
 
@@ -905,7 +966,7 @@ no debe recibir nuevas escrituras sin una decisión arquitectónica explícita.
 
 ---
 
-### 6.9. `kobo_ficha01coveredcommunity`
+### 6.12. `kobo_ficha01coveredcommunity`
 
 Representa las comunidades cubiertas dentro de la Ficha 1 heredada.
 
@@ -1046,6 +1107,8 @@ Restricciones explícitas vigentes:
 | `kobo_koboprojectbinding`   | Un binding directo por activo           |
 | `kobo_koboprojectbinding`   | Ruta por campo no duplicada             |
 | `kobo_kobosubmission`       | Submission externa única por formulario |
+| `kobo_koboimportrecord`     | Una fila por submission y target positivo |
+| `kobo_koboterritorialprofile` | Una fila por submission, catálogos y hogares válidos |
 
 Además, Django y PostgreSQL crean índices automáticos para:
 
@@ -1177,9 +1240,14 @@ kobo_koboasset
 kobo_koboattachment
 kobo_kobodiscoveredasset
 kobo_koboformdefinition
+kobo_koboimportrecord
+kobo_kobopastoralzoneprojectmapping
 kobo_koboprocessingevent
 kobo_koboprojectbinding
 kobo_kobosubmission
+kobo_koboterritorialidentity
+kobo_koboterritorialidentityconflict
+kobo_koboterritorialprofile
 operations_auditlog
 operations_donation
 operations_expense

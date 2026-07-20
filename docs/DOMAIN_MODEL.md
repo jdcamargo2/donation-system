@@ -375,7 +375,35 @@ Responsabilidades:
 * soportar rechazo, restauración e importación;
 * evitar la pérdida de información original.
 
-### 14.6. `KoboAttachment`
+### 14.6. `KoboTerritorialIdentity`
+
+Representa el código territorial canónico, su zona pastoral y su proyecto. El
+routing de Ficha 1 crea o confirma esta identidad; la importación no crea una
+segunda identidad ni cambia su asignación territorial.
+
+### 14.7. `KoboTerritorialProfile`
+
+Representa el diagnóstico aprobado e inmutable materializado desde una Ficha 1.
+Cada submission puede originar un solo perfil, mientras una identidad puede
+tener varios perfiles históricos. El perfil vigente se deriva por fecha y no se
+guarda como puntero redundante.
+
+```text
+KoboTerritorialIdentity 1 ──< KoboTerritorialProfile
+Project 1 ──< KoboTerritorialProfile
+KoboSubmission 1 ── 1 KoboTerritorialProfile
+KoboImportRecord 1 ── referencia lógica ──> KoboTerritorialProfile
+```
+
+El perfil conserva la ubicación canónica como JSON validado y los campos
+revisados del payload normalizado, pero no duplica código ni zona pastoral.
+
+### 14.8. `KoboImportRecord`
+
+Registra el resultado único de una importación completada y apunta lógicamente
+a la entidad materializada sin introducir una relación genérica en la submission.
+
+### 14.9. `KoboAttachment`
 
 Representa un archivo adjunto descargado desde Kobo.
 
@@ -387,7 +415,7 @@ Reglas:
 * su descarga debe estar protegida;
 * no se publica automáticamente en el portal público.
 
-### 14.7. `KoboProcessingEvent`
+### 14.10. `KoboProcessingEvent`
 
 Representa un evento técnico ocurrido durante el procesamiento de una submission.
 
@@ -396,7 +424,8 @@ Responsabilidades:
 * registrar etapas del pipeline;
 * conservar errores y resultados técnicos;
 * apoyar la trazabilidad de la integración;
-* permitir el diagnóstico de fallos.
+* permitir el diagnóstico de fallos;
+* conservar metadata estructurada limitada a identificadores no sensibles.
 
 `KoboProcessingEvent` no sustituye a `AuditLog`.
 

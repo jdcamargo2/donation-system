@@ -174,6 +174,11 @@ contrato vigente esos estados describen revisión administrativa de la identidad
 y no revocan su asociación territorial; bloquearlos requeriría una transición y
 una política de negocio nuevas.
 
+La materialización aplica una política más restrictiva que el routing: una
+identidad `INACTIVE` no admite nuevos perfiles, `OBSERVED` conserva ese estado y
+`PENDING_REVIEW` pasa a `ACTIVE` únicamente después de importar exitosamente una
+Ficha 1 aprobada y sin conflictos abiertos.
+
 La recepción ordinaria conserva first-write-wins: un webhook repetido no
 reemplaza el payload ni la normalización existentes. Si una modificación técnica
 posterior cambia el código de una submission ya resuelta hacia otra identidad o
@@ -417,7 +422,7 @@ Cuando una submission se importa:
 4. el handler materializa su entidad dentro de la misma transacción;
 5. se crea un único `KoboImportRecord` con el tipo de handler y la referencia
    lógica mínima al resultado, sin payload ni datos sensibles;
-6. solo entonces se asignan `IMPORTED` e `imported_at`;
+6. solo entonces se asignan `IMPORTED`, `processed_at` e `imported_at`;
 7. se registran una vez el evento técnico y la auditoría funcional.
 
 `KoboImportRecord` usa una relación `OneToOne` con la submission en lugar de una
@@ -428,7 +433,21 @@ referencia auditable mediante `target_app_label`, `target_model` y
 estado de una tabla y la existencia de una fila en otra; por ello el servicio
 transaccional es la frontera que establece `IMPORTED`.
 
-En esta fase los handlers de Ficha 1, 10 y 11 son stubs controlados. Devuelven
+El handler de Ficha 1 crea un `KoboTerritorialProfile` inmutable por submission.
+La relación es histórica:
+
+```text
+KoboTerritorialIdentity 1 ──< KoboTerritorialProfile
+KoboSubmission 1 ── 1 KoboTerritorialProfile
+```
+
+No se copian el código ni la zona al perfil: se consultan en la identidad
+canónica. `location` conserva el objeto normalizado con latitud, longitud,
+altitud y precisión; `communities_covered` conserva el texto libre confirmado
+por el XLSForm, y `access_difficulties` usa el catálogo cerrado
+`yes/no/unknown`. El handler nunca reinterpreta `raw_payload`.
+
+Los handlers de Ficha 10 y 11 siguen siendo stubs controlados. Devuelven
 `MATERIALIZATION_NOT_IMPLEMENTED`, no crean `KoboImportRecord` y nunca marcan
 `IMPORTED`. Las advertencias `PRIORITY_TOTAL_MISMATCH` y
 `SUGGESTED_SEMAPHORE_MISMATCH` de Ficha 11 se entregan al handler y permanecen
@@ -440,6 +459,10 @@ evento y auditoría de éxito. Después se registra, cuando la base de datos lo
 permite, un error seguro fuera de la transacción y la submission queda
 reintentable. Un reintento de una importación completada devuelve
 `ALREADY_IMPORTED` con la referencia original, sin repetir efectos.
+
+Si existe un perfil para la submission pero falta su import record, el sistema
+considera el estado corrupto, responde `FICHA_1_PROFILE_STATE_CONFLICT` y no crea
+un segundo perfil ni intenta una reparación implícita.
 
 Las filas históricas que ya estaban en `IMPORTED` antes de esta migración no se
 rellenan con referencias ficticias. Un reintento sigue siendo idempotente y

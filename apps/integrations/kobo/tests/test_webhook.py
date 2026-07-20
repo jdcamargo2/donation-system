@@ -9,11 +9,13 @@ from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_VERSION
 from apps.integrations.kobo.models import KoboAsset
 from apps.integrations.kobo.models import KoboDiscoveredAsset
 from apps.integrations.kobo.models import KoboFormDefinition
+from apps.integrations.kobo.models import KoboImportRecord
 from apps.integrations.kobo.models import KoboProcessingEvent
 from apps.integrations.kobo.models import KoboProjectBinding
 from apps.integrations.kobo.models import KoboPastoralZoneProjectMapping
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.models import KoboTerritorialIdentity
+from apps.integrations.kobo.models import KoboTerritorialProfile
 from apps.integrations.kobo.services import associate_submission_with_project
 from apps.integrations.kobo.services import receive_webhook_submission
 from apps.integrations.kobo.tests.test_contracts import KoboFicha01NormalizerTests
@@ -332,15 +334,25 @@ class KoboWebhookTests(TestCase):
         submission.refresh_from_db()
 
         self.assertEqual(response.status_code, 201)
-        self.assertFalse(result.associated)
+        self.assertTrue(result.associated)
         self.assertEqual(submission.project, project)
         self.assertEqual(
             submission.status,
-            KoboSubmission.Status.APPROVED_FOR_IMPORT,
+            KoboSubmission.Status.IMPORTED,
         )
-        self.assertIsNone(submission.imported_at)
-        self.assertIsNone(submission.processed_at)
-        self.assertEqual(submission.error_code, "MATERIALIZATION_NOT_IMPLEMENTED")
+        self.assertIsNotNone(submission.imported_at)
+        self.assertEqual(submission.processed_at, submission.imported_at)
+        profile = KoboTerritorialProfile.objects.get(source_submission=submission)
+        self.assertEqual(profile.project, project)
+        self.assertEqual(profile.territorial_identity.project, project)
+        self.assertEqual(
+            profile.territorial_identity.status,
+            KoboTerritorialIdentity.Status.ACTIVE,
+        )
+        self.assertEqual(
+            KoboImportRecord.objects.get(submission=submission).target_object_id,
+            profile.pk,
+        )
 
     def test_basic_authentication_rejects_invalid_or_malformed_credentials(self):
         url = reverse("kobo:webhook_submission")

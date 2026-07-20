@@ -422,7 +422,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             1,
         )
 
-    def test_supported_stub_handlers_never_mark_imported(self):
+    def test_ficha_10_and_11_stub_handlers_never_mark_imported(self):
         microproject_pending = KoboSubmission.objects.create(
             form_definition=self.microproject_form_definition,
             asset=self.microproject_asset,
@@ -447,10 +447,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             processed_at=django_timezone.now(),
             routing_status=KoboSubmission.RoutingStatus.RESOLVED,
         )
-        self.ready.status = KoboSubmission.Status.APPROVED_FOR_IMPORT
-        self.ready.save(update_fields=("status",))
-
-        for submission in (self.ready, microproject_pending, prioritization_pending):
+        for submission in (microproject_pending, prioritization_pending):
             with self.subTest(submission=submission.external_id):
                 result = import_kobo_submission(submission, actor=self.reviewer)
                 submission.refresh_from_db()
@@ -468,18 +465,18 @@ class KoboProjectImportedSubmissionsTests(TestCase):
                     ).exists()
                 )
 
-        repeated = import_kobo_submission(self.ready, actor=self.reviewer)
+        repeated = import_kobo_submission(microproject_pending, actor=self.reviewer)
         self.assertFalse(repeated.imported)
         self.assertFalse(repeated.already_imported)
         self.assertEqual(
             AuditLog.objects.filter(
-                entity_id=str(self.ready.pk),
+                entity_id=str(microproject_pending.pk),
                 action=AuditLog.Action.CREATED,
                 user=self.reviewer,
             ).count(),
             0,
         )
-        self.assertEqual(self.ready.processing_events.count(), 1)
+        self.assertEqual(microproject_pending.processing_events.count(), 1)
 
     def test_pending_territorial_submission_is_not_importable_or_in_project_queue(self):
         pending = KoboSubmission.objects.create(

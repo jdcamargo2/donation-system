@@ -475,12 +475,15 @@ def _import_kobo_submission_with_handlers(
             imported_at = timezone.now()
             locked_submission.status = KoboSubmission.Status.IMPORTED
             locked_submission.imported_at = imported_at
+            if locked_submission.processed_at is None:
+                locked_submission.processed_at = imported_at
             locked_submission.error_code = ""
             locked_submission.error_message = ""
             locked_submission.save(
                 update_fields=(
                     "status",
                     "imported_at",
+                    "processed_at",
                     "error_code",
                     "error_message",
                 )
@@ -509,6 +512,8 @@ def _import_kobo_submission_with_handlers(
 
     submission.status = KoboSubmission.Status.IMPORTED
     submission.imported_at = imported_at
+    if submission.processed_at is None:
+        submission.processed_at = imported_at
     submission.error_code = ""
     submission.error_message = ""
     return KoboImportResult(
