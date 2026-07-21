@@ -1,11 +1,23 @@
-from apps.integrations.kobo.models import KoboAttachment
-from apps.integrations.kobo.models import KoboFormDefinition
-from apps.integrations.kobo.models import KoboSubmission
 from datetime import date
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.test import TestCase
 from django.urls import reverse
+
+from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
+from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
+from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID, FICHA_11_VERSION
+from apps.integrations.kobo.models import KoboAttachment
+from apps.integrations.kobo.models import KoboFormDefinition
+from apps.integrations.kobo.models import KoboProcessingEvent
+from apps.integrations.kobo.models import KoboSubmission
+from apps.integrations.kobo.submission_presentation import (
+    choice_value_label,
+    present_processing_events,
+    present_submission_fields,
+    submission_status_label,
+)
 
 
 class KoboReviewPanelTests(TestCase):
@@ -29,9 +41,19 @@ class KoboReviewPanelTests(TestCase):
         cls.viewer.user_permissions.add(view_permission)
         cls.reviewer.user_permissions.add(view_permission, change_permission)
         cls.form_definition = KoboFormDefinition.objects.create(
-            form_id="ficha_01_territorio",
+            form_id=FICHA_01_FORM_ID,
             title="Ficha 01 - Territorio",
-            version="20260710",
+            version=FICHA_01_VERSION,
+        )
+        cls.ficha_10 = KoboFormDefinition.objects.create(
+            form_id=FICHA_10_FORM_ID,
+            title="Ficha 10",
+            version=FICHA_10_VERSION,
+        )
+        cls.ficha_11 = KoboFormDefinition.objects.create(
+            form_id=FICHA_11_FORM_ID,
+            title="Ficha 11",
+            version=FICHA_11_VERSION,
         )
 
     def setUp(self):
@@ -48,9 +70,14 @@ class KoboReviewPanelTests(TestCase):
                 "contact_phone": "+58-secret-phone",
                 "main_informant_role": "Sensitive Informant Role",
                 "nucleo_code": "NV-001",
+                "communities_covered": "Sector Norte",
+                "estimated_households": 12,
+                "access_difficulties": "yes",
+                "initial_priority_perception": "high",
+                "general_notes": "Notas del territorio",
             },
             status=KoboSubmission.Status.READY_FOR_REVIEW,
-            pastoral_zone="zone-one",
+            pastoral_zone="centro",
             parish="parish-one",
             primary_community="community-one",
             assessment_date=date(2026, 7, 11),
@@ -65,6 +92,20 @@ class KoboReviewPanelTests(TestCase):
             privacy_level=KoboAttachment.PrivacyLevel.INTERNAL_REVIEW,
             status=KoboAttachment.Status.DOWNLOADED,
             file="kobo-safe-attachment.jpg",
+        )
+        KoboProcessingEvent.objects.create(
+            submission=self.submission,
+            stage="webhook",
+            level=KoboProcessingEvent.Level.INFO,
+            code="webhook_received",
+            message="Kobo webhook submission received.",
+        )
+        KoboProcessingEvent.objects.create(
+            submission=self.submission,
+            stage="normalization",
+            level=KoboProcessingEvent.Level.INFO,
+            code="normalized",
+            message="Submission normalized and ready for review.",
         )
         self.list_url = reverse("kobo:submission_list")
         self.detail_url = reverse(
@@ -100,31 +141,180 @@ class KoboReviewPanelTests(TestCase):
         self.assertNotContains(response, "private-device-id")
         self.assertContains(response, "parish-one")
 
-    def test_detail_separates_sensitive_data(self):
+    def test_detail_uses_operator_language_and_status_labels(self):
         self.client.force_login(self.viewer)
 
         response = self.client.get(self.detail_url)
 
-        self.assertContains(response, "Datos internos sensibles")
+        self.assertContains(response, "Revisión de formulario")
+        self.assertContains(response, "Ficha 1 · Registro territorial")
+        self.assertContains(response, "Pendiente de revisión")
+        self.assertNotContains(response, "Submission #")
+        self.assertNotContains(response, "READY_FOR_REVIEW")
+        self.assertNotContains(response, "Ready for review")
+        self.assertEqual(
+            submission_status_label(KoboSubmission.Status.APPROVED_FOR_IMPORT),
+            "Aprobado para importar",
+        )
+        self.assertEqual(
+            submission_status_label(KoboSubmission.Status.PROCESSING_FAILED),
+            "Error de procesamiento",
+        )
+
+    def test_detail_shows_contact_and_hides_technical_from_viewer(self):
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(self.detail_url)
+
+        self.assertContains(response, "Datos de contacto")
         self.assertContains(response, "Sensitive Delegate")
         self.assertContains(response, "Sensitive Informant Role")
         self.assertContains(response, "+58-secret-phone")
-        self.assertContains(response, "internal-submitter")
-        self.assertContains(response, "private-device-id")
+        self.assertNotContains(response, "Información técnica")
+        self.assertNotContains(response, "raw-secret-marker")
+        self.assertNotContains(response, "private-device-id")
+        self.assertNotContains(response, "internal-submitter")
         self.assertContains(response, "NV-001")
+        self.assertContains(response, "Comunidades cubiertas")
+        self.assertNotContains(response, "parish_delegate")
+        self.assertNotContains(response, "nucleo_code_normalized")
 
-    def test_raw_payload_requires_existing_elevated_permission(self):
-        self.client.force_login(self.viewer)
-        viewer_response = self.client.get(self.detail_url)
-
-        self.assertNotContains(viewer_response, "Raw payload")
-        self.assertNotContains(viewer_response, "raw-secret-marker")
-
+    def test_technical_information_is_collapsible_for_reviewer(self):
         self.client.force_login(self.reviewer)
-        reviewer_response = self.client.get(self.detail_url)
+        response = self.client.get(self.detail_url)
 
-        self.assertContains(reviewer_response, "Raw payload")
-        self.assertContains(reviewer_response, "raw-secret-marker")
+        self.assertContains(response, "<details")
+        self.assertContains(response, "Información técnica")
+        self.assertContains(response, "Identificador externo")
+        self.assertContains(response, "Payload crudo")
+        self.assertContains(response, "raw-secret-marker")
+        self.assertContains(response, "private-device-id")
+        self.assertNotContains(response, "Raw payload (solo lectura)")
+
+    def test_history_and_review_actions_are_operator_facing(self):
+        self.client.force_login(self.reviewer)
+        response = self.client.get(self.detail_url)
+
+        self.assertContains(response, "Formulario recibido desde KoboToolbox")
+        self.assertContains(response, "Información procesada correctamente")
+        self.assertNotContains(response, "webhook / webhook_received")
+        self.assertNotContains(response, "normalization / normalized")
+        self.assertContains(response, "Aprobar e importar")
+        self.assertContains(response, "Solicitar corrección")
+        self.assertContains(response, "Rechazar formulario")
+        self.assertNotContains(response, "Registrar decisión")
+        self.assertNotContains(response, "Reintentar normalización")
+        self.assertNotContains(response, "Herramientas técnicas")
+
+    def test_technical_tools_appear_only_when_pertinent(self):
+        self.client.force_login(self.reviewer)
+        ready = self.client.get(self.detail_url)
+        self.assertNotContains(ready, "Herramientas técnicas")
+
+        self.submission.status = KoboSubmission.Status.PROCESSING_FAILED
+        self.submission.save(update_fields=("status",))
+        failed = self.client.get(self.detail_url)
+        self.assertContains(failed, "Herramientas técnicas")
+        self.assertContains(failed, "Reintentar procesamiento")
+
+        self.attachment.status = KoboAttachment.Status.FAILED
+        self.attachment.save(update_fields=("status",))
+        with_attachments = self.client.get(self.detail_url)
+        self.assertContains(with_attachments, "Reintentar adjuntos")
+
+    def test_empty_states_avoid_huge_empty_cards(self):
+        self.attachment.delete()
+        self.submission.normalized_payload = {
+            "nucleo_code": "NV-001",
+            "communities_covered": "Sector Norte",
+            "estimated_households": 12,
+            "access_difficulties": "no",
+            "initial_priority_perception": "low",
+        }
+        self.submission.save(update_fields=("normalized_payload",))
+        self.client.force_login(self.viewer)
+        response = self.client.get(self.detail_url)
+
+        self.assertContains(response, "No hay datos de contacto registrados.")
+        self.assertNotContains(response, "Datos de contacto</h2>")
+        self.assertNotContains(response, "<th scope=\"col\">Archivo</th>")
+        self.assertContains(response, "Sin proyecto asociado todavía.")
+
+    def test_ficha_field_labels_and_value_translations(self):
+        micro = KoboSubmission.objects.create(
+            form_definition=self.ficha_10,
+            external_id="micro-1",
+            raw_payload={"_uuid": "micro-1"},
+            normalized_payload={
+                "microproject_name": "Huertos",
+                "component": "livelihoods",
+                "problem_summary": "Falta de ingresos",
+                "specific_objective": "Crear empleo",
+                "beneficiary_group": ["women"],
+                "main_activities": "Capacitación",
+                "estimated_cost_range": "5000_15000",
+                "technical_viability": "low",
+                "implementation_urgency": "short_term",
+                "expected_result": "Ingresos estables",
+            },
+            status=KoboSubmission.Status.READY_FOR_REVIEW,
+        )
+        fields = {field.key: field for field in present_submission_fields(micro)}
+        self.assertEqual(fields["microproject_name"].label, "Nombre del microproyecto")
+        self.assertEqual(fields["component"].label, "Componente")
+        self.assertEqual(fields["component"].value, "Medios de vida")
+        self.assertEqual(fields["beneficiary_group"].value, "Mujeres")
+        self.assertEqual(fields["estimated_cost_range"].value, "Entre 5.000 y 15.000 USD")
+        self.assertEqual(fields["technical_viability"].value, "Baja")
+        self.assertEqual(fields["implementation_urgency"].value, "Corto plazo")
+        self.assertEqual(choice_value_label("women"), "Mujeres")
+
+        profile_fields = {
+            field.key: field for field in present_submission_fields(self.submission)
+        }
+        self.assertEqual(profile_fields["access_difficulties"].label, "Dificultades de acceso")
+        self.assertEqual(profile_fields["access_difficulties"].value, "Sí")
+
+        assessment = KoboSubmission.objects.create(
+            form_definition=self.ficha_11,
+            external_id="prio-1",
+            raw_payload={"_uuid": "prio-1"},
+            normalized_payload={
+                "nucleo_code": "NV-002",
+                "physical_damage_score": 4,
+                "final_priority": "high",
+                "final_semaphore": "red",
+                "priority_summary": "Priorizar intervención",
+            },
+            status=KoboSubmission.Status.READY_FOR_REVIEW,
+        )
+        assessment_fields = {
+            field.key: field for field in present_submission_fields(assessment)
+        }
+        self.assertEqual(
+            assessment_fields["physical_damage_score"].label,
+            "Nivel de daño físico",
+        )
+        self.assertEqual(assessment_fields["final_priority"].value, "Alta")
+        self.assertEqual(assessment_fields["final_semaphore"].value, "Rojo")
+
+        self.client.force_login(self.viewer)
+        response = self.client.get(
+            reverse("kobo:submission_detail", args=(micro.pk,))
+        )
+        self.assertContains(response, "Ficha 10 · Microproyecto priorizado")
+        self.assertContains(response, "Medios de vida")
+        self.assertContains(response, "Entre 5.000 y 15.000 USD")
+        self.assertNotContains(response, "microproject_name")
+        self.assertNotContains(response, ">livelihoods<")
+
+    def test_presented_events_hide_stage_code_headers(self):
+        events = present_processing_events(self.submission.processing_events.all())
+        titles = [event.title for event in events]
+        self.assertIn("Formulario recibido desde KoboToolbox", titles)
+        self.assertIn("Información procesada correctamente", titles)
+        for event in events:
+            self.assertNotIn(" / ", event.title)
 
     def test_approval_changes_status_and_creates_event(self):
         self.client.force_login(self.reviewer)
@@ -132,7 +322,7 @@ class KoboReviewPanelTests(TestCase):
         response = self.client.post(
             self.review_url,
             {
-                "decision": KoboSubmission.Status.APPROVED_FOR_IMPORT,
+                "review_intent": "approve",
                 "reason": "",
             },
         )
@@ -143,44 +333,68 @@ class KoboReviewPanelTests(TestCase):
             self.submission.status,
             KoboSubmission.Status.APPROVED_FOR_IMPORT,
         )
-        event = self.submission.processing_events.get()
-        self.assertEqual(event.stage, "review")
+        event = self.submission.processing_events.filter(stage="review").get()
         self.assertEqual(event.code, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+
+    def test_request_correction_requires_reason(self):
+        self.client.force_login(self.reviewer)
+
+        response = self.client.post(
+            self.review_url,
+            {"review_intent": "request_correction", "reason": "   "},
+        )
+        self.submission.refresh_from_db()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(
+            response,
+            "Indique el motivo para solicitar la corrección.",
+            status_code=400,
+        )
+        self.assertEqual(
+            self.submission.status,
+            KoboSubmission.Status.READY_FOR_REVIEW,
+        )
 
     def test_rejection_requires_reason(self):
         self.client.force_login(self.reviewer)
 
         response = self.client.post(
             self.review_url,
-            {"decision": KoboSubmission.Status.REJECTED, "reason": "   "},
+            {"review_intent": "reject", "reason": "   "},
         )
         self.submission.refresh_from_db()
 
         self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "La razón es obligatoria", status_code=400)
+        self.assertContains(response, "Indique el motivo del rechazo.", status_code=400)
         self.assertEqual(
             self.submission.status,
             KoboSubmission.Status.READY_FOR_REVIEW,
         )
-        self.assertFalse(self.submission.processing_events.exists())
+        self.assertFalse(
+            self.submission.processing_events.filter(stage="review").exists()
+        )
 
     def test_submission_cannot_be_reviewed_twice(self):
         self.client.force_login(self.reviewer)
         self.client.post(
             self.review_url,
             {
-                "decision": KoboSubmission.Status.APPROVED_FOR_IMPORT,
+                "review_intent": "approve",
                 "reason": "",
             },
         )
 
         second_response = self.client.post(
             self.review_url,
-            {"decision": KoboSubmission.Status.REJECTED, "reason": "Second"},
+            {"review_intent": "reject", "reason": "Second"},
         )
 
         self.assertEqual(second_response.status_code, 400)
-        self.assertEqual(self.submission.processing_events.count(), 1)
+        self.assertEqual(
+            self.submission.processing_events.filter(stage="review").count(),
+            1,
+        )
 
     def test_get_cannot_execute_review(self):
         self.client.force_login(self.reviewer)
@@ -203,3 +417,4 @@ class KoboReviewPanelTests(TestCase):
         self.assertNotContains(response, self.attachment.source_url)
         self.assertNotContains(response, "remote-personal-name.jpg")
         self.assertNotContains(response, "href=\"/media/")
+        self.assertContains(response, "csrfmiddlewaretoken")

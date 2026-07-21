@@ -164,7 +164,7 @@ def _build_next_actions(
                 "title": "Zonas sin configurar",
                 "description": f"{zone_names} todavía no tienen proyecto asociado.",
                 "count": len(missing_mappings),
-                "url": reverse("kobo:mapping_list") + f"?zone={first_zone}",
+                "url": reverse("kobo:mapping_list") + f"?zone={first_zone}#configurar-zona",
             }
         )
     if pending_review:
@@ -439,34 +439,92 @@ def sync_asset(request, pk, mode):
 
 @territorial_hub_access
 def mapping_list(request):
-    mappings = {
-        item.pastoral_zone: item
-        for item in KoboPastoralZoneProjectMapping.objects.filter(is_active=True).select_related("project")
-    }
-    identity_counts = dict(
-        KoboTerritorialIdentity.objects.values("pastoral_zone").annotate(total=Count("pk")).values_list("pastoral_zone", "total")
-    )
-    rows = [
-        {"zone": zone, "mapping": mappings.get(zone.value), "identity_count": identity_counts.get(zone.value, 0)}
-        for zone in PastoralZone
-    ]
     selected_zone = _parse_selected_zone(request.GET.get("zone"))
-    form_kwargs = {}
-    if selected_zone is not None:
-        form_kwargs["initial"] = {"pastoral_zone": selected_zone.value}
+    change_zone = _parse_selected_zone(request.GET.get("change"))
     return render(
         request,
         "kobo/hub/mapping_list.html",
-        {
-            "rows": rows,
-            "form": PastoralZoneProjectMappingForm(**form_kwargs),
-            "selected_zone": selected_zone,
-            "selected_zone_label": pastoral_zone_label(selected_zone) if selected_zone else "",
-            "can_manage": request.user.has_perm("kobo.manage_pastoral_zone_mappings"),
-            "hub_nav": "mappings",
-            "missing_count": sum(1 for row in rows if row["mapping"] is None),
-        },
+        _mapping_list_context(
+            request,
+            selected_zone=selected_zone,
+            change_zone=change_zone,
+        ),
     )
+
+
+def _mapping_list_context(
+    request,
+    *,
+    form=None,
+    selected_zone=None,
+    change_zone=None,
+):
+    # PRE: optional form/zones come from GET preselection or POST validation recovery.
+    # POST: returns the assignment screen context without mutating mappings.
+    mappings = {
+        item.pastoral_zone: item
+        for item in KoboPastoralZoneProjectMapping.objects.filter(is_active=True).select_related(
+            "project"
+        )
+    }
+    identity_counts = dict(
+        KoboTerritorialIdentity.objects.values("pastoral_zone")
+        .annotate(total=Count("pk"))
+        .values_list("pastoral_zone", "total")
+    )
+    rows = [
+        {
+            "zone": zone,
+            "mapping": mappings.get(zone.value),
+            "identity_count": identity_counts.get(zone.value, 0),
+        }
+        for zone in PastoralZone
+    ]
+    change_mapping = None
+    if change_zone is not None:
+        change_mapping = mappings.get(change_zone.value)
+        if change_mapping is None:
+            change_zone = None
+    focus_project = selected_zone is not None or (
+        form is not None and form.is_bound and not form.is_valid()
+    )
+    if form is None:
+        form_kwargs = {"focus_project": focus_project}
+        if selected_zone is not None:
+            form_kwargs["initial"] = {"pastoral_zone": selected_zone.value}
+        form = PastoralZoneProjectMappingForm(**form_kwargs)
+    change_form = None
+    if change_zone is not None and change_mapping is not None:
+        change_form = PastoralZoneProjectMappingForm(
+            initial={
+                "pastoral_zone": change_zone.value,
+                "project": change_mapping.project_id,
+            },
+            focus_project=True,
+        )
+    return {
+        "rows": rows,
+        "form": form,
+        "selected_zone": selected_zone,
+        "selected_zone_label": pastoral_zone_label(selected_zone) if selected_zone else "",
+        "change_zone": change_zone,
+        "change_zone_label": pastoral_zone_label(change_zone) if change_zone else "",
+        "change_mapping": change_mapping,
+        "change_form": change_form,
+        "change_explanation": (
+            (
+                f"La zona {pastoral_zone_label(change_zone)} dejará de asociar nuevos "
+                f"formularios al proyecto {change_mapping.project.name}. "
+                "Los formularios ya importados no serán modificados."
+            )
+            if change_zone is not None and change_mapping is not None
+            else ""
+        ),
+        "reason_form": TerritorialReasonForm(),
+        "can_manage": request.user.has_perm("kobo.manage_pastoral_zone_mappings"),
+        "hub_nav": "mappings",
+        "missing_count": sum(1 for row in rows if row["mapping"] is None),
+    }
 
 
 @territorial_hub_access
@@ -475,14 +533,20 @@ def configure_mapping(request):
     if not request.user.has_perm("kobo.manage_pastoral_zone_mappings"):
         from django.core.exceptions import PermissionDenied
         raise PermissionDenied
-    form = PastoralZoneProjectMappingForm(request.POST)
+    form = PastoralZoneProjectMappingForm(request.POST, focus_project=True)
     if form.is_valid():
         result = configure_pastoral_zone_project_mapping(actor=request.user, **form.cleaned_data)
         message, level = _message_for_result(result, "Asignación guardada.")
         messages.add_message(request, level, message)
-    else:
-        messages.error(request, "Revise los datos de la asignación.")
-    return redirect("kobo:mapping_list")
+        return redirect("kobo:mapping_list")
+    selected_zone = _parse_selected_zone(request.POST.get("pastoral_zone"))
+    messages.error(request, "Revise los datos de la asignación.")
+    return render(
+        request,
+        "kobo/hub/mapping_list.html",
+        _mapping_list_context(request, form=form, selected_zone=selected_zone),
+        status=400,
+    )
 
 
 @territorial_hub_access
@@ -493,11 +557,15 @@ def deactivate_mapping(request, zone):
         raise PermissionDenied
     form = TerritorialReasonForm(request.POST)
     if form.is_valid():
-        result = deactivate_pastoral_zone_project_mapping(pastoral_zone=zone, actor=request.user, reason=form.cleaned_data["reason"])
-        message, level = _message_for_result(result, "Asignación desactivada.")
+        result = deactivate_pastoral_zone_project_mapping(
+            pastoral_zone=zone,
+            actor=request.user,
+            reason=form.cleaned_data["reason"],
+        )
+        message, level = _message_for_result(result, "Asignación quitada.")
         messages.add_message(request, level, message)
     else:
-        messages.error(request, "Debe indicar el motivo de desactivación.")
+        messages.error(request, "Debe indicar el motivo para quitar la asignación.")
     return redirect("kobo:mapping_list")
 
 

@@ -225,11 +225,18 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
 
     def test_configure_buttons_preselect_each_pastoral_zone(self):
         mapping = self.client.get(reverse("kobo:mapping_list"))
-        for zone in PastoralZone:
+        focused_zones = (
+            PastoralZone.CENTRO,
+            PastoralZone.ESTE,
+            PastoralZone.MONTANA,
+            PastoralZone.INSULAR,
+            PastoralZone.CATIA_LA_MAR,
+        )
+        for zone in focused_zones:
             with self.subTest(zone=zone.value):
                 self.assertContains(
                     mapping,
-                    'href="%s?zone=%s#configure-zone"'
+                    'href="%s?zone=%s#configurar-zona"'
                     % (reverse("kobo:mapping_list"), zone.value),
                 )
                 response = self.client.get(
@@ -242,9 +249,14 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
                     response,
                     "Configurar zona: %s" % pastoral_zone_label(zone),
                 )
+                self.assertContains(response, 'id="configurar-zona"')
                 self.assertEqual(
                     response.context["form"]["pastoral_zone"].value(),
                     zone.value,
+                )
+                self.assertIn(
+                    "autofocus",
+                    response.context["form"]["project"].field.widget.attrs,
                 )
                 before = KoboPastoralZoneProjectMapping.objects.count()
                 self.assertEqual(
@@ -256,6 +268,106 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
         self.assertIsNone(invalid.context["selected_zone"])
         self.assertContains(invalid, "Configurar zona")
         self.assertNotContains(invalid, "Configurar zona:")
+
+    def test_configure_requires_permission_and_never_saves_on_get(self):
+        before = KoboPastoralZoneProjectMapping.objects.count()
+        get_response = self.client.get(
+            reverse("kobo:mapping_list"),
+            {"zone": PastoralZone.CENTRO.value},
+        )
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(KoboPastoralZoneProjectMapping.objects.count(), before)
+
+        user = get_user_model().objects.create_user("hub-mapping-reader")
+        from django.contrib.auth.models import Permission
+
+        user.user_permissions.add(
+            Permission.objects.get(codename="view_territorial_administration")
+        )
+        self.client.force_login(user)
+        forbidden = self.client.post(
+            reverse("kobo:configure_mapping"),
+            {"pastoral_zone": "centro", "project": self.project.pk},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(KoboPastoralZoneProjectMapping.objects.count(), before)
+
+    def test_mapping_change_and_remove_use_operator_language(self):
+        KoboPastoralZoneProjectMapping.objects.create(
+            pastoral_zone="centro",
+            project=self.project,
+            is_active=True,
+        )
+        listing = self.client.get(reverse("kobo:mapping_list"))
+        self.assertContains(listing, "Cambiar asignación")
+        self.assertNotContains(listing, "Motivo de desactivación")
+        self.assertNotContains(listing, "Confirmar desactivación")
+        self.assertNotContains(listing, 'name="reason"')
+
+        change = self.client.get(
+            reverse("kobo:mapping_list"),
+            {"change": "centro"},
+        )
+        self.assertContains(change, "Cambiar asignación: Centro")
+        self.assertContains(change, "Motivo para quitar la asignación")
+        self.assertContains(change, "Quitar asignación")
+        self.assertContains(
+            change,
+            "La zona Centro dejará de asociar nuevos formularios al proyecto Centro.",
+        )
+        self.assertContains(
+            change,
+            "Los formularios ya importados no serán modificados.",
+        )
+        self.assertContains(change, 'id="cambiar-asignacion"')
+        self.assertNotContains(change, "desactivación")
+
+        switched = self.client.post(
+            reverse("kobo:configure_mapping"),
+            {"pastoral_zone": "centro", "project": self.other_project.pk},
+            follow=True,
+        )
+        self.assertContains(switched, "Asignación guardada.")
+        self.assertTrue(
+            KoboPastoralZoneProjectMapping.objects.filter(
+                pastoral_zone="centro",
+                project=self.other_project,
+                is_active=True,
+            ).exists()
+        )
+
+        removed = self.client.post(
+            reverse("kobo:deactivate_mapping", args=("centro",)),
+            {"reason": "Cierre temporal del proyecto territorial"},
+            follow=True,
+        )
+        self.assertContains(removed, "Asignación quitada.")
+        self.assertFalse(
+            KoboPastoralZoneProjectMapping.objects.filter(
+                pastoral_zone="centro",
+                is_active=True,
+            ).exists()
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse("kobo:deactivate_mapping", args=("centro",))
+            ).status_code,
+            405,
+        )
+
+    def test_configure_validation_keeps_selected_zone(self):
+        response = self.client.post(
+            reverse("kobo:configure_mapping"),
+            {"pastoral_zone": "este", "project": ""},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.context["selected_zone"], PastoralZone.ESTE)
+        self.assertContains(
+            response,
+            "Configurar zona: Este",
+            status_code=400,
+        )
+        self.assertContains(response, 'id="configurar-zona"', status_code=400)
 
     def test_dashboard_navigation_links_are_not_dead(self):
         response = self.client.get(reverse("kobo:hub"))
@@ -309,12 +421,25 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
         response = self.client.post(
             reverse("kobo:configure_mapping"),
             {"pastoral_zone": "centro", "project": self.project.pk},
+            follow=True,
         )
-        self.assertRedirects(response, reverse("kobo:mapping_list"))
+        self.assertRedirects(
+            response,
+            reverse("kobo:mapping_list"),
+            status_code=302,
+            target_status_code=200,
+        )
+        self.assertContains(response, "Asignación guardada.")
+        self.assertContains(response, self.project.name)
         self.assertTrue(
             KoboPastoralZoneProjectMapping.objects.filter(
                 pastoral_zone="centro", project=self.project, is_active=True
             ).exists()
+        )
+        self.assertContains(response, "csrfmiddlewaretoken")
+        self.assertEqual(
+            self.client.get(reverse("kobo:configure_mapping")).status_code,
+            405,
         )
 
     def test_identity_status_get_never_mutates(self):

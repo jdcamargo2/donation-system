@@ -27,8 +27,45 @@
     </div>
 {% endif %}
 
-{% if can_manage %}
-    <section id="configure-zone" class="card border-0 ops-table-card mb-4" aria-labelledby="configure-zone-title">
+{% if can_manage and change_zone and change_mapping %}
+    <section id="cambiar-asignacion" class="card border-0 ops-table-card mb-4" aria-labelledby="change-zone-title">
+        <div class="card-body">
+            <h2 id="change-zone-title" class="h5 ops-section-title">Cambiar asignación: {{ change_zone_label }}</h2>
+            <p class="text-muted">Puede asociar otro proyecto o quitar la asignación actual.</p>
+
+            <form method="post" action="{% url 'kobo:configure_mapping' %}" class="row g-3 mb-4">
+                {% csrf_token %}
+                <div class="col-md-5">
+                    <label class="form-label" for="{{ change_form.pastoral_zone.id_for_label }}">{{ change_form.pastoral_zone.label }}</label>
+                    {{ change_form.pastoral_zone }}
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label" for="{{ change_form.project.id_for_label }}">{{ change_form.project.label }}</label>
+                    {{ change_form.project }}
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">Guardar cambio</button>
+                </div>
+            </form>
+
+            <div class="border-top pt-3">
+                <h3 class="h6 text-danger mb-2">Quitar asignación</h3>
+                <p class="kobo-hub-notice-secondary mb-3">{{ change_explanation }}</p>
+                <form method="post" action="{% url 'kobo:deactivate_mapping' change_zone.value %}" class="row g-3">
+                    {% csrf_token %}
+                    <div class="col-md-8">
+                        <label class="form-label" for="{{ reason_form.reason.id_for_label }}">{{ reason_form.reason.label }}</label>
+                        {{ reason_form.reason }}
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button type="submit" class="btn btn-outline-danger w-100">Quitar asignación</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </section>
+{% elif can_manage %}
+    <section id="configurar-zona" class="card border-0 ops-table-card mb-4" aria-labelledby="configure-zone-title">
         <div class="card-body">
             {% if selected_zone %}
                 <h2 id="configure-zone-title" class="h5 ops-section-title">Configurar zona: {{ selected_zone_label }}</h2>
@@ -42,10 +79,12 @@
                 <div class="col-md-5">
                     <label class="form-label" for="{{ form.pastoral_zone.id_for_label }}">{{ form.pastoral_zone.label }}</label>
                     {{ form.pastoral_zone }}
+                    {% if form.pastoral_zone.errors %}<div class="invalid-feedback d-block">{{ form.pastoral_zone.errors|striptags }}</div>{% endif %}
                 </div>
                 <div class="col-md-5">
                     <label class="form-label" for="{{ form.project.id_for_label }}">{{ form.project.label }}</label>
                     {{ form.project }}
+                    {% if form.project.errors %}<div class="invalid-feedback d-block">{{ form.project.errors|striptags }}</div>{% endif %}
                 </div>
                 <div class="col-md-2 d-flex align-items-end">
                     <button type="submit" class="btn btn-primary w-100">Guardar asignación</button>
@@ -91,17 +130,9 @@
                         <td>{{ row.mapping.updated_at|default:"—" }}</td>
                         <td class="text-end">
                             {% if row.mapping and can_manage %}
-                                <details>
-                                    <summary class="btn btn-sm btn-outline-secondary">Cambiar asignación</summary>
-                                    <form method="post" action="{% url 'kobo:deactivate_mapping' row.zone.value %}" class="mt-2 text-start">
-                                        {% csrf_token %}
-                                        <label class="form-label" for="reason-{{ row.zone.value }}">Motivo de desactivación</label>
-                                        <textarea id="reason-{{ row.zone.value }}" name="reason" required class="form-control mb-2" rows="3"></textarea>
-                                        <button type="submit" class="btn btn-sm btn-outline-danger">Confirmar desactivación</button>
-                                    </form>
-                                </details>
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:mapping_list' %}?change={{ row.zone.value }}#cambiar-asignacion">Cambiar asignación</a>
                             {% elif not row.mapping and can_manage %}
-                                <a class="btn btn-sm btn-primary" href="{% url 'kobo:mapping_list' %}?zone={{ row.zone.value }}#configure-zone">Configurar</a>
+                                <a class="btn btn-sm btn-primary" href="{% url 'kobo:mapping_list' %}?zone={{ row.zone.value }}#configurar-zona">Configurar</a>
                             {% elif row.mapping %}
                                 <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_detail' row.mapping.project.pk %}">Ver detalle</a>
                             {% endif %}
@@ -112,4 +143,18 @@
         </table>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    if (window.location.hash !== "#configurar-zona") {
+        return;
+    }
+    var projectField = document.getElementById("id_project");
+    if (projectField) {
+        projectField.focus({ preventScroll: false });
+    }
+})();
+</script>
 {% endblock %}

@@ -61,6 +61,17 @@ from apps.integrations.kobo.hub import (
     mapping_list, pending_submission_list, reconcile_identity, resolve_conflict,
     sync_asset, sync_history,
 )
+from apps.integrations.kobo.submission_presentation import (
+    attachment_status_label,
+    form_identity,
+    present_contact_fields,
+    present_processing_events,
+    present_submission_fields,
+    should_show_retry_attachments,
+    should_show_retry_normalization,
+    submission_status_label,
+    territorial_summary_rows,
+)
 
 
 WEBHOOK_BASIC_REALM = "SIGEDON Kobo Webhook"
@@ -220,7 +231,11 @@ def _asset_configuration_context(asset):
 def _submission_queryset():
     # PRE: Kobo staging models are migrated.
     # POST: returns review data with relations prefetched and no state changes.
-    return KoboSubmission.objects.select_related("form_definition").prefetch_related(
+    return KoboSubmission.objects.select_related(
+        "form_definition",
+        "asset",
+        "project",
+    ).prefetch_related(
         "attachments",
         "processing_events",
     )
@@ -452,35 +467,46 @@ def _project_submission_history_rows(project):
 def _detail_context(submission, user, *, review_form=None):
     # PRE: submission is loaded and user passed general view authorization.
     # POST: returns separated review context without exposing attachment sources.
-    normalized_payload = submission.normalized_payload or {}
-    sensitive_data = {
-        "parish_delegate": normalized_payload.get("parish_delegate"),
-        "contact_phone": normalized_payload.get("contact_phone"),
-        "main_informant_role": normalized_payload.get("main_informant_role"),
-        "submitted_by": submission.raw_payload.get("_submitted_by"),
-        "device_id": submission.raw_payload.get("deviceid"),
-    }
-    sensitive_keys = {"parish_delegate", "contact_phone", "main_informant_role"}
-    display_normalized_payload = {
-        key: value
-        for key, value in normalized_payload.items()
-        if key not in sensitive_keys
-    }
+    attachments = list(submission.attachments.all())
+    processing_events = list(submission.processing_events.all())
     can_view_raw_payload = _can_view_raw_payload(user)
+    can_change_submission = user.has_perm("kobo.change_kobosubmission")
+    can_view_technical = can_view_raw_payload
+    ficha_title, ficha_subtitle = form_identity(submission)
     return {
         "submission": submission,
-        "normalized_payload": display_normalized_payload,
-        "sensitive_data": sensitive_data,
-        "attachments": submission.attachments.all(),
-        "processing_events": submission.processing_events.all(),
+        "ficha_title": ficha_title,
+        "ficha_subtitle": ficha_subtitle,
+        "status_label": submission_status_label(submission.status),
+        "territorial_rows": territorial_summary_rows(submission),
+        "presented_fields": present_submission_fields(submission),
+        "contact_fields": present_contact_fields(submission),
+        "presented_events": present_processing_events(processing_events),
+        "attachments": attachments,
+        "attachment_status_label": attachment_status_label,
+        "has_project": submission.project_id is not None,
         "review_form": review_form or KoboReviewForm(submission=submission),
-        "can_change_submission": user.has_perm("kobo.change_kobosubmission"),
+        "can_change_submission": can_change_submission,
+        "can_view_technical": can_view_technical,
         "can_view_raw_payload": can_view_raw_payload,
+        "show_retry_normalization": can_change_submission
+        and should_show_retry_normalization(submission),
+        "show_retry_attachments": can_change_submission
+        and should_show_retry_attachments(submission, attachments),
         "kobo_enabled": settings.KOBO_ENABLED,
+        "normalized_payload_json": (
+            json.dumps(submission.normalized_payload or {}, indent=2, ensure_ascii=False)
+            if can_view_technical
+            else None
+        ),
         "raw_payload_json": (
             json.dumps(submission.raw_payload, indent=2, ensure_ascii=False)
             if can_view_raw_payload
             else None
+        ),
+        "device_id": submission.raw_payload.get("deviceid") if can_view_technical else None,
+        "submitted_by": (
+            submission.raw_payload.get("_submitted_by") if can_view_technical else None
         ),
     }
 
@@ -575,7 +601,10 @@ def retry_normalization_action(request, pk):
     )
     if outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW:
         route_normalized_submission(submission)
-    messages.info(request, f"Normalización finalizada: {outcome.final_status}.")
+    messages.info(
+        request,
+        f"Procesamiento finalizado: {submission_status_label(outcome.final_status)}.",
+    )
     return redirect("kobo:submission_detail", pk=submission.pk)
 
 
