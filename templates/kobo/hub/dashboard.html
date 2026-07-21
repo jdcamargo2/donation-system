@@ -17,203 +17,131 @@
 {% include "kobo/hub/_nav.html" %}
 
 {% if not kobo_configuration_complete %}
-    <div class="alert alert-warning kobo-hub-notice" role="alert">
+    <div class="alert alert-warning kobo-hub-notice kobo-hub-notice-compact" role="alert">
         <strong>La conexión con KoboToolbox está incompleta.</strong>
-        <p class="kobo-hub-notice-secondary mb-0">
-            Puede consultar y organizar la información local, pero la sincronización remota no estará disponible hasta completar la configuración.
-        </p>
+        <span class="kobo-hub-notice-secondary">La sincronización remota no estará disponible hasta completar la configuración.</span>
     </div>
-{% elif missing_mappings %}
-    <div class="alert alert-warning kobo-hub-notice" role="status">
+{% endif %}
+{% if missing_mappings %}
+    <div class="alert alert-warning kobo-hub-notice kobo-hub-notice-compact" role="status">
         <strong>Faltan asignaciones para: {{ missing_mappings_label }}.</strong>
-        <p class="kobo-hub-notice-secondary mb-0">
-            Asocia cada zona pastoral con su proyecto para que los formularios puedan organizarse correctamente.
-        </p>
+        <span class="kobo-hub-notice-secondary">Asocia cada zona pastoral con su proyecto.</span>
     </div>
 {% endif %}
 
-{% if not kobo_configuration_complete and missing_mappings %}
-    <p class="kobo-hub-notice-secondary mb-3" role="note">
-        Faltan asignaciones para: {{ missing_mappings_label }}. Asocia cada zona pastoral con su proyecto para que los formularios puedan organizarse correctamente.
-    </p>
+<section class="mb-4" aria-labelledby="kobo-next-actions-title">
+    <h2 id="kobo-next-actions-title" class="h5 ops-section-title">¿Qué debes hacer ahora?</h2>
+    <div class="card border-0 ops-table-card">
+        <div class="card-body">
+            {% for item in next_actions %}
+                <a class="kobo-hub-next-action" href="{{ item.url }}">
+                    <div class="kobo-hub-next-action-main">
+                        <div class="kobo-hub-attention-title">{{ item.title }}</div>
+                        <p class="kobo-hub-attention-copy">{{ item.description }}</p>
+                    </div>
+                    <div class="kobo-hub-next-action-count" aria-label="{{ item.count }} pendientes">{{ item.count }}</div>
+                </a>
+            {% empty %}
+                <div class="kobo-hub-empty-state" role="status">
+                    <p class="mb-1"><strong>No hay acciones pendientes ahora.</strong></p>
+                    <p class="kobo-hub-notice-secondary mb-0">
+                        Puede sincronizar formularios o revisar la asignación de zonas cuando lo necesite.
+                    </p>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+{% if can_sync %}
+    <section class="card border-0 ops-table-card mb-4" aria-labelledby="kobo-sync-title">
+        <div class="card-body">
+            <h2 id="kobo-sync-title" class="h5 ops-section-title">Sincronización de formularios</h2>
+            <p class="text-muted mb-3">
+                Traiga formularios nuevos desde KoboToolbox o vuelva a revisar toda la información disponible.
+            </p>
+            {% for row in sync_assets %}
+                <div class="kobo-hub-sync-row">
+                    <div class="kobo-hub-sync-copy">
+                        <div class="fw-semibold">{{ row.title }}</div>
+                        <div class="small text-muted">{{ row.subtitle }}</div>
+                    </div>
+                    <div class="kobo-hub-sync-actions">
+                        <form method="post" action="{% url 'kobo:sync_asset' row.asset.pk 'incremental' %}" class="kobo-hub-sync-action">
+                            {% csrf_token %}
+                            <button
+                                type="submit"
+                                class="btn btn-primary kobo-hub-sync-btn"
+                                title="Trae únicamente formularios nuevos o modificados."
+                            >
+                                Actualizar ahora
+                            </button>
+                        </form>
+                        <form method="post" action="{% url 'kobo:sync_asset' row.asset.pk 'full' %}" class="kobo-hub-sync-action">
+                            {% csrf_token %}
+                            <button
+                                type="submit"
+                                class="btn btn-outline-secondary kobo-hub-sync-btn"
+                                title="Vuelve a revisar todos los formularios disponibles."
+                            >
+                                Sincronización completa
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="kobo-hub-empty-state" role="status">
+                    <p class="mb-1"><strong>No hay formularios activos para sincronizar.</strong></p>
+                    <p class="kobo-hub-notice-secondary mb-0">
+                        Configure un formulario descubierto antes de sincronizar desde KoboToolbox.
+                    </p>
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+{% else %}
+    <section class="card border-0 ops-table-card mb-4" aria-labelledby="kobo-sync-title">
+        <div class="card-body">
+            <h2 id="kobo-sync-title" class="h5 ops-section-title">Sincronización de formularios</h2>
+            <p class="text-muted mb-0">Su cuenta no tiene permiso para sincronizar formularios.</p>
+        </div>
+    </section>
 {% endif %}
 
-<div class="row g-4 mb-4">
-    <div class="col-lg-5">
-        {% if can_sync %}
-            <section class="card border-0 ops-table-card h-100" aria-labelledby="kobo-sync-title">
-                <div class="card-body">
-                    <h2 id="kobo-sync-title" class="h5 ops-section-title">Sincronización de formularios</h2>
-                    <p class="text-muted mb-3">
-                        Use estas opciones para traer formularios nuevos desde KoboToolbox o volver a revisar toda la información disponible.
-                    </p>
-                    <p class="kobo-hub-notice-secondary mb-3">
-                        La sincronización se realiza en este momento y puede tardar algunos minutos.
-                    </p>
-                    {% for row in sync_assets %}
-                        <div class="kobo-hub-sync-row">
-                            <div>
-                                <div class="fw-semibold">{{ row.title }}</div>
-                                <div class="small text-muted">{{ row.subtitle }}</div>
-                            </div>
-                            <div class="kobo-hub-sync-actions">
-                                <form method="post" action="{% url 'kobo:sync_asset' row.asset.pk 'incremental' %}">
-                                    {% csrf_token %}
-                                    <button
-                                        type="submit"
-                                        class="btn btn-primary"
-                                        title="Trae únicamente formularios nuevos o modificados."
-                                    >
-                                        Actualizar ahora
-                                    </button>
-                                </form>
-                                <form method="post" action="{% url 'kobo:sync_asset' row.asset.pk 'full' %}">
-                                    {% csrf_token %}
-                                    <button
-                                        type="submit"
-                                        class="btn btn-outline-secondary"
-                                        title="Vuelve a revisar todos los formularios disponibles."
-                                    >
-                                        Sincronización completa
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                    {% empty %}
-                        <p class="text-muted mb-0">No hay formularios activos configurados para sincronizar.</p>
-                    {% endfor %}
-                </div>
-            </section>
-        {% else %}
-            <section class="card border-0 ops-table-card h-100" aria-labelledby="kobo-sync-title">
-                <div class="card-body">
-                    <h2 id="kobo-sync-title" class="h5 ops-section-title">Sincronización de formularios</h2>
-                    <p class="text-muted mb-0">Su cuenta no tiene permiso para sincronizar formularios.</p>
-                </div>
-            </section>
-        {% endif %}
+<div class="row g-3 ops-metric-grid mb-4">
+    <div class="col-md-4">
+        <div class="card h-100 border-0 ops-metric-card">
+            <div class="card-body">
+                <div class="ops-metric-label">Zonas asignadas</div>
+                <div class="ops-metric-value">{{ mapping_count }} de {{ zone_total }}</div>
+            </div>
+        </div>
     </div>
-    <div class="col-lg-7">
-        <div class="row g-3 ops-metric-grid">
-            <div class="col-sm-6">
-                <div class="card h-100 border-0 ops-metric-card">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Zonas asignadas</div>
-                        <div class="ops-metric-value">{{ mapping_count }} de {{ zone_total }}</div>
-                    </div>
-                </div>
+    <div class="col-md-4">
+        <div class="card h-100 border-0 ops-metric-card">
+            <div class="card-body">
+                <div class="ops-metric-label">Núcleos registrados</div>
+                <div class="ops-metric-value">{{ identity_count }}</div>
             </div>
-            <div class="col-sm-6">
-                <div class="card h-100 border-0 ops-metric-card">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Núcleos registrados</div>
-                        <div class="ops-metric-value">{{ identity_count }}</div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-sm-6">
-                <div class="card h-100 border-0 ops-metric-card">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Formularios pendientes de revisión</div>
-                        <div class="ops-metric-value">{{ pending_review }}</div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-sm-6">
-                <div class="card h-100 border-0 ops-metric-card ops-metric-card-available">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Formularios importados</div>
-                        <div class="ops-metric-value">{{ imported }}</div>
-                    </div>
-                </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100 border-0 ops-metric-card">
+            <div class="card-body">
+                <div class="ops-metric-label">Formularios pendientes de revisión</div>
+                <div class="ops-metric-value">{{ pending_review }}</div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="row g-4 mb-4">
-    <div class="col-lg-8">
-        <section aria-labelledby="kobo-zones-title">
-            <h2 id="kobo-zones-title" class="h5 ops-section-title">Estado de las zonas pastorales</h2>
-            <div class="card border-0 ops-table-card">
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0 kobo-hub-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Zona pastoral</th>
-                                <th scope="col">Proyecto asociado</th>
-                                <th scope="col">Estado</th>
-                                <th scope="col">Núcleos registrados</th>
-                                <th scope="col" class="text-end">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for row in zone_rows %}
-                                <tr>
-                                    <td class="fw-semibold">{{ row.label }}</td>
-                                    <td>
-                                        {% if row.project %}
-                                            {{ row.project.name }}
-                                            <span class="small text-muted d-block">{{ row.project.code }}</span>
-                                        {% else %}
-                                            <span class="text-muted">Sin proyecto asociado</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if row.mapped %}
-                                            <span class="badge ops-status-badge">Configurada</span>
-                                        {% else %}
-                                            <span class="badge ops-status-badge">Pendiente</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>{{ row.identities }}</td>
-                                    <td class="text-end">
-                                        {% if row.mapped %}
-                                            {% if can_manage_mappings %}
-                                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:mapping_list' %}#zone-{{ row.code }}">Cambiar asignación</a>
-                                            {% elif row.project %}
-                                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_detail' row.project.pk %}">Ver detalle</a>
-                                            {% endif %}
-                                        {% elif can_manage_mappings %}
-                                            <a class="btn btn-sm btn-primary" href="{% url 'kobo:mapping_list' %}#configure-zone">Configurar</a>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-    </div>
-    <div class="col-lg-4">
-        <section aria-labelledby="kobo-attention-title">
-            <h2 id="kobo-attention-title" class="h5 ops-section-title">¿Qué necesita atención?</h2>
-            <div class="card border-0 ops-table-card">
-                <div class="card-body">
-                    {% for item in attention_items %}
-                        {% if item.url %}
-                            <a class="kobo-hub-attention-item is-{{ item.tone }}" href="{{ item.url }}">
-                                <div class="kobo-hub-attention-title">{{ item.title }}</div>
-                                <p class="kobo-hub-attention-copy">{{ item.description }}</p>
-                            </a>
-                        {% else %}
-                            <div class="kobo-hub-attention-item is-{{ item.tone }}" role="status">
-                                <div class="kobo-hub-attention-title">{{ item.title }}</div>
-                                <p class="kobo-hub-attention-copy">{{ item.description }}</p>
-                            </div>
-                        {% endif %}
-                    {% empty %}
-                        <p class="text-muted mb-0">No hay pendientes destacados en este momento.</p>
-                    {% endfor %}
-                </div>
-            </div>
-        </section>
-    </div>
-</div>
-
 <section class="mb-4" aria-labelledby="kobo-forms-title">
-    <h2 id="kobo-forms-title" class="h5 ops-section-title">Formularios recibidos</h2>
+    <div class="ops-page-header-row mb-3">
+        <div>
+            <h2 id="kobo-forms-title" class="h5 ops-section-title mb-1">Resumen por ficha</h2>
+            <p class="text-muted mb-0">Totales recibidos y pendientes de revisión por formulario.</p>
+        </div>
+    </div>
     <div class="card border-0 ops-table-card">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
@@ -245,50 +173,56 @@
     </div>
 </section>
 
-<section aria-labelledby="kobo-sync-history-title">
-    <h2 id="kobo-sync-history-title" class="h5 ops-section-title">Últimas sincronizaciones</h2>
-    <div class="card border-0 ops-table-card">
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 kobo-hub-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Ficha o formulario</th>
-                        <th scope="col">Tipo de actualización</th>
-                        <th scope="col">Estado</th>
-                        <th scope="col">Fecha</th>
-                        <th scope="col">Creados</th>
-                        <th scope="col">Modificados</th>
-                        <th scope="col">Sin cambios</th>
-                        <th scope="col">Con errores</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for run in sync_runs %}
-                        <tr>
-                            <td>
-                                {% if run.asset %}
-                                    <span class="fw-semibold">{{ run.asset.form_role|kobo_form_role_title }}</span>
-                                    <span class="small text-muted d-block">{{ run.asset.form_role|kobo_form_role_subtitle }}</span>
-                                {% else %}
-                                    <span class="text-muted">Formulario no disponible</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ run.mode|kobo_sync_mode }}</td>
-                            <td><span class="badge ops-status-badge">{{ run.status|kobo_sync_status }}</span></td>
-                            <td>{{ run.started_at }}</td>
-                            <td>{{ run.items_created }}</td>
-                            <td>{{ run.items_updated }}</td>
-                            <td>{{ run.items_unchanged }}</td>
-                            <td>{{ run.items_failed }}</td>
-                        </tr>
-                    {% empty %}
-                        <tr>
-                            <td colspan="8" class="text-muted">Todavía no hay sincronizaciones registradas.</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+<section class="mb-4" aria-labelledby="kobo-latest-sync-title">
+    <div class="ops-page-header-row mb-3">
+        <div>
+            <h2 id="kobo-latest-sync-title" class="h5 ops-section-title mb-1">Última actualización por ficha</h2>
+            <p class="text-muted mb-0">Una sola sincronización reciente por formulario activo.</p>
         </div>
     </div>
+    {% if latest_sync_rows %}
+        <div class="card border-0 ops-table-card">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th scope="col">Ficha</th>
+                            <th scope="col">Tipo</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col">Fecha</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in latest_sync_rows %}
+                            <tr>
+                                <td>
+                                    <span class="fw-semibold">{{ row.title }}</span>
+                                    <span class="small text-muted d-block">{{ row.subtitle }}</span>
+                                </td>
+                                <td>{{ row.run.mode|kobo_sync_mode }}</td>
+                                <td><span class="badge ops-status-badge">{{ row.run.status|kobo_sync_status }}</span></td>
+                                <td>{{ row.run.started_at }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% else %}
+        <div class="kobo-hub-empty-state card border-0 ops-table-card" role="status">
+            <div class="card-body">
+                <p class="mb-1"><strong>Todavía no hay sincronizaciones registradas.</strong></p>
+                <p class="kobo-hub-notice-secondary mb-0">
+                    Use «Actualizar ahora» cuando necesite traer formularios desde KoboToolbox.
+                </p>
+            </div>
+        </div>
+    {% endif %}
 </section>
+
+<nav class="kobo-hub-dashboard-links" aria-label="Enlaces del resumen">
+    <a href="{% url 'kobo:mapping_list' %}">Ver asignación de zonas</a>
+    <a href="{% url 'kobo:sync_history' %}">Ver historial de sincronizaciones</a>
+    <a href="{% url 'kobo:pending_submission_list' %}">Ver formularios pendientes</a>
+</nav>
 {% endblock %}

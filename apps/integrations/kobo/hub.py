@@ -78,6 +78,7 @@ FICHA_DISPLAY = {
     "ficha_10": ("Ficha 10", "Microproyectos priorizados"),
     "ficha_11": ("Ficha 11", "Evaluación de prioridad"),
 }
+VALID_ZONE_VALUES = {zone.value for zone in PastoralZone}
 
 
 def territorial_hub_access(view):
@@ -96,6 +97,15 @@ def territorial_hub_access(view):
         return view(request, *args, **kwargs)
 
     return wrapped
+
+
+def pending_review_queryset(base_queryset=None):
+    """
+    PRE: base_queryset is None or a KoboSubmission queryset.
+    POST: returns the single shared criterion for forms pending human review.
+    """
+    queryset = base_queryset if base_queryset is not None else KoboSubmission.objects.all()
+    return queryset.filter(status=KoboSubmission.Status.READY_FOR_REVIEW)
 
 
 def _message_for_result(result, success_message):
@@ -133,94 +143,56 @@ def _project_filter(request, queryset, field="project_id"):
     return queryset.filter(**{field: project}) if project and project.isdigit() else queryset
 
 
-def _build_attention_items(
+def _build_next_actions(
     *,
     missing_mappings,
     pending_review,
-    pending_identity,
     open_conflicts,
     routing_errors,
     processing_errors,
+    pending_identity,
     remote_updates_pending,
 ):
     # PRE: counts and missing zones come from dashboard aggregations.
-    # POST: returns operator-facing attention cards ordered by operational priority.
+    # POST: returns ordered actionable next steps without repeating dashboard metrics.
     items = []
     if missing_mappings:
         zone_names = spanish_join([pastoral_zone_label(zone) for zone in missing_mappings])
+        first_zone = missing_mappings[0].value
         items.append(
             {
-                "title": f"Configurar {len(missing_mappings)} zonas pendientes",
+                "title": "Zonas sin configurar",
                 "description": f"{zone_names} todavía no tienen proyecto asociado.",
-                "url": reverse("kobo:mapping_list"),
-                "tone": "warning",
+                "count": len(missing_mappings),
+                "url": reverse("kobo:mapping_list") + f"?zone={first_zone}",
             }
         )
     if pending_review:
         items.append(
             {
-                "title": (
-                    f"Revisar {pending_review} formulario"
-                    if pending_review == 1
-                    else f"Revisar {pending_review} formularios"
-                ),
+                "title": "Formularios pendientes de revisión",
                 "description": "Comprueba la información antes de importarla al sistema.",
+                "count": pending_review,
+                "url": reverse("kobo:pending_submission_list"),
+            }
+        )
+    errors_or_conflicts = open_conflicts + routing_errors + processing_errors + pending_identity
+    if errors_or_conflicts:
+        items.append(
+            {
+                "title": "Errores o conflictos",
+                "description": "Hay incidencias de asignación o procesamiento que requieren decisión.",
+                "count": errors_or_conflicts,
                 "url": reverse("kobo:conflict_list"),
-                "tone": "warning",
-            }
-        )
-    if pending_identity:
-        items.append(
-            {
-                "title": f"Registrar {pending_identity} núcleos pendientes",
-                "description": "Hay formularios que aún no tienen un núcleo registrado.",
-                "url": reverse("kobo:pending_submission_list") + "?routing_status=pending_identity",
-                "tone": "info",
-            }
-        )
-    if open_conflicts:
-        items.append(
-            {
-                "title": f"Resolver {open_conflicts} casos de asignación",
-                "description": "Hay formularios cuya zona o proyecto necesita una decisión.",
-                "url": reverse("kobo:conflict_list"),
-                "tone": "danger",
-            }
-        )
-    if routing_errors:
-        items.append(
-            {
-                "title": f"Corregir {routing_errors} errores de asignación",
-                "description": "Algunos formularios no pudieron ubicarse automáticamente.",
-                "url": reverse("kobo:pending_submission_list") + "?routing_status=error",
-                "tone": "danger",
-            }
-        )
-    if processing_errors:
-        items.append(
-            {
-                "title": f"Revisar {processing_errors} errores de procesamiento",
-                "description": "Hay formularios que no completaron su procesamiento.",
-                "url": reverse("kobo:conflict_list"),
-                "tone": "danger",
             }
         )
     if remote_updates_pending:
         items.append(
             {
-                "title": f"Atender {remote_updates_pending} actualizaciones remotas",
+                "title": "Actualización remota pendiente",
                 "description": "Hay cambios recibidos desde KoboToolbox pendientes de revisión.",
-                "url": reverse("kobo:conflict_list"),
-                "tone": "info",
-            }
-        )
-    if not open_conflicts and not routing_errors:
-        items.append(
-            {
-                "title": "No hay conflictos ni errores de asignación",
-                "description": "Todos los formularios recibidos pudieron ubicarse correctamente.",
-                "url": None,
-                "tone": "success",
+                "count": remote_updates_pending,
+                "url": reverse("kobo:pending_submission_list") + "?remote_update_pending=1",
             }
         )
     return items
@@ -264,10 +236,110 @@ def _form_receipt_rows(by_form, form_status_rows):
     return rows
 
 
+def _latest_sync_by_ficha(sync_assets):
+    # PRE: sync_assets lists active hub assets in display order.
+    # POST: returns at most one latest submissions sync per ficha without duplicates.
+    if not sync_assets:
+        return []
+    asset_ids = [row["asset"].pk for row in sync_assets]
+    runs = (
+        KoboSyncRun.objects.filter(
+            kind=KoboSyncRun.Kind.SUBMISSIONS,
+            asset_id__in=asset_ids,
+        )
+        .select_related("asset")
+        .order_by("asset_id", "-started_at", "-pk")
+    )
+    latest_by_asset = {}
+    for run in runs:
+        if run.asset_id not in latest_by_asset:
+            latest_by_asset[run.asset_id] = run
+    rows = []
+    for row in sync_assets:
+        run = latest_by_asset.get(row["asset"].pk)
+        if run is None:
+            continue
+        rows.append(
+            {
+                "title": row["title"],
+                "subtitle": row["subtitle"],
+                "run": run,
+            }
+        )
+    return rows
+
+
+def _parse_selected_zone(raw_zone):
+    # PRE: raw_zone comes from an optional GET parameter.
+    # POST: returns a PastoralZone when valid; otherwise None without mutating state.
+    if not raw_zone or raw_zone not in VALID_ZONE_VALUES:
+        return None
+    return PastoralZone(raw_zone)
+
+
+def _review_categories():
+    # PRE: hub readers may inspect review queues.
+    # POST: returns category cards using shared count criteria and functional list links.
+    submissions = KoboSubmission.objects.all()
+    pending_review = pending_review_queryset(submissions).count()
+    return [
+        {
+            "key": "pending_review",
+            "title": "Formularios pendientes de revisión",
+            "description": "Comprueba la información antes de importarla al sistema.",
+            "empty_meaning": "No hay formularios listos para revisión humana.",
+            "empty_action": "Sincronice formularios o espere nuevos envíos desde KoboToolbox.",
+            "count": pending_review,
+            "url": reverse("kobo:pending_submission_list"),
+        },
+        {
+            "key": "pending_identity",
+            "title": "Formularios sin núcleo registrado",
+            "description": "Requieren recibir o resolver el registro territorial (Ficha 1).",
+            "empty_meaning": "Todos los formularios tienen núcleo identificado o no aplica.",
+            "empty_action": "Revise Ficha 1 o registre el núcleo correspondiente.",
+            "count": submissions.filter(
+                routing_status=KoboSubmission.RoutingStatus.PENDING_IDENTITY
+            ).count(),
+            "url": reverse("kobo:pending_submission_list") + "?routing_status=pending_identity",
+        },
+        {
+            "key": "conflicts",
+            "title": "Conflictos de asignación",
+            "description": "La zona o el proyecto del formulario no coincide con el núcleo registrado.",
+            "empty_meaning": "No hay conflictos de asignación abiertos.",
+            "empty_action": "Cuando aparezca un conflicto, ábralo desde esta misma pantalla.",
+            "count": KoboTerritorialIdentityConflict.objects.filter(status="open").count(),
+            "url": None,
+        },
+        {
+            "key": "processing_errors",
+            "title": "Errores de procesamiento",
+            "description": "Formularios que no completaron su procesamiento automático.",
+            "empty_meaning": "No hay errores de procesamiento pendientes.",
+            "empty_action": "Si un formulario falla al procesarse, aparecerá aquí para revisión.",
+            "count": submissions.filter(
+                status=KoboSubmission.Status.PROCESSING_FAILED
+            ).count(),
+            "url": reverse("kobo:pending_submission_list")
+            + f"?status={KoboSubmission.Status.PROCESSING_FAILED}",
+        },
+        {
+            "key": "remote_updates",
+            "title": "Actualizaciones remotas pendientes",
+            "description": "Cambios recibidos desde KoboToolbox que requieren revisión humana.",
+            "empty_meaning": "No hay actualizaciones remotas pendientes.",
+            "empty_action": "Tras una sincronización con cambios, revise esta categoría.",
+            "count": submissions.filter(remote_update_pending=True).count(),
+            "url": reverse("kobo:pending_submission_list") + "?remote_update_pending=1",
+        },
+    ]
+
+
 @territorial_hub_access
 def hub_dashboard(request):
     # PRE: Kobo is enabled and the caller may read territorial administration.
-    # POST: renders aggregate operational state without loading submissions into Python.
+    # POST: renders a reduced operational resumen without redundant tables.
     submissions = _project_filter(request, KoboSubmission.objects.all())
     routing_counts = submissions.values("routing_status").annotate(total=Count("pk"))
     by_routing = {row["routing_status"]: row["total"] for row in routing_counts}
@@ -276,8 +348,6 @@ def hub_dashboard(request):
     form_status_rows = list(
         submissions.values("form_definition__form_id", "status").annotate(total=Count("pk"))
     )
-    zone_counts = KoboTerritorialIdentity.objects.values("pastoral_zone").annotate(total=Count("pk"))
-    identity_zones = {row["pastoral_zone"]: row["total"] for row in zone_counts}
     mappings = {
         item.pastoral_zone: item
         for item in KoboPastoralZoneProjectMapping.objects.filter(is_active=True).select_related(
@@ -286,8 +356,7 @@ def hub_dashboard(request):
     }
     mapped_zones = set(mappings)
     missing_mappings = [zone for zone in PastoralZone if zone.value not in mapped_zones]
-    pending_review = submissions.filter(status=KoboSubmission.Status.READY_FOR_REVIEW).count()
-    imported = submissions.filter(status=KoboSubmission.Status.IMPORTED).count()
+    pending_review = pending_review_queryset(submissions).count()
     pending_identity = by_routing.get(KoboSubmission.RoutingStatus.PENDING_IDENTITY, 0)
     routing_errors = by_routing.get(KoboSubmission.RoutingStatus.ERROR, 0)
     open_conflicts = KoboTerritorialIdentityConflict.objects.filter(status="open").count()
@@ -296,7 +365,6 @@ def hub_dashboard(request):
     ).count()
     remote_updates_pending = submissions.filter(remote_update_pending=True).count()
     identity_count = KoboTerritorialIdentity.objects.count()
-    can_manage_mappings = request.user.has_perm("kobo.manage_pastoral_zone_mappings")
     sync_assets = []
     for asset in KoboAsset.objects.filter(is_active=True).order_by("name", "asset_uid"):
         title, subtitle = form_role_title(asset.form_role)
@@ -310,56 +378,43 @@ def hub_dashboard(request):
     context = {
         "mapping_count": len(mapped_zones),
         "zone_total": PASTORAL_ZONE_TOTAL,
-        "zone_rows": [
-            {
-                "code": zone.value,
-                "label": pastoral_zone_label(zone),
-                "identities": identity_zones.get(zone.value, 0),
-                "mapped": zone.value in mapped_zones,
-                "project": mappings[zone.value].project if zone.value in mapped_zones else None,
-            }
-            for zone in PastoralZone
-        ],
         "identity_count": identity_count,
-        "open_conflicts": open_conflicts,
-        "pending_identity": pending_identity,
-        "routing_errors": routing_errors,
         "pending_review": pending_review,
-        "imported": imported,
-        "processing_errors": processing_errors,
-        "remote_updates_pending": remote_updates_pending,
-        "form_counts": {
-            "ficha_01": by_form.get(FICHA_01_FORM_ID, 0),
-            "ficha_10": by_form.get(FICHA_10_FORM_ID, 0),
-            "ficha_11": by_form.get(FICHA_11_FORM_ID, 0),
-        },
         "form_receipt_rows": _form_receipt_rows(by_form, form_status_rows),
         "missing_mappings": missing_mappings,
         "missing_mappings_label": spanish_join(
             [pastoral_zone_label(zone) for zone in missing_mappings]
         ),
-        "attention_items": _build_attention_items(
+        "next_actions": _build_next_actions(
             missing_mappings=missing_mappings,
             pending_review=pending_review,
-            pending_identity=pending_identity,
             open_conflicts=open_conflicts,
             routing_errors=routing_errors,
             processing_errors=processing_errors,
+            pending_identity=pending_identity,
             remote_updates_pending=remote_updates_pending,
         ),
         "kobo_configuration_complete": bool(settings.KOBO_BASE_URL and settings.KOBO_API_TOKEN),
-        "projects": Project.objects.order_by("code", "pk"),
-        "sync_runs": list(
-            KoboSyncRun.objects.filter(kind=KoboSyncRun.Kind.SUBMISSIONS)
-            .select_related("asset")
-            .order_by("-started_at", "-pk")[:5]
-        ),
+        "latest_sync_rows": _latest_sync_by_ficha(sync_assets),
         "sync_assets": sync_assets,
         "can_sync": request.user.has_perm("kobo.change_koboasset"),
-        "can_manage_mappings": can_manage_mappings,
         "hub_nav": "summary",
     }
     return render(request, "kobo/hub/dashboard.html", context)
+
+
+@territorial_hub_access
+def sync_history(request):
+    # PRE: caller may read the territorial hub.
+    # POST: lists submission sync runs outside the reduced dashboard.
+    queryset = (
+        KoboSyncRun.objects.filter(kind=KoboSyncRun.Kind.SUBMISSIONS)
+        .select_related("asset")
+        .order_by("-started_at", "-pk")
+    )
+    context = _pagination_context(request, queryset)
+    context["hub_nav"] = "summary"
+    return render(request, "kobo/hub/sync_history.html", context)
 
 
 @territorial_hub_access
@@ -395,12 +450,18 @@ def mapping_list(request):
         {"zone": zone, "mapping": mappings.get(zone.value), "identity_count": identity_counts.get(zone.value, 0)}
         for zone in PastoralZone
     ]
+    selected_zone = _parse_selected_zone(request.GET.get("zone"))
+    form_kwargs = {}
+    if selected_zone is not None:
+        form_kwargs["initial"] = {"pastoral_zone": selected_zone.value}
     return render(
         request,
         "kobo/hub/mapping_list.html",
         {
             "rows": rows,
-            "form": PastoralZoneProjectMappingForm(),
+            "form": PastoralZoneProjectMappingForm(**form_kwargs),
+            "selected_zone": selected_zone,
+            "selected_zone_label": pastoral_zone_label(selected_zone) if selected_zone else "",
             "can_manage": request.user.has_perm("kobo.manage_pastoral_zone_mappings"),
             "hub_nav": "mappings",
             "missing_count": sum(1 for row in rows if row["mapping"] is None),
@@ -563,7 +624,11 @@ def conflict_list(request):
         queryset = queryset.filter(
             Q(existing_project_id=request.GET["project"]) | Q(proposed_project_id=request.GET["project"])
         )
-    submissions = KoboSubmission.objects.all()
+    review_categories = _review_categories()
+    open_conflicts_count = next(
+        (category["count"] for category in review_categories if category["key"] == "conflicts"),
+        0,
+    )
     context = _pagination_context(request, queryset.order_by("status", "-created_at", "-pk"))
     context.update(
         {
@@ -571,42 +636,8 @@ def conflict_list(request):
             "projects": Project.objects.order_by("code"),
             "statuses": KoboTerritorialIdentityConflict.Status,
             "hub_nav": "cases",
-            "review_categories": [
-                {
-                    "title": "Formularios pendientes de revisión",
-                    "description": "Comprueba la información antes de importarla al sistema.",
-                    "count": submissions.filter(status=KoboSubmission.Status.READY_FOR_REVIEW).count(),
-                    "url": reverse("kobo:pending_submission_list"),
-                },
-                {
-                    "title": "Formularios sin núcleo registrado",
-                    "description": "Requieren recibir o resolver el registro territorial (Ficha 1).",
-                    "count": submissions.filter(
-                        routing_status=KoboSubmission.RoutingStatus.PENDING_IDENTITY
-                    ).count(),
-                    "url": reverse("kobo:pending_submission_list") + "?routing_status=pending_identity",
-                },
-                {
-                    "title": "Conflictos de asignación",
-                    "description": "La zona o el proyecto del formulario no coincide con el núcleo registrado.",
-                    "count": KoboTerritorialIdentityConflict.objects.filter(status="open").count(),
-                    "url": None,
-                },
-                {
-                    "title": "Errores de procesamiento",
-                    "description": "Formularios que no completaron su procesamiento automático.",
-                    "count": submissions.filter(
-                        status=KoboSubmission.Status.PROCESSING_FAILED
-                    ).count(),
-                    "url": reverse("kobo:pending_submission_list") + "?routing_status=error",
-                },
-                {
-                    "title": "Actualizaciones remotas pendientes",
-                    "description": "Cambios recibidos desde KoboToolbox que requieren revisión humana.",
-                    "count": submissions.filter(remote_update_pending=True).count(),
-                    "url": reverse("kobo:pending_submission_list"),
-                },
-            ],
+            "review_categories": review_categories,
+            "show_conflict_table": open_conflicts_count > 0 or bool(status),
         }
     )
     return render(request, "kobo/hub/conflict_list.html", context)
@@ -661,19 +692,53 @@ def resolve_conflict(request, pk):
 
 @territorial_hub_access
 def pending_submission_list(request):
-    queryset = KoboSubmission.objects.filter(
-        routing_status__in=("pending_identity", "conflict", "error")
-    ).select_related("form_definition", "project").order_by("-received_at", "-pk")
-    for field, lookup in (("routing_status", "routing_status"), ("reason_code", "routing_reason_code")):
-        value = request.GET.get(field)
-        if value:
-            queryset = queryset.filter(**{lookup: value})
+    routing_status = request.GET.get("routing_status")
+    status_filter = request.GET.get("status")
+    remote_update_pending = request.GET.get("remote_update_pending")
+
+    if routing_status in {
+        KoboSubmission.RoutingStatus.PENDING_IDENTITY,
+        KoboSubmission.RoutingStatus.CONFLICT,
+        KoboSubmission.RoutingStatus.ERROR,
+    }:
+        queryset = KoboSubmission.objects.filter(routing_status=routing_status)
+        list_mode = "routing"
+        page_title = "Formularios por revisar"
+        page_intro = (
+            "Formularios sin núcleo registrado, con conflicto de asignación o con errores."
+        )
+    elif status_filter == KoboSubmission.Status.PROCESSING_FAILED:
+        queryset = KoboSubmission.objects.filter(
+            status=KoboSubmission.Status.PROCESSING_FAILED
+        )
+        list_mode = "processing_errors"
+        page_title = "Errores de procesamiento"
+        page_intro = "Formularios que no completaron su procesamiento automático."
+    elif remote_update_pending == "1":
+        queryset = KoboSubmission.objects.filter(remote_update_pending=True)
+        list_mode = "remote_updates"
+        page_title = "Actualizaciones remotas pendientes"
+        page_intro = "Cambios recibidos desde KoboToolbox que requieren revisión humana."
+    else:
+        queryset = pending_review_queryset()
+        list_mode = "pending_review"
+        page_title = "Formularios pendientes de revisión"
+        page_intro = "Formularios listos para comprobación humana antes de importarlos."
+
+    if request.GET.get("reason_code"):
+        queryset = queryset.filter(routing_reason_code=request.GET["reason_code"])
     if request.GET.get("ficha"):
         queryset = queryset.filter(form_definition__form_id=request.GET["ficha"])
     if request.GET.get("nucleo_code"):
-        queryset = queryset.filter(nucleo_code_normalized__icontains=request.GET["nucleo_code"].strip())
+        queryset = queryset.filter(
+            nucleo_code_normalized__icontains=request.GET["nucleo_code"].strip()
+        )
     if request.GET.get("date"):
         queryset = queryset.filter(received_at__date=request.GET["date"])
+
+    queryset = queryset.select_related("form_definition", "project").order_by(
+        "-received_at", "-pk"
+    )
     identities = dict(KoboTerritorialIdentity.objects.values_list("nucleo_code_normalized", "pk"))
     conflicts = dict(
         KoboTerritorialIdentityConflict.objects.filter(status="open").values_list(
@@ -681,5 +746,14 @@ def pending_submission_list(request):
         )
     )
     context = _pagination_context(request, queryset)
-    context.update({"identities": identities, "conflicts": conflicts, "hub_nav": "cases"})
+    context.update(
+        {
+            "identities": identities,
+            "conflicts": conflicts,
+            "hub_nav": "cases",
+            "list_mode": list_mode,
+            "page_title": page_title,
+            "page_intro": page_intro,
+        }
+    )
     return render(request, "kobo/hub/pending_submission_list.html", context)

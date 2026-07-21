@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static kobo_presentation %}
 
-{% block title %}Formularios por revisar | SIGEDON{% endblock %}
+{% block title %}{{ page_title }} | SIGEDON{% endblock %}
 
 {% block extra_css %}
 <link href="{% static 'web/css/kobo_hub.css' %}" rel="stylesheet">
@@ -10,81 +10,105 @@
 {% block content %}
 <div class="ops-page-header">
     <div class="ops-kicker">Integración de formularios</div>
-    <h1>Formularios por revisar</h1>
-    <p>
-        Formularios sin núcleo registrado, con conflicto de asignación o con errores.
-        Esta bandeja no permite importar ni asignar proyectos manualmente.
-    </p>
+    <h1>{{ page_title }}</h1>
+    <p>{{ page_intro }}</p>
 </div>
 
 {% include "kobo/hub/_nav.html" %}
 
-<form method="get" class="row g-2 mb-4" aria-label="Filtrar formularios por revisar">
+<form method="get" class="row g-2 mb-4" aria-label="Filtrar formularios">
+    {% if list_mode == "processing_errors" %}
+        <input type="hidden" name="status" value="processing_failed">
+    {% endif %}
+    {% if list_mode == "remote_updates" %}
+        <input type="hidden" name="remote_update_pending" value="1">
+    {% endif %}
     <div class="col-md-4">
         <label class="visually-hidden" for="nucleo_code">Código del núcleo</label>
         <input id="nucleo_code" class="form-control" name="nucleo_code" value="{{ request.GET.nucleo_code }}" placeholder="Código del núcleo">
     </div>
-    <div class="col-md-4">
-        <label class="visually-hidden" for="routing_status">Situación</label>
-        <select id="routing_status" class="form-select" name="routing_status">
-            <option value="">Todas las situaciones</option>
-            <option value="pending_identity" {% if request.GET.routing_status == "pending_identity" %}selected{% endif %}>Sin núcleo registrado</option>
-            <option value="conflict" {% if request.GET.routing_status == "conflict" %}selected{% endif %}>Conflicto de asignación</option>
-            <option value="error" {% if request.GET.routing_status == "error" %}selected{% endif %}>Error de asignación</option>
-        </select>
-    </div>
+    {% if list_mode == "routing" or list_mode == "pending_review" %}
+        <div class="col-md-4">
+            <label class="visually-hidden" for="routing_status">Situación</label>
+            <select id="routing_status" class="form-select" name="routing_status">
+                <option value="">
+                    {% if list_mode == "pending_review" %}Pendientes de revisión{% else %}Todas las situaciones{% endif %}
+                </option>
+                <option value="pending_identity" {% if request.GET.routing_status == "pending_identity" %}selected{% endif %}>Sin núcleo registrado</option>
+                <option value="conflict" {% if request.GET.routing_status == "conflict" %}selected{% endif %}>Conflicto de asignación</option>
+                <option value="error" {% if request.GET.routing_status == "error" %}selected{% endif %}>Error de asignación</option>
+            </select>
+        </div>
+    {% endif %}
     <div class="col-md-2">
         <button type="submit" class="btn btn-outline-primary w-100">Filtrar</button>
     </div>
 </form>
 
-<div class="card border-0 ops-table-card">
-    <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0 kobo-hub-table">
-            <thead>
-                <tr>
-                    <th scope="col">Fecha</th>
-                    <th scope="col">Ficha</th>
-                    <th scope="col">Núcleo</th>
-                    <th scope="col">Situación</th>
-                    <th scope="col">Motivo</th>
-                    <th scope="col">Proyecto</th>
-                    <th scope="col">Estado</th>
-                    <th scope="col" class="text-end">Acciones</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for submission in page_obj %}
+{% if page_obj.object_list %}
+    <div class="card border-0 ops-table-card">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 kobo-hub-table">
+                <thead>
                     <tr>
-                        <td>{{ submission.received_at }}</td>
-                        <td>{{ submission.form_definition.form_id }}</td>
-                        <td>{{ submission.nucleo_code_normalized|default:"—" }}</td>
-                        <td>{{ submission.routing_status|kobo_label }}</td>
-                        <td>{{ submission.routing_reason_code|kobo_label|default:"—" }}</td>
-                        <td>{{ submission.project|default:"—" }}</td>
-                        <td><span class="badge ops-status-badge">{{ submission.status|kobo_label }}</span></td>
-                        <td class="text-end">
-                            <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:submission_detail' submission.pk %}">Abrir</a>
-                            {% with identity_pk=identities|get_item:submission.nucleo_code_normalized %}
-                                {% if identity_pk %}
-                                    <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:identity_detail' identity_pk %}">Ver núcleo</a>
-                                {% endif %}
-                            {% endwith %}
-                            {% with conflict_pk=conflicts|get_item:submission.pk %}
-                                {% if conflict_pk %}
-                                    <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:conflict_detail' conflict_pk %}">Ver caso</a>
-                                {% endif %}
-                            {% endwith %}
-                        </td>
+                        <th scope="col">Fecha</th>
+                        <th scope="col">Ficha</th>
+                        <th scope="col">Núcleo</th>
+                        <th scope="col">Situación</th>
+                        <th scope="col">Motivo</th>
+                        <th scope="col">Proyecto</th>
+                        <th scope="col">Estado</th>
+                        <th scope="col" class="text-end">Acciones</th>
                     </tr>
-                {% empty %}
-                    <tr>
-                        <td colspan="8" class="text-muted">No hay formularios pendientes en este filtro.</td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    {% for submission in page_obj %}
+                        <tr>
+                            <td>{{ submission.received_at }}</td>
+                            <td>{{ submission.form_definition.form_id }}</td>
+                            <td>{{ submission.nucleo_code_normalized|default:"—" }}</td>
+                            <td>{{ submission.routing_status|kobo_label }}</td>
+                            <td>{{ submission.routing_reason_code|kobo_label|default:"—" }}</td>
+                            <td>{{ submission.project|default:"—" }}</td>
+                            <td><span class="badge ops-status-badge">{{ submission.status|kobo_label }}</span></td>
+                            <td class="text-end">
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:submission_detail' submission.pk %}">Abrir</a>
+                                {% with identity_pk=identities|get_item:submission.nucleo_code_normalized %}
+                                    {% if identity_pk %}
+                                        <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:identity_detail' identity_pk %}">Ver núcleo</a>
+                                    {% endif %}
+                                {% endwith %}
+                                {% with conflict_pk=conflicts|get_item:submission.pk %}
+                                    {% if conflict_pk %}
+                                        <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:conflict_detail' conflict_pk %}">Ver caso</a>
+                                    {% endif %}
+                                {% endwith %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
-</div>
-{% include "web/includes/pagination.html" with page_obj=page_obj %}
+    {% include "web/includes/pagination.html" with page_obj=page_obj %}
+{% else %}
+    <div class="kobo-hub-empty-state card border-0 ops-table-card" role="status">
+        <div class="card-body">
+            {% if list_mode == "pending_review" %}
+                <p class="mb-1"><strong>No hay formularios pendientes de revisión.</strong></p>
+                <p class="kobo-hub-notice-secondary mb-0">
+                    Significa que no hay envíos listos para comprobación humana. Sincronice formularios o revise Casos por revisar si busca otra incidencia.
+                </p>
+            {% else %}
+                <p class="mb-1"><strong>No hay formularios en este filtro.</strong></p>
+                <p class="kobo-hub-notice-secondary mb-0">
+                    Pruebe otra situación o vuelva al listado de pendientes de revisión.
+                </p>
+            {% endif %}
+            <p class="mt-3 mb-0">
+                <a href="{% url 'kobo:conflict_list' %}">Volver a Casos por revisar</a>
+            </p>
+        </div>
+    </div>
+{% endif %}
 {% endblock %}

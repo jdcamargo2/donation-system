@@ -740,3 +740,12 @@ El lenguaje visible del panel prioriza términos operativos:
 
 Los nombres técnicos internos (`mapping`, `routing`, identidades territoriales)
 se conservan en modelos, servicios y documentación de arquitectura.
+
+El criterio compartido de «formularios pendientes de revisión» es
+`status=ready_for_review` (`pending_review_queryset` en el hub). Ese mismo
+queryset alimenta la métrica del resumen, la categoría en Casos por revisar,
+el enlace «Ver listado» y el listado en `/integrations/kobo/submissions/pending/`.
+
+La asignación de zonas admite `?zone=<codigo>` para preseleccionar la zona en el
+formulario de configuración sin mutar por GET. El historial completo de
+sincronizaciones vive en `/integrations/kobo/sync/history/`.

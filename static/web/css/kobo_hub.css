@@ -47,6 +47,10 @@
     gap: 0.35rem;
 }
 
+.kobo-hub-notice-compact {
+    gap: 0.25rem;
+}
+
 .kobo-hub-notice-secondary {
     color: var(--ops-muted);
     font-size: 0.92rem;
@@ -54,12 +58,11 @@
 }
 
 .kobo-hub-sync-row {
-    align-items: flex-start;
+    align-items: center;
     border-top: 1px solid #edf2f7;
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
     gap: 0.75rem 1rem;
-    justify-content: space-between;
+    grid-template-columns: minmax(180px, 1fr) auto auto;
     padding: 0.95rem 0;
 }
 
@@ -68,47 +71,58 @@
     padding-top: 0.15rem;
 }
 
+.kobo-hub-sync-copy {
+    min-width: 0;
+}
+
+.kobo-hub-sync-copy .fw-semibold,
+.kobo-hub-sync-copy .small {
+    overflow-wrap: anywhere;
+}
+
 .kobo-hub-sync-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+    display: contents;
 }
 
-.kobo-hub-sync-actions .btn {
+.kobo-hub-sync-action {
+    margin: 0;
+}
+
+.kobo-hub-sync-btn {
     min-height: 2.5rem;
+    min-width: 11.5rem;
+    width: 100%;
 }
 
-.kobo-hub-attention-item {
+.kobo-hub-next-action {
+    align-items: center;
     border: 1px solid var(--ops-border);
     border-radius: 0.85rem;
-    display: block;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
     padding: 0.9rem 1rem;
     text-decoration: none;
 }
 
-.kobo-hub-attention-item + .kobo-hub-attention-item {
+.kobo-hub-next-action + .kobo-hub-next-action {
     margin-top: 0.65rem;
 }
 
-.kobo-hub-attention-item:hover,
-.kobo-hub-attention-item:focus-visible {
+.kobo-hub-next-action:hover,
+.kobo-hub-next-action:focus-visible {
     background: #f8fbff;
 }
 
-.kobo-hub-attention-item.is-warning {
-    border-left: 4px solid #d4a017;
+.kobo-hub-next-action-main {
+    min-width: 0;
 }
 
-.kobo-hub-attention-item.is-danger {
-    border-left: 4px solid #c0392b;
-}
-
-.kobo-hub-attention-item.is-info {
-    border-left: 4px solid var(--ops-primary);
-}
-
-.kobo-hub-attention-item.is-success {
-    border-left: 4px solid var(--ops-success);
+.kobo-hub-next-action-count {
+    color: var(--ops-primary-strong);
+    font-size: 1.35rem;
+    font-weight: 800;
+    line-height: 1;
 }
 
 .kobo-hub-attention-title {
@@ -122,21 +136,64 @@
     margin: 0.25rem 0 0;
 }
 
-.kobo-hub-category-grid {
-    display: grid;
-    gap: 0.75rem;
-    grid-template-columns: repeat(1, minmax(0, 1fr));
-    margin-bottom: 1.35rem;
+.kobo-hub-category-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
 }
 
-.kobo-hub-category-card {
+.kobo-hub-category-item {
+    align-items: flex-start;
     background: #ffffff;
     border: 1px solid var(--ops-border);
     border-radius: 0.85rem;
-    padding: 0.95rem 1rem;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
 }
 
-.kobo-hub-category-card a {
+.kobo-hub-category-item.is-empty {
+    background: #fafbfc;
+}
+
+.kobo-hub-category-item.has-data {
+    border-left: 4px solid var(--ops-primary);
+}
+
+.kobo-hub-category-item-main {
+    min-width: 0;
+}
+
+.kobo-hub-category-item-main a {
+    display: inline-block;
+    font-weight: 700;
+    margin-top: 0.35rem;
+    text-decoration: none;
+}
+
+.kobo-hub-category-count {
+    color: var(--ops-text);
+    font-size: 1.25rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.kobo-hub-empty-state {
+    padding: 0.25rem 0;
+}
+
+.kobo-hub-dashboard-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    margin-bottom: 1rem;
+}
+
+.kobo-hub-dashboard-links a {
     font-weight: 700;
     text-decoration: none;
 }
@@ -145,25 +202,30 @@
     min-width: 680px;
 }
 
-@media (min-width: 768px) {
-    .kobo-hub-category-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (max-width: 991.98px) {
+    .kobo-hub-sync-row {
+        grid-template-columns: 1fr auto;
     }
-}
 
-@media (min-width: 992px) {
-    .kobo-hub-category-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+    .kobo-hub-sync-actions {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 0.5rem;
     }
 }
 
 @media (max-width: 575.98px) {
-    .kobo-hub-sync-actions {
-        width: 100%;
+    .kobo-hub-sync-row {
+        grid-template-columns: 1fr;
     }
 
-    .kobo-hub-sync-actions form,
-    .kobo-hub-sync-actions .btn {
-        flex: 1 1 100%;
+    .kobo-hub-sync-actions {
+        display: grid;
+        gap: 0.5rem;
+        grid-template-columns: 1fr;
+    }
+
+    .kobo-hub-sync-btn {
+        min-width: 0;
     }
 }

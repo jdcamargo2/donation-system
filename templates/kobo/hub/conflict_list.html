@@ -16,85 +16,101 @@
 
 {% include "kobo/hub/_nav.html" %}
 
-<section aria-labelledby="review-categories-title">
+<section aria-labelledby="review-categories-title" class="mb-4">
     <h2 id="review-categories-title" class="h5 ops-section-title">Qué necesita revisión</h2>
-    <div class="kobo-hub-category-grid">
+    <ul class="kobo-hub-category-list">
         {% for category in review_categories %}
-            <article class="kobo-hub-category-card">
-                <div class="ops-metric-label">{{ category.title }}</div>
-                <div class="ops-metric-value">{{ category.count }}</div>
-                <p class="kobo-hub-attention-copy">{{ category.description }}</p>
-                {% if category.url and category.count %}
-                    <a href="{{ category.url }}">Ver listado</a>
-                {% endif %}
-            </article>
+            <li class="kobo-hub-category-item {% if category.count %}has-data{% else %}is-empty{% endif %}">
+                <div class="kobo-hub-category-item-main">
+                    <div class="kobo-hub-attention-title">{{ category.title }}</div>
+                    {% if category.count %}
+                        <p class="kobo-hub-attention-copy">{{ category.description }}</p>
+                        {% if category.url %}
+                            <a href="{{ category.url }}">Ver listado</a>
+                        {% endif %}
+                    {% else %}
+                        <p class="kobo-hub-attention-copy mb-0">{{ category.empty_meaning }}</p>
+                        <p class="kobo-hub-notice-secondary mb-0">{{ category.empty_action }}</p>
+                    {% endif %}
+                </div>
+                <div class="kobo-hub-category-count" aria-label="{{ category.count }}">{{ category.count }}</div>
+            </li>
         {% endfor %}
-    </div>
+    </ul>
 </section>
 
-<section aria-labelledby="assignment-cases-title">
-    <div class="ops-page-header-row mb-3">
-        <div>
-            <h2 id="assignment-cases-title" class="h5 ops-section-title mb-1">Conflictos de asignación</h2>
-            <p class="text-muted mb-0">Casos en los que la zona o el proyecto del formulario no coincide con el núcleo registrado.</p>
+{% if show_conflict_table %}
+    <section aria-labelledby="assignment-cases-title">
+        <div class="ops-page-header-row mb-3">
+            <div>
+                <h2 id="assignment-cases-title" class="h5 ops-section-title mb-1">Conflictos de asignación</h2>
+                <p class="text-muted mb-0">Casos en los que la zona o el proyecto del formulario no coincide con el núcleo registrado.</p>
+            </div>
         </div>
-    </div>
 
-    <form method="get" class="row g-2 mb-3" aria-label="Filtrar conflictos de asignación">
-        <div class="col-md-4">
-            <label class="visually-hidden" for="status">Estado</label>
-            <select id="status" class="form-select" name="status">
-                <option value="">Todos los estados</option>
-                {% for status in statuses %}
-                    <option value="{{ status.value }}" {% if request.GET.status == status.value %}selected{% endif %}>{{ status.value|kobo_label }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="col-md-2">
-            <button type="submit" class="btn btn-outline-primary w-100">Filtrar</button>
-        </div>
-    </form>
-
-    <div class="card border-0 ops-table-card">
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 kobo-hub-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Núcleo</th>
-                        <th scope="col">Zona existente</th>
-                        <th scope="col">Zona propuesta</th>
-                        <th scope="col">Proyecto existente</th>
-                        <th scope="col">Proyecto propuesto</th>
-                        <th scope="col">Formulario</th>
-                        <th scope="col">Estado</th>
-                        <th scope="col">Fecha</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for conflict in page_obj %}
-                        <tr>
-                            <td>
-                                <a class="fw-semibold text-decoration-none" href="{% url 'kobo:conflict_detail' conflict.pk %}">
-                                    {{ conflict.identity.nucleo_code_normalized }}
-                                </a>
-                            </td>
-                            <td>{{ conflict.existing_pastoral_zone|kobo_zone_label }}</td>
-                            <td>{{ conflict.proposed_pastoral_zone|kobo_zone_label }}</td>
-                            <td>{{ conflict.existing_project|default:"—" }}</td>
-                            <td>{{ conflict.proposed_project|default:"—" }}</td>
-                            <td>{{ conflict.incoming_submission.external_id }}</td>
-                            <td><span class="badge ops-status-badge">{{ conflict.status|kobo_label }}</span></td>
-                            <td>{{ conflict.created_at }}</td>
-                        </tr>
-                    {% empty %}
-                        <tr>
-                            <td colspan="8" class="text-muted">No hay conflictos de asignación en este filtro.</td>
-                        </tr>
+        <form method="get" class="row g-2 mb-3" aria-label="Filtrar conflictos de asignación">
+            <div class="col-md-4">
+                <label class="visually-hidden" for="status">Estado</label>
+                <select id="status" class="form-select" name="status">
+                    <option value="">Todos los estados</option>
+                    {% for status in statuses %}
+                        <option value="{{ status.value }}" {% if request.GET.status == status.value %}selected{% endif %}>{{ status.value|kobo_label }}</option>
                     {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {% include "web/includes/pagination.html" with page_obj=page_obj %}
-</section>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-outline-primary w-100">Filtrar</button>
+            </div>
+        </form>
+
+        {% if page_obj.object_list %}
+            <div class="card border-0 ops-table-card">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 kobo-hub-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Núcleo</th>
+                                <th scope="col">Zona existente</th>
+                                <th scope="col">Zona propuesta</th>
+                                <th scope="col">Proyecto existente</th>
+                                <th scope="col">Proyecto propuesto</th>
+                                <th scope="col">Formulario</th>
+                                <th scope="col">Estado</th>
+                                <th scope="col">Fecha</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for conflict in page_obj %}
+                                <tr>
+                                    <td>
+                                        <a class="fw-semibold text-decoration-none" href="{% url 'kobo:conflict_detail' conflict.pk %}">
+                                            {{ conflict.identity.nucleo_code_normalized }}
+                                        </a>
+                                    </td>
+                                    <td>{{ conflict.existing_pastoral_zone|kobo_zone_label }}</td>
+                                    <td>{{ conflict.proposed_pastoral_zone|kobo_zone_label }}</td>
+                                    <td>{{ conflict.existing_project|default:"—" }}</td>
+                                    <td>{{ conflict.proposed_project|default:"—" }}</td>
+                                    <td>{{ conflict.incoming_submission.external_id }}</td>
+                                    <td><span class="badge ops-status-badge">{{ conflict.status|kobo_label }}</span></td>
+                                    <td>{{ conflict.created_at }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% include "web/includes/pagination.html" with page_obj=page_obj %}
+        {% else %}
+            <div class="kobo-hub-empty-state card border-0 ops-table-card" role="status">
+                <div class="card-body">
+                    <p class="mb-1"><strong>No hay conflictos de asignación en este filtro.</strong></p>
+                    <p class="kobo-hub-notice-secondary mb-0">
+                        Pruebe otro estado o vuelva a «Todos los estados» para ver el listado completo.
+                    </p>
+                </div>
+            </div>
+        {% endif %}
+    </section>
+{% endif %}
 {% endblock %}

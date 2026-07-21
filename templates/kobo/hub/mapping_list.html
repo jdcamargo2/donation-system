@@ -30,8 +30,13 @@
 {% if can_manage %}
     <section id="configure-zone" class="card border-0 ops-table-card mb-4" aria-labelledby="configure-zone-title">
         <div class="card-body">
-            <h2 id="configure-zone-title" class="h5 ops-section-title">Configurar zona</h2>
-            <p class="text-muted">Seleccione la zona pastoral y el proyecto donde se organizarán sus formularios.</p>
+            {% if selected_zone %}
+                <h2 id="configure-zone-title" class="h5 ops-section-title">Configurar zona: {{ selected_zone_label }}</h2>
+                <p class="text-muted">La zona pastoral ya está preseleccionada. Elija el proyecto y guarde la asignación.</p>
+            {% else %}
+                <h2 id="configure-zone-title" class="h5 ops-section-title">Configurar zona</h2>
+                <p class="text-muted">Seleccione la zona pastoral y el proyecto donde se organizarán sus formularios.</p>
+            {% endif %}
             <form method="post" action="{% url 'kobo:configure_mapping' %}" class="row g-3">
                 {% csrf_token %}
                 <div class="col-md-5">
@@ -96,7 +101,7 @@
                                     </form>
                                 </details>
                             {% elif not row.mapping and can_manage %}
-                                <a class="btn btn-sm btn-primary" href="#configure-zone">Configurar</a>
+                                <a class="btn btn-sm btn-primary" href="{% url 'kobo:mapping_list' %}?zone={{ row.zone.value }}#configure-zone">Configurar</a>
                             {% elif row.mapping %}
                                 <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_detail' row.mapping.project.pk %}">Ver detalle</a>
                             {% endif %}
