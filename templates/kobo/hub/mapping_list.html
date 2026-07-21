@@ -18,6 +18,9 @@
 
 {% include "kobo/hub/_nav.html" %}
 
+<div id="kobo-toast-root" class="mb-3" aria-live="polite"></div>
+<div id="kobo-modal-root"></div>
+
 {% if missing_count %}
     <div class="alert alert-warning kobo-hub-notice mb-4" role="status">
         <strong>Hay {{ missing_count }} zonas sin proyecto asociado.</strong>
@@ -28,11 +31,11 @@
 {% endif %}
 
 {% if can_manage and change_zone and change_mapping %}
+    <noscript>
     <section id="cambiar-asignacion" class="card border-0 ops-table-card mb-4" aria-labelledby="change-zone-title">
         <div class="card-body">
             <h2 id="change-zone-title" class="h5 ops-section-title">Cambiar asignación: {{ change_zone_label }}</h2>
             <p class="text-muted">Puede asociar otro proyecto o quitar la asignación actual.</p>
-
             <form method="post" action="{% url 'kobo:configure_mapping' %}" class="row g-3 mb-4">
                 {% csrf_token %}
                 <div class="col-md-5">
@@ -47,7 +50,6 @@
                     <button type="submit" class="btn btn-primary w-100">Guardar cambio</button>
                 </div>
             </form>
-
             <div class="border-top pt-3">
                 <h3 class="h6 text-danger mb-2">Quitar asignación</h3>
                 <p class="kobo-hub-notice-secondary mb-3">{{ change_explanation }}</p>
@@ -64,16 +66,13 @@
             </div>
         </div>
     </section>
-{% elif can_manage %}
+    </noscript>
+{% elif can_manage and selected_zone %}
+    <noscript>
     <section id="configurar-zona" class="card border-0 ops-table-card mb-4" aria-labelledby="configure-zone-title">
         <div class="card-body">
-            {% if selected_zone %}
-                <h2 id="configure-zone-title" class="h5 ops-section-title">Configurar zona: {{ selected_zone_label }}</h2>
-                <p class="text-muted">La zona pastoral ya está preseleccionada. Elija el proyecto y guarde la asignación.</p>
-            {% else %}
-                <h2 id="configure-zone-title" class="h5 ops-section-title">Configurar zona</h2>
-                <p class="text-muted">Seleccione la zona pastoral y el proyecto donde se organizarán sus formularios.</p>
-            {% endif %}
+            <h2 id="configure-zone-title" class="h5 ops-section-title">Configurar zona: {{ selected_zone_label }}</h2>
+            <p class="text-muted">La zona pastoral ya está preseleccionada. Elija el proyecto y guarde la asignación.</p>
             <form method="post" action="{% url 'kobo:configure_mapping' %}" class="row g-3">
                 {% csrf_token %}
                 <div class="col-md-5">
@@ -92,6 +91,7 @@
             </form>
         </div>
     </section>
+    </noscript>
 {% endif %}
 
 <div class="card border-0 ops-table-card">
@@ -109,35 +109,7 @@
             </thead>
             <tbody>
                 {% for row in rows %}
-                    <tr id="zone-{{ row.zone.value }}">
-                        <td class="fw-semibold">{{ row.zone|kobo_zone_label }}</td>
-                        <td>
-                            {% if row.mapping %}
-                                {{ row.mapping.project.name }}
-                                <span class="small text-muted d-block">{{ row.mapping.project.code }}</span>
-                            {% else %}
-                                <span class="text-muted">Sin proyecto asociado</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if row.mapping %}
-                                <span class="badge ops-status-badge">Configurada</span>
-                            {% else %}
-                                <span class="badge ops-status-badge">Pendiente</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ row.identity_count }}</td>
-                        <td>{{ row.mapping.updated_at|default:"—" }}</td>
-                        <td class="text-end">
-                            {% if row.mapping and can_manage %}
-                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:mapping_list' %}?change={{ row.zone.value }}#cambiar-asignacion">Cambiar asignación</a>
-                            {% elif not row.mapping and can_manage %}
-                                <a class="btn btn-sm btn-primary" href="{% url 'kobo:mapping_list' %}?zone={{ row.zone.value }}#configurar-zona">Configurar</a>
-                            {% elif row.mapping %}
-                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_detail' row.mapping.project.pk %}">Ver detalle</a>
-                            {% endif %}
-                        </td>
-                    </tr>
+                    {% include "kobo/hub/_mapping_row.html" with row=row can_manage=can_manage %}
                 {% endfor %}
             </tbody>
         </table>
@@ -146,15 +118,22 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-(function () {
-    if (window.location.hash !== "#configurar-zona") {
+{{ block.super }}
+<script src="{% static 'vendor/htmx/htmx.min.js' %}" defer></script>
+<script defer>
+document.addEventListener('DOMContentLoaded', function () {
+    var params = new URLSearchParams(window.location.search);
+    var zone = params.get('change') || params.get('zone');
+    if (!zone || !window.htmx) {
         return;
     }
-    var projectField = document.getElementById("id_project");
-    if (projectField) {
-        projectField.focus({ preventScroll: false });
-    }
-})();
+    var query = params.get('change')
+        ? ('?change=' + encodeURIComponent(zone))
+        : ('?zone=' + encodeURIComponent(zone));
+    window.htmx.ajax('GET', '{% url "kobo:mapping_modal" %}' + query, {
+        target: '#kobo-modal-root',
+        swap: 'innerHTML'
+    });
+});
 </script>
 {% endblock %}

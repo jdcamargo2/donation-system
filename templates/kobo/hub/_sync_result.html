@@ -1,0 +1,16 @@
+{% load kobo_presentation %}
+<div class="alert {% if sync_result.status == 'SUCCEEDED' %}alert-success{% elif sync_result.status == 'PARTIAL' %}alert-warning{% else %}alert-danger{% endif %} kobo-hub-notice" role="status">
+    <strong>Sincronización completada.</strong>
+    <ul class="mb-0 mt-2">
+        <li>Activos: {{ sync_result.assets_processed }}</li>
+        <li>Encontrados: {{ sync_result.forms_found }}</li>
+        <li>Nuevos: {{ sync_result.created }}</li>
+        <li>Actualizados: {{ sync_result.updated }}</li>
+        <li>Sin cambios: {{ sync_result.unchanged }}</li>
+        <li>Importados: {{ sync_result.imported }}</li>
+        <li>Incidencias: {{ sync_result.incidents }}</li>
+        <li>Con error: {{ sync_result.errors }}</li>
+    </ul>
+</div>
+{% include "kobo/hub/_dashboard_status.html" with status_oob=True %}
+{% include "kobo/hub/_next_actions.html" with next_actions_oob=True %}

@@ -544,8 +544,8 @@ def deactivate_territorial_identity(*, identity, actor, reason):
 def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_RECONCILIATION_BATCH):
     """
     PRE: actor may reconcile, identity is persisted, and limit is between 1 and 100.
-    POST: resolves one locked batch of pending Ficha 10/11 submissions only; review,
-    approval, import status, imported rows, bindings, and import records remain untouched.
+    POST: resolves one locked batch of pending Ficha 10/11 submissions, then attempts
+    automatic import for each newly resolved row using the system actor.
     """
     blocked = _authorized(actor, RUN_RECONCILIATION_PERMISSION)
     if blocked:
@@ -567,6 +567,7 @@ def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_REC
             reason_code=ReasonCode.IDENTITY_NOT_FOUND,
         )
 
+    resolved_ids: list[int] = []
     with transaction.atomic():
         try:
             locked_identity = KoboTerritorialIdentity.objects.select_for_update().get(pk=identity_id)
@@ -603,6 +604,7 @@ def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_REC
                 update_fields=("project", "routing_status", "routing_reason_code", "routing_resolved_at")
             )
             resolved += 1
+            resolved_ids.append(submission.pk)
         still_pending = KoboSubmission.objects.filter(
             form_definition__form_id__in=(FICHA_10_FORM_ID, FICHA_11_FORM_ID),
             nucleo_code_normalized=locked_identity.nucleo_code_normalized,
@@ -632,4 +634,12 @@ def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_REC
                     "has_more": result.has_more,
                 },
             )
-        return result
+    if resolved_ids:
+        from apps.integrations.kobo.services.automation import auto_import_if_eligible
+
+        for submission_id in resolved_ids:
+            try:
+                auto_import_if_eligible(KoboSubmission.objects.get(pk=submission_id))
+            except Exception:
+                continue
+    return result

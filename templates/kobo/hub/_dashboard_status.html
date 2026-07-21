@@ -1,0 +1,66 @@
+{% load kobo_presentation %}
+{% if status_oob %}<div id="kobo-dashboard-status" hx-swap-oob="innerHTML">{% endif %}
+    <div class="row g-3 ops-metric-grid mb-4">
+        <div class="col-md-4">
+            <div class="card h-100 border-0 ops-metric-card">
+                <div class="card-body">
+                    <div class="ops-metric-label">Formularios importados</div>
+                    <div class="ops-metric-value">{{ imported_count }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100 border-0 ops-metric-card">
+                <div class="card-body">
+                    <div class="ops-metric-label">Incidencias</div>
+                    <div class="ops-metric-value">{{ incident_count }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100 border-0 ops-metric-card">
+                <div class="card-body">
+                    <div class="ops-metric-label">Zonas configuradas</div>
+                    <div class="ops-metric-value">{{ mapping_count }} de {{ zone_total }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <section class="card border-0 ops-table-card mb-4" aria-labelledby="kobo-last-sync-title">
+        <div class="card-body">
+            <h2 id="kobo-last-sync-title" class="h5 ops-section-title">Última sincronización</h2>
+            {% if last_sync %}
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Estado</dt>
+                    <dd class="col-sm-8">
+                        <span class="badge ops-status-badge">{{ last_sync.status|kobo_sync_status }}</span>
+                    </dd>
+                    <dt class="col-sm-4">Modo</dt>
+                    <dd class="col-sm-8">{{ last_sync.mode|kobo_sync_mode }}</dd>
+                    <dt class="col-sm-4">Inicio</dt>
+                    <dd class="col-sm-8">{{ last_sync.started_at }}</dd>
+                    {% if last_sync.asset %}
+                        <dt class="col-sm-4">Formulario</dt>
+                        <dd class="col-sm-8">{{ last_sync.asset.name }}</dd>
+                    {% endif %}
+                </dl>
+            {% else %}
+                <p class="kobo-hub-notice-secondary mb-0">Todavía no hay sincronizaciones registradas.</p>
+            {% endif %}
+            <p class="kobo-hub-notice-secondary mt-3 mb-0">
+                Estado del procesamiento:
+                {% if processing_status == "syncing" %}
+                    <strong>Sincronizando</strong>
+                {% else %}
+                    En espera
+                {% endif %}
+            </p>
+            {% if latest_received_at %}
+                <p class="kobo-hub-notice-secondary mb-0">
+                    Último formulario recibido: {{ latest_received_at }}
+                </p>
+            {% endif %}
+        </div>
+    </section>
+{% if status_oob %}</div>{% endif %}

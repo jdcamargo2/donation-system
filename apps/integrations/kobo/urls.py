@@ -5,9 +5,12 @@ from apps.integrations.kobo import views
 app_name = "kobo"
 urlpatterns = [
     path("", views.hub_dashboard, name="hub"),
+    path("sync/", views.sync_all, name="sync_all"),
     path("sync/history/", views.sync_history, name="sync_history"),
     path("sync/<int:pk>/<str:mode>/", views.sync_asset, name="sync_asset"),
+    path("dashboard/status/", views.dashboard_status, name="dashboard_status"),
     path("mappings/", views.mapping_list, name="mapping_list"),
+    path("mappings/modal/", views.mapping_modal, name="mapping_modal"),
     path("mappings/configure/", views.configure_mapping, name="configure_mapping"),
     path("mappings/<str:zone>/deactivate/", views.deactivate_mapping, name="deactivate_mapping"),
     path("identities/", views.identity_list, name="identity_list"),
@@ -18,6 +21,11 @@ urlpatterns = [
     path("conflicts/<int:pk>/", views.conflict_detail, name="conflict_detail"),
     path("conflicts/<int:pk>/resolve/", views.resolve_conflict, name="resolve_conflict"),
     path("submissions/pending/", views.pending_submission_list, name="pending_submission_list"),
+    path(
+        "submissions/<int:pk>/retry-import/",
+        views.retry_submission_import,
+        name="retry_submission_import",
+    ),
     path("webhook/", views.webhook_submission, name="webhook_submission"),
     path(
         "discovered-assets/",

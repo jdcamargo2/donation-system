@@ -56,10 +56,25 @@ from apps.integrations.kobo.services import (
     route_normalized_submission,
 )
 from apps.integrations.kobo.hub import (
-    conflict_detail, conflict_list, configure_mapping, deactivate_mapping,
-    hub_dashboard, identity_detail, identity_list, identity_status,
-    mapping_list, pending_submission_list, reconcile_identity, resolve_conflict,
-    sync_asset, sync_history,
+    conflict_detail,
+    conflict_list,
+    configure_mapping,
+    dashboard_status,
+    deactivate_mapping,
+    hub_dashboard,
+    identity_detail,
+    identity_list,
+    identity_status,
+    mapping_list,
+    mapping_modal,
+    pending_submission_list,
+    reconcile_identity,
+    resolve_conflict,
+    retry_submission_import,
+    submission_incident_context,
+    sync_all,
+    sync_asset,
+    sync_history,
 )
 from apps.integrations.kobo.submission_presentation import (
     attachment_status_label,
@@ -181,29 +196,35 @@ def webhook_submission(request):
         )
     except Exception:
         return JsonResponse({"ok": False, "error": "internal_error"}, status=500)
-    if not convergence.completed:
-        error = (
-            "project_assignment_failed"
-            if convergence.final_status == KoboSubmission.Status.READY_FOR_REVIEW
-            else "processing_failed"
-        )
+    durable_statuses = {
+        KoboSubmission.Status.READY_FOR_REVIEW,
+        KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        KoboSubmission.Status.IMPORTED,
+        KoboSubmission.Status.VALIDATION_FAILED,
+        KoboSubmission.Status.PROCESSING_FAILED,
+        KoboSubmission.Status.REJECTED,
+        KoboSubmission.Status.DUPLICATE,
+        KoboSubmission.Status.PARTIALLY_IMPORTED,
+    }
+    if convergence.completed or convergence.final_status in durable_statuses:
         return JsonResponse(
             {
-                "ok": False,
-                "error": error,
+                "ok": True,
+                "created": created,
                 "submission_id": convergence.submission_id,
                 "status": convergence.final_status,
             },
-            status=422,
+            status=201 if created else 200,
         )
+    # Still incomplete (e.g. RECEIVED/NORMALIZED): ask Kobo to retry.
     return JsonResponse(
         {
-            "ok": True,
-            "created": created,
+            "ok": False,
+            "error": "processing_incomplete",
             "submission_id": convergence.submission_id,
             "status": convergence.final_status,
         },
-        status=201 if created else 200,
+        status=422,
     )
 
 
@@ -466,13 +487,14 @@ def _project_submission_history_rows(project):
 
 def _detail_context(submission, user, *, review_form=None):
     # PRE: submission is loaded and user passed general view authorization.
-    # POST: returns separated review context without exposing attachment sources.
+    # POST: returns detail context for imported rows or automatic-import incidents.
     attachments = list(submission.attachments.all())
     processing_events = list(submission.processing_events.all())
     can_view_raw_payload = _can_view_raw_payload(user)
     can_change_submission = user.has_perm("kobo.change_kobosubmission")
     can_view_technical = can_view_raw_payload
     ficha_title, ficha_subtitle = form_identity(submission)
+    incident = submission_incident_context(submission)
     return {
         "submission": submission,
         "ficha_title": ficha_title,
@@ -493,6 +515,17 @@ def _detail_context(submission, user, *, review_form=None):
         and should_show_retry_normalization(submission),
         "show_retry_attachments": can_change_submission
         and should_show_retry_attachments(submission, attachments),
+        "show_retry_import": can_change_submission and incident["can_retry_import"],
+        "is_incident": incident["is_incident"],
+        "is_imported": incident["is_imported"],
+        "import_record": incident["import_record"],
+        "incident_label": incident["incident_label"],
+        "incident_action": incident["incident_action"],
+        "page_title": (
+            "Detalle de formulario"
+            if incident["is_imported"]
+            else ("Incidencia" if incident["is_incident"] else "Detalle de formulario")
+        ),
         "kobo_enabled": settings.KOBO_ENABLED,
         "normalized_payload_json": (
             json.dumps(submission.normalized_payload or {}, indent=2, ensure_ascii=False)
@@ -601,9 +634,13 @@ def retry_normalization_action(request, pk):
     )
     if outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW:
         route_normalized_submission(submission)
+        from apps.integrations.kobo.services import auto_import_if_eligible
+
+        auto_import_if_eligible(submission)
+        submission.refresh_from_db()
     messages.info(
         request,
-        f"Procesamiento finalizado: {submission_status_label(outcome.final_status)}.",
+        f"Procesamiento finalizado: {submission_status_label(submission.status)}.",
     )
     return redirect("kobo:submission_detail", pk=submission.pk)
 

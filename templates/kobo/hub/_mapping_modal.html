@@ -1,0 +1,87 @@
+{% load kobo_presentation %}
+<div class="kobo-hub-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="kobo-mapping-modal-title">
+    <div class="kobo-hub-modal">
+        <div class="kobo-hub-modal-header">
+            <h2 id="kobo-mapping-modal-title" class="h5 mb-0">
+                {% if mode == "change" %}
+                    Cambiar asignación: {{ zone_label }}
+                {% else %}
+                    Configurar zona {{ zone_label }}
+                {% endif %}
+            </h2>
+            <button
+                type="button"
+                class="btn-close"
+                aria-label="Cerrar"
+                hx-get="{% url 'kobo:mapping_list' %}"
+                hx-target="#kobo-modal-root"
+                hx-swap="innerHTML"
+                onclick="document.getElementById('kobo-modal-root').innerHTML=''; return false;"
+            ></button>
+        </div>
+        <div class="kobo-hub-modal-body">
+            {% if mode == "change" %}
+                <p class="text-muted">Puede asociar otro proyecto o quitar la asignación actual.</p>
+            {% else %}
+                <p class="text-muted">
+                    Elija el proyecto donde se organizarán los formularios de esta zona pastoral.
+                </p>
+            {% endif %}
+
+            <form
+                method="post"
+                action="{% url 'kobo:configure_mapping' %}"
+                class="row g-3"
+                hx-post="{% url 'kobo:configure_mapping' %}"
+                hx-target="#kobo-modal-root"
+                hx-swap="innerHTML"
+            >
+                {% csrf_token %}
+                <input type="hidden" name="mapping_mode" value="{{ mode }}">
+                {{ form.pastoral_zone }}
+                <div class="col-12">
+                    <label class="form-label" for="{{ form.project.id_for_label }}">{{ form.project.label }}</label>
+                    {{ form.project }}
+                    {% if form.project.errors %}<div class="invalid-feedback d-block">{{ form.project.errors|striptags }}</div>{% endif %}
+                    {% if form.pastoral_zone.errors %}<div class="invalid-feedback d-block">{{ form.pastoral_zone.errors|striptags }}</div>{% endif %}
+                </div>
+                <div class="col-12 d-flex flex-wrap gap-2">
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                    <button
+                        type="button"
+                        class="btn btn-outline-secondary"
+                        onclick="document.getElementById('kobo-modal-root').innerHTML=''"
+                    >
+                        Cancelar
+                    </button>
+                </div>
+            </form>
+
+            {% if mode == "change" and mapping and can_manage %}
+                <div class="border-top pt-3 mt-4">
+                    <h3 class="h6 text-danger mb-2">Quitar asignación</h3>
+                    <p class="kobo-hub-notice-secondary mb-3">{{ change_explanation }}</p>
+                    <form
+                        method="post"
+                        action="{% url 'kobo:deactivate_mapping' zone.value %}"
+                        class="row g-3"
+                        hx-post="{% url 'kobo:deactivate_mapping' zone.value %}"
+                        hx-target="#kobo-modal-root"
+                        hx-swap="innerHTML"
+                        onsubmit="return confirm('¿Confirma quitar la asignación de esta zona?');"
+                    >
+                        {% csrf_token %}
+                        <div class="col-12">
+                            <label class="form-label" for="{{ reason_form.reason.id_for_label }}">{{ reason_form.reason.label }}</label>
+                            {{ reason_form.reason }}
+                            {% if reason_form.reason.errors %}<div class="invalid-feedback d-block">{{ reason_form.reason.errors|striptags }}</div>{% endif %}
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-outline-danger">Quitar asignación</button>
+                        </div>
+                    </form>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>

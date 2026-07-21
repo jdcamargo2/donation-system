@@ -14,9 +14,11 @@ def process_pending_submissions(
 ) -> ProcessingBatchResult:
     """
     PRE: limit is positive and default_timezone is supplied by the caller.
-    POST: processes oldest retryable submissions independently up to limit and
-    returns aggregate, non-sensitive counts.
+    POST: processes oldest retryable submissions independently up to limit,
+    auto-imports eligible ones, and returns aggregate, non-sensitive counts.
     """
+    from apps.integrations.kobo.services.automation import auto_import_if_eligible
+
     if limit <= 0:
         raise KoboConfigurationError("Kobo processing limit must be positive.")
 
@@ -42,9 +44,16 @@ def process_pending_submissions(
         processed_count += int(outcome.processed)
         if outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW:
             route_normalized_submission(submission)
+            auto_import_if_eligible(submission)
+            submission.refresh_from_db()
         skipped_count += int(not outcome.processed)
         ready_count += int(
-            outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW
+            submission.status
+            in {
+                KoboSubmission.Status.READY_FOR_REVIEW,
+                KoboSubmission.Status.APPROVED_FOR_IMPORT,
+                KoboSubmission.Status.IMPORTED,
+            }
         )
         validation_failed_count += int(
             outcome.final_status == KoboSubmission.Status.VALIDATION_FAILED
@@ -71,6 +80,9 @@ def review_submission(
     reviewed_by,
 ) -> ReviewResult:
     """
+    DEPRECATED: human review is no longer part of the operational Kobo workflow.
+    Prefer automatic import via auto_import_if_eligible().
+
     PRE: submission is ready, decision is valid, reviewer is authenticated, and
     rejection includes a reason.
     POST: atomically records the terminal review state and event without payload,

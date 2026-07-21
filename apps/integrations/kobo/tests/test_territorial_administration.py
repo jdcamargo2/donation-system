@@ -303,8 +303,12 @@ class TerritorialConflictAdministrationTests(TerritorialAdministrationFixtureMix
         self.assertEqual(identity.source_submission, incoming)
         self.assertEqual(incoming.routing_status, KoboSubmission.RoutingStatus.RESOLVED)
         self.assertEqual(pending.project, self.other_project)
-        self.assertEqual(pending.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertEqual(pending.routing_status, KoboSubmission.RoutingStatus.RESOLVED)
+        # Incomplete fixture payload is auto-approved then blocked; never rejected.
+        self.assertEqual(pending.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+        self.assertIsNone(pending.imported_at)
         self.assertFalse(KoboImportRecord.objects.exists())
+        self.assertNotEqual(pending.status, KoboSubmission.Status.REJECTED)
 
     def test_accept_proposed_is_blocked_by_profile_or_import_record(self):
         identity = self.create_identity()
@@ -544,7 +548,7 @@ class TerritorialIdentityStateTests(TerritorialAdministrationFixtureMixin, TestC
 
 
 class TerritorialReconciliationAdministrationTests(TerritorialAdministrationFixtureMixin, TestCase):
-    def test_reconciliation_batches_one_hundred_and_never_imports_or_approves(self):
+    def test_reconciliation_batches_one_hundred_and_auto_approves_without_importing_incomplete(self):
         identity = self.create_identity()
         for index in range(101):
             self.create_submission(
@@ -564,9 +568,20 @@ class TerritorialReconciliationAdministrationTests(TerritorialAdministrationFixt
         self.assertFalse(second.has_more)
         self.assertEqual(third.resolved, 0)
         self.assertEqual(KoboTerritorialAdministrationEvent.objects.count(), 2)
+        # Incomplete payloads cannot materialize; auto-import approves then leaves incidents.
         self.assertFalse(KoboImportRecord.objects.exists())
         self.assertFalse(
-            KoboSubmission.objects.exclude(status=KoboSubmission.Status.READY_FOR_REVIEW).exists()
+            KoboSubmission.objects.filter(status=KoboSubmission.Status.IMPORTED).exists()
+        )
+        self.assertFalse(
+            KoboSubmission.objects.filter(status=KoboSubmission.Status.REJECTED).exists()
+        )
+        self.assertEqual(
+            KoboSubmission.objects.filter(
+                status=KoboSubmission.Status.APPROVED_FOR_IMPORT,
+                imported_at__isnull=True,
+            ).count(),
+            101,
         )
 
     def test_reconciliation_does_not_touch_imported_submission(self):

@@ -16,9 +16,12 @@
 
 {% include "kobo/hub/_nav.html" %}
 
-<form method="get" class="row g-2 mb-4" aria-label="Filtrar formularios">
+<form method="get" class="row g-2 mb-4" aria-label="Filtrar incidencias">
     {% if list_mode == "processing_errors" %}
         <input type="hidden" name="status" value="processing_failed">
+    {% endif %}
+    {% if list_mode == "invalid_data" %}
+        <input type="hidden" name="status" value="validation_failed">
     {% endif %}
     {% if list_mode == "remote_updates" %}
         <input type="hidden" name="remote_update_pending" value="1">
@@ -27,12 +30,12 @@
         <label class="visually-hidden" for="nucleo_code">Código del núcleo</label>
         <input id="nucleo_code" class="form-control" name="nucleo_code" value="{{ request.GET.nucleo_code }}" placeholder="Código del núcleo">
     </div>
-    {% if list_mode == "routing" or list_mode == "pending_review" %}
+    {% if list_mode == "routing" or list_mode == "incidents" %}
         <div class="col-md-4">
             <label class="visually-hidden" for="routing_status">Situación</label>
             <select id="routing_status" class="form-select" name="routing_status">
                 <option value="">
-                    {% if list_mode == "pending_review" %}Pendientes de revisión{% else %}Todas las situaciones{% endif %}
+                    {% if list_mode == "incidents" %}Todas las incidencias{% else %}Todas las situaciones{% endif %}
                 </option>
                 <option value="pending_identity" {% if request.GET.routing_status == "pending_identity" %}selected{% endif %}>Sin núcleo registrado</option>
                 <option value="conflict" {% if request.GET.routing_status == "conflict" %}selected{% endif %}>Conflicto de asignación</option>
@@ -94,19 +97,19 @@
 {% else %}
     <div class="kobo-hub-empty-state card border-0 ops-table-card" role="status">
         <div class="card-body">
-            {% if list_mode == "pending_review" %}
-                <p class="mb-1"><strong>No hay formularios pendientes de revisión.</strong></p>
+            {% if list_mode == "incidents" %}
+                <p class="mb-1"><strong>No hay incidencias pendientes.</strong></p>
                 <p class="kobo-hub-notice-secondary mb-0">
-                    Significa que no hay envíos listos para comprobación humana. Sincronice formularios o revise Casos por revisar si busca otra incidencia.
+                    Significa que no hay formularios bloqueados en el procesamiento automático.
                 </p>
             {% else %}
                 <p class="mb-1"><strong>No hay formularios en este filtro.</strong></p>
                 <p class="kobo-hub-notice-secondary mb-0">
-                    Pruebe otra situación o vuelva al listado de pendientes de revisión.
+                    Pruebe otra situación o vuelva al listado de incidencias.
                 </p>
             {% endif %}
             <p class="mt-3 mb-0">
-                <a href="{% url 'kobo:conflict_list' %}">Volver a Casos por revisar</a>
+                <a href="{% url 'kobo:conflict_list' %}">Volver a Incidencias</a>
             </p>
         </div>
     </div>

@@ -21,7 +21,7 @@ SENSITIVE_PAYLOAD_KEYS = frozenset(
 )
 
 SUBMISSION_STATUS_LABELS = {
-    KoboSubmission.Status.READY_FOR_REVIEW: "Pendiente de revisión",
+    KoboSubmission.Status.READY_FOR_REVIEW: "Incidencia",
     KoboSubmission.Status.APPROVED_FOR_IMPORT: "Aprobado para importar",
     KoboSubmission.Status.IMPORTED: "Importado",
     KoboSubmission.Status.REJECTED: "Rechazado",
@@ -75,7 +75,7 @@ EVENT_PRESENTATIONS = {
     ),
     "normalized": (
         "Información procesada correctamente",
-        "Los datos del formulario se normalizaron y quedaron listos para revisión.",
+        "Los datos del formulario se normalizaron y quedaron listos para importación automática.",
     ),
     "project_assigned": (
         "Formulario asociado al proyecto",
@@ -88,6 +88,14 @@ EVENT_PRESENTATIONS = {
     "restored": (
         "Restaurado a revisión",
         "El formulario volvió a la cola de revisión humana.",
+    ),
+    "auto_approved": (
+        "Aprobado automáticamente",
+        "El sistema autorizó la importación sin revisión humana.",
+    ),
+    "auto_imported": (
+        "Importado automáticamente",
+        "La información quedó registrada en el proyecto por el procesamiento automático.",
     ),
     "imported": (
         "Formulario importado",

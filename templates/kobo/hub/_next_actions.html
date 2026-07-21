@@ -1,0 +1,28 @@
+<section
+    id="kobo-next-actions"
+    class="mb-4"
+    aria-labelledby="kobo-next-actions-title"
+    {% if next_actions_oob %}hx-swap-oob="outerHTML"{% endif %}
+>
+    <h2 id="kobo-next-actions-title" class="h5 ops-section-title">¿Qué debes hacer ahora?</h2>
+    <div class="card border-0 ops-table-card">
+        <div class="card-body">
+            {% for item in next_actions %}
+                <a class="kobo-hub-next-action" href="{{ item.url }}">
+                    <div class="kobo-hub-next-action-main">
+                        <div class="kobo-hub-attention-title">{{ item.title }}</div>
+                        <p class="kobo-hub-attention-copy">{{ item.description }}</p>
+                    </div>
+                    <div class="kobo-hub-next-action-count" aria-label="{{ item.count }} pendientes">{{ item.count }}</div>
+                </a>
+            {% empty %}
+                <div class="kobo-hub-empty-state" role="status">
+                    <p class="mb-1"><strong>No hay acciones pendientes ahora.</strong></p>
+                    <p class="kobo-hub-notice-secondary mb-0">
+                        Puede sincronizar formularios o revisar la asignación de zonas cuando lo necesite.
+                    </p>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>

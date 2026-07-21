@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static kobo_presentation %}
 
-{% block title %}Revisión de formulario | SIGEDON{% endblock %}
+{% block title %}{{ page_title }} | SIGEDON{% endblock %}
 
 {% block extra_css %}
 <link href="{% static 'web/css/kobo_hub.css' %}" rel="stylesheet">
@@ -11,14 +11,14 @@
 <div class="ops-page-header ops-page-header-row">
     <div>
         <div class="ops-kicker">Integración de formularios</div>
-        <h1>Revisión de formulario</h1>
+        <h1>{{ page_title }}</h1>
         <p class="mb-0">{{ ficha_title }} · {{ ficha_subtitle }}</p>
     </div>
     <span class="badge ops-status-badge">{{ status_label }}</span>
 </div>
 
 <p class="mb-3">
-    <a href="{% url 'kobo:pending_submission_list' %}" class="text-decoration-none">← Volver a formularios pendientes</a>
+    <a href="{% url 'kobo:pending_submission_list' %}" class="text-decoration-none">← Volver a incidencias</a>
 </p>
 
 {% if submission.project %}
@@ -28,6 +28,45 @@
             <a class="btn btn-primary" href="{% url 'kobo:project_submission_detail' submission.pk %}">Ver dentro del proyecto</a>
         {% endif %}
     </div>
+{% endif %}
+
+{% if is_imported %}
+    <section class="card border-0 ops-table-card mb-4" aria-labelledby="import-result-title">
+        <div class="card-body">
+            <h2 id="import-result-title" class="h5 ops-section-title">Resultado de la importación</h2>
+            <dl class="row mb-0">
+                <dt class="col-sm-3">Estado</dt>
+                <dd class="col-sm-9">Importado automáticamente</dd>
+                <dt class="col-sm-3">Importado el</dt>
+                <dd class="col-sm-9">{{ submission.imported_at|default:"—" }}</dd>
+                <dt class="col-sm-3">Proyecto</dt>
+                <dd class="col-sm-9">{{ submission.project|default:"—" }}</dd>
+                {% if import_record %}
+                    <dt class="col-sm-3">Objeto creado</dt>
+                    <dd class="col-sm-9">
+                        {{ import_record.target_app_label }}.{{ import_record.target_model }}
+                        #{{ import_record.target_object_id }}
+                    </dd>
+                {% endif %}
+            </dl>
+        </div>
+    </section>
+{% elif is_incident %}
+    <section class="card border-0 ops-table-card mb-4" aria-labelledby="incident-title">
+        <div class="card-body">
+            <h2 id="incident-title" class="h5 ops-section-title">Incidencia</h2>
+            <p class="mb-1"><strong>{{ incident_label }}</strong></p>
+            {% if incident_action %}
+                <p class="kobo-hub-notice-secondary mb-3">{{ incident_action }}</p>
+            {% endif %}
+            {% if show_retry_import %}
+                <form method="post" action="{% url 'kobo:retry_submission_import' submission.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary">Reintentar importación</button>
+                </form>
+            {% endif %}
+        </div>
+    </section>
 {% endif %}
 
 <section class="card border-0 ops-table-card mb-4" aria-labelledby="territorial-summary-title">
@@ -133,61 +172,6 @@
     <section class="alert alert-danger mb-4" role="alert">
         <h2 class="h5">Incidencia de procesamiento</h2>
         {% if submission.error_message %}<p class="mb-0">{{ submission.error_message }}</p>{% endif %}
-    </section>
-{% endif %}
-
-{% if can_change_submission and submission.status == "ready_for_review" %}
-    <section class="card border-0 ops-table-card mb-4" aria-labelledby="review-actions-title">
-        <div class="card-body">
-            <h2 id="review-actions-title" class="h5 ops-section-title">Acciones de revisión</h2>
-            <p class="text-muted">Elija una decisión. El motivo es obligatorio al solicitar corrección o rechazar.</p>
-            <form method="post" action="{% url 'kobo:submission_review' submission.pk %}" id="kobo-review-form">
-                {% csrf_token %}
-                {% if review_form.non_field_errors %}
-                    <div class="alert alert-danger">{{ review_form.non_field_errors }}</div>
-                {% endif %}
-                <div class="row g-3 mb-3">
-                    <div class="col-md-4">
-                        <button
-                            type="submit"
-                            name="review_intent"
-                            value="approve"
-                            class="btn btn-primary w-100"
-                            formaction="{% url 'kobo:submission_review' submission.pk %}"
-                        >
-                            Aprobar e importar
-                        </button>
-                    </div>
-                    <div class="col-md-4">
-                        <button
-                            type="submit"
-                            name="review_intent"
-                            value="request_correction"
-                            class="btn btn-outline-secondary w-100"
-                        >
-                            Solicitar corrección
-                        </button>
-                    </div>
-                    <div class="col-md-4">
-                        <button
-                            type="submit"
-                            name="review_intent"
-                            value="reject"
-                            class="btn btn-outline-danger w-100"
-                        >
-                            Rechazar formulario
-                        </button>
-                    </div>
-                </div>
-                <label class="form-label" for="{{ review_form.reason.id_for_label }}" id="review-reason-label">
-                    Motivo de la decisión
-                </label>
-                {{ review_form.reason }}
-                {% if review_form.reason.errors %}
-                    <div class="invalid-feedback d-block">{{ review_form.reason.errors|striptags }}</div>
-                {% endif %}
-            </form>
-        </div>
     </section>
 {% endif %}
 

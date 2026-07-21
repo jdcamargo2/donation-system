@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static kobo_presentation %}
 
-{% block title %}Casos por revisar | SIGEDON{% endblock %}
+{% block title %}Incidencias | SIGEDON{% endblock %}
 
 {% block extra_css %}
 <link href="{% static 'web/css/kobo_hub.css' %}" rel="stylesheet">
@@ -10,14 +10,14 @@
 {% block content %}
 <div class="ops-page-header">
     <div class="ops-kicker">Integración de formularios</div>
-    <h1>Casos por revisar</h1>
-    <p>Formularios e incidencias que requieren una decisión o comprobación antes de continuar.</p>
+    <h1>Incidencias</h1>
+    <p>Formularios que no pudieron procesarse automáticamente.</p>
 </div>
 
 {% include "kobo/hub/_nav.html" %}
 
 <section aria-labelledby="review-categories-title" class="mb-4">
-    <h2 id="review-categories-title" class="h5 ops-section-title">Qué necesita revisión</h2>
+    <h2 id="review-categories-title" class="h5 ops-section-title">Qué necesita atención</h2>
     <ul class="kobo-hub-category-list">
         {% for category in review_categories %}
             <li class="kobo-hub-category-item {% if category.count %}has-data{% else %}is-empty{% endif %}">

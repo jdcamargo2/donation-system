@@ -5,11 +5,13 @@ from django.contrib.auth.models import Permission
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.integrations.kobo.contracts import TerritorialRoutingReasonCode
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
 from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID, FICHA_11_VERSION
 from apps.integrations.kobo.models import KoboAttachment
 from apps.integrations.kobo.models import KoboFormDefinition
+from apps.integrations.kobo.models import KoboImportRecord
 from apps.integrations.kobo.models import KoboProcessingEvent
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.submission_presentation import (
@@ -18,6 +20,8 @@ from apps.integrations.kobo.submission_presentation import (
     present_submission_fields,
     submission_status_label,
 )
+from apps.operations.models import Project
+from django.utils import timezone
 
 
 class KoboReviewPanelTests(TestCase):
@@ -55,6 +59,11 @@ class KoboReviewPanelTests(TestCase):
             title="Ficha 11",
             version=FICHA_11_VERSION,
         )
+        cls.project = Project.objects.create(
+            code="PRJ-REVIEW-01",
+            name="Proyecto revisión",
+            status=Project.Status.ACTIVE,
+        )
 
     def setUp(self):
         self.submission = KoboSubmission.objects.create(
@@ -77,10 +86,14 @@ class KoboReviewPanelTests(TestCase):
                 "general_notes": "Notas del territorio",
             },
             status=KoboSubmission.Status.READY_FOR_REVIEW,
+            routing_status=KoboSubmission.RoutingStatus.PENDING_IDENTITY,
             pastoral_zone="centro",
             parish="parish-one",
             primary_community="community-one",
             assessment_date=date(2026, 7, 11),
+            nucleo_code_original="NV-001",
+            nucleo_code_normalized="NV-001",
+            routing_reason_code=TerritorialRoutingReasonCode.UNKNOWN_TERRITORIAL_IDENTITY,
         )
         self.attachment = KoboAttachment.objects.create(
             submission=self.submission,
@@ -146,12 +159,18 @@ class KoboReviewPanelTests(TestCase):
 
         response = self.client.get(self.detail_url)
 
-        self.assertContains(response, "Revisión de formulario")
+        self.assertContains(response, "Incidencia")
         self.assertContains(response, "Ficha 1 · Registro territorial")
-        self.assertContains(response, "Pendiente de revisión")
+        self.assertNotContains(response, "Revisión de formulario")
+        self.assertNotContains(response, "Pendiente de revisión")
+        self.assertNotContains(response, "Pendientes de revisión")
         self.assertNotContains(response, "Submission #")
         self.assertNotContains(response, "READY_FOR_REVIEW")
         self.assertNotContains(response, "Ready for review")
+        self.assertEqual(
+            submission_status_label(KoboSubmission.Status.READY_FOR_REVIEW),
+            "Incidencia",
+        )
         self.assertEqual(
             submission_status_label(KoboSubmission.Status.APPROVED_FOR_IMPORT),
             "Aprobado para importar",
@@ -160,6 +179,52 @@ class KoboReviewPanelTests(TestCase):
             submission_status_label(KoboSubmission.Status.PROCESSING_FAILED),
             "Error de procesamiento",
         )
+
+    def test_detail_shows_incident_explanation_without_human_review_actions(self):
+        self.client.force_login(self.reviewer)
+        response = self.client.get(self.detail_url)
+
+        self.assertContains(response, "Incidencia")
+        self.assertContains(response, "Núcleo no encontrado")
+        self.assertContains(response, "Espere o importe primero la Ficha 1")
+        self.assertContains(response, "Reintentar importación")
+        self.assertNotContains(response, "Aprobar e importar")
+        self.assertNotContains(response, "Solicitar corrección")
+        self.assertNotContains(response, "Rechazar formulario")
+        self.assertNotContains(response, "Pendientes de revisión")
+        self.assertNotContains(response, "Registrar decisión")
+
+    def test_detail_shows_import_result_for_imported_submission(self):
+        self.submission.status = KoboSubmission.Status.IMPORTED
+        self.submission.routing_status = KoboSubmission.RoutingStatus.RESOLVED
+        self.submission.project = self.project
+        self.submission.imported_at = timezone.now()
+        self.submission.processed_at = self.submission.imported_at
+        self.submission.save(
+            update_fields=(
+                "status",
+                "routing_status",
+                "project",
+                "imported_at",
+                "processed_at",
+            )
+        )
+        KoboImportRecord.objects.create(
+            submission=self.submission,
+            handler_type="ficha_1",
+            target_app_label="kobo",
+            target_model="KoboTerritorialProfile",
+            target_object_id=99,
+            created_by=self.reviewer,
+        )
+        self.client.force_login(self.viewer)
+        response = self.client.get(self.detail_url)
+
+        self.assertContains(response, "Resultado de la importación")
+        self.assertContains(response, "Importado automáticamente")
+        self.assertContains(response, "Detalle de formulario")
+        self.assertNotContains(response, "Aprobar e importar")
+        self.assertNotContains(response, "Reintentar importación")
 
     def test_detail_shows_contact_and_hides_technical_from_viewer(self):
         self.client.force_login(self.viewer)
@@ -191,7 +256,7 @@ class KoboReviewPanelTests(TestCase):
         self.assertContains(response, "private-device-id")
         self.assertNotContains(response, "Raw payload (solo lectura)")
 
-    def test_history_and_review_actions_are_operator_facing(self):
+    def test_history_uses_operator_facing_events(self):
         self.client.force_login(self.reviewer)
         response = self.client.get(self.detail_url)
 
@@ -199,12 +264,9 @@ class KoboReviewPanelTests(TestCase):
         self.assertContains(response, "Información procesada correctamente")
         self.assertNotContains(response, "webhook / webhook_received")
         self.assertNotContains(response, "normalization / normalized")
-        self.assertContains(response, "Aprobar e importar")
-        self.assertContains(response, "Solicitar corrección")
-        self.assertContains(response, "Rechazar formulario")
-        self.assertNotContains(response, "Registrar decisión")
-        self.assertNotContains(response, "Reintentar normalización")
-        self.assertNotContains(response, "Herramientas técnicas")
+        self.assertNotContains(response, "Aprobar e importar")
+        self.assertNotContains(response, "Solicitar corrección")
+        self.assertNotContains(response, "Rechazar formulario")
 
     def test_technical_tools_appear_only_when_pertinent(self):
         self.client.force_login(self.reviewer)
@@ -258,6 +320,9 @@ class KoboReviewPanelTests(TestCase):
                 "expected_result": "Ingresos estables",
             },
             status=KoboSubmission.Status.READY_FOR_REVIEW,
+            routing_status=KoboSubmission.RoutingStatus.PENDING_IDENTITY,
+            nucleo_code_original="NV-MICRO",
+            nucleo_code_normalized="NV-MICRO",
         )
         fields = {field.key: field for field in present_submission_fields(micro)}
         self.assertEqual(fields["microproject_name"].label, "Nombre del microproyecto")
@@ -287,6 +352,9 @@ class KoboReviewPanelTests(TestCase):
                 "priority_summary": "Priorizar intervención",
             },
             status=KoboSubmission.Status.READY_FOR_REVIEW,
+            routing_status=KoboSubmission.RoutingStatus.PENDING_IDENTITY,
+            nucleo_code_original="NV-002",
+            nucleo_code_normalized="NV-002",
         )
         assessment_fields = {
             field.key: field for field in present_submission_fields(assessment)
@@ -316,8 +384,10 @@ class KoboReviewPanelTests(TestCase):
         for event in events:
             self.assertNotIn(" / ", event.title)
 
-    def test_approval_changes_status_and_creates_event(self):
+    def test_legacy_review_endpoint_still_accepts_post_but_ui_hides_actions(self):
         self.client.force_login(self.reviewer)
+        detail = self.client.get(self.detail_url)
+        self.assertNotContains(detail, "Aprobar e importar")
 
         response = self.client.post(
             self.review_url,
@@ -332,68 +402,6 @@ class KoboReviewPanelTests(TestCase):
         self.assertEqual(
             self.submission.status,
             KoboSubmission.Status.APPROVED_FOR_IMPORT,
-        )
-        event = self.submission.processing_events.filter(stage="review").get()
-        self.assertEqual(event.code, KoboSubmission.Status.APPROVED_FOR_IMPORT)
-
-    def test_request_correction_requires_reason(self):
-        self.client.force_login(self.reviewer)
-
-        response = self.client.post(
-            self.review_url,
-            {"review_intent": "request_correction", "reason": "   "},
-        )
-        self.submission.refresh_from_db()
-
-        self.assertEqual(response.status_code, 400)
-        self.assertContains(
-            response,
-            "Indique el motivo para solicitar la corrección.",
-            status_code=400,
-        )
-        self.assertEqual(
-            self.submission.status,
-            KoboSubmission.Status.READY_FOR_REVIEW,
-        )
-
-    def test_rejection_requires_reason(self):
-        self.client.force_login(self.reviewer)
-
-        response = self.client.post(
-            self.review_url,
-            {"review_intent": "reject", "reason": "   "},
-        )
-        self.submission.refresh_from_db()
-
-        self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "Indique el motivo del rechazo.", status_code=400)
-        self.assertEqual(
-            self.submission.status,
-            KoboSubmission.Status.READY_FOR_REVIEW,
-        )
-        self.assertFalse(
-            self.submission.processing_events.filter(stage="review").exists()
-        )
-
-    def test_submission_cannot_be_reviewed_twice(self):
-        self.client.force_login(self.reviewer)
-        self.client.post(
-            self.review_url,
-            {
-                "review_intent": "approve",
-                "reason": "",
-            },
-        )
-
-        second_response = self.client.post(
-            self.review_url,
-            {"review_intent": "reject", "reason": "Second"},
-        )
-
-        self.assertEqual(second_response.status_code, 400)
-        self.assertEqual(
-            self.submission.processing_events.filter(stage="review").count(),
-            1,
         )
 
     def test_get_cannot_execute_review(self):
