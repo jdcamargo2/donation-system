@@ -1,7 +1,7 @@
 # Operación y mantenimiento de SIGEDON
 
-> Kobo: las Fichas 1, 10 y 11 se administran desde el Hub territorial. No
-> configure bindings asset-proyecto: el UID identifica la ficha y el proyecto
+> Kobo: las Fichas 1, 10 y 11 se administran desde el panel operativo de KoboToolbox.
+> No configure bindings asset-proyecto: el UID identifica la ficha y el proyecto
 > se resuelve por zona pastoral e identidad territorial.
 
 Este documento describe las tareas habituales de preparación, operación, verificación y mantenimiento de SIGEDON.
@@ -531,8 +531,8 @@ Después de desplegar:
 
 El despliegue no debe considerarse completo hasta validar el comportamiento básico del sistema.
 
-## Hub territorial Kobo
+## Panel operativo Kobo
 
-Con Kobo habilitado, el Hub `/integrations/kobo/` permite revisar y operar
-mappings, identidades, conflictos y reconciliación. Compruebe que los permisos
-Kobo se asignaron antes de habilitar acceso operativo.
+Con Kobo habilitado, el panel `/integrations/kobo/` permite revisar y operar
+asignación de zonas, núcleos registrados, casos por revisar y reconciliación.
+Compruebe que los permisos Kobo se asignaron antes de habilitar acceso operativo.

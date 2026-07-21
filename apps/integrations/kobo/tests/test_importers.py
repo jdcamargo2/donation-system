@@ -364,7 +364,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Comunidades visibles")
-        self.assertContains(response, "Identificación territorial")
+        self.assertContains(response, "Registro territorial")
         self.assertContains(response, "Pendiente de revisión")
         self.assertContains(response, "Rechazar ficha")
         self.assertNotContains(response, "Sensitive Submitter")
@@ -630,8 +630,8 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Importada")
-        self.assertContains(response, "Rechazada")
+        self.assertContains(response, "Importado")
+        self.assertContains(response, "Rechazado")
         self.assertContains(response, "Submission de prueba")
         self.assertNotContains(response, "approved-hidden")
         self.assertNotContains(response, "validation-failed-hidden")

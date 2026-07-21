@@ -1,0 +1,169 @@
+/*
+  Scoped layout helpers for the Kobo operations hub.
+  Purpose: align hub screens with SIGEDON ops patterns without global side effects.
+*/
+.kobo-hub-nav {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    margin: 0 0 1.35rem;
+    overflow-x: auto;
+    padding-bottom: 0.15rem;
+    -webkit-overflow-scrolling: touch;
+}
+
+.kobo-hub-nav-link {
+    background: #ffffff;
+    border: 1px solid var(--ops-border);
+    border-radius: 0.75rem;
+    color: var(--ops-text);
+    flex: 0 0 auto;
+    font-size: 0.9rem;
+    font-weight: 700;
+    min-height: 2.5rem;
+    padding: 0.55rem 0.95rem;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.kobo-hub-nav-link:hover,
+.kobo-hub-nav-link:focus-visible {
+    background: #f7fbff;
+    border-color: #c9daf5;
+    color: var(--ops-primary-strong);
+    outline: 2px solid transparent;
+}
+
+.kobo-hub-nav-link.is-active {
+    background: #eef4ff;
+    border-color: #d7e6ff;
+    color: var(--ops-primary-strong);
+}
+
+.kobo-hub-notice {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.kobo-hub-notice-secondary {
+    color: var(--ops-muted);
+    font-size: 0.92rem;
+    margin: 0;
+}
+
+.kobo-hub-sync-row {
+    align-items: flex-start;
+    border-top: 1px solid #edf2f7;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    justify-content: space-between;
+    padding: 0.95rem 0;
+}
+
+.kobo-hub-sync-row:first-of-type {
+    border-top: 0;
+    padding-top: 0.15rem;
+}
+
+.kobo-hub-sync-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.kobo-hub-sync-actions .btn {
+    min-height: 2.5rem;
+}
+
+.kobo-hub-attention-item {
+    border: 1px solid var(--ops-border);
+    border-radius: 0.85rem;
+    display: block;
+    padding: 0.9rem 1rem;
+    text-decoration: none;
+}
+
+.kobo-hub-attention-item + .kobo-hub-attention-item {
+    margin-top: 0.65rem;
+}
+
+.kobo-hub-attention-item:hover,
+.kobo-hub-attention-item:focus-visible {
+    background: #f8fbff;
+}
+
+.kobo-hub-attention-item.is-warning {
+    border-left: 4px solid #d4a017;
+}
+
+.kobo-hub-attention-item.is-danger {
+    border-left: 4px solid #c0392b;
+}
+
+.kobo-hub-attention-item.is-info {
+    border-left: 4px solid var(--ops-primary);
+}
+
+.kobo-hub-attention-item.is-success {
+    border-left: 4px solid var(--ops-success);
+}
+
+.kobo-hub-attention-title {
+    color: var(--ops-text);
+    font-weight: 800;
+}
+
+.kobo-hub-attention-copy {
+    color: var(--ops-muted);
+    font-size: 0.9rem;
+    margin: 0.25rem 0 0;
+}
+
+.kobo-hub-category-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+    margin-bottom: 1.35rem;
+}
+
+.kobo-hub-category-card {
+    background: #ffffff;
+    border: 1px solid var(--ops-border);
+    border-radius: 0.85rem;
+    padding: 0.95rem 1rem;
+}
+
+.kobo-hub-category-card a {
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.kobo-hub-table {
+    min-width: 680px;
+}
+
+@media (min-width: 768px) {
+    .kobo-hub-category-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 992px) {
+    .kobo-hub-category-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 575.98px) {
+    .kobo-hub-sync-actions {
+        width: 100%;
+    }
+
+    .kobo-hub-sync-actions form,
+    .kobo-hub-sync-actions .btn {
+        flex: 1 1 100%;
+    }
+}

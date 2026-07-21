@@ -108,7 +108,7 @@ una ejecución `SUCCEEDED` actualiza atómicamente cursor, watermark y hora del
 una lease atribuida al `KoboSyncRun`; una lease vencida deja el run anterior
 como `ABANDONED` con `SYNC_LEASE_EXPIRED` antes de adquirir la nueva.
 
-Las acciones del Hub son POST con CSRF, requieren permiso de cambio del asset y
+Las acciones del panel operativo son POST con CSRF, requieren permiso de cambio del asset y
 son síncronas; no existe scheduling automático.
 
 ## 4. Registro de formularios
@@ -724,9 +724,19 @@ python manage.py process_kobo_submissions
 python manage.py reconcile_kobo_submissions
 ```
 
-## 19. Hub territorial
+## 19. Panel operativo de KoboToolbox
 
-Con `KOBO_ENABLED=true`, `/integrations/kobo/` es el Hub para dashboard,
-mappings, identidades, conflictos y routing pendiente. Sus mutaciones usan
+Con `KOBO_ENABLED=true`, `/integrations/kobo/` es el panel operativo para resumen,
+asignación de zonas, núcleos registrados y casos por revisar. Sus mutaciones usan
 POST, CSRF y los servicios administrativos existentes. Cuando Kobo está
-deshabilitado, el enlace y las rutas del Hub no están disponibles.
+deshabilitado, el enlace y las rutas del panel no están disponibles.
+
+El lenguaje visible del panel prioriza términos operativos:
+
+* Asignación de zonas (configuración zona pastoral → proyecto)
+* Núcleos registrados
+* Casos por revisar
+* Formularios pendientes de revisión / importados
+
+Los nombres técnicos internos (`mapping`, `routing`, identidades territoriales)
+se conservan en modelos, servicios y documentación de arquitectura.

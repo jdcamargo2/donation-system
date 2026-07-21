@@ -1,1 +1,138 @@
-{% extends "base.html" %}{% load kobo_presentation %}{% block title %}{{ identity.nucleo_code_normalized }} | Kobo{% endblock %}{% block content %}<div class="container-fluid py-3"><a href="{% url 'kobo:identity_list' %}">← Identidades</a><h1 class="h3 my-3">{{ identity.nucleo_code_normalized }}</h1><section class="card card-body mb-3"><dl class="row mb-0"><dt class="col-sm-3">Código original</dt><dd class="col-sm-9">{{ identity.nucleo_code_original }}</dd><dt class="col-sm-3">Zona</dt><dd class="col-sm-9">{{ identity.pastoral_zone|title }}</dd><dt class="col-sm-3">Proyecto</dt><dd class="col-sm-9">{{ identity.project }}</dd><dt class="col-sm-3">Estado</dt><dd class="col-sm-9">{{ identity.get_status_display }}</dd><dt class="col-sm-3">Submission fuente</dt><dd class="col-sm-9"><a href="{% url 'kobo:submission_detail' identity.source_submission_id %}">Ver submission</a></dd></dl></section>{% if can_change %}<section class="card card-body mb-3"><h2 class="h5">Cambiar estado</h2><div class="d-flex flex-wrap gap-2">{% if identity.status == 'pending_review' or identity.status == 'active' %}<form method="post" action="{% url 'kobo:identity_status' identity.pk 'observe' %}">{% csrf_token %}<label class="visually-hidden" for="observe-reason">Motivo</label><input id="observe-reason" required name="reason" class="form-control mb-1" placeholder="Motivo"><button class="btn btn-outline-warning">Observar</button></form>{% endif %}{% if identity.status == 'observed' %}<form method="post" action="{% url 'kobo:identity_status' identity.pk 'activate' %}">{% csrf_token %}<label class="visually-hidden" for="activate-reason">Motivo</label><input id="activate-reason" required name="reason" class="form-control mb-1" placeholder="Motivo"><button class="btn btn-outline-success">Activar</button></form>{% endif %}{% if identity.status != 'inactive' %}<form method="post" action="{% url 'kobo:identity_status' identity.pk 'deactivate' %}">{% csrf_token %}<label class="visually-hidden" for="deactivate-reason">Motivo</label><input id="deactivate-reason" required name="reason" class="form-control mb-1" placeholder="Motivo"><button class="btn btn-outline-danger">Inactivar</button></form>{% endif %}</div></section>{% endif %}{% if can_reconcile %}<form method="post" action="{% url 'kobo:reconcile_identity' identity.pk %}" class="mb-3">{% csrf_token %}<button class="btn btn-primary">Reconciliar submissions pendientes</button></form>{% endif %}<section class="card card-body mb-3"><h2 class="h5">Materializaciones readonly</h2><p>Perfiles: {{ identity.territorial_profiles.count }} · Microproyectos: {{ identity.prioritized_microprojects.count }} · Evaluaciones: {{ identity.prioritization_assessments.count }}</p>{% for profile in identity.territorial_profiles.all %}<div class="border-top pt-2"><strong>Perfil:</strong> {{ profile.parish }} — {{ profile.community_sector }}</div>{% endfor %}{% for microproject in identity.prioritized_microprojects.all %}<div class="border-top pt-2"><strong>Propuesta priorizada:</strong> {{ microproject.name }}. No representa aprobación financiera.</div>{% endfor %}{% for assessment in identity.prioritization_assessments.all %}<div class="border-top pt-2"><strong>Evaluación:</strong> total {{ assessment.priority_total_original|default:"—" }}/{{ assessment.priority_total_calculated }}, semáforo final {{ assessment.final_semaphore|kobo_label }}{% if assessment.calculation_warnings %}. Hay discrepancias registradas.{% endif %}</div>{% endfor %}</section><section class="card card-body mb-3"><h2 class="h5">Submissions vinculadas</h2><p>Pendientes: {{ pending_count }} · Errores: {{ error_count }}</p><ul>{% for submission in submissions %}<li><a href="{% url 'kobo:submission_detail' submission.pk %}">{{ submission.external_id }}</a> — {{ submission.get_routing_status_display }} — {{ submission.project|default:"sin proyecto" }}</li>{% endfor %}</ul></section><section class="card card-body"><h2 class="h5">Eventos territoriales</h2><ul>{% for event in events %}<li>{{ event.created_at }} — {{ event.action }}{% if event.reason %}: {{ event.reason }}{% endif %}</li>{% empty %}<li>Sin eventos territoriales.</li>{% endfor %}</ul></section></div>{% endblock %}
+{% extends "base.html" %}
+{% load static kobo_presentation %}
+
+{% block title %}{{ identity.nucleo_code_normalized }} | SIGEDON{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'web/css/kobo_hub.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Núcleos registrados</div>
+        <h1>{{ identity.nucleo_code_normalized }}</h1>
+        <p>Detalle operativo del núcleo identificado a partir de los registros territoriales.</p>
+    </div>
+    <div class="ops-header-actions">
+        <a class="btn btn-outline-secondary" href="{% url 'kobo:identity_list' %}">Volver a núcleos</a>
+    </div>
+</div>
+
+{% include "kobo/hub/_nav.html" %}
+
+<section class="card border-0 ops-table-card mb-4" aria-labelledby="identity-summary-title">
+    <div class="card-body ops-detail-card">
+        <h2 id="identity-summary-title" class="h5 ops-section-title">Resumen</h2>
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Código original</dt>
+            <dd class="col-sm-9">{{ identity.nucleo_code_original }}</dd>
+            <dt class="col-sm-3">Zona pastoral</dt>
+            <dd class="col-sm-9">{{ identity.pastoral_zone|kobo_zone_label }}</dd>
+            <dt class="col-sm-3">Proyecto asociado</dt>
+            <dd class="col-sm-9">{{ identity.project }}</dd>
+            <dt class="col-sm-3">Estado</dt>
+            <dd class="col-sm-9"><span class="badge ops-status-badge">{{ identity.status|kobo_label }}</span></dd>
+            <dt class="col-sm-3">Formulario fuente</dt>
+            <dd class="col-sm-9"><a href="{% url 'kobo:submission_detail' identity.source_submission_id %}">Ver formulario</a></dd>
+        </dl>
+    </div>
+</section>
+
+{% if can_change %}
+    <section class="card border-0 ops-table-card mb-4" aria-labelledby="identity-status-title">
+        <div class="card-body">
+            <h2 id="identity-status-title" class="h5 ops-section-title">Cambiar estado</h2>
+            <div class="d-flex flex-wrap gap-2">
+                {% if identity.status == 'pending_review' or identity.status == 'active' %}
+                    <form method="post" action="{% url 'kobo:identity_status' identity.pk 'observe' %}">
+                        {% csrf_token %}
+                        <label class="visually-hidden" for="observe-reason">Motivo</label>
+                        <input id="observe-reason" required name="reason" class="form-control mb-1" placeholder="Motivo">
+                        <button type="submit" class="btn btn-outline-warning">Observar</button>
+                    </form>
+                {% endif %}
+                {% if identity.status == 'observed' %}
+                    <form method="post" action="{% url 'kobo:identity_status' identity.pk 'activate' %}">
+                        {% csrf_token %}
+                        <label class="visually-hidden" for="activate-reason">Motivo</label>
+                        <input id="activate-reason" required name="reason" class="form-control mb-1" placeholder="Motivo">
+                        <button type="submit" class="btn btn-outline-success">Activar</button>
+                    </form>
+                {% endif %}
+                {% if identity.status != 'inactive' %}
+                    <form method="post" action="{% url 'kobo:identity_status' identity.pk 'deactivate' %}">
+                        {% csrf_token %}
+                        <label class="visually-hidden" for="deactivate-reason">Motivo</label>
+                        <input id="deactivate-reason" required name="reason" class="form-control mb-1" placeholder="Motivo">
+                        <button type="submit" class="btn btn-outline-danger">Inactivar</button>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+{% endif %}
+
+{% if can_reconcile %}
+    <form method="post" action="{% url 'kobo:reconcile_identity' identity.pk %}" class="mb-4">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary">Reconciliar formularios pendientes</button>
+    </form>
+{% endif %}
+
+<section class="card border-0 ops-table-card mb-4" aria-labelledby="identity-materializations-title">
+    <div class="card-body">
+        <h2 id="identity-materializations-title" class="h5 ops-section-title">Información registrada</h2>
+        <p class="text-muted">
+            Perfiles: {{ identity.territorial_profiles.all|length }} ·
+            Microproyectos: {{ identity.prioritized_microprojects.all|length }} ·
+            Evaluaciones: {{ identity.prioritization_assessments.all|length }}
+        </p>
+        {% for profile in identity.territorial_profiles.all %}
+            <div class="border-top pt-2"><strong>Perfil:</strong> {{ profile.parish }} — {{ profile.community_sector }}</div>
+        {% endfor %}
+        {% for microproject in identity.prioritized_microprojects.all %}
+            <div class="border-top pt-2"><strong>Propuesta priorizada:</strong> {{ microproject.name }}. No representa aprobación financiera.</div>
+        {% endfor %}
+        {% for assessment in identity.prioritization_assessments.all %}
+            <div class="border-top pt-2">
+                <strong>Evaluación:</strong>
+                total {{ assessment.priority_total_original|default:"—" }}/{{ assessment.priority_total_calculated }},
+                semáforo final {{ assessment.final_semaphore|kobo_label }}
+                {% if assessment.calculation_warnings %}. Hay discrepancias registradas.{% endif %}
+            </div>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="card border-0 ops-table-card mb-4" aria-labelledby="identity-submissions-title">
+    <div class="card-body">
+        <h2 id="identity-submissions-title" class="h5 ops-section-title">Formularios vinculados</h2>
+        <p class="text-muted">Pendientes: {{ pending_count }} · Errores: {{ error_count }}</p>
+        <ul class="mb-0">
+            {% for submission in submissions %}
+                <li>
+                    <a href="{% url 'kobo:submission_detail' submission.pk %}">{{ submission.external_id }}</a>
+                    — {{ submission.routing_status|kobo_label }}
+                    — {{ submission.project|default:"sin proyecto" }}
+                </li>
+            {% empty %}
+                <li class="text-muted">No hay formularios vinculados.</li>
+            {% endfor %}
+        </ul>
+    </div>
+</section>
+
+<section class="card border-0 ops-table-card" aria-labelledby="identity-events-title">
+    <div class="card-body">
+        <h2 id="identity-events-title" class="h5 ops-section-title">Eventos del núcleo</h2>
+        <ul class="mb-0">
+            {% for event in events %}
+                <li>{{ event.created_at }} — {{ event.action }}{% if event.reason %}: {{ event.reason }}{% endif %}</li>
+            {% empty %}
+                <li class="text-muted">Sin eventos registrados.</li>
+            {% endfor %}
+        </ul>
+    </div>
+</section>
+{% endblock %}

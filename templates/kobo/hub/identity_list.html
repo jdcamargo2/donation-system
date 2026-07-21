@@ -1,1 +1,89 @@
-{% extends "base.html" %}{% block title %}Identidades Kobo | SIGEDON{% endblock %}{% block content %}<div class="container-fluid py-3"><a href="{% url 'kobo:hub' %}">← KoboToolbox</a><h1 class="h3 my-3">Identidades territoriales</h1><form class="row g-2 mb-3" method="get"><div class="col"><label class="visually-hidden" for="q">Código</label><input id="q" name="q" value="{{ request.GET.q }}" class="form-control" placeholder="Buscar núcleo"></div><div class="col"><select name="zone" class="form-select"><option value="">Todas las zonas</option>{% for zone in zones %}<option value="{{ zone.value }}">{{ zone.value|title }}</option>{% endfor %}</select></div><div class="col"><select name="project" class="form-select"><option value="">Todos los proyectos</option>{% for project in projects %}<option value="{{ project.pk }}">{{ project.code }}</option>{% endfor %}</select></div><div class="col"><button class="btn btn-outline-primary">Filtrar</button></div></form><div class="table-responsive"><table class="table"><thead><tr><th>Núcleo</th><th>Zona</th><th>Proyecto</th><th>Estado</th><th>Perfiles</th><th>Microproyectos</th><th>Evaluaciones</th><th>Pendientes</th><th>Creación</th></tr></thead><tbody>{% for identity in page_obj %}<tr><td><a href="{% url 'kobo:identity_detail' identity.pk %}">{{ identity.nucleo_code_normalized }}</a></td><td>{{ identity.pastoral_zone|title }}</td><td>{{ identity.project.code }}</td><td>{{ identity.get_status_display }}</td><td>{{ identity.profile_count }}</td><td>{{ identity.microproject_count }}</td><td>{{ identity.assessment_count }}</td><td>{{ identity.pending_count }}</td><td>{{ identity.created_at }}</td></tr>{% empty %}<tr><td colspan="9">No hay identidades.</td></tr>{% endfor %}</tbody></table></div>{% include 'web/includes/pagination.html' with page_obj=page_obj %}</div>{% endblock %}
+{% extends "base.html" %}
+{% load static kobo_presentation %}
+
+{% block title %}Núcleos registrados | SIGEDON{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'web/css/kobo_hub.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ops-page-header">
+    <div class="ops-kicker">Integración de formularios</div>
+    <h1>Núcleos registrados</h1>
+    <p>Núcleos identificados a partir de los registros territoriales recibidos.</p>
+</div>
+
+{% include "kobo/hub/_nav.html" %}
+
+<form class="row g-2 mb-4" method="get" role="search" aria-label="Filtrar núcleos registrados">
+    <div class="col-md-4">
+        <label class="visually-hidden" for="q">Código del núcleo</label>
+        <input id="q" name="q" value="{{ request.GET.q }}" class="form-control" placeholder="Buscar código del núcleo">
+    </div>
+    <div class="col-md-3">
+        <label class="visually-hidden" for="zone">Zona pastoral</label>
+        <select id="zone" name="zone" class="form-select">
+            <option value="">Todas las zonas</option>
+            {% for zone in zones %}
+                <option value="{{ zone.value }}" {% if request.GET.zone == zone.value %}selected{% endif %}>{{ zone|kobo_zone_label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="visually-hidden" for="project">Proyecto asociado</label>
+        <select id="project" name="project" class="form-select">
+            <option value="">Todos los proyectos</option>
+            {% for project in projects %}
+                <option value="{{ project.pk }}" {% if request.GET.project == project.pk|stringformat:"s" %}selected{% endif %}>{{ project.code }} — {{ project.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button type="submit" class="btn btn-outline-primary w-100">Filtrar</button>
+    </div>
+</form>
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 kobo-hub-table">
+            <thead>
+                <tr>
+                    <th scope="col">Código del núcleo</th>
+                    <th scope="col">Zona pastoral</th>
+                    <th scope="col">Proyecto asociado</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Fecha de registro</th>
+                    <th scope="col" class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for identity in page_obj %}
+                    <tr>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url 'kobo:identity_detail' identity.pk %}">
+                                {{ identity.nucleo_code_normalized }}
+                            </a>
+                        </td>
+                        <td>{{ identity.pastoral_zone|kobo_zone_label }}</td>
+                        <td>
+                            {{ identity.project.name }}
+                            <span class="small text-muted d-block">{{ identity.project.code }}</span>
+                        </td>
+                        <td><span class="badge ops-status-badge">{{ identity.status|kobo_label }}</span></td>
+                        <td>{{ identity.created_at }}</td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-secondary" href="{% url 'kobo:identity_detail' identity.pk %}">Ver detalle</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-muted">No hay núcleos registrados.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include "web/includes/pagination.html" with page_obj=page_obj %}
+{% endblock %}

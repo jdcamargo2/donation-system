@@ -141,23 +141,25 @@ class KoboRejectionForm(forms.Form):
 
 
 class PastoralZoneProjectMappingForm(forms.Form):
-    pastoral_zone = forms.ChoiceField(choices=())
-    project = forms.ModelChoiceField(queryset=None, label="Proyecto")
+    pastoral_zone = forms.ChoiceField(choices=(), label="Zona pastoral")
+    project = forms.ModelChoiceField(queryset=None, label="Proyecto asociado")
 
     def __init__(self, *args, **kwargs):
         # PRE: the operations Project model is available to the Kobo integration.
         # POST: accepts only canonical zones and projects the administration service may use.
         from apps.integrations.kobo.contracts import PastoralZone
+        from apps.integrations.kobo.presentation import pastoral_zone_label
         from apps.operations.models import Project
 
         super().__init__(*args, **kwargs)
         self.fields["pastoral_zone"].choices = tuple(
-            (zone.value, zone.value.replace("_", " ").title())
-            for zone in PastoralZone
+            (zone.value, pastoral_zone_label(zone)) for zone in PastoralZone
         )
+        self.fields["pastoral_zone"].widget.attrs.update({"class": "form-select"})
         self.fields["project"].queryset = Project.objects.filter(
             status__in=(Project.Status.PLANNED, Project.Status.ACTIVE, Project.Status.SUSPENDED)
         ).order_by("code", "pk")
+        self.fields["project"].widget.attrs.update({"class": "form-select"})
 
 
 class TerritorialReasonForm(forms.Form):
