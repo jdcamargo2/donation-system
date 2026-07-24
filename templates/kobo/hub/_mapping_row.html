@@ -1,0 +1,42 @@
+{% load kobo_presentation %}
+<tr id="zone-{{ row.zone.value }}"{% if row_oob %} hx-swap-oob="outerHTML"{% endif %}>
+    <td class="fw-semibold">{{ row.zone|kobo_zone_label }}</td>
+    <td>
+        {% if row.mapping %}
+            {{ row.mapping.project.name }}
+            <span class="small text-muted d-block">{{ row.mapping.project.code }}</span>
+        {% else %}
+            <span class="text-muted">Sin proyecto asociado</span>
+        {% endif %}
+    </td>
+    <td>
+        {% if row.mapping %}
+            <span class="badge ops-status-badge">Configurada</span>
+        {% else %}
+            <span class="badge ops-status-badge">Pendiente</span>
+        {% endif %}
+    </td>
+    <td>{{ row.identity_count }}</td>
+    <td>{{ row.mapping.updated_at|default:"—" }}</td>
+    <td class="text-end">
+        {% if row.mapping and can_manage %}
+            <a
+                class="btn btn-sm btn-outline-secondary"
+                href="{% url 'kobo:mapping_list' %}?change={{ row.zone.value }}"
+                hx-get="{% url 'kobo:mapping_modal' %}?change={{ row.zone.value }}"
+                hx-target="#kobo-modal-root"
+                hx-swap="innerHTML"
+            >Cambiar asignación</a>
+        {% elif not row.mapping and can_manage %}
+            <a
+                class="btn btn-sm btn-primary"
+                href="{% url 'kobo:mapping_list' %}?zone={{ row.zone.value }}"
+                hx-get="{% url 'kobo:mapping_modal' %}?zone={{ row.zone.value }}"
+                hx-target="#kobo-modal-root"
+                hx-swap="innerHTML"
+            >Configurar</a>
+        {% elif row.mapping %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_detail' row.mapping.project.pk %}">Ver detalle</a>
+        {% endif %}
+    </td>
+</tr>

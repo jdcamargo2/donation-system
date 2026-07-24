@@ -11,6 +11,7 @@ from apps.integrations.kobo import tests as kobo_tests
 FUNCTIONAL_TEST_COUNT = 0
 TEST_MODULES = (
     "test_attachments",
+    "test_automation",
     "test_client",
     "test_concurrency",
     "test_contracts",
@@ -19,6 +20,7 @@ TEST_MODULES = (
     "test_import_contracts",
     "test_hub",
     "test_incremental",
+    "test_orchestration",
     "test_processing",
     "test_prioritized_microprojects",
     "test_prioritization_assessments",
@@ -30,10 +32,12 @@ TEST_MODULES = (
     "test_territorial_routing",
 )
 MODULES_ALLOWED_TO_IMPORT_SERVICES = {
+    "test_automation",
     "test_binding_retirement",
     "test_importers",
     "test_import_contracts",
     "test_incremental",
+    "test_orchestration",
     "test_processing",
     "test_prioritized_microprojects",
     "test_prioritization_assessments",

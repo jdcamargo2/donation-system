@@ -85,18 +85,35 @@ class KoboAssetConfigurationForm(forms.Form):
 
 class KoboReviewForm(forms.Form):
     decision = forms.ChoiceField(
+        required=False,
         choices=(
             (
                 KoboSubmission.Status.APPROVED_FOR_IMPORT,
-                "Aprobar para importación",
+                "Aprobar e importar",
             ),
-            (KoboSubmission.Status.REJECTED, "Rechazar"),
-        )
+            (KoboSubmission.Status.REJECTED, "Rechazar formulario"),
+        ),
+        widget=forms.HiddenInput,
+    )
+    review_intent = forms.ChoiceField(
+        required=False,
+        choices=(
+            ("approve", "Aprobar e importar"),
+            ("request_correction", "Solicitar corrección"),
+            ("reject", "Rechazar formulario"),
+        ),
+        widget=forms.HiddenInput,
     )
     reason = forms.CharField(
         required=False,
-        widget=forms.Textarea(attrs={"rows": 3}),
-        label="Razón",
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "class": "form-control",
+                "placeholder": "Describa el motivo para la persona que corregirá o revisará el formulario.",
+            }
+        ),
+        label="Motivo",
     )
 
     def __init__(self, *args, submission: KoboSubmission, **kwargs):
@@ -105,15 +122,36 @@ class KoboReviewForm(forms.Form):
 
     def clean(self):
         # PRE: submission is the staging record being reviewed.
-        # POST: allows only one ready-state decision and requires rejection reason.
+        # POST: allows only one ready-state decision and requires reason for
+        # correction requests and rejections without changing stored contracts.
         cleaned_data = super().clean()
         if self.submission.status != KoboSubmission.Status.READY_FOR_REVIEW:
-            raise ValidationError("La submission ya no está lista para revisión.")
-        if (
-            cleaned_data.get("decision") == KoboSubmission.Status.REJECTED
-            and not cleaned_data.get("reason", "").strip()
-        ):
-            self.add_error("reason", "La razón es obligatoria al rechazar.")
+            raise ValidationError("Este formulario ya no está pendiente de revisión.")
+        intent = cleaned_data.get("review_intent") or ""
+        decision = cleaned_data.get("decision")
+        if intent == "approve":
+            cleaned_data["decision"] = KoboSubmission.Status.APPROVED_FOR_IMPORT
+            decision = cleaned_data["decision"]
+        elif intent in {"request_correction", "reject"}:
+            cleaned_data["decision"] = KoboSubmission.Status.REJECTED
+            decision = cleaned_data["decision"]
+        if decision not in {
+            KoboSubmission.Status.APPROVED_FOR_IMPORT,
+            KoboSubmission.Status.REJECTED,
+        }:
+            raise ValidationError("Seleccione una acción de revisión.")
+        needs_reason = decision == KoboSubmission.Status.REJECTED
+        if needs_reason and not cleaned_data.get("reason", "").strip():
+            if intent == "request_correction":
+                self.add_error(
+                    "reason",
+                    "Indique el motivo para solicitar la corrección.",
+                )
+            else:
+                self.add_error(
+                    "reason",
+                    "Indique el motivo del rechazo.",
+                )
         return cleaned_data
 
 
@@ -141,30 +179,35 @@ class KoboRejectionForm(forms.Form):
 
 
 class PastoralZoneProjectMappingForm(forms.Form):
-    pastoral_zone = forms.ChoiceField(choices=())
-    project = forms.ModelChoiceField(queryset=None, label="Proyecto")
+    pastoral_zone = forms.ChoiceField(choices=(), label="Zona pastoral")
+    project = forms.ModelChoiceField(queryset=None, label="Proyecto asociado")
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, focus_project: bool = False, **kwargs):
         # PRE: the operations Project model is available to the Kobo integration.
         # POST: accepts only canonical zones and projects the administration service may use.
         from apps.integrations.kobo.contracts import PastoralZone
+        from apps.integrations.kobo.presentation import pastoral_zone_label
         from apps.operations.models import Project
 
         super().__init__(*args, **kwargs)
         self.fields["pastoral_zone"].choices = tuple(
-            (zone.value, zone.value.replace("_", " ").title())
-            for zone in PastoralZone
+            (zone.value, pastoral_zone_label(zone)) for zone in PastoralZone
         )
+        self.fields["pastoral_zone"].widget.attrs.update({"class": "form-select"})
         self.fields["project"].queryset = Project.objects.filter(
             status__in=(Project.Status.PLANNED, Project.Status.ACTIVE, Project.Status.SUSPENDED)
         ).order_by("code", "pk")
+        project_attrs = {"class": "form-select"}
+        if focus_project:
+            project_attrs["autofocus"] = "autofocus"
+        self.fields["project"].widget.attrs.update(project_attrs)
 
 
 class TerritorialReasonForm(forms.Form):
     reason = forms.CharField(
-        label="Motivo",
+        label="Motivo para quitar la asignación",
         max_length=500,
-        widget=forms.Textarea(attrs={"rows": 3}),
+        widget=forms.Textarea(attrs={"rows": 3, "class": "form-control"}),
     )
 
 

@@ -1,0 +1,23 @@
+{# Shared Kobo hub navigation. Expects hub_nav in {summary, mappings, identities, cases}. #}
+<nav class="kobo-hub-nav" aria-label="Navegación de KoboToolbox">
+    <a
+        class="kobo-hub-nav-link{% if hub_nav == 'summary' %} is-active{% endif %}"
+        href="{% url 'kobo:hub' %}"
+        {% if hub_nav == 'summary' %}aria-current="page"{% endif %}
+    >Resumen</a>
+    <a
+        class="kobo-hub-nav-link{% if hub_nav == 'mappings' %} is-active{% endif %}"
+        href="{% url 'kobo:mapping_list' %}"
+        {% if hub_nav == 'mappings' %}aria-current="page"{% endif %}
+    >Asignación de zonas</a>
+    <a
+        class="kobo-hub-nav-link{% if hub_nav == 'identities' %} is-active{% endif %}"
+        href="{% url 'kobo:identity_list' %}"
+        {% if hub_nav == 'identities' %}aria-current="page"{% endif %}
+    >Núcleos registrados</a>
+    <a
+        class="kobo-hub-nav-link{% if hub_nav == 'cases' %} is-active{% endif %}"
+        href="{% url 'kobo:conflict_list' %}"
+        {% if hub_nav == 'cases' %}aria-current="page"{% endif %}
+    >Incidencias</a>
+</nav>

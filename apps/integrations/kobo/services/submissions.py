@@ -124,9 +124,11 @@ def converge_webhook_submission(
 ) -> WebhookConvergenceResult:
     """
     PRE: submission_id identifies a staged webhook submission and no remote work is required.
-    POST: serializes processing and explicit per-form routing until the persisted
-    row is normalized with a durable routing outcome.
+    POST: normalizes, routes, and auto-imports when eligible. Durable incident states count
+    as completed so Kobo does not retry forever; valid forms are never left for human approval.
     """
+    from apps.integrations.kobo.services.automation import auto_import_if_eligible
+
     with transaction.atomic():
         submission = KoboSubmission.objects.select_for_update().get(pk=submission_id)
         if submission.status in PROCESSABLE_STATUSES:
@@ -134,20 +136,17 @@ def converge_webhook_submission(
             submission.refresh_from_db()
 
         if submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
-            routing = route_normalized_submission(submission)
-            submission.refresh_from_db()
-            return WebhookConvergenceResult(
-                submission_id=submission.pk,
-                final_status=submission.status,
-                completed=(
-                    routing.status.value
-                    != KoboSubmission.RoutingStatus.UNRESOLVED
-                    and (
-                        routing.form_type != KoboFormType.FICHA_1
-                        or submission.project_id is not None
-                    )
-                ),
-            )
+            route_normalized_submission(submission)
+
+    submission = KoboSubmission.objects.get(pk=submission_id)
+    if submission.status in {
+        KoboSubmission.Status.READY_FOR_REVIEW,
+        KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        KoboSubmission.Status.VALIDATION_FAILED,
+        KoboSubmission.Status.PROCESSING_FAILED,
+    }:
+        auto_import_if_eligible(submission)
+        submission.refresh_from_db()
 
     return WebhookConvergenceResult(
         submission_id=submission.pk,

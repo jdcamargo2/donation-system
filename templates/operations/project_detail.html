@@ -23,7 +23,7 @@
                         <td>{{ submission.external_id }}</td>
                         <td>{% if submission.normalized_payload.microproject_name %}{{ submission.normalized_payload.microproject_name }}{% elif submission.normalized_payload.final_priority %}Prioridad {{ submission.normalized_payload.final_priority }}{% else %}{{ submission.normalized_payload.communities_covered|default:submission.primary_community|default:"—" }}{% endif %}</td>
                         <td>{{ submission.status|kobo_label }}</td>
-                        <td>{% if can_import_kobo_submissions %}<a href="{% url 'kobo:project_pending_submission_review' project.pk submission.pk %}">Revisar</a>{% endif %}</td>
+                        <td>Procesamiento automático</td>
                     </tr>
                 {% empty %}
                     <tr><td colspan="6" class="text-muted">No hay fichas Kobo pendientes de revisión.</td></tr>

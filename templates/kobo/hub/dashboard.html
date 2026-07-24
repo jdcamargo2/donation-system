@@ -1,14 +1,92 @@
 {% extends "base.html" %}
+{% load static kobo_presentation %}
+
 {% block title %}KoboToolbox | SIGEDON{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'web/css/kobo_hub.css' %}" rel="stylesheet">
+{% endblock %}
+
 {% block content %}
-<div class="container-fluid py-3"><div class="d-flex justify-content-between align-items-center mb-3"><div><div class="ops-kicker">Integración territorial</div><h1 class="h3 mb-0">KoboToolbox</h1></div><div class="btn-group"><a class="btn btn-outline-primary" href="{% url 'kobo:mapping_list' %}">Mappings</a><a class="btn btn-outline-primary" href="{% url 'kobo:identity_list' %}">Identidades</a><a class="btn btn-outline-primary" href="{% url 'kobo:conflict_list' %}">Conflictos</a></div></div>
-{% if not kobo_configuration_complete %}<div class="alert alert-warning" role="alert">La configuración de API Kobo está incompleta. El Hub sigue disponible para consultar y administrar la configuración territorial.</div>{% endif %}
-{% if missing_mappings %}<div class="alert alert-warning" role="alert">Faltan mappings para: {% for zone in missing_mappings %}{{ zone.value|title }}{% if not forloop.last %}, {% endif %}{% endfor %}.</div>{% endif %}
-{% if open_conflicts %}<div class="alert alert-danger" role="alert">Hay {{ open_conflicts }} conflictos territoriales abiertos.</div>{% endif %}
-{% if pending_identity %}<div class="alert alert-info" role="alert">Hay {{ pending_identity }} submissions pendientes de identidad.</div>{% endif %}
-{% if routing_errors %}<div class="alert alert-danger" role="alert">Hay {{ routing_errors }} errores de routing.</div>{% endif %}
-{% if can_sync %}<div class="alert alert-warning" role="alert">La sincronización es síncrona y puede tardar.</div><section class="card card-body mb-3"><h2 class="h5">Sincronización</h2>{% for asset in sync_assets %}<div class="d-flex gap-2 align-items-center mb-2"><span>{{ asset.name }}</span><form method="post" action="{% url 'kobo:sync_asset' asset.pk 'incremental' %}">{% csrf_token %}<button class="btn btn-sm btn-outline-primary">Sincronización incremental</button></form><form method="post" action="{% url 'kobo:sync_asset' asset.pk 'full' %}">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary">Sincronización completa</button></form></div>{% empty %}<p class="text-muted mb-0">No hay assets activos.</p>{% endfor %}</section>{% endif %}
-<div class="row row-cols-1 row-cols-md-3 row-cols-xl-4 g-3 mb-4"><div class="col"><div class="card card-body h-100"><strong>Mappings configurados</strong><span class="display-6">{{ mapping_count }}/5</span></div></div><div class="col"><div class="card card-body h-100"><strong>Identidades territoriales</strong><span class="display-6">{{ identity_count }}</span></div></div><div class="col"><div class="card card-body h-100"><strong>Conflictos abiertos</strong><span class="display-6">{{ open_conflicts }}</span></div></div><div class="col"><div class="card card-body h-100"><strong>Pendientes de revisión</strong><span class="display-6">{{ pending_review }}</span></div></div><div class="col"><div class="card card-body h-100"><strong>Importadas</strong><span class="display-6">{{ imported }}</span></div></div><div class="col"><a class="card card-body h-100 text-decoration-none" href="{% url 'kobo:pending_submission_list' %}"><strong>Pendientes de identidad</strong><span class="display-6">{{ pending_identity }}</span></a></div><div class="col"><a class="card card-body h-100 text-decoration-none" href="{% url 'kobo:pending_submission_list' %}?routing_status=error"><strong>Errores de routing</strong><span class="display-6">{{ routing_errors }}</span></a></div></div>
-<section class="card card-body mb-3"><h2 class="h5">Conteos por ficha</h2><dl class="row mb-0"><dt class="col-sm-3">Ficha 1</dt><dd class="col-sm-9">{{ form_counts.ficha_01|default:0 }}</dd><dt class="col-sm-3">Ficha 10</dt><dd class="col-sm-9">{{ form_counts.ficha_10|default:0 }}</dd><dt class="col-sm-3">Ficha 11</dt><dd class="col-sm-9">{{ form_counts.ficha_11|default:0 }}</dd></dl></section>
-<section class="card card-body"><h2 class="h5">Zonas pastorales</h2><div class="table-responsive"><table class="table mb-0"><thead><tr><th>Zona</th><th>Mapping</th><th>Identidades</th></tr></thead><tbody>{% for row in zone_rows %}<tr><td>{{ row.label }}</td><td>{% if row.mapped %}Configurado{% else %}Falta configurar{% endif %}</td><td>{{ row.identities }}</td></tr>{% endfor %}</tbody></table></div></section></div>
+<div class="ops-page-header">
+    <div class="ops-kicker">Integración de formularios</div>
+    <h1>KoboToolbox</h1>
+    <p>Recepción automática de formularios territoriales y seguimiento de incidencias.</p>
+</div>
+
+{% include "kobo/hub/_nav.html" %}
+
+{% if not kobo_configuration_complete %}
+    <div class="alert alert-warning kobo-hub-notice kobo-hub-notice-compact" role="alert">
+        <strong>La conexión con KoboToolbox está incompleta.</strong>
+        <span class="kobo-hub-notice-secondary">La sincronización remota no estará disponible hasta completar la configuración.</span>
+    </div>
+{% endif %}
+{% if missing_mappings %}
+    <div class="alert alert-warning kobo-hub-notice kobo-hub-notice-compact" role="status">
+        <strong>Faltan asignaciones para: {{ missing_mappings_label }}.</strong>
+        <span class="kobo-hub-notice-secondary">Asocia cada zona pastoral con su proyecto.</span>
+    </div>
+{% endif %}
+
+{% if can_sync %}
+    <section class="card border-0 ops-table-card mb-4" aria-labelledby="kobo-sync-title">
+        <div class="card-body">
+            <h2 id="kobo-sync-title" class="h5 ops-section-title">Sincronizar KoboToolbox</h2>
+            <p class="mb-2">
+                Las fichas llegan automáticamente. Use esta opción solo para buscar formularios pendientes o recuperar información no recibida.
+            </p>
+            <p class="text-muted mb-3">
+                Trae y procesa los formularios nuevos o modificados de las Fichas 1, 10 y 11.
+            </p>
+            <form
+                method="post"
+                action="{% url 'kobo:sync_all' %}"
+                hx-post="{% url 'kobo:sync_all' %}"
+                hx-target="#kobo-sync-result"
+                hx-swap="innerHTML"
+                hx-disabled-elt="find button"
+                hx-indicator="#kobo-sync-indicator"
+            >
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary kobo-hub-sync-btn">
+                    Sincronizar KoboToolbox
+                </button>
+                <span id="kobo-sync-indicator" class="kobo-hub-sync-indicator htmx-indicator" aria-live="polite">
+                    Sincronizando…
+                </span>
+            </form>
+            <div id="kobo-sync-result" class="mt-3" aria-live="polite"></div>
+        </div>
+    </section>
+{% else %}
+    <section class="card border-0 ops-table-card mb-4" aria-labelledby="kobo-sync-title">
+        <div class="card-body">
+            <h2 id="kobo-sync-title" class="h5 ops-section-title">Sincronizar KoboToolbox</h2>
+            <p class="text-muted mb-0">Su cuenta no tiene permiso para sincronizar formularios.</p>
+        </div>
+    </section>
+{% endif %}
+
+<div
+    id="kobo-dashboard-status"
+    hx-get="{% url 'kobo:dashboard_status' %}"
+    hx-trigger="load, every 15s"
+    hx-swap="innerHTML"
+>
+    {% include "kobo/hub/_dashboard_status.html" %}
+</div>
+
+{% include "kobo/hub/_next_actions.html" %}
+
+<nav class="kobo-hub-dashboard-links" aria-label="Enlaces del resumen">
+    <a href="{% url 'kobo:mapping_list' %}">Ver asignación de zonas</a>
+    <a href="{% url 'kobo:sync_history' %}">Ver historial de sincronizaciones</a>
+    <a href="{% url 'kobo:pending_submission_list' %}">Ver incidencias</a>
+</nav>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script src="{% static 'vendor/htmx/htmx.min.js' %}" defer></script>
 {% endblock %}

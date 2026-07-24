@@ -39,6 +39,8 @@ class AssetSyncResult:
     conflicts: int = 0
     validation_failed: int = 0
     processing_failed: int = 0
+    imported: int = 0
+    incidents: int = 0
     partial: bool = False
 
 
@@ -109,17 +111,29 @@ def _is_protected_submission(submission: KoboSubmission) -> bool:
     }
 
 
-def _converge_submission(submission: KoboSubmission) -> tuple[str, str]:
-    """PRE: submission was staged or reset to received. POST: normalizes then routes safely."""
+def _converge_submission(submission: KoboSubmission) -> tuple[str, str, str]:
+    """
+    PRE: submission was staged or reset to received.
+    POST: normalizes, routes, and auto-imports when eligible; never requires human approval.
+    """
+    from apps.integrations.kobo.services.automation import (
+        AutoImportOutcome,
+        auto_import_if_eligible,
+    )
+
     outcome = process_submission(
         submission,
         default_timezone=timezone.get_current_timezone(),
     )
     submission.refresh_from_db()
     if outcome.final_status != KoboSubmission.Status.READY_FOR_REVIEW:
-        return outcome.final_status, KoboSubmission.RoutingStatus.UNRESOLVED
+        auto = auto_import_if_eligible(submission)
+        return outcome.final_status, KoboSubmission.RoutingStatus.UNRESOLVED, auto.outcome
     routing = route_normalized_submission(submission)
-    return outcome.final_status, routing.status
+    submission.refresh_from_db()
+    auto = auto_import_if_eligible(submission)
+    final_status = submission.status
+    return final_status, routing.status, auto.outcome
 
 
 def _start_run(asset_id, actor, full):
@@ -174,6 +188,7 @@ def sync_asset_submissions(*, asset, client, actor=None, full=False, max_pages=N
     leased_asset, run = started
     created = updated = unchanged = detected = failed = pages = 0
     normalized = routed = pending = conflicts = validation_failed = processing_failed = 0
+    imported = incidents = 0
     candidate = leased_asset.last_remote_watermark
     partial = False
     error_code = safe_error = ""
@@ -215,6 +230,7 @@ def sync_asset_submissions(*, asset, client, actor=None, full=False, max_pages=N
                     if revision_created:
                         detected += 1
                         conflicts += 1
+                        incidents += 1
                     if _is_protected_submission(submission):
                         submission.remote_update_pending = True
                         submission.save(update_fields=("remote_update_pending",))
@@ -223,6 +239,7 @@ def sync_asset_submissions(*, asset, client, actor=None, full=False, max_pages=N
                     revision, revision_created = KoboSubmissionRemoteRevision.objects.get_or_create(submission=submission, payload_hash=digest, defaults={"payload": payload, "remote_updated_at": remote_at, "remote_version": str(payload.get("version", ""))})
                     if revision_created:
                         detected += 1
+                        incidents += 1
                     submission.remote_update_pending = True
                     submission.save(update_fields=("remote_update_pending",))
                     KoboProcessingEvent.objects.get_or_create(submission=submission, stage="remote_sync", code="REMOTE_UPDATE_DETECTED", defaults={"level": KoboProcessingEvent.Level.WARNING, "message": "Remote update requires review."})
@@ -237,17 +254,53 @@ def sync_asset_submissions(*, asset, client, actor=None, full=False, max_pages=N
                     updated += 1
                     should_converge = True
             if should_converge:
-                final_status, routing_status = _converge_submission(submission)
-                normalized += int(final_status == KoboSubmission.Status.READY_FOR_REVIEW)
+                from apps.integrations.kobo.services.automation import AutoImportOutcome
+
+                final_status, routing_status, auto_outcome = _converge_submission(submission)
+                normalized += int(
+                    final_status
+                    in {
+                        KoboSubmission.Status.READY_FOR_REVIEW,
+                        KoboSubmission.Status.APPROVED_FOR_IMPORT,
+                        KoboSubmission.Status.IMPORTED,
+                    }
+                )
                 routed += int(routing_status == KoboSubmission.RoutingStatus.RESOLVED)
                 pending += int(routing_status == KoboSubmission.RoutingStatus.PENDING_IDENTITY)
                 conflicts += int(routing_status == KoboSubmission.RoutingStatus.CONFLICT)
                 validation_failed += int(final_status == KoboSubmission.Status.VALIDATION_FAILED)
                 processing_failed += int(final_status == KoboSubmission.Status.PROCESSING_FAILED)
+                imported += int(auto_outcome == AutoImportOutcome.IMPORTED)
+                incidents += int(
+                    auto_outcome
+                    in {AutoImportOutcome.INCIDENT, AutoImportOutcome.FAILED}
+                )
             candidate = max(filter(None, (candidate, remote_at)))
     except KoboIntegrationError:
         partial, error_code, safe_error = True, "REMOTE_SYNC_FAILED", "Remote synchronization did not complete."
     except Exception:
         error_code, safe_error = "SYNC_FAILED", "Synchronization failed safely."
     run = _finish_run(run=run, candidate_watermark=candidate, partial=partial, error_code=error_code, safe_error_message=safe_error, counters=(created, updated, unchanged, detected, failed))
-    return AssetSyncResult(run.status, run.mode, run.cursor_before, run.cursor_after, run.watermark_before, run.watermark_after, pages_fetched=pages, created=created, updated=updated, unchanged=unchanged, remote_updates_detected=detected, failed=failed, normalized=normalized, routed=routed, pending=pending, conflicts=conflicts, validation_failed=validation_failed, processing_failed=processing_failed, partial=run.partial)
+    return AssetSyncResult(
+        run.status,
+        run.mode,
+        run.cursor_before,
+        run.cursor_after,
+        run.watermark_before,
+        run.watermark_after,
+        pages_fetched=pages,
+        created=created,
+        updated=updated,
+        unchanged=unchanged,
+        remote_updates_detected=detected,
+        failed=failed,
+        normalized=normalized,
+        routed=routed,
+        pending=pending,
+        conflicts=conflicts,
+        validation_failed=validation_failed,
+        processing_failed=processing_failed,
+        imported=imported,
+        incidents=incidents,
+        partial=run.partial,
+    )

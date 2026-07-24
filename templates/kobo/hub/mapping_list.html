@@ -1,1 +1,139 @@
-{% extends "base.html" %}{% block title %}Mappings Kobo | SIGEDON{% endblock %}{% block content %}<div class="container-fluid py-3"><a href="{% url 'kobo:hub' %}">← KoboToolbox</a><h1 class="h3 my-3">Mappings zona pastoral → proyecto</h1>{% if can_manage %}<section class="card card-body mb-3"><h2 class="h5">Configurar mapping</h2><form method="post" action="{% url 'kobo:configure_mapping' %}">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Guardar mapping</button></form></section>{% endif %}<div class="table-responsive"><table class="table"><thead><tr><th>Zona</th><th>Proyecto asignado</th><th>Estado</th><th>Identidades asociadas</th><th>Actualización</th><th>Acciones</th></tr></thead><tbody>{% for row in rows %}<tr><td>{{ row.zone.value|title }}</td><td>{{ row.mapping.project|default:"—" }}</td><td>{% if row.mapping %}Activo{% else %}Sin configurar{% endif %}</td><td>{{ row.identity_count }}</td><td>{{ row.mapping.updated_at|default:"—" }}</td><td>{% if row.mapping and can_manage %}<details><summary>Desactivar</summary><form method="post" action="{% url 'kobo:deactivate_mapping' row.zone.value %}">{% csrf_token %}<label class="visually-hidden" for="reason-{{ row.zone.value }}">Motivo</label><textarea id="reason-{{ row.zone.value }}" name="reason" required class="form-control my-2"></textarea><button class="btn btn-sm btn-outline-danger">Confirmar</button></form></details>{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>{% endblock %}
+{% extends "base.html" %}
+{% load static kobo_presentation %}
+
+{% block title %}Asignación de zonas | SIGEDON{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'web/css/kobo_hub.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Integración de formularios</div>
+        <h1>Asignación de zonas</h1>
+        <p>Relaciona cada zona pastoral con el proyecto donde se organizarán sus formularios.</p>
+    </div>
+</div>
+
+{% include "kobo/hub/_nav.html" %}
+
+<div id="kobo-toast-root" class="mb-3" aria-live="polite"></div>
+<div id="kobo-modal-root"></div>
+
+{% if missing_count %}
+    <div class="alert alert-warning kobo-hub-notice mb-4" role="status">
+        <strong>Hay {{ missing_count }} zonas sin proyecto asociado.</strong>
+        <p class="kobo-hub-notice-secondary mb-0">
+            Cada zona pastoral necesita un proyecto asociado para organizar correctamente los formularios recibidos.
+        </p>
+    </div>
+{% endif %}
+
+{% if can_manage and change_zone and change_mapping %}
+    <noscript>
+    <section id="cambiar-asignacion" class="card border-0 ops-table-card mb-4" aria-labelledby="change-zone-title">
+        <div class="card-body">
+            <h2 id="change-zone-title" class="h5 ops-section-title">Cambiar asignación: {{ change_zone_label }}</h2>
+            <p class="text-muted">Puede asociar otro proyecto o quitar la asignación actual.</p>
+            <form method="post" action="{% url 'kobo:configure_mapping' %}" class="row g-3 mb-4">
+                {% csrf_token %}
+                <div class="col-md-5">
+                    <label class="form-label" for="{{ change_form.pastoral_zone.id_for_label }}">{{ change_form.pastoral_zone.label }}</label>
+                    {{ change_form.pastoral_zone }}
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label" for="{{ change_form.project.id_for_label }}">{{ change_form.project.label }}</label>
+                    {{ change_form.project }}
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">Guardar cambio</button>
+                </div>
+            </form>
+            <div class="border-top pt-3">
+                <h3 class="h6 text-danger mb-2">Quitar asignación</h3>
+                <p class="kobo-hub-notice-secondary mb-3">{{ change_explanation }}</p>
+                <form method="post" action="{% url 'kobo:deactivate_mapping' change_zone.value %}" class="row g-3">
+                    {% csrf_token %}
+                    <div class="col-md-8">
+                        <label class="form-label" for="{{ reason_form.reason.id_for_label }}">{{ reason_form.reason.label }}</label>
+                        {{ reason_form.reason }}
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button type="submit" class="btn btn-outline-danger w-100">Quitar asignación</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </section>
+    </noscript>
+{% elif can_manage and selected_zone %}
+    <noscript>
+    <section id="configurar-zona" class="card border-0 ops-table-card mb-4" aria-labelledby="configure-zone-title">
+        <div class="card-body">
+            <h2 id="configure-zone-title" class="h5 ops-section-title">Configurar zona: {{ selected_zone_label }}</h2>
+            <p class="text-muted">La zona pastoral ya está preseleccionada. Elija el proyecto y guarde la asignación.</p>
+            <form method="post" action="{% url 'kobo:configure_mapping' %}" class="row g-3">
+                {% csrf_token %}
+                <div class="col-md-5">
+                    <label class="form-label" for="{{ form.pastoral_zone.id_for_label }}">{{ form.pastoral_zone.label }}</label>
+                    {{ form.pastoral_zone }}
+                    {% if form.pastoral_zone.errors %}<div class="invalid-feedback d-block">{{ form.pastoral_zone.errors|striptags }}</div>{% endif %}
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label" for="{{ form.project.id_for_label }}">{{ form.project.label }}</label>
+                    {{ form.project }}
+                    {% if form.project.errors %}<div class="invalid-feedback d-block">{{ form.project.errors|striptags }}</div>{% endif %}
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">Guardar asignación</button>
+                </div>
+            </form>
+        </div>
+    </section>
+    </noscript>
+{% endif %}
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 kobo-hub-table">
+            <thead>
+                <tr>
+                    <th scope="col">Zona pastoral</th>
+                    <th scope="col">Proyecto asociado</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Núcleos registrados</th>
+                    <th scope="col">Actualización</th>
+                    <th scope="col" class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    {% include "kobo/hub/_mapping_row.html" with row=row can_manage=can_manage %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script src="{% static 'vendor/htmx/htmx.min.js' %}" defer></script>
+<script defer>
+document.addEventListener('DOMContentLoaded', function () {
+    var params = new URLSearchParams(window.location.search);
+    var zone = params.get('change') || params.get('zone');
+    if (!zone || !window.htmx) {
+        return;
+    }
+    var query = params.get('change')
+        ? ('?change=' + encodeURIComponent(zone))
+        : ('?zone=' + encodeURIComponent(zone));
+    window.htmx.ajax('GET', '{% url "kobo:mapping_modal" %}' + query, {
+        target: '#kobo-modal-root',
+        swap: 'innerHTML'
+    });
+});
+</script>
+{% endblock %}

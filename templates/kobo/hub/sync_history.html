@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% load static kobo_presentation %}
+
+{% block title %}Historial de sincronizaciones | SIGEDON{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'web/css/kobo_hub.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ops-page-header">
+    <div class="ops-kicker">Integración de formularios</div>
+    <h1>Historial de sincronizaciones</h1>
+    <p>Ejecuciones de sincronización de formularios desde KoboToolbox.</p>
+</div>
+
+{% include "kobo/hub/_nav.html" %}
+
+<p class="mb-3">
+    <a href="{% url 'kobo:hub' %}">Volver al resumen</a>
+</p>
+
+{% if page_obj.object_list %}
+    <div class="card border-0 ops-table-card">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 kobo-hub-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Ficha o formulario</th>
+                        <th scope="col">Tipo de actualización</th>
+                        <th scope="col">Estado</th>
+                        <th scope="col">Fecha</th>
+                        <th scope="col">Creados</th>
+                        <th scope="col">Modificados</th>
+                        <th scope="col">Sin cambios</th>
+                        <th scope="col">Con errores</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for run in page_obj %}
+                        <tr>
+                            <td>
+                                {% if run.asset %}
+                                    <span class="fw-semibold">{{ run.asset.form_role|kobo_form_role_title }}</span>
+                                    <span class="small text-muted d-block">{{ run.asset.form_role|kobo_form_role_subtitle }}</span>
+                                {% else %}
+                                    <span class="text-muted">Formulario no disponible</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ run.mode|kobo_sync_mode }}</td>
+                            <td><span class="badge ops-status-badge">{{ run.status|kobo_sync_status }}</span></td>
+                            <td>{{ run.started_at }}</td>
+                            <td>{{ run.items_created }}</td>
+                            <td>{{ run.items_updated }}</td>
+                            <td>{{ run.items_unchanged }}</td>
+                            <td>{{ run.items_failed }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include "web/includes/pagination.html" with page_obj=page_obj %}
+{% else %}
+    <div class="kobo-hub-empty-state card border-0 ops-table-card" role="status">
+        <div class="card-body">
+            <p class="mb-1"><strong>Todavía no hay sincronizaciones registradas.</strong></p>
+            <p class="kobo-hub-notice-secondary mb-0">
+                Cuando sincronice formularios desde el resumen, el historial completo aparecerá aquí.
+            </p>
+            <p class="mt-3 mb-0">
+                <a href="{% url 'kobo:hub' %}">Ir al resumen para sincronizar</a>
+            </p>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}

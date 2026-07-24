@@ -1,6 +1,6 @@
 # Integración con KoboToolbox
 
-Este documento describe la integración entre KoboToolbox y SIGEDON, incluyendo su configuración, flujo de procesamiento, revisión, privacidad y trazabilidad.
+Este documento describe la integración entre KoboToolbox y SIGEDON, incluyendo su configuración, automatización, privacidad y trazabilidad. Las secciones marcadas **Histórico** se conservan únicamente para interpretar datos y auditorías antiguas; no describen acciones disponibles en la UI.
 
 ## 1. Objetivo
 
@@ -11,11 +11,49 @@ La integración permite:
 * normalizar la información;
 * validar los datos;
 * asociar submissions con proyectos SIGEDON;
-* realizar revisión humana;
-* importar o rechazar información;
+* importar automáticamente información materializable;
 * conservar trazabilidad técnica e institucional.
 
 La integración Kobo no modifica directamente saldos financieros ni sustituye las reglas de negocio de `apps.operations`.
+
+## Flujo automatizado vigente
+
+```text
+KoboToolbox → webhook → staging idempotente → normalización
+→ asignación territorial → importación automática → auditoría
+```
+
+El webhook es el mecanismo principal. El botón único **Sincronizar KoboToolbox**
+es respaldo para recuperar formularios tras una caída o buscar cambios remotos;
+no se sincroniza cada ficha por separado. El panel usa HTMX y polling cada 15
+segundos para métricas agregadas, sin payloads ni eventos técnicos completos.
+
+El flujo de incidencia es:
+
+```text
+KoboToolbox → procesamiento → bloqueo seguro → incidencia conservada
+→ corrección de configuración → reintento automático o manual
+```
+
+Una incidencia se clasifica como zona sin proyecto, núcleo no encontrado,
+conflicto territorial, datos inválidos, normalización fallida, materialización
+fallida, actualización remota pendiente o error técnico. Las submissions
+importadas, sin cambios y estados heredados sin error activo no son incidencias.
+
+Ficha 1 crea o confirma la identidad territorial; Fichas 10 y 11 requieren esa
+identidad para materializar. La reconciliación recupera cambios remotos y
+mantiene la idempotencia; los bloqueos de fila evitan doble materialización.
+
+Las acciones humanas vigentes son configurar zona, resolver conflictos,
+consultar historial y reintentar una incidencia resoluble. La aprobación,
+rechazo, restauración e importación manual son flujos retirados.
+
+### Actor técnico `kobo.system`
+
+La importación automática siempre usa `kobo.system`, no al operador que pulse
+sincronizar. Se crea idempotentemente, está activo para auditoría, no es
+superusuario, no pertenece a grupos y tiene sólo `operations.change_project`.
+Su contraseña es inutilizable y no se espera acceso interactivo.
 
 ## 2. Formularios soportados
 
@@ -108,7 +146,7 @@ una ejecución `SUCCEEDED` actualiza atómicamente cursor, watermark y hora del
 una lease atribuida al `KoboSyncRun`; una lease vencida deja el run anterior
 como `ABANDONED` con `SYNC_LEASE_EXPIRED` antes de adquirir la nueva.
 
-Las acciones del Hub son POST con CSRF, requieren permiso de cambio del asset y
+Las acciones del panel operativo son POST con CSRF, requieren permiso de cambio del asset y
 son síncronas; no existe scheduling automático.
 
 ## 4. Registro de formularios
@@ -260,12 +298,12 @@ DUPLICATE
 PROCESSING_FAILED
 ```
 
-### Flujo ordinario por proyecto
+### Flujo ordinario automático
 
 ```text
 RECEIVED
-→ READY_FOR_REVIEW
-→ APPROVED_FOR_IMPORT
+→ READY_FOR_REVIEW (transitorio interno)
+→ APPROVED_FOR_IMPORT (transitorio interno)
 → IMPORTED
 ```
 
@@ -289,26 +327,17 @@ RECEIVED
 → PROCESSING_FAILED
 ```
 
-### Rechazo
-
-```text
-READY_FOR_REVIEW
-→ REJECTED
-```
-
-### Restauración
-
-```text
-REJECTED
-→ READY_FOR_REVIEW
-```
-
 ### Estados de compatibilidad
 
-`APPROVED_FOR_IMPORT` es el único estado revisado desde el que el servicio común
-puede iniciar materialización. La acción histórica de importación desde la
-bandeja de proyecto conserva su URL, pero primero registra explícitamente la
-aprobación y después invoca el mismo servicio común que la consola técnica.
+`APPROVED_FOR_IMPORT` sólo existe dentro de la transición automática hacia el
+servicio materializador; no es aprobación humana ni estado terminal. Si la
+materialización se bloquea o falla, pasa a `PROCESSING_FAILED`, conserva causa
+y se presenta como incidencia reintentable. `IMPORTED` sólo se asigna en la
+misma transacción que crea `KoboImportRecord` y la entidad materializada.
+
+`READY_FOR_REVIEW` es un estado técnico heredado oculto: puede existir entre
+normalización/routing e importación automática, pero no es bandeja humana. Un
+reintento nunca interpreta una incidencia como aprobación humana válida.
 
 `NORMALIZED` y `DUPLICATE` permanecen declarados por compatibilidad histórica.
 `PARTIALLY_IMPORTED` no tiene escritores, lectores de negocio ni una semántica
@@ -413,7 +442,7 @@ Los adjuntos Kobo:
 
 Las firmas y otros archivos sensibles no pueden marcarse como candidatos públicos.
 
-## 13. Revisión por proyecto
+## 13. Histórico: revisión manual por proyecto
 
 La revisión ordinaria asociada a un proyecto permite:
 
@@ -574,7 +603,7 @@ la importación. Como el cambio de estado y sus eventos estaban dentro de
 revertía esas escrituras; la deuda era semántica, no un commit parcial conocido.
 Ambas rutas terminan ahora en el servicio materializador común.
 
-## 14. Rechazo y restauración
+## 14. Histórico: rechazo y restauración
 
 ### Rechazo
 
@@ -627,7 +656,7 @@ Requiere permisos `kobo.*`.
 * reintentar procesamiento;
 * inspeccionar errores;
 * gestionar activos;
-* utilizar el flujo histórico de aprobación;
+* consultar el historial del flujo histórico de aprobación, ya retirado;
 * realizar acciones de soporte y diagnóstico.
 
 ### Restricciones
@@ -724,9 +753,28 @@ python manage.py process_kobo_submissions
 python manage.py reconcile_kobo_submissions
 ```
 
-## 19. Hub territorial
+## 19. Panel operativo de KoboToolbox
 
-Con `KOBO_ENABLED=true`, `/integrations/kobo/` es el Hub para dashboard,
-mappings, identidades, conflictos y routing pendiente. Sus mutaciones usan
+Con `KOBO_ENABLED=true`, `/integrations/kobo/` es el panel operativo para resumen,
+asignación de zonas, núcleos registrados y casos por revisar. Sus mutaciones usan
 POST, CSRF y los servicios administrativos existentes. Cuando Kobo está
-deshabilitado, el enlace y las rutas del Hub no están disponibles.
+deshabilitado, el enlace y las rutas del panel no están disponibles.
+
+El lenguaje visible del panel prioriza términos operativos:
+
+* Asignación de zonas (configuración zona pastoral → proyecto)
+* Núcleos registrados
+* Casos por revisar
+* Formularios pendientes de revisión / importados
+
+Los nombres técnicos internos (`mapping`, `routing`, identidades territoriales)
+se conservan en modelos, servicios y documentación de arquitectura.
+
+El criterio compartido de «formularios pendientes de revisión» es
+`status=ready_for_review` (`pending_review_queryset` en el hub). Ese mismo
+queryset alimenta la métrica del resumen, la categoría en Casos por revisar,
+el enlace «Ver listado» y el listado en `/integrations/kobo/submissions/pending/`.
+
+La asignación de zonas admite `?zone=<codigo>` para preseleccionar la zona en el
+formulario de configuración sin mutar por GET. El historial completo de
+sincronizaciones vive en `/integrations/kobo/sync/history/`.

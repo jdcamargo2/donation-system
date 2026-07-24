@@ -99,6 +99,12 @@ class TerritorialReconciliationResult:
     skipped: int = 0
     has_more: bool = False
     warnings: tuple[str, ...] = ()
+    scanned: int = 0
+    routed: int = 0
+    imported: int = 0
+    incidents: int = 0
+    failed: int = 0
+    remaining: int = 0
 
 
 @dataclass(frozen=True)

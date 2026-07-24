@@ -56,10 +56,36 @@ from apps.integrations.kobo.services import (
     route_normalized_submission,
 )
 from apps.integrations.kobo.hub import (
-    conflict_detail, conflict_list, configure_mapping, deactivate_mapping,
-    hub_dashboard, identity_detail, identity_list, identity_status,
-    mapping_list, pending_submission_list, reconcile_identity, resolve_conflict,
+    conflict_detail,
+    conflict_list,
+    configure_mapping,
+    dashboard_status,
+    deactivate_mapping,
+    hub_dashboard,
+    identity_detail,
+    identity_list,
+    identity_status,
+    mapping_list,
+    mapping_modal,
+    pending_submission_list,
+    reconcile_identity,
+    resolve_conflict,
+    retry_submission_import,
+    submission_incident_context,
+    sync_all,
     sync_asset,
+    sync_history,
+)
+from apps.integrations.kobo.submission_presentation import (
+    attachment_status_label,
+    form_identity,
+    present_contact_fields,
+    present_processing_events,
+    present_submission_fields,
+    should_show_retry_attachments,
+    should_show_retry_normalization,
+    submission_status_label,
+    territorial_summary_rows,
 )
 
 
@@ -170,29 +196,35 @@ def webhook_submission(request):
         )
     except Exception:
         return JsonResponse({"ok": False, "error": "internal_error"}, status=500)
-    if not convergence.completed:
-        error = (
-            "project_assignment_failed"
-            if convergence.final_status == KoboSubmission.Status.READY_FOR_REVIEW
-            else "processing_failed"
-        )
+    durable_statuses = {
+        KoboSubmission.Status.READY_FOR_REVIEW,
+        KoboSubmission.Status.APPROVED_FOR_IMPORT,
+        KoboSubmission.Status.IMPORTED,
+        KoboSubmission.Status.VALIDATION_FAILED,
+        KoboSubmission.Status.PROCESSING_FAILED,
+        KoboSubmission.Status.REJECTED,
+        KoboSubmission.Status.DUPLICATE,
+        KoboSubmission.Status.PARTIALLY_IMPORTED,
+    }
+    if convergence.completed or convergence.final_status in durable_statuses:
         return JsonResponse(
             {
-                "ok": False,
-                "error": error,
+                "ok": True,
+                "created": created,
                 "submission_id": convergence.submission_id,
                 "status": convergence.final_status,
             },
-            status=422,
+            status=201 if created else 200,
         )
+    # Still incomplete (e.g. RECEIVED/NORMALIZED): ask Kobo to retry.
     return JsonResponse(
         {
-            "ok": True,
-            "created": created,
+            "ok": False,
+            "error": "processing_incomplete",
             "submission_id": convergence.submission_id,
             "status": convergence.final_status,
         },
-        status=201 if created else 200,
+        status=422,
     )
 
 
@@ -220,7 +252,11 @@ def _asset_configuration_context(asset):
 def _submission_queryset():
     # PRE: Kobo staging models are migrated.
     # POST: returns review data with relations prefetched and no state changes.
-    return KoboSubmission.objects.select_related("form_definition").prefetch_related(
+    return KoboSubmission.objects.select_related(
+        "form_definition",
+        "asset",
+        "project",
+    ).prefetch_related(
         "attachments",
         "processing_events",
     )
@@ -451,36 +487,59 @@ def _project_submission_history_rows(project):
 
 def _detail_context(submission, user, *, review_form=None):
     # PRE: submission is loaded and user passed general view authorization.
-    # POST: returns separated review context without exposing attachment sources.
-    normalized_payload = submission.normalized_payload or {}
-    sensitive_data = {
-        "parish_delegate": normalized_payload.get("parish_delegate"),
-        "contact_phone": normalized_payload.get("contact_phone"),
-        "main_informant_role": normalized_payload.get("main_informant_role"),
-        "submitted_by": submission.raw_payload.get("_submitted_by"),
-        "device_id": submission.raw_payload.get("deviceid"),
-    }
-    sensitive_keys = {"parish_delegate", "contact_phone", "main_informant_role"}
-    display_normalized_payload = {
-        key: value
-        for key, value in normalized_payload.items()
-        if key not in sensitive_keys
-    }
+    # POST: returns detail context for imported rows or automatic-import incidents.
+    attachments = list(submission.attachments.all())
+    processing_events = list(submission.processing_events.all())
     can_view_raw_payload = _can_view_raw_payload(user)
+    can_change_submission = user.has_perm("kobo.change_kobosubmission")
+    can_view_technical = can_view_raw_payload
+    ficha_title, ficha_subtitle = form_identity(submission)
+    incident = submission_incident_context(submission)
     return {
         "submission": submission,
-        "normalized_payload": display_normalized_payload,
-        "sensitive_data": sensitive_data,
-        "attachments": submission.attachments.all(),
-        "processing_events": submission.processing_events.all(),
+        "ficha_title": ficha_title,
+        "ficha_subtitle": ficha_subtitle,
+        "status_label": submission_status_label(submission.status),
+        "territorial_rows": territorial_summary_rows(submission),
+        "presented_fields": present_submission_fields(submission),
+        "contact_fields": present_contact_fields(submission),
+        "presented_events": present_processing_events(processing_events),
+        "attachments": attachments,
+        "attachment_status_label": attachment_status_label,
+        "has_project": submission.project_id is not None,
         "review_form": review_form or KoboReviewForm(submission=submission),
-        "can_change_submission": user.has_perm("kobo.change_kobosubmission"),
+        "can_change_submission": can_change_submission,
+        "can_view_technical": can_view_technical,
         "can_view_raw_payload": can_view_raw_payload,
+        "show_retry_normalization": can_change_submission
+        and should_show_retry_normalization(submission),
+        "show_retry_attachments": can_change_submission
+        and should_show_retry_attachments(submission, attachments),
+        "show_retry_import": can_change_submission and incident["can_retry_import"],
+        "is_incident": incident["is_incident"],
+        "is_imported": incident["is_imported"],
+        "import_record": incident["import_record"],
+        "incident_label": incident["incident_label"],
+        "incident_action": incident["incident_action"],
+        "page_title": (
+            "Detalle de formulario"
+            if incident["is_imported"]
+            else ("Incidencia" if incident["is_incident"] else "Detalle de formulario")
+        ),
         "kobo_enabled": settings.KOBO_ENABLED,
+        "normalized_payload_json": (
+            json.dumps(submission.normalized_payload or {}, indent=2, ensure_ascii=False)
+            if can_view_technical
+            else None
+        ),
         "raw_payload_json": (
             json.dumps(submission.raw_payload, indent=2, ensure_ascii=False)
             if can_view_raw_payload
             else None
+        ),
+        "device_id": submission.raw_payload.get("deviceid") if can_view_technical else None,
+        "submitted_by": (
+            submission.raw_payload.get("_submitted_by") if can_view_technical else None
         ),
     }
 
@@ -542,23 +601,8 @@ def submission_detail(request, pk):
     raise_exception=True,
 )
 def review_submission_action(request, pk):
-    submission = get_object_or_404(_submission_queryset(), pk=pk)
-    form = KoboReviewForm(request.POST, submission=submission)
-    if not form.is_valid():
-        return render(
-            request,
-            "kobo/submission_detail.html",
-            _detail_context(submission, request.user, review_form=form),
-            status=400,
-        )
-    review_submission(
-        submission,
-        decision=form.cleaned_data["decision"],
-        reason=form.cleaned_data["reason"],
-        reviewed_by=request.user,
-    )
-    messages.success(request, "Revisión registrada.")
-    return redirect("kobo:submission_detail", pk=submission.pk)
+    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
+    raise Http404
 
 
 @require_POST
@@ -575,7 +619,14 @@ def retry_normalization_action(request, pk):
     )
     if outcome.final_status == KoboSubmission.Status.READY_FOR_REVIEW:
         route_normalized_submission(submission)
-    messages.info(request, f"Normalización finalizada: {outcome.final_status}.")
+        from apps.integrations.kobo.services import auto_import_if_eligible
+
+        auto_import_if_eligible(submission)
+        submission.refresh_from_db()
+    messages.info(
+        request,
+        f"Procesamiento finalizado: {submission_status_label(submission.status)}.",
+    )
     return redirect("kobo:submission_detail", pk=submission.pk)
 
 
@@ -676,34 +727,8 @@ def project_pending_submission_list(request, project_pk):
     raise_exception=True,
 )
 def project_pending_submission_review(request, project_pk, pk):
-    # PRE: request user can operate on projects and Kobo is enabled.
-    # POST: renders safe normalized data for one pending submission of that project.
-    _require_kobo_enabled()
-    from apps.operations.models import Project
-
-    project = get_object_or_404(Project, pk=project_pk)
-    submission = get_object_or_404(
-        KoboSubmission.objects.select_related("project", "asset", "form_definition")
-        .prefetch_related("attachments"),
-        pk=pk,
-        project=project,
-        status=KoboSubmission.Status.READY_FOR_REVIEW,
-        imported_at__isnull=True,
-        asset__is_active=True,
-    )
-    return render(
-        request,
-        "kobo/project_pending_submission_review.html",
-        {
-            "project": project,
-            "submission": submission,
-            "normalized_payload": submission.normalized_payload or {},
-            "attachments": submission.attachments.all(),
-            "project_submission_detail_rows": _project_submission_detail_rows(submission),
-            "project_submission_detail_title": _project_submission_detail_title(submission),
-            "rejection_form": KoboRejectionForm(),
-        },
-    )
+    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
+    raise Http404
 
 
 @require_POST
@@ -713,29 +738,8 @@ def project_pending_submission_review(request, project_pk, pk):
     raise_exception=True,
 )
 def project_pending_submission_import(request, project_pk, pk):
-    # PRE: request user can operate on the selected project and Kobo is enabled.
-    # POST: explicitly approves one ready submission, then delegates import to the
-    # common materialization service and reports its safe outcome.
-    _require_kobo_enabled()
-    from apps.operations.models import Project
-
-    project = get_object_or_404(Project, pk=project_pk)
-    submission = get_object_or_404(KoboSubmission, pk=pk, project=project)
-    if submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
-        review_submission(
-            submission,
-            decision=KoboSubmission.Status.APPROVED_FOR_IMPORT,
-            reason="Aprobada desde la revisión operativa del proyecto.",
-            reviewed_by=request.user,
-        )
-    result = import_kobo_submission(submission, actor=request.user)
-    if result.imported:
-        messages.success(request, "Ficha Kobo importada al proyecto.")
-    elif result.already_imported:
-        messages.info(request, "La ficha Kobo ya había sido importada.")
-    else:
-        messages.error(request, "No fue posible importar la ficha Kobo.")
-    return redirect("project_detail", pk=project.pk)
+    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
+    raise Http404
 
 
 @require_POST
@@ -745,49 +749,8 @@ def project_pending_submission_import(request, project_pk, pk):
     raise_exception=True,
 )
 def project_pending_submission_reject(request, project_pk, pk):
-    # PRE: request user may decide pending project submissions.
-    # POST: rejects one ready submission or returns the confirmation errors.
-    _require_kobo_enabled()
-    from apps.operations.models import Project
-
-    project = get_object_or_404(Project, pk=project_pk)
-    submission = get_object_or_404(
-        KoboSubmission,
-        pk=pk,
-        project=project,
-        status__in=(
-            KoboSubmission.Status.READY_FOR_REVIEW,
-            KoboSubmission.Status.REJECTED,
-        ),
-        imported_at__isnull=True,
-    )
-    form = KoboRejectionForm(request.POST)
-    if not form.is_valid():
-        return render(
-            request,
-            "kobo/project_pending_submission_review.html",
-            {
-                "project": project,
-                "submission": submission,
-                "normalized_payload": submission.normalized_payload or {},
-                "attachments": submission.attachments.all(),
-                "project_submission_detail_rows": _project_submission_detail_rows(submission),
-                "project_submission_detail_title": _project_submission_detail_title(submission),
-                "rejection_form": form,
-            },
-            status=400,
-        )
-    result = reject_kobo_submission(
-        submission,
-        actor=request.user,
-        reason=form.cleaned_data["reason"],
-        comment=form.cleaned_data["comment"],
-    )
-    if result.rejected:
-        messages.success(request, "Ficha Kobo rechazada.")
-    else:
-        messages.info(request, "La ficha Kobo ya estaba rechazada.")
-    return redirect("kobo:project_pending_submission_list", project_pk=project.pk)
+    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
+    raise Http404
 
 
 @login_required
@@ -851,24 +814,8 @@ def project_submission_history_detail(request, project_pk, pk):
     raise_exception=True,
 )
 def project_rejected_submission_restore(request, project_pk, pk):
-    # PRE: request user may change the selected project.
-    # POST: restores exactly one rejected Kobo submission to the review queue.
-    _require_kobo_enabled()
-    from apps.operations.models import Project
-
-    project = get_object_or_404(Project, pk=project_pk)
-    submission = get_object_or_404(
-        KoboSubmission,
-        pk=pk,
-        project=project,
-        status__in=(
-            KoboSubmission.Status.REJECTED,
-            KoboSubmission.Status.READY_FOR_REVIEW,
-        ),
-    )
-    restore_kobo_submission_to_review(submission, actor=request.user)
-    messages.success(request, "Ficha Kobo restaurada a revisión.")
-    return redirect("kobo:project_submission_history", project_pk=project.pk)
+    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
+    raise Http404
 
 
 @login_required

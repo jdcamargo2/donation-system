@@ -11,10 +11,12 @@ from apps.integrations.kobo import services
 
 SERVICE_MODULES = (
     "association",
+    "automation",
     "common",
     "discovery",
     "importers",
     "incremental",
+    "orchestration",
     "processing",
     "submissions",
     "territorial_administration",
@@ -24,6 +26,7 @@ EXPECTED_PUBLIC_API = {
     "REJECTION_REASON_LABELS",
     "activate_kobo_asset",
     "activate_observed_territorial_identity",
+    "auto_import_if_eligible",
     "configure_discovered_asset",
     "configure_pastoral_zone_project_mapping",
     "converge_webhook_submission",
@@ -32,6 +35,7 @@ EXPECTED_PUBLIC_API = {
     "deactivate_territorial_identity",
     "discover_assets",
     "get_asset_readiness",
+    "get_kobo_system_actor",
     "get_project_imported_submissions",
     "get_project_pending_submissions",
     "get_project_submission_history",
@@ -42,6 +46,7 @@ EXPECTED_PUBLIC_API = {
     "reject_kobo_submission",
     "reconcile_territorial_identity_submissions",
     "restore_kobo_submission_to_review",
+    "retry_auto_import",
     "review_submission",
     "route_dependent_territorial_submission",
     "route_ficha_1_submission",
@@ -49,10 +54,12 @@ EXPECTED_PUBLIC_API = {
     "resolve_territorial_identity_conflict",
     "sync_asset_submissions",
     "sync_registered_forms",
+    "sync_supported_assets",
 }
 EXPECTED_SIGNATURES = {
     "activate_kobo_asset": "(asset, *, activated_by)",
     "activate_observed_territorial_identity": "(*, identity, actor, reason)",
+    "auto_import_if_eligible": "(submission)",
     "configure_discovered_asset": (
         "(discovered_asset, *, name, form_definition, form_role, configured_by)"
     ),
@@ -63,6 +70,7 @@ EXPECTED_SIGNATURES = {
     "deactivate_territorial_identity": "(*, identity, actor, reason)",
     "discover_assets": "(client, *, limit=100, dry_run=False)",
     "get_asset_readiness": "(asset)",
+    "get_kobo_system_actor": "()",
     "get_project_imported_submissions": "(project, *, form_role=None)",
     "get_project_pending_submissions": "(project)",
     "get_project_submission_history": "(project)",
@@ -73,6 +81,7 @@ EXPECTED_SIGNATURES = {
     "reject_kobo_submission": "(submission, *, actor, reason, comment='')",
     "reconcile_territorial_identity_submissions": "(*, identity, actor, limit=100)",
     "restore_kobo_submission_to_review": "(submission, *, actor)",
+    "retry_auto_import": "(submission)",
     "review_submission": "(submission, *, decision, reason, reviewed_by)",
     "route_dependent_territorial_submission": "(submission)",
     "route_ficha_1_submission": "(submission)",
@@ -80,6 +89,7 @@ EXPECTED_SIGNATURES = {
     "resolve_territorial_identity_conflict": "(*, conflict, decision, actor, reason)",
     "sync_asset_submissions": "(*, asset, client, actor=None, full=False, max_pages=None)",
     "sync_registered_forms": "()",
+    "sync_supported_assets": "(*, client, actor=None, full=False, max_pages=None)",
 }
 
 

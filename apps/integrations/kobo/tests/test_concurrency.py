@@ -365,9 +365,13 @@ class KoboWebhookConcurrencyTests(TransactionTestCase):
         self.assertEqual(sorted(results.get_nowait() for _ in threads), [200, 201])
         submission = KoboSubmission.objects.get(external_id=payload["_uuid"])
         self.assertEqual(KoboSubmission.objects.count(), 1)
-        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        # Mapping + valid Ficha 1 payload → automatic import after converge.
+        self.assertEqual(submission.status, KoboSubmission.Status.IMPORTED)
         self.assertEqual(submission.project, self.project)
         self.assertEqual(
             submission.processing_events.filter(code="webhook_received").count(), 1
         )
         self.assertEqual(submission.processing_events.filter(code="normalized").count(), 1)
+        self.assertTrue(
+            submission.processing_events.filter(code="auto_imported").exists()
+        )

@@ -1,7 +1,7 @@
 # Operación y mantenimiento de SIGEDON
 
-> Kobo: las Fichas 1, 10 y 11 se administran desde el Hub territorial. No
-> configure bindings asset-proyecto: el UID identifica la ficha y el proyecto
+> Kobo: las Fichas 1, 10 y 11 se administran desde el panel operativo de KoboToolbox.
+> No configure bindings asset-proyecto: el UID identifica la ficha y el proyecto
 > se resuelve por zona pastoral e identidad territorial.
 
 Este documento describe las tareas habituales de preparación, operación, verificación y mantenimiento de SIGEDON.
@@ -139,11 +139,11 @@ Después del descubrimiento se debe:
 
 1. seleccionar el activo correcto;
 2. asociarlo con una definición soportada;
-3. configurar el binding hacia un proyecto;
+3. configurar la zona pastoral hacia un proyecto;
 4. activar el activo;
 5. verificar las credenciales del webhook;
 6. comprobar la recepción de submissions;
-7. ejecutar el procesamiento cuando corresponda.
+7. comprobar que el webhook materializa automáticamente una submission de prueba.
 
 El descubrimiento no activa automáticamente un activo ni configura su routing.
 
@@ -177,7 +177,23 @@ Opciones disponibles:
 --dry-run
 ```
 
-La reconciliación recupera submissions ausentes en staging, pero no sustituye la validación, normalización ni revisión humana.
+La reconciliación recupera submissions ausentes en staging, pero no sustituye la
+validación, normalización, asignación territorial ni importación automática.
+
+### Recuperación e incidencias
+
+Use **Sincronizar KoboToolbox** sólo tras una caída, webhook perdido o para
+buscar cambios remotos. La operación es idempotente: una submission ya
+importada no se materializa de nuevo. Configure la zona desde el panel para
+reintentar incidencias de esa zona; crear o reconciliar un núcleo reintenta las
+Fichas 10 y 11 relacionadas. Los errores permanentes conservan su causa y no
+entran en un bucle automático.
+
+La pantalla de incidencias muestra causa, explicación, posible acción y enlace
+funcional. Consulte el historial para auditoría. Para diagnosticar sin exponer
+secretos, confirme `KOBO_ENABLED`, que el activo y la zona estén activos, el
+estado agregado de sincronización y los códigos de incidencia; nunca copie
+tokens, cabeceras de webhook ni payloads privados en tickets o logs.
 
 ## 6. Verificación diaria o previa a una entrega
 
@@ -389,7 +405,7 @@ Los logs no deben contener secretos, tokens ni payloads sensibles completos.
 * activo configurado;
 * activo habilitado;
 * definición asociada;
-* binding configurado;
+* zona pastoral configurada;
 * estado de la submission;
 * eventos de procesamiento.
 
@@ -531,8 +547,11 @@ Después de desplegar:
 
 El despliegue no debe considerarse completo hasta validar el comportamiento básico del sistema.
 
-## Hub territorial Kobo
+## Panel operativo Kobo
 
-Con Kobo habilitado, el Hub `/integrations/kobo/` permite revisar y operar
-mappings, identidades, conflictos y reconciliación. Compruebe que los permisos
-Kobo se asignaron antes de habilitar acceso operativo.
+Con Kobo habilitado, el panel `/integrations/kobo/` permite revisar y operar
+asignación de zonas, núcleos registrados, incidencias y reconciliación. No es
+necesario pulsar sincronizar durante la operación normal: las Fichas 1, 10 y 11
+llegan por webhook, el panel se actualiza por polling cada 15 segundos y la
+intervención humana ocurre sólo ante incidencias.
+Compruebe que los permisos Kobo se asignaron antes de habilitar acceso operativo.

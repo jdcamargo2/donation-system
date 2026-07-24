@@ -544,8 +544,8 @@ def deactivate_territorial_identity(*, identity, actor, reason):
 def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_RECONCILIATION_BATCH):
     """
     PRE: actor may reconcile, identity is persisted, and limit is between 1 and 100.
-    POST: resolves one locked batch of pending Ficha 10/11 submissions only; review,
-    approval, import status, imported rows, bindings, and import records remain untouched.
+    POST: resolves one locked batch of pending Ficha 10/11 submissions, then attempts
+    automatic import for each newly resolved row using the system actor.
     """
     blocked = _authorized(actor, RUN_RECONCILIATION_PERMISSION)
     if blocked:
@@ -567,6 +567,8 @@ def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_REC
             reason_code=ReasonCode.IDENTITY_NOT_FOUND,
         )
 
+    resolved_ids: list[int] = []
+    scanned = routed = imported = incidents = failed = skipped = 0
     with transaction.atomic():
         try:
             locked_identity = KoboTerritorialIdentity.objects.select_for_update().get(pk=identity_id)
@@ -586,6 +588,7 @@ def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_REC
             )
             .order_by("received_at", "pk")[:limit]
         )
+        scanned = len(candidates)
         resolved = 0
         errors = 0
         identity_valid = bool(locked_identity.project_id) and locked_identity.pastoral_zone in {
@@ -603,6 +606,8 @@ def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_REC
                 update_fields=("project", "routing_status", "routing_reason_code", "routing_resolved_at")
             )
             resolved += 1
+            routed += 1
+            resolved_ids.append(submission.pk)
         still_pending = KoboSubmission.objects.filter(
             form_definition__form_id__in=(FICHA_10_FORM_ID, FICHA_11_FORM_ID),
             nucleo_code_normalized=locked_identity.nucleo_code_normalized,
@@ -616,6 +621,9 @@ def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_REC
             still_pending=still_pending,
             errors=errors,
             has_more=still_pending > 0,
+            scanned=scanned,
+            routed=routed,
+            remaining=still_pending,
         )
         if candidates:
             _record_administration_event(
@@ -632,4 +640,45 @@ def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_REC
                     "has_more": result.has_more,
                 },
             )
-        return result
+    if resolved_ids:
+        from apps.integrations.kobo.services.automation import (
+            AutoImportOutcome,
+            auto_import_if_eligible,
+        )
+
+        for submission_id in resolved_ids:
+            try:
+                auto_import_result = auto_import_if_eligible(
+                    KoboSubmission.objects.get(pk=submission_id)
+                )
+            except Exception:
+                failed += 1
+                incidents += 1
+                continue
+            if auto_import_result.outcome == AutoImportOutcome.IMPORTED:
+                imported += 1
+            elif auto_import_result.outcome == AutoImportOutcome.FAILED:
+                failed += 1
+                incidents += 1
+            elif auto_import_result.outcome == AutoImportOutcome.INCIDENT:
+                incidents += 1
+            else:
+                skipped += 1
+    return TerritorialReconciliationResult(
+        status=result.status,
+        identity_id=result.identity_id,
+        reason_code=result.reason_code,
+        resolved=result.resolved,
+        still_pending=result.still_pending,
+        conflicts=result.conflicts,
+        errors=result.errors,
+        skipped=skipped,
+        has_more=result.has_more,
+        warnings=result.warnings,
+        scanned=scanned,
+        routed=routed,
+        imported=imported,
+        incidents=incidents,
+        failed=failed,
+        remaining=result.still_pending,
+    )
