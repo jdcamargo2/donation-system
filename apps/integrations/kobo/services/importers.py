@@ -43,11 +43,13 @@ def _operational_import_failure(
 ) -> KoboImportResult:
     """
     PRE: submission is locked in an import transaction and remains reviewable.
-    POST: records a non-sensitive import failure without changing its lifecycle.
+    POST: records a non-sensitive import failure as a retryable processing incident.
     """
+    # APPROVED_FOR_IMPORT is a transitional automatic state, never a durable incident.
+    submission.status = KoboSubmission.Status.PROCESSING_FAILED
     submission.error_code = error_code
     submission.error_message = error_message
-    submission.save(update_fields=("error_code", "error_message"))
+    submission.save(update_fields=("status", "error_code", "error_message"))
     event_exists = submission.processing_events.filter(
         stage="operational_import",
         code=error_code,
@@ -101,6 +103,7 @@ def reject_kobo_submission(
     comment: str = "",
 ) -> KoboRejectionResult:
     """
+    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
     PRE: submission is persisted, ready for review, and reason is a supported code.
     POST: atomically records one auditable rejection without changing payloads or attachments.
     """
@@ -159,6 +162,7 @@ def restore_kobo_submission_to_review(
     actor,
 ) -> KoboRestoreResult:
     """
+    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
     PRE: submission is persisted and actor is a project operator.
     POST: atomically restores only a rejected submission to ready-for-review.
     """
@@ -376,25 +380,27 @@ def _record_blocked_import(
 def _record_failed_import(submission_id: int) -> KoboImportResult:
     """
     PRE: the materialization transaction rolled back after an unexpected exception.
-    POST: best-effort records a safe technical failure and leaves import retryable.
+    POST: best-effort records a safe retryable technical processing incident.
     """
+    with transaction.atomic():
+        submission = _lock_submission_for_operational_import(submission_id)
+        submission.status = KoboSubmission.Status.PROCESSING_FAILED
+        submission.error_code = "MATERIALIZATION_FAILED"
+        submission.error_message = "Kobo materialization failed safely."
+        submission.save(update_fields=("status", "error_code", "error_message"))
     try:
-        with transaction.atomic():
-            submission = _lock_submission_for_operational_import(submission_id)
-            submission.error_code = "MATERIALIZATION_FAILED"
-            submission.error_message = "Kobo materialization failed safely."
-            submission.save(update_fields=("error_code", "error_message"))
-            if not submission.processing_events.filter(
+        if not KoboProcessingEvent.objects.filter(
+            submission_id=submission_id,
+            stage="operational_import",
+            code="MATERIALIZATION_FAILED",
+        ).exists():
+            KoboProcessingEvent.objects.create(
+                submission_id=submission_id,
                 stage="operational_import",
+                level=KoboProcessingEvent.Level.ERROR,
                 code="MATERIALIZATION_FAILED",
-            ).exists():
-                KoboProcessingEvent.objects.create(
-                    submission=submission,
-                    stage="operational_import",
-                    level=KoboProcessingEvent.Level.ERROR,
-                    code="MATERIALIZATION_FAILED",
-                    message="Kobo materialization failed safely.",
-                )
+                message="Kobo materialization failed safely.",
+            )
     except Exception:
         pass
     return KoboImportResult(
@@ -418,7 +424,7 @@ def _import_kobo_submission_with_handlers(
     PRE: submission is persisted; actor may import projects; handlers perform only
     transactional DB work and return traceable persisted target identifiers.
     POST: creates one import record before marking APPROVED_FOR_IMPORT as IMPORTED,
-    returns an idempotent prior result, or leaves import state uncommitted on failure.
+    returns an idempotent prior result, or records a retryable processing incident.
     """
     if submission is None or submission.pk is None:
         raise KoboConfigurationError("Kobo submission must exist.")

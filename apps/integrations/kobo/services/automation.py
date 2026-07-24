@@ -81,7 +81,7 @@ class AutoImportResult:
 def get_kobo_system_actor():
     """
     PRE: auth tables are migrated.
-    POST: returns the durable technical actor used for automatic imports.
+    POST: returns the durable non-interactive actor with only change_project.
     """
     User = get_user_model()
     user, created = User.objects.get_or_create(
@@ -106,17 +106,20 @@ def get_kobo_system_actor():
     if update_fields:
         user.save(update_fields=update_fields)
 
-    if not user.has_perm("operations.change_project"):
-        content_type = ContentType.objects.get(app_label="operations", model="project")
-        permission = Permission.objects.get(
-            content_type=content_type,
-            codename="change_project",
-        )
-        user.user_permissions.add(permission)
+    content_type = ContentType.objects.get(app_label="operations", model="project")
+    permission = Permission.objects.get(
+        content_type=content_type,
+        codename="change_project",
+    )
+    if set(user.user_permissions.values_list("pk", flat=True)) != {permission.pk}:
+        user.user_permissions.set((permission,))
         if hasattr(user, "_perm_cache"):
             delattr(user, "_perm_cache")
         if hasattr(user, "_user_perm_cache"):
             delattr(user, "_user_perm_cache")
+    # The actor is a traceable service identity, not an operational account.
+    if user.groups.exists():
+        user.groups.clear()
     return user
 
 
@@ -129,10 +132,14 @@ def classify_incident(submission: KoboSubmission) -> IncidentKind:
         return IncidentKind.REMOTE_UPDATE_PENDING
     if submission.status == KoboSubmission.Status.VALIDATION_FAILED:
         return IncidentKind.INVALID_DATA
-    if submission.status == KoboSubmission.Status.PROCESSING_FAILED:
-        return IncidentKind.NORMALIZATION_ERROR
     if submission.error_code in {"MATERIALIZATION_FAILED"}:
         return IncidentKind.MATERIALIZATION_ERROR
+    if submission.status == KoboSubmission.Status.PROCESSING_FAILED:
+        return (
+            IncidentKind.NORMALIZATION_ERROR
+            if submission.error_code.startswith("NORMALIZATION")
+            else IncidentKind.TECHNICAL_ERROR
+        )
     if submission.error_code and submission.error_code.startswith("IMPORT_"):
         if submission.error_code in {
             "IMPORT_ROUTING_PENDING",
@@ -200,10 +207,6 @@ def incident_queryset(base_queryset=None):
             project__isnull=True,
         )
         | Q(
-            status=KoboSubmission.Status.APPROVED_FOR_IMPORT,
-            imported_at__isnull=True,
-        )
-        | Q(
             status=KoboSubmission.Status.READY_FOR_REVIEW,
             error_code__gt="",
         )
@@ -213,7 +216,7 @@ def incident_queryset(base_queryset=None):
 def _auto_approve_for_import(submission: KoboSubmission) -> bool:
     """
     PRE: submission is eligible for automatic import and remains READY_FOR_REVIEW.
-    POST: records system approval without attributing a human reviewer.
+    POST: records a short-lived system approval without attributing a human reviewer.
     """
     with transaction.atomic():
         locked = KoboSubmission.objects.select_for_update().get(pk=submission.pk)
@@ -378,7 +381,7 @@ def auto_import_if_eligible(submission: KoboSubmission) -> AutoImportResult:
 def retry_auto_import(submission: KoboSubmission) -> AutoImportResult:
     """
     PRE: submission is an unresolved incident that may now be importable.
-    POST: re-routes when still reviewable, then attempts automatic import safely.
+    POST: reopens a retryable processing incident, re-routes, then imports safely.
     """
     if submission is None or submission.pk is None:
         return AutoImportResult(
@@ -393,6 +396,12 @@ def retry_auto_import(submission: KoboSubmission) -> AutoImportResult:
             outcome=AutoImportOutcome.ALREADY_IMPORTED,
             import_outcome=ImportOutcome.ALREADY_IMPORTED.value,
         )
+    if submission.status == KoboSubmission.Status.PROCESSING_FAILED:
+        # READY_FOR_REVIEW remains a hidden transitional processing state only.
+        submission.status = KoboSubmission.Status.READY_FOR_REVIEW
+        submission.error_code = ""
+        submission.error_message = ""
+        submission.save(update_fields=("status", "error_code", "error_message"))
     if submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
         route_normalized_submission(submission)
         submission.refresh_from_db()

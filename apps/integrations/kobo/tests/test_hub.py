@@ -81,6 +81,25 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
         self.assertNotContains(response, reverse("kobo:sync_asset", args=(1, "incremental")))
         self.assertNotContains(response, "Última actualización por ficha")
 
+    def test_dashboard_status_polling_is_protected_compact_and_aggregated(self):
+        with self.assertNumQueries(8):
+            response = self.client.get(
+                reverse("kobo:dashboard_status"),
+                HTTP_HX_REQUEST="true",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Formularios importados")
+        self.assertNotContains(response, "raw_payload")
+        self.assertNotContains(response, "webhook_received")
+
+        unauthorized = get_user_model().objects.create_user("hub-status-unauthorized")
+        self.client.force_login(unauthorized)
+        self.assertEqual(
+            self.client.get(reverse("kobo:dashboard_status")).status_code,
+            403,
+        )
+
     def test_dashboard_shows_missing_zone_assignments_and_metrics(self):
         KoboPastoralZoneProjectMapping.objects.create(
             pastoral_zone="centro",

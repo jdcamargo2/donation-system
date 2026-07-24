@@ -80,6 +80,7 @@ def review_submission(
     reviewed_by,
 ) -> ReviewResult:
     """
+    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
     DEPRECATED: human review is no longer part of the operational Kobo workflow.
     Prefer automatic import via auto_import_if_eligible().
 

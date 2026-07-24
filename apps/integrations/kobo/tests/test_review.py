@@ -384,7 +384,7 @@ class KoboReviewPanelTests(TestCase):
         for event in events:
             self.assertNotIn(" / ", event.title)
 
-    def test_legacy_review_endpoint_still_accepts_post_but_ui_hides_actions(self):
+    def test_legacy_review_endpoint_is_disabled_without_mutation(self):
         self.client.force_login(self.reviewer)
         detail = self.client.get(self.detail_url)
         self.assertNotContains(detail, "Aprobar e importar")
@@ -398,11 +398,8 @@ class KoboReviewPanelTests(TestCase):
         )
         self.submission.refresh_from_db()
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(
-            self.submission.status,
-            KoboSubmission.Status.APPROVED_FOR_IMPORT,
-        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
 
     def test_get_cannot_execute_review(self):
         self.client.force_login(self.reviewer)

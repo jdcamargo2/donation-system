@@ -255,6 +255,27 @@ def _dashboard_metrics(request):
     }
 
 
+def _dashboard_status_metrics(request):
+    """
+    PRE: caller passed territorial_hub_access and only needs polling data.
+    POST: returns compact aggregates without mappings, payloads, or full form rows.
+    """
+    submissions = _project_filter(request, KoboSubmission.objects.all())
+    aggregates = submissions.aggregate(
+        imported_count=Count("pk", filter=Q(status=KoboSubmission.Status.IMPORTED)),
+        latest_received_at=Max("received_at"),
+    )
+    return {
+        "imported_count": aggregates["imported_count"],
+        "incident_count": incident_queryset(submissions).count(),
+        "mapping_count": KoboPastoralZoneProjectMapping.objects.filter(is_active=True).count(),
+        "zone_total": PASTORAL_ZONE_TOTAL,
+        "last_sync": _latest_supported_sync_run(),
+        "processing_status": _processing_status(),
+        "latest_received_at": aggregates["latest_received_at"],
+    }
+
+
 def _review_categories():
     # PRE: hub readers may inspect incident queues.
     # POST: returns category cards for automatic-import incidents without human review.
@@ -362,7 +383,7 @@ def hub_dashboard(request):
 def dashboard_status(request):
     # PRE: caller may read the territorial hub and KOBO_ENABLED is True.
     # POST: returns light aggregates for polling without payloads or secrets.
-    context = _dashboard_metrics(request)
+    context = _dashboard_status_metrics(request)
     return render(request, "kobo/hub/_dashboard_status.html", context)
 
 

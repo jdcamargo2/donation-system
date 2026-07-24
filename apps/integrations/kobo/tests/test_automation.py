@@ -98,6 +98,20 @@ class KoboAutomationFicha1Tests(KoboTerritorialProfileTests):
         )
         self.assertNotEqual(submission.territorial_profile.created_by_id, self.sync_clicker.pk)
 
+    def test_system_actor_is_noninteractive_and_has_only_minimum_permission(self):
+        system_actor = get_kobo_system_actor()
+
+        self.assertEqual(system_actor.username, KOBO_SYSTEM_USERNAME)
+        self.assertTrue(system_actor.is_active)
+        self.assertFalse(system_actor.is_superuser)
+        self.assertFalse(system_actor.has_usable_password())
+        self.assertFalse(self.client.login(username=KOBO_SYSTEM_USERNAME, password="unused"))
+        self.assertEqual(system_actor.groups.count(), 0)
+        self.assertEqual(
+            set(system_actor.user_permissions.values_list("content_type__app_label", "codename")),
+            {("operations", "change_project")},
+        )
+
 
 class KoboAutomationFicha10Tests(PrioritizedMicroprojectFixtureMixin, TestCase):
     def setUp(self):
@@ -287,7 +301,7 @@ class KoboClassifyIncidentTests(TestCase):
                 {"status": KoboSubmission.Status.VALIDATION_FAILED},
             ),
             (
-                IncidentKind.NORMALIZATION_ERROR,
+                IncidentKind.TECHNICAL_ERROR,
                 {"status": KoboSubmission.Status.PROCESSING_FAILED},
             ),
             (

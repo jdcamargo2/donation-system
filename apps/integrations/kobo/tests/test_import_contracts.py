@@ -35,6 +35,7 @@ from apps.integrations.kobo.models import (
     KoboTerritorialProfile,
 )
 from apps.integrations.kobo.services import import_kobo_submission
+from apps.integrations.kobo.services.automation import incident_queryset
 from apps.integrations.kobo.services.importers import (
     _import_kobo_submission_with_handlers,
 )
@@ -175,13 +176,11 @@ class KoboImportContractTests(TestCase):
             with self.subTest(form_type=form_type):
                 self.assertEqual(get_import_handler(form_type).form_type, form_type)
 
-    def test_public_import_routes_delegate_without_direct_imported_assignment(self):
+    def test_legacy_project_import_route_is_explicitly_disabled(self):
         views_path = Path(__file__).parents[1] / "views.py"
         views_source = views_path.read_text()
         views_tree = ast.parse(views_source)
-        expected_delegates = {
-            "project_pending_submission_import": "import_kobo_submission",
-        }
+        expected_delegates = {"project_pending_submission_import": "raise Http404"}
         view_functions = {
             node.name: ast.get_source_segment(views_source, node)
             for node in views_tree.body
@@ -205,7 +204,7 @@ class KoboImportContractTests(TestCase):
 
         self.assertEqual(result.outcome, ImportOutcome.BLOCKED)
         self.assertEqual(result.reason_code, "FICHA_11_IDENTITY_MISMATCH")
-        self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+        self.assertEqual(submission.status, KoboSubmission.Status.PROCESSING_FAILED)
         self.assertIsNone(submission.imported_at)
         self.assertFalse(KoboImportRecord.objects.filter(submission=submission).exists())
 
@@ -290,7 +289,7 @@ class KoboImportContractTests(TestCase):
         self.assertEqual(result.outcome, ImportOutcome.BLOCKED)
         self.assertEqual(result.reason_code, "UNSUPPORTED_FORM")
 
-    def test_failure_rolls_back_materialization_and_retry_can_succeed(self):
+    def test_failure_rolls_back_materialization_as_processing_incident(self):
         submission = self.create_submission()
         failing_handler = FailingProjectHandler(KoboFormType.FICHA_1)
 
@@ -302,25 +301,14 @@ class KoboImportContractTests(TestCase):
         submission.refresh_from_db()
 
         self.assertEqual(failed.outcome, ImportOutcome.FAILED)
-        self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+        self.assertEqual(submission.status, KoboSubmission.Status.PROCESSING_FAILED)
         self.assertIsNone(submission.imported_at)
         self.assertFalse(KoboImportRecord.objects.filter(submission=submission).exists())
         self.assertFalse(
             submission.processing_events.filter(code="must_rollback").exists()
         )
 
-        successful_handler = SuccessfulProjectHandler(KoboFormType.FICHA_1)
-        retried = _import_kobo_submission_with_handlers(
-            submission,
-            actor=self.importer,
-            handler_registry={KoboFormType.FICHA_1: successful_handler},
-        )
-        submission.refresh_from_db()
-
-        self.assertEqual(retried.outcome, ImportOutcome.IMPORTED)
-        self.assertEqual(submission.status, KoboSubmission.Status.IMPORTED)
-        self.assertIsNotNone(submission.imported_at)
-        self.assertEqual(submission.import_record.target_object_id, self.project.pk)
+        self.assertTrue(incident_queryset().filter(pk=submission.pk).exists())
 
     def test_sequential_retry_returns_original_record_without_duplicates(self):
         submission = self.create_submission()
@@ -358,7 +346,7 @@ class KoboImportContractTests(TestCase):
         )
 
     @override_settings(KOBO_ENABLED=True)
-    def test_project_ui_explicitly_approves_then_calls_ficha_11_handler(self):
+    def test_legacy_project_import_ui_is_disabled(self):
         submission = self.create_submission(
             KoboFormType.FICHA_11,
             status=KoboSubmission.Status.READY_FOR_REVIEW,
@@ -373,21 +361,8 @@ class KoboImportContractTests(TestCase):
         )
         submission.refresh_from_db()
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
-        self.assertIsNone(submission.imported_at)
-        self.assertTrue(
-            submission.processing_events.filter(
-                stage="review",
-                code=KoboSubmission.Status.APPROVED_FOR_IMPORT,
-            ).exists()
-        )
-        self.assertTrue(
-            submission.processing_events.filter(
-                stage="operational_import",
-                code="FICHA_11_IDENTITY_MISMATCH",
-            ).exists()
-        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
 
 
 @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row-level locking")

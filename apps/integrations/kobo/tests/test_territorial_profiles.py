@@ -286,7 +286,7 @@ class KoboTerritorialProfileTests(TestCase):
 
         self.assertEqual(result.outcome, ImportOutcome.BLOCKED)
         self.assertEqual(result.reason_code, "FICHA_1_TERRITORIAL_CONFLICT")
-        self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+        self.assertEqual(submission.status, KoboSubmission.Status.PROCESSING_FAILED)
         self.assertFalse(KoboTerritorialProfile.objects.exists())
 
     def test_identity_project_or_zone_incoherence_blocks(self):
@@ -452,7 +452,7 @@ class KoboTerritorialProfileTests(TestCase):
                 submission.refresh_from_db()
                 identity.refresh_from_db()
                 self.assertEqual(result.outcome, ImportOutcome.FAILED)
-                self.assertEqual(submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+                self.assertEqual(submission.status, KoboSubmission.Status.PROCESSING_FAILED)
                 self.assertIsNone(submission.imported_at)
                 self.assertEqual(identity.status, KoboTerritorialIdentity.Status.PENDING_REVIEW)
                 self.assertFalse(
