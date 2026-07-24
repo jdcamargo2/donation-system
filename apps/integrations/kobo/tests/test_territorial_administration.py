@@ -22,6 +22,7 @@ from apps.integrations.kobo.models import (
     KoboPrioritizationAssessment,
     KoboPrioritizedMicroproject,
     KoboPastoralZoneProjectMapping,
+    KoboProcessingEvent,
     KoboSubmission,
     KoboTerritorialAdministrationEvent,
     KoboTerritorialIdentity,
@@ -37,6 +38,7 @@ from apps.integrations.kobo.services.territorial_administration import (
     reconcile_territorial_identity_submissions,
     resolve_territorial_identity_conflict,
 )
+from apps.integrations.kobo.services.automation import IncidentKind, classify_incident
 from apps.integrations.kobo.services.territorial_routing import route_ficha_1_submission
 from apps.operations.models import AuditLog, Project
 from apps.operations.role_services import sync_operation_roles
@@ -304,10 +306,21 @@ class TerritorialConflictAdministrationTests(TerritorialAdministrationFixtureMix
         self.assertEqual(incoming.routing_status, KoboSubmission.RoutingStatus.RESOLVED)
         self.assertEqual(pending.project, self.other_project)
         self.assertEqual(pending.routing_status, KoboSubmission.RoutingStatus.RESOLVED)
-        # Incomplete fixture payload is auto-approved then blocked; never rejected.
-        self.assertEqual(pending.status, KoboSubmission.Status.APPROVED_FOR_IMPORT)
+        self.assertEqual(pending.status, KoboSubmission.Status.PROCESSING_FAILED)
         self.assertIsNone(pending.imported_at)
+        self.assertEqual(pending.error_code, "IMPORT_NORMALIZATION_INVALID")
+        self.assertEqual(classify_incident(pending), IncidentKind.TECHNICAL_ERROR)
         self.assertFalse(KoboImportRecord.objects.exists())
+        self.assertFalse(
+            KoboPrioritizedMicroproject.objects.filter(
+                source_submission=pending
+            ).exists()
+        )
+        self.assertFalse(
+            KoboPrioritizationAssessment.objects.filter(
+                source_submission=pending
+            ).exists()
+        )
         self.assertNotEqual(pending.status, KoboSubmission.Status.REJECTED)
 
     def test_accept_proposed_is_blocked_by_profile_or_import_record(self):
@@ -548,7 +561,7 @@ class TerritorialIdentityStateTests(TerritorialAdministrationFixtureMixin, TestC
 
 
 class TerritorialReconciliationAdministrationTests(TerritorialAdministrationFixtureMixin, TestCase):
-    def test_reconciliation_batches_one_hundred_and_auto_approves_without_importing_incomplete(self):
+    def test_reconciliation_batches_one_hundred_and_records_incomplete_as_incidents(self):
         identity = self.create_identity()
         for index in range(101):
             self.create_submission(
@@ -559,16 +572,39 @@ class TerritorialReconciliationAdministrationTests(TerritorialAdministrationFixt
 
         first = reconcile_territorial_identity_submissions(identity=identity, actor=self.actor)
         second = reconcile_territorial_identity_submissions(identity=identity, actor=self.actor)
+        processing_events_before_retry = KoboProcessingEvent.objects.filter(
+            submission__nucleo_code_normalized=identity.nucleo_code_normalized
+        ).count()
         third = reconcile_territorial_identity_submissions(identity=identity, actor=self.actor)
 
-        self.assertEqual(first.resolved, 100)
-        self.assertEqual(first.still_pending, 1)
+        self.assertEqual(
+            (first.scanned, first.resolved, first.routed, first.imported),
+            (100, 100, 100, 0),
+        )
+        self.assertEqual((first.incidents, first.failed, first.skipped), (100, 0, 0))
+        self.assertEqual((first.still_pending, first.remaining), (1, 1))
         self.assertTrue(first.has_more)
-        self.assertEqual(second.resolved, 1)
+        self.assertEqual(
+            (second.scanned, second.resolved, second.routed, second.imported),
+            (1, 1, 1, 0),
+        )
+        self.assertEqual((second.incidents, second.failed, second.skipped), (1, 0, 0))
+        self.assertEqual((second.still_pending, second.remaining), (0, 0))
         self.assertFalse(second.has_more)
-        self.assertEqual(third.resolved, 0)
+        self.assertEqual(
+            (third.scanned, third.resolved, third.routed, third.imported),
+            (0, 0, 0, 0),
+        )
+        self.assertEqual((third.incidents, third.failed, third.skipped), (0, 0, 0))
+        self.assertEqual(
+            KoboProcessingEvent.objects.filter(
+                submission__nucleo_code_normalized=identity.nucleo_code_normalized
+            ).count(),
+            processing_events_before_retry,
+        )
         self.assertEqual(KoboTerritorialAdministrationEvent.objects.count(), 2)
-        # Incomplete payloads cannot materialize; auto-import approves then leaves incidents.
+        self.assertEqual(first.incidents + second.incidents, 101)
+        self.assertEqual(first.failed + second.failed, 0)
         self.assertFalse(KoboImportRecord.objects.exists())
         self.assertFalse(
             KoboSubmission.objects.filter(status=KoboSubmission.Status.IMPORTED).exists()
@@ -578,11 +614,18 @@ class TerritorialReconciliationAdministrationTests(TerritorialAdministrationFixt
         )
         self.assertEqual(
             KoboSubmission.objects.filter(
-                status=KoboSubmission.Status.APPROVED_FOR_IMPORT,
+                status=KoboSubmission.Status.PROCESSING_FAILED,
                 imported_at__isnull=True,
             ).count(),
             101,
         )
+        self.assertFalse(
+            KoboSubmission.objects.filter(
+                status=KoboSubmission.Status.APPROVED_FOR_IMPORT
+            ).exists()
+        )
+        self.assertFalse(KoboPrioritizedMicroproject.objects.exists())
+        self.assertFalse(KoboPrioritizationAssessment.objects.exists())
 
     def test_reconciliation_does_not_touch_imported_submission(self):
         identity = self.create_identity()

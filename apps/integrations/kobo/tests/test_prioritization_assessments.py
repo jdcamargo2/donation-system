@@ -516,16 +516,24 @@ class KoboPrioritizationAssessmentTests(
                 submission = self.create_submission(
                     code=code, external_id=f"assessment-rollback-{index}"
                 )
+                raw_payload = submission.raw_payload.copy()
+                normalized_payload = submission.normalized_payload.copy()
                 with patch(target, side_effect=RuntimeError("forced failure")):
                     result = import_kobo_submission(submission, actor=self.importer)
                 submission.refresh_from_db()
                 identity.refresh_from_db()
                 self.assertEqual(result.outcome, ImportOutcome.FAILED)
-                self.assertEqual(
-                    submission.status, KoboSubmission.Status.APPROVED_FOR_IMPORT
-                )
+                self.assertEqual(submission.status, KoboSubmission.Status.PROCESSING_FAILED)
                 self.assertIsNone(submission.imported_at)
+                self.assertEqual(submission.error_code, "MATERIALIZATION_FAILED")
+                self.assertNotIn("forced failure", submission.error_message)
                 self.assertEqual(identity.status, KoboTerritorialIdentity.Status.ACTIVE)
+                self.assertEqual(submission.project, self.project)
+                self.assertEqual(
+                    submission.routing_status, KoboSubmission.RoutingStatus.RESOLVED
+                )
+                self.assertEqual(submission.raw_payload, raw_payload)
+                self.assertEqual(submission.normalized_payload, normalized_payload)
                 self.assertFalse(
                     KoboPrioritizationAssessment.objects.filter(
                         source_submission=submission
@@ -533,6 +541,16 @@ class KoboPrioritizationAssessmentTests(
                 )
                 self.assertFalse(
                     KoboImportRecord.objects.filter(submission=submission).exists()
+                )
+                self.assertFalse(
+                    submission.processing_events.filter(code="imported").exists()
+                )
+                self.assertLessEqual(
+                    submission.processing_events.filter(
+                        stage="operational_import",
+                        code="MATERIALIZATION_FAILED",
+                    ).count(),
+                    1,
                 )
 
     def test_event_metadata_and_admin_are_safe_readonly_and_searchable(self):

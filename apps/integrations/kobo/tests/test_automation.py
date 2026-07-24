@@ -1,8 +1,10 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from unittest.mock import patch
 
 from apps.integrations.kobo.contracts import TerritorialRoutingReasonCode
 from apps.integrations.kobo.models import (
+    KoboImportRecord,
     KoboPastoralZoneProjectMapping,
     KoboPrioritizationAssessment,
     KoboPrioritizedMicroproject,
@@ -17,6 +19,7 @@ from apps.integrations.kobo.services.automation import (
     classify_incident,
     get_kobo_system_actor,
     incident_queryset,
+    retry_auto_import,
 )
 from apps.integrations.kobo.services.territorial_routing import route_ficha_1_submission
 from apps.integrations.kobo.tests.test_prioritization_assessments import (
@@ -145,6 +148,37 @@ class KoboAutomationFicha10Tests(PrioritizedMicroprojectFixtureMixin, TestCase):
         self.assertEqual(first.outcome, AutoImportOutcome.IMPORTED)
         self.assertEqual(second.outcome, AutoImportOutcome.ALREADY_IMPORTED)
         self.assertEqual(KoboPrioritizedMicroproject.objects.count(), 1)
+
+    def test_failed_auto_import_is_retryable_without_duplicate_materialization(self):
+        submission = self.create_submission(
+            status=KoboSubmission.Status.READY_FOR_REVIEW,
+            external_id="auto-ficha-10-retry",
+        )
+
+        with patch(
+            "apps.integrations.kobo.models.KoboPrioritizedMicroproject.save",
+            side_effect=RuntimeError("internal failure"),
+        ):
+            failed = auto_import_if_eligible(submission)
+        submission.refresh_from_db()
+
+        self.assertEqual(failed.outcome, AutoImportOutcome.FAILED)
+        self.assertTrue(
+            submission.processing_events.filter(code="auto_approved").exists()
+        )
+        self.assertEqual(submission.status, KoboSubmission.Status.PROCESSING_FAILED)
+        self.assertEqual(submission.error_code, "MATERIALIZATION_FAILED")
+        self.assertNotIn("internal failure", submission.error_message)
+        self.assertEqual(KoboPrioritizedMicroproject.objects.count(), 0)
+        self.assertFalse(KoboImportRecord.objects.filter(submission=submission).exists())
+
+        retried = retry_auto_import(submission)
+        submission.refresh_from_db()
+
+        self.assertEqual(retried.outcome, AutoImportOutcome.IMPORTED)
+        self.assertEqual(submission.status, KoboSubmission.Status.IMPORTED)
+        self.assertEqual(KoboPrioritizedMicroproject.objects.count(), 1)
+        self.assertEqual(KoboImportRecord.objects.filter(submission=submission).count(), 1)
 
 
 class KoboAutomationFicha11Tests(PrioritizationAssessmentFixtureMixin, TestCase):
