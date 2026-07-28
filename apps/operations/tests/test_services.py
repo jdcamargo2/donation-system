@@ -259,35 +259,26 @@ class OperationServiceTests(TestCase):
         self.assertEqual(allocation.donation, donation)
         self.assertEqual(allocation.amount, Decimal('20.00'))
 
-    def test_create_fund_allocation_accepts_planned_or_active_project(self):
-        for status in (Project.Status.PLANNED, Project.Status.ACTIVE):
-            with self.subTest(status=status):
-                donation = self.create_donation(code=f'DON-ALLOC-{status}', amount=Decimal('100.00'))
-                project = self.create_project(code=f'PRJ-ALLOC-{status}', status=status)
+    def test_create_fund_allocation_accepts_active_project(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        project = self.create_project(code='PRJ-ALLOC-ACTIVE', status=Project.Status.ACTIVE)
 
-                allocation = create_fund_allocation(
-                    **self.allocation_service_data(donation, project, Decimal('20.00'))
-                )
-
-                self.assertEqual(allocation.project, project)
-
-    def test_create_fund_allocation_rejects_non_operational_project(self):
-        rejected_statuses = (
-            Project.Status.SUSPENDED,
-            Project.Status.CLOSED,
-            Project.Status.ANNULLED,
+        allocation = create_fund_allocation(
+            **self.allocation_service_data(donation, project, Decimal('20.00'))
         )
-        for status in rejected_statuses:
-            with self.subTest(status=status):
-                donation = self.create_donation(code=f'DON-ALLOC-{status}', amount=Decimal('100.00'))
-                project = self.create_project(code=f'PRJ-ALLOC-{status}', status=status)
 
-                with self.assertRaisesMessage(ValidationError, 'admiten asignaciones'):
-                    create_fund_allocation(
-                        **self.allocation_service_data(donation, project, Decimal('20.00'))
-                    )
+        self.assertEqual(allocation.project, project)
 
-                self.assertFalse(donation.allocations.exists())
+    def test_create_fund_allocation_rejects_closed_project(self):
+        donation = self.create_donation(code='DON-ALLOC-CLOSED', amount=Decimal('100.00'))
+        project = self.create_project(code='PRJ-ALLOC-CLOSED', status=Project.Status.CLOSED)
+
+        with self.assertRaisesMessage(ValidationError, 'admiten asignaciones'):
+            create_fund_allocation(
+                **self.allocation_service_data(donation, project, Decimal('20.00'))
+            )
+
+        self.assertFalse(donation.allocations.exists())
 
     def test_update_fund_allocation_excludes_its_previous_amount(self):
         donation = self.create_donation(amount=Decimal('100.00'))
@@ -302,10 +293,10 @@ class OperationServiceTests(TestCase):
         self.assertEqual(updated.amount, Decimal('100.00'))
         self.assertEqual(donation.available_balance, ZERO_MONEY)
 
-    def test_update_fund_allocation_rejects_reassignment_to_non_operational_project(self):
+    def test_update_fund_allocation_rejects_reassignment_to_closed_project(self):
         donation = self.create_donation(amount=Decimal('100.00'))
         original_project = self.create_project(code='PRJ-ORIGINAL')
-        target_project = self.create_project(code='PRJ-SUSPENDED', status=Project.Status.SUSPENDED)
+        target_project = self.create_project(code='PRJ-CLOSED-TARGET', status=Project.Status.CLOSED)
         allocation = self.create_allocation(
             donation=donation,
             project=original_project,
@@ -401,29 +392,21 @@ class OperationServiceTests(TestCase):
         self.assertEqual(expense.allocation, allocation)
         self.assertEqual(expense.amount, Decimal('20.00'))
 
-    def test_create_expense_service_rejects_non_active_project(self):
-        rejected_statuses = (
-            Project.Status.PLANNED,
-            Project.Status.SUSPENDED,
-            Project.Status.CLOSED,
-            Project.Status.ANNULLED,
+    def test_create_expense_service_rejects_closed_project(self):
+        project = self.create_project(code='PRJ-EXP-CLOSED', status=Project.Status.CLOSED)
+        donation = self.create_donation(code='DON-EXP-CLOSED', amount=Decimal('100.00'))
+        allocation = self.create_allocation(
+            donation=donation,
+            project=project,
+            amount=Decimal('60.00'),
         )
-        for status in rejected_statuses:
-            with self.subTest(status=status):
-                project = self.create_project(code=f'PRJ-EXP-{status}', status=status)
-                donation = self.create_donation(code=f'DON-EXP-{status}', amount=Decimal('100.00'))
-                allocation = self.create_allocation(
-                    donation=donation,
-                    project=project,
-                    amount=Decimal('60.00'),
-                )
 
-                with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
-                    create_expense_service(
-                        **self.expense_service_data(allocation, Decimal('20.00'))
-                    )
+        with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+            create_expense_service(
+                **self.expense_service_data(allocation, Decimal('20.00'))
+            )
 
-                self.assertFalse(allocation.expenses.exists())
+        self.assertFalse(allocation.expenses.exists())
 
     def test_update_expense_excludes_its_previous_amount(self):
         allocation = self.create_allocation(amount=Decimal('60.00'))
@@ -450,11 +433,11 @@ class OperationServiceTests(TestCase):
         self.assertEqual(expense.amount, Decimal('20.00'))
         self.assertEqual(expense.currency, 'USD')
 
-    def test_update_expense_rejects_reassignment_to_non_active_project(self):
+    def test_update_expense_rejects_reassignment_to_closed_project(self):
         original_allocation = self.create_allocation(amount=Decimal('70.00'))
         expense = self.create_expense(allocation=original_allocation, amount=Decimal('30.00'))
-        target_project = self.create_project(code='PRJ-EXP-SUSPENDED', status=Project.Status.SUSPENDED)
-        target_donation = self.create_donation(code='DON-EXP-SUSPENDED', amount=Decimal('100.00'))
+        target_project = self.create_project(code='PRJ-EXP-CLOSED-TARGET', status=Project.Status.CLOSED)
+        target_donation = self.create_donation(code='DON-EXP-CLOSED-TARGET', amount=Decimal('100.00'))
         target_allocation = self.create_allocation(
             donation=target_donation,
             project=target_project,

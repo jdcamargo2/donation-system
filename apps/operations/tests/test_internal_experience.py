@@ -506,18 +506,14 @@ class InternalExperienceTemplateTests(TestCase):
     def test_project_detail_unifies_actions_and_keeps_mutations_as_post_forms(self):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
         content = response.content.decode()
-        transition_url = reverse(
-            'project_status_transition',
-            args=[self.project.pk, Project.Status.SUSPENDED],
-        )
 
         self.assertContains(response, reverse('project_update', args=[self.project.pk]))
-        self.assertContains(response, 'aria-label="Cambiar estado del proyecto"')
+        self.assertNotContains(response, 'aria-label="Cambiar estado del proyecto"')
         self.assertContains(response, 'aria-label="Más acciones del proyecto"')
-        self.assertIn(f'<form method="post" action="{transition_url}">', content)
-        self.assertIn('name="csrfmiddlewaretoken"', content)
-        self.assertNotIn(f'href="{transition_url}"', content)
         self.assertContains(response, reverse('project_finish', args=[self.project.pk]))
+        self.assertContains(response, 'Terminar proyecto')
+        self.assertNotContains(response, 'Anular proyecto')
+        self.assertIn('name="csrfmiddlewaretoken"', content)
 
         viewer = get_user_model().objects.create_user(
             username='project-detail-viewer',
@@ -541,20 +537,10 @@ class InternalExperienceTemplateTests(TestCase):
             viewer_response,
             reverse('project_update', args=[self.project.pk]),
         )
-        self.assertNotContains(viewer_response, 'aria-label="Cambiar estado del proyecto"')
+        self.assertNotContains(viewer_response, 'aria-label="Más acciones del proyecto"')
         self.assertNotContains(viewer_response, self.project_update.title)
         self.assertContains(viewer_response, published_update.title)
         self.client.force_login(self.user)
-
-        annulable_project = create_project(code='PRJ-OPS-ANNULABLE')
-        annulable_response = self.client.get(
-            reverse('project_detail', args=[annulable_project.pk])
-        )
-        self.assertContains(
-            annulable_response,
-            reverse('project_annul', args=[annulable_project.pk]),
-        )
-        self.assertContains(annulable_response, 'Anular proyecto')
 
         self.project.status = Project.Status.CLOSED
         self.project.save(update_fields=('status', 'updated_at'))
@@ -565,6 +551,7 @@ class InternalExperienceTemplateTests(TestCase):
             terminal_response,
             reverse('project_update', args=[self.project.pk]),
         )
+        self.assertNotContains(terminal_response, 'Terminar proyecto')
 
     def test_project_detail_keeps_milestones_once_after_financial_summary(self):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))

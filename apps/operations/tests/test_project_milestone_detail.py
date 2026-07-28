@@ -379,10 +379,6 @@ class ProjectMilestoneDetailTests(TestCase):
                 Project.Status.CLOSED,
                 'Este proyecto está cerrado. Sus hitos se conservan como registro histórico.',
             ),
-            (
-                Project.Status.ANNULLED,
-                'Este proyecto está anulado. Sus hitos no pueden modificarse.',
-            ),
         )
 
         for status, notice in terminal_cases:

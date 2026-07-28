@@ -166,7 +166,7 @@ class ProjectMilestoneServiceTests(TestCase):
             [PROJECT_REACHED_100_SUMMARY],
         )
         self.project.refresh_from_db()
-        self.assertEqual(self.project.status, Project.Status.PLANNED)
+        self.assertEqual(self.project.status, Project.Status.ACTIVE)
 
     def test_complete_requires_existing_authenticated_actor(self):
         milestone = self.create_milestone(position=1)
@@ -289,8 +289,8 @@ class ProjectMilestoneServiceTests(TestCase):
             AuditLog.objects.filter(action=AuditLog.Action.REORDERED).exists()
         )
 
-    def test_every_mutation_rejects_closed_and_annulled_projects(self):
-        for status in (Project.Status.CLOSED, Project.Status.ANNULLED):
+    def test_every_mutation_rejects_closed_projects(self):
+        for status in (Project.Status.CLOSED,):
             with self.subTest(status=status):
                 project = create_project(code=f'PRJ-MILESTONE-{status.upper()}')
                 project.status = status

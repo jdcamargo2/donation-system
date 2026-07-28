@@ -82,27 +82,36 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ('code', 'name', 'status', 'estimated_budget')
     search_fields = ('code', 'name')
     list_filter = ('status',)
-    readonly_fields = ('code', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
+    readonly_fields = (
+        'code',
+        'status',
+        'is_public',
+        'terminal_reason',
+        'terminal_at',
+        'terminal_by',
+    )
 
     def get_readonly_fields(self, request, obj=None):
         # PRE: obj is an optional project shown in admin.
         # POST: terminal projects expose every persisted field as readonly.
         readonly = set(super().get_readonly_fields(request, obj))
-        if obj and obj.status in {Project.Status.CLOSED, Project.Status.ANNULLED}:
+        if obj and obj.status == Project.Status.CLOSED:
             readonly.update(field.name for field in self.model._meta.concrete_fields)
         return tuple(readonly)
 
     def save_model(self, request, obj, form, change):
         """
         PRE: obj is new or an existing project submitted through admin.
-        POST: creates PLANNED and preserves persisted status on ordinary edits.
+        POST: creates ACTIVE via model default and preserves persisted status/is_public on edits.
         """
         if change:
             persisted = Project.objects.get(pk=obj.pk)
             ensure_operational_entity_is_editable(persisted)
             obj.status = persisted.status
+            obj.is_public = persisted.is_public
         else:
-            obj.status = Project.Status.PLANNED
+            obj.status = Project.Status.ACTIVE
+            obj.is_public = False
         super().save_model(request, obj, form, change)
 
 

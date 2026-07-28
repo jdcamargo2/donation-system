@@ -112,11 +112,8 @@ class Institution(models.Model):
 
 class Project(models.Model):
     class Status(models.TextChoices):
-        PLANNED = 'planned', _('Planificado')
         ACTIVE = 'active', _('Activo')
-        SUSPENDED = 'suspended', _('Suspendido')
         CLOSED = 'closed', _('Cerrado')
-        ANNULLED = 'annulled', _('Anulado')
 
     code = models.CharField(max_length=40, unique=True)
     name = models.CharField(max_length=180)
@@ -127,7 +124,8 @@ class Project(models.Model):
     estimated_budget = models.DecimalField(max_digits=14, decimal_places=2, default=ZERO_MONEY)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PLANNED)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    is_public = models.BooleanField(default=False)
     terminal_reason = models.TextField(blank=True, editable=False)
     terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
     terminal_by = models.ForeignKey(

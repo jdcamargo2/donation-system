@@ -22,46 +22,28 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_project and object.status != 'closed' and object.status != 'annulled' %}
+        {% if perms.operations.change_project and object.status != 'closed' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
-        {% if perms.operations.change_project and status_transitions %}
-        <div class="dropdown">
-            <button class="btn btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Cambiar estado del proyecto">
-                Estado
-            </button>
-            <div class="dropdown-menu dropdown-menu-end ops-project-detail-action-menu">
-                {% for transition in status_transitions %}
-                <form method="post" action="{% url transition_url_name object.pk transition.value %}">
-                    {% csrf_token %}
-                    <button class="dropdown-item" type="submit">Cambiar a {{ transition.label }}</button>
-                </form>
-                {% endfor %}
-            </div>
-        </div>
-        {% endif %}
-        {% if perms.operations.change_project and can_finish or perms.operations.change_project and can_annul %}
+        {% if can_finish %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Más acciones del proyecto">
                 Más
             </button>
             <div class="dropdown-menu dropdown-menu-end ops-project-detail-action-menu">
-                {% if can_finish %}
-                    <a
-                        class="dropdown-item"
-                        href="{% url 'project_finish' object.pk %}"
-                        data-confirm-action
-                        data-confirm-form="project-finish-form"
-                        data-confirm-title="¿Terminar este proyecto?"
-                        data-confirm-text="Después de terminarlo no podrá editarse ni reactivarse."
-                        data-confirm-confirm-label="Sí, terminar"
-                        data-confirm-variant="warning"
-                    >Terminar proyecto</a>
-                    <form id="project-finish-form" method="post" action="{% url 'project_finish' object.pk %}">
-                        {% csrf_token %}
-                    </form>
-                {% endif %}
-                {% if can_annul %}<a class="dropdown-item text-danger" href="{% url 'project_annul' object.pk %}">Anular proyecto</a>{% endif %}
+                <a
+                    class="dropdown-item"
+                    href="{% url 'project_finish' object.pk %}"
+                    data-confirm-action
+                    data-confirm-form="project-finish-form"
+                    data-confirm-title="¿Terminar este proyecto?"
+                    data-confirm-text="Después de terminarlo no podrá editarse ni reactivarse."
+                    data-confirm-confirm-label="Sí, terminar"
+                    data-confirm-variant="warning"
+                >Terminar proyecto</a>
+                <form id="project-finish-form" method="post" action="{% url 'project_finish' object.pk %}">
+                    {% csrf_token %}
+                </form>
             </div>
         </div>
         {% endif %}

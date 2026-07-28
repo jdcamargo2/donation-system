@@ -7,16 +7,13 @@ from django.test import TestCase
 from django.urls import reverse
 
 from apps.operations.admin import DonationAdmin, FundAllocationAdmin, ProjectAdmin
-from apps.operations.models import AuditLog, Donation, Expense, FundAllocation, Project, ProjectUpdate
+from apps.operations.models import AuditLog, Donation, Expense, FundAllocation, Project
 from apps.operations.services import (
     InvalidStateTransitionError,
     allocation_has_effective_expenses,
     annul_donation,
     annul_fund_allocation,
-    annul_project,
     finish_project,
-    publish_project_update,
-    register_advance,
     update_fund_allocation,
 )
 from apps.operations.tests.helpers import (
@@ -40,8 +37,6 @@ class TerminalActionServiceTests(TestCase):
 
     def test_finish_project_persists_metadata_and_one_audit(self):
         project = create_project(code='PRJ-FINISH', name='Proyecto a terminar')
-        project.status = Project.Status.ACTIVE
-        project.save(update_fields=('status', 'updated_at'))
 
         finished = finish_project(project.pk, actor=self.actor)
 
@@ -57,79 +52,21 @@ class TerminalActionServiceTests(TestCase):
             1,
         )
 
-    def test_project_annulment_requires_no_non_annulled_allocations(self):
-        project = create_project(code='PRJ-ANNUL', name='Proyecto a anular')
-        allocation = create_allocation(project=project)
+    def test_finish_project_rejects_already_closed_project(self):
+        project = create_project(code='PRJ-FINISH-TWICE')
+        finish_project(project.pk, actor=self.actor)
 
-        with self.assertRaises(ValidationError):
-            annul_project(project.pk, actor=self.actor, reason=VALID_REASON)
-        project.refresh_from_db()
-        self.assertNotEqual(project.status, Project.Status.ANNULLED)
-
-        annul_fund_allocation(allocation.pk, actor=self.actor, reason=VALID_REASON)
-        annulled = annul_project(project.pk, actor=self.actor, reason=VALID_REASON)
-        self.assertEqual(annulled.status, Project.Status.ANNULLED)
-
-    def test_project_annulment_rejects_draft_update_without_changes(self):
-        project = create_project(code='PRJ-DRAFT-ANNUL')
-        project.status = Project.Status.ACTIVE
-        project.save(update_fields=('status', 'updated_at'))
-        register_advance(
-            project_id=project.pk,
-            title='Avance pendiente',
-            description='Debe resolverse antes de anular el proyecto.',
-            created_by=self.actor,
-            reported_by=self.actor,
-        )
-
-        with self.assertRaisesMessage(InvalidStateTransitionError, 'mantiene avances en borrador'):
-            annul_project(project.pk, actor=self.actor, reason=VALID_REASON)
+        with self.assertRaises(InvalidStateTransitionError):
+            finish_project(project.pk, actor=self.actor)
 
         project.refresh_from_db()
-        self.assertEqual(project.status, Project.Status.ACTIVE)
-        self.assertEqual(project.terminal_reason, '')
-        self.assertIsNone(project.terminal_at)
-        self.assertIsNone(project.terminal_by)
-        self.assertFalse(
+        self.assertEqual(project.status, Project.Status.CLOSED)
+        self.assertEqual(
             AuditLog.objects.filter(
-                action=AuditLog.Action.ANNULLED,
+                action=AuditLog.Action.CLOSED,
                 entity_id=str(project.pk),
-            ).exists()
-        )
-
-    def test_project_annulment_allows_published_update_without_allocations(self):
-        project = create_project(code='PRJ-PUBLISHED-ANNUL')
-        project.status = Project.Status.ACTIVE
-        project.save(update_fields=('status', 'updated_at'))
-        update = register_advance(
-            project_id=project.pk,
-            title='Avance histórico',
-            description='La publicación conserva la evidencia histórica.',
-            created_by=self.actor,
-            reported_by=self.actor,
-        )
-        publish_project_update(update.pk, self.actor)
-
-        annulled = annul_project(project.pk, actor=self.actor, reason=VALID_REASON)
-
-        update.refresh_from_db()
-        self.assertEqual(update.status, ProjectUpdate.Status.PUBLISHED)
-        self.assertEqual(annulled.status, Project.Status.ANNULLED)
-
-    def test_project_annulment_without_active_children_still_succeeds(self):
-        project = create_project(code='PRJ-EMPTY-ANNUL')
-        project.status = Project.Status.ACTIVE
-        project.save(update_fields=('status', 'updated_at'))
-
-        annulled = annul_project(project.pk, actor=self.actor, reason=VALID_REASON)
-
-        self.assertEqual(annulled.status, Project.Status.ANNULLED)
-        self.assertEqual(annulled.terminal_by, self.actor)
-        self.assertTrue(
-            AuditLog.objects.filter(
-                action=AuditLog.Action.ANNULLED,
-                entity_id=str(project.pk),
-            ).exists()
+            ).count(),
+            1,
         )
 
     def test_donation_annulment_requires_no_non_annulled_allocations(self):
@@ -225,8 +162,6 @@ class TerminalActionViewTests(TestCase):
 
     def test_project_finish_get_is_safe_and_post_closes(self):
         project = create_project(code='PRJ-VIEW-FINISH')
-        project.status = Project.Status.ACTIVE
-        project.save(update_fields=('status', 'updated_at'))
         url = reverse('project_finish', args=[project.pk])
 
         self.assertEqual(self.client.get(url).status_code, 200)
@@ -274,11 +209,11 @@ class TerminalActionViewTests(TestCase):
         limited = get_user_model().objects.create_user('terminal-limited', password='pass-12345')
         self.client.force_login(limited)
 
-        self.assertEqual(self.client.get(reverse('project_annul', args=[project.pk])).status_code, 403)
-        self.assertEqual(self.client.post(reverse('project_annul', args=[project.pk]), {'reason': VALID_REASON}).status_code, 403)
+        self.assertEqual(self.client.get(reverse('project_finish', args=[project.pk])).status_code, 403)
+        self.assertEqual(self.client.post(reverse('project_finish', args=[project.pk])).status_code, 403)
 
         self.client.force_login(self.user)
-        self.assertEqual(self.client.get(reverse('project_annul', args=[999999])).status_code, 404)
+        self.assertEqual(self.client.get(reverse('project_finish', args=[999999])).status_code, 404)
 
     def test_admin_terminal_fields_and_entities_are_readonly(self):
         project = create_project(code='PRJ-ADMIN-TERMINAL')
@@ -301,3 +236,5 @@ class TerminalActionViewTests(TestCase):
             self.assertIn('terminal_at', readonly)
             self.assertIn('terminal_by', readonly)
         self.assertIn('name', ProjectAdmin(Project, admin.site).get_readonly_fields(None, project))
+        self.assertIn('is_public', ProjectAdmin(Project, admin.site).get_readonly_fields(None, project))
+        self.assertTrue(hasattr(AuditLog.Action, 'ANNULLED'))

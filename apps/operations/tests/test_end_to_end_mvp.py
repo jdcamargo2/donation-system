@@ -60,12 +60,8 @@ class EndToEndMVPFlowTests(TestCase):
         self.assertRedirects(project_response, reverse('project_list'))
         project = Project.objects.get(name='Atención integral E2E')
         self.assertEqual(project.code, 'PRJ-000001')
-        self.assertRedirects(
-            self.client.post(
-                reverse('project_status_transition', args=[project.pk, Project.Status.ACTIVE])
-            ),
-            reverse('project_detail', args=[project.pk]),
-        )
+        self.assertEqual(project.status, Project.Status.ACTIVE)
+        self.assertFalse(project.is_public)
 
         donation_response = self.client.post(
             reverse('donation_create'),
@@ -203,6 +199,8 @@ class EndToEndMVPFlowTests(TestCase):
         self.assertEqual(dashboard_response.context['available_balance'], Decimal('200.25'))
 
         cache.clear()
+        project.is_public = True
+        project.save(update_fields=['is_public'])
         public_detail_response = self.client.get(reverse('public_portal:public_project_detail', args=[project.pk]))
         public_feed_response = self.client.get(reverse('public_portal:public_updates_feed'))
         self.assertContains(public_detail_response, approved_update.title)

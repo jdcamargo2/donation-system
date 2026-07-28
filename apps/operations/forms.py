@@ -2,6 +2,7 @@ import re
 from decimal import Decimal
 
 from django import forms
+from django.db.models import Q
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
@@ -293,6 +294,15 @@ class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, f
         }
         widgets = {'update_date': build_date_widget()}
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        project_qs = Project.objects.filter(status=Project.Status.ACTIVE)
+        if self.instance.pk and self.instance.project_id:
+            project_qs = Project.objects.filter(
+                Q(status=Project.Status.ACTIVE) | Q(pk=self.instance.project_id)
+            )
+        self.fields['project'].queryset = project_qs
+
 
 class ProjectUpdateForProjectForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, forms.ModelForm):
     attachments = MultipleFileField(
@@ -472,9 +482,12 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
             if donation.available_balance > 0 or donation.pk == current_donation_id
         ]
         self.fields['donation'].queryset = donations.filter(pk__in=eligible_donation_ids)
-        self.fields['project'].queryset = Project.objects.exclude(
-            status__in=(Project.Status.CLOSED, Project.Status.ANNULLED)
-        )
+        project_qs = Project.objects.filter(status=Project.Status.ACTIVE)
+        if self.instance.pk and self.instance.project_id:
+            project_qs = Project.objects.filter(
+                Q(status=Project.Status.ACTIVE) | Q(pk=self.instance.project_id)
+            )
+        self.fields['project'].queryset = project_qs
         selected_donation_id = self.data.get(self.add_prefix('donation')) or current_donation_id
         selected_donation = donations.filter(pk=selected_donation_id).first() if selected_donation_id else None
         if selected_donation:

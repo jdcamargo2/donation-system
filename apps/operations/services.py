@@ -97,7 +97,7 @@ class OperationalEntityFinalizedError(ValidationError):
 
 TERMINAL_REASON_MIN_LENGTH = 10
 TERMINAL_REASON_MAX_LENGTH = 500
-PROJECT_TERMINAL_STATUSES = frozenset({Project.Status.CLOSED, Project.Status.ANNULLED})
+PROJECT_TERMINAL_STATUSES = frozenset({Project.Status.CLOSED})
 DONATION_TERMINAL_STATUSES = frozenset({Donation.Status.ANNULLED})
 ALLOCATION_TERMINAL_STATUSES = frozenset({FundAllocation.Status.FINISHED, FundAllocation.Status.ANNULLED})
 
@@ -108,11 +108,8 @@ DONATION_STATUS_TRANSITIONS = {
     Donation.Status.ANNULLED: frozenset(),
 }
 PROJECT_STATUS_TRANSITIONS = {
-    Project.Status.PLANNED: frozenset({Project.Status.ACTIVE, Project.Status.ANNULLED}),
-    Project.Status.ACTIVE: frozenset({Project.Status.SUSPENDED, Project.Status.CLOSED, Project.Status.ANNULLED}),
-    Project.Status.SUSPENDED: frozenset({Project.Status.ACTIVE, Project.Status.CLOSED, Project.Status.ANNULLED}),
+    Project.Status.ACTIVE: frozenset({Project.Status.CLOSED}),
     Project.Status.CLOSED: frozenset(),
-    Project.Status.ANNULLED: frozenset(),
 }
 FUND_ALLOCATION_STATUS_TRANSITIONS = {
     FundAllocation.Status.ACTIVE: frozenset({FundAllocation.Status.FINISHED, FundAllocation.Status.ANNULLED}),
@@ -180,29 +177,6 @@ def transition_donation_status(donation_id: int, *, actor, target_status: str) -
         donation.save(update_fields=('status', 'updated_at'))
         _log_status_transition(actor, donation, previous_status, target_status)
         return donation
-
-
-def transition_project_status(project_id: int, *, actor, target_status: str) -> Project:
-    """
-    PRE: project_id exists, actor is authenticated, and target_status is requested explicitly.
-    POST: atomically locks, validates and audits exactly one permitted status transition.
-    """
-    _require_transition_actor(actor)
-    if target_status in PROJECT_TERMINAL_STATUSES:
-        raise InvalidStateTransitionError(
-            {'status': _('Las acciones terminales requieren su confirmación específica.')}
-        )
-    with transaction.atomic():
-        project = Project.objects.select_for_update().get(pk=project_id)
-        previous_status = project.status
-        validate_state_transition(current_status=previous_status, target_status=target_status, allowed_transitions=PROJECT_STATUS_TRANSITIONS)
-        if target_status == Project.Status.CLOSED and project.start_date and project.end_date and project.end_date < project.start_date:
-            raise InvalidStateTransitionError({'end_date': _('No se puede cerrar un proyecto con fechas incoherentes.')})
-        project.status = target_status
-        project.full_clean()
-        project.save(update_fields=('status', 'updated_at'))
-        _log_status_transition(actor, project, previous_status, target_status)
-        return project
 
 
 def transition_fund_allocation_status(allocation_id: int, *, actor, target_status: str) -> FundAllocation:
@@ -292,7 +266,7 @@ def _finalize_operational_entity(*, entity, target_status, actor, reason, action
 
 def finish_project(project_id: int, *, actor) -> Project:
     """
-    PRE: actor is authenticated and project_id identifies a project allowed to transition to CLOSED.
+    PRE: actor is authenticated and project_id identifies an ACTIVE project.
     POST: atomically closes it, persists terminal metadata, and creates one audit event.
     """
     _require_transition_actor(actor)
@@ -314,39 +288,6 @@ def finish_project(project_id: int, *, actor) -> Project:
             reason=_('Proyecto terminado.'),
             action=AuditLog.Action.CLOSED,
             summary=_('Proyecto %(code)s terminado.') % {'code': project.code},
-        )
-
-
-def annul_project(project_id: int, *, actor, reason) -> Project:
-    """
-    PRE: actor is authenticated, reason is valid, and project can transition to ANNULLED.
-    POST: annuls only a project without non-annulled allocations or draft updates and audits atomically.
-    """
-    _require_transition_actor(actor)
-    clean_reason = validate_terminal_reason(reason)
-    with transaction.atomic():
-        project = Project.objects.select_for_update().get(pk=project_id)
-        validate_state_transition(
-            current_status=project.status,
-            target_status=Project.Status.ANNULLED,
-            allowed_transitions=PROJECT_STATUS_TRANSITIONS,
-        )
-        if project.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists():
-            raise InvalidStateTransitionError(
-                {'allocations': _('El proyecto mantiene asignaciones no anuladas.')}
-            )
-        if project.updates.filter(status=ProjectUpdate.Status.DRAFT).exists():
-            raise InvalidStateTransitionError(
-                {'updates': _('El proyecto mantiene avances en borrador que deben resolverse antes de anularse.')}
-            )
-        return _finalize_operational_entity(
-            entity=project,
-            target_status=Project.Status.ANNULLED,
-            actor=actor,
-            reason=clean_reason,
-            action=AuditLog.Action.ANNULLED,
-            summary=_('Proyecto %(code)s anulado. Motivo: %(reason)s')
-            % {'code': project.code, 'reason': clean_reason},
         )
 
 
@@ -516,7 +457,7 @@ def _require_project_milestone_actor(actor):
 def _ensure_project_accepts_milestone_mutations(project):
     if project.status in PROJECT_TERMINAL_STATUSES:
         raise ProjectMilestoneError(
-            {'project': _('Los proyectos cerrados o anulados no admiten cambios en sus hitos.')}
+            {'project': _('Los proyectos cerrados no admiten cambios en sus hitos.')}
         )
 
 
@@ -820,11 +761,11 @@ def _validate_donation_can_fund_allocations(donation):
 
 
 # PRE: project is locked for update before an allocation is created or reassigned.
-# POST: returns only when the project is PLANNED or ACTIVE; otherwise raises a domain validation error.
+# POST: returns only when the project is ACTIVE; otherwise raises a domain validation error.
 def _validate_project_accepts_allocations(project):
-    if project.status not in {Project.Status.PLANNED, Project.Status.ACTIVE}:
+    if project.status != Project.Status.ACTIVE:
         raise ValidationError(
-            {'project': _('Solo los proyectos planificados o activos admiten asignaciones.')}
+            {'project': _('Solo los proyectos activos admiten asignaciones.')}
         )
 
 

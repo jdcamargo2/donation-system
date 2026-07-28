@@ -195,7 +195,7 @@ class PastoralZoneProjectMappingForm(forms.Form):
         )
         self.fields["pastoral_zone"].widget.attrs.update({"class": "form-select"})
         self.fields["project"].queryset = Project.objects.filter(
-            status__in=(Project.Status.PLANNED, Project.Status.ACTIVE, Project.Status.SUSPENDED)
+            status=Project.Status.ACTIVE
         ).order_by("code", "pk")
         project_attrs = {"class": "form-select"}
         if focus_project:

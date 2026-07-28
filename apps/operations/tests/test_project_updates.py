@@ -78,28 +78,20 @@ class ProjectUpdateTests(TestCase):
                 created_by=self.user,
             )
 
-    def test_register_advance_rejects_non_active_project(self):
-        rejected_statuses = (
-            Project.Status.PLANNED,
-            Project.Status.SUSPENDED,
-            Project.Status.CLOSED,
-            Project.Status.ANNULLED,
-        )
-        for status in rejected_statuses:
-            with self.subTest(status=status):
-                project = create_project(code=f'PRJ-UPDATE-{status}')
-                project.status = status
-                project.save(update_fields=('status',))
+    def test_register_advance_rejects_closed_project(self):
+        project = create_project(code='PRJ-UPDATE-CLOSED')
+        project.status = Project.Status.CLOSED
+        project.save(update_fields=('status',))
 
-                with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
-                    register_advance(
-                        project_id=project.pk,
-                        title='Avance no permitido',
-                        description='No debe guardarse para un proyecto no activo.',
-                        created_by=self.user,
-                    )
+        with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+            register_advance(
+                project_id=project.pk,
+                title='Avance no permitido',
+                description='No debe guardarse para un proyecto no activo.',
+                created_by=self.user,
+            )
 
-                self.assertFalse(project.updates.exists())
+        self.assertFalse(project.updates.exists())
 
     def test_project_update_forms_include_reported_by_and_exclude_created_by(self):
         for form_class in (ProjectUpdateForm, ProjectUpdateForProjectForm):
@@ -172,10 +164,10 @@ class ProjectUpdateTests(TestCase):
             entity_id=str(update.pk), action=AuditLog.Action.UPDATED, user=self.editor
         ).exists())
 
-    def test_draft_cannot_be_reassigned_to_non_active_project(self):
+    def test_draft_cannot_be_reassigned_to_closed_project(self):
         update = self.create_draft()
-        target_project = create_project(code='PRJ-UPDATE-SUSPENDED')
-        target_project.status = Project.Status.SUSPENDED
+        target_project = create_project(code='PRJ-UPDATE-CLOSED-TARGET')
+        target_project.status = Project.Status.CLOSED
         target_project.save(update_fields=('status',))
 
         with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
@@ -183,7 +175,7 @@ class ProjectUpdateTests(TestCase):
                 update_id=update.pk,
                 project=target_project,
                 title='Reasignación no permitida',
-                description='No debe persistirse en un proyecto suspendido.',
+                description='No debe persistirse en un proyecto cerrado.',
                 update_date=date(2026, 7, 12),
                 progress_percentage=40,
                 reported_by=self.reported_by,
@@ -302,25 +294,18 @@ class ProjectUpdateTests(TestCase):
         self.assertNotIn(replacement.username, audit.summary)
         self.assertNotIn(replacement.email, audit.summary)
 
-    def test_publish_rejects_project_no_longer_active(self):
-        rejected_statuses = (
-            Project.Status.SUSPENDED,
-            Project.Status.CLOSED,
-            Project.Status.ANNULLED,
-        )
-        for status in rejected_statuses:
-            with self.subTest(status=status):
-                update = self.create_draft()
-                self.project.status = status
-                self.project.save(update_fields=('status',))
+    def test_publish_rejects_closed_project(self):
+        update = self.create_draft()
+        self.project.status = Project.Status.CLOSED
+        self.project.save(update_fields=('status',))
 
-                with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
-                    publish_project_update(update.pk, self.user)
+        with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+            publish_project_update(update.pk, self.user)
 
-                update.refresh_from_db()
-                self.assertEqual(update.status, ProjectUpdate.Status.DRAFT)
-                self.project.status = Project.Status.ACTIVE
-                self.project.save(update_fields=('status',))
+        update.refresh_from_db()
+        self.assertEqual(update.status, ProjectUpdate.Status.DRAFT)
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
 
     def test_published_project_update_cannot_be_edited(self):
         update = self.create_draft()

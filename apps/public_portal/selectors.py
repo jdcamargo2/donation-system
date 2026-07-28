@@ -6,9 +6,10 @@ from apps.operations.models import Donation, Expense, FundAllocation, Project, P
 
 
 # PRE: Operational models are available and project is either a saved Project or None.
-# POST: returns only non-annulled allocations backed by non-annulled donations for active projects.
+# POST: returns only non-annulled allocations backed by non-annulled donations for public active projects.
 def _get_public_allocations(project=None):
     allocations = FundAllocation.objects.filter(
+        project__is_public=True,
         project__status=Project.Status.ACTIVE,
         donation__currency=OPERATING_CURRENCY,
     ).exclude(
@@ -30,7 +31,7 @@ def _get_public_expenses(allocations):
     ).exclude(status=Expense.Status.ANNULLED)
 
 
-# PRE: project is an active Project returned by get_public_projects().
+# PRE: project is an active public Project returned by get_public_projects().
 # POST: returns project financial metrics calculated only from its public allocation scope.
 def _get_public_project_financial_summary(project):
     allocations = _get_public_allocations(project)
@@ -48,18 +49,22 @@ def _get_public_project_financial_summary(project):
 def get_public_projects():
     """
     PRE: Los modelos operativos están disponibles.
-    POST: Retorna solo proyectos activos aptos para visualización pública, sin exponer datos sensibles.
+    POST: Retorna solo proyectos activos y públicos aptos para visualización, sin exponer datos sensibles.
     """
-    return Project.objects.filter(status=Project.Status.ACTIVE).order_by('code')
+    return Project.objects.filter(
+        is_public=True,
+        status=Project.Status.ACTIVE,
+    ).order_by('code')
 
 
 def get_published_project_updates(project):
     """
     PRE: project es una instancia válida de Project.
-    POST: Retorna solo avances publicados cuando el proyecto continúa activo.
+    POST: Retorna solo avances publicados cuando el proyecto continúa activo y público.
     """
     return project.updates.filter(
         status=ProjectUpdate.Status.PUBLISHED,
+        project__is_public=True,
         project__status=Project.Status.ACTIVE,
     ).order_by('-created_at')
 
@@ -75,10 +80,11 @@ def get_recent_project_updates(project, limit: int = 20):
 def get_recent_published_updates(limit: int = 10):
     """
     PRE: limit debe ser un entero positivo.
-    POST: Retorna avances publicados recientes de proyectos activos, sin datos privados de usuarios.
+    POST: Retorna avances publicados recientes de proyectos activos y públicos, sin datos privados.
     """
     return ProjectUpdate.objects.filter(
         status=ProjectUpdate.Status.PUBLISHED,
+        project__is_public=True,
         project__status=Project.Status.ACTIVE,
     ).select_related('project').order_by('-created_at')[:limit]
 
@@ -86,12 +92,13 @@ def get_recent_published_updates(limit: int = 10):
 def get_public_project_update_detail(update_id: int):
     """
     PRE: update_id identifica un avance que se solicita desde el portal público.
-    POST: retorna únicamente un avance PUBLISHED de un proyecto ACTIVE, con los
+    POST: retorna únicamente un avance PUBLISHED de un proyecto ACTIVE y público, con los
     campos públicos necesarios; cualquier otro avance produce 404.
     """
     return get_object_or_404(
         ProjectUpdate.objects.filter(
             status=ProjectUpdate.Status.PUBLISHED,
+            project__is_public=True,
             project__status=Project.Status.ACTIVE,
         )
         .select_related('project')
@@ -143,6 +150,7 @@ def get_public_transparency_summary():
         'available_balance': max(total_assigned - total_executed, ZERO_MONEY),
         'published_update_count': ProjectUpdate.objects.filter(
             status=ProjectUpdate.Status.PUBLISHED,
+            project__is_public=True,
             project__status=Project.Status.ACTIVE,
         ).count(),
     }

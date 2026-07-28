@@ -70,6 +70,9 @@ class MvpWorkflowRegressionTests(TestCase):
         )
         self.assertEqual(project_response.status_code, 200)
         self.assertContains(project_response, 'PRJ-000001')
+        project = Project.objects.get(code='PRJ-000001')
+        self.assertEqual(project.status, Project.Status.ACTIVE)
+        self.assertFalse(project.is_public)
         self.assertTrue(Project.objects.filter(code='PRJ-000001').exists())
 
         donation_form = self.client.get(reverse('donation_create'))

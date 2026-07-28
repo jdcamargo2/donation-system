@@ -306,6 +306,7 @@ class Command(BaseCommand):
                     "start_date": today - timedelta(days=30),
                     "end_date": today + timedelta(days=335),
                     "status": Project.Status.ACTIVE,
+                    "is_public": False,
                 },
             )
 

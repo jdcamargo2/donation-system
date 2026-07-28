@@ -25,10 +25,6 @@
             <div class="ops-milestones-terminal" role="status">
                 Este proyecto está cerrado. Sus hitos se conservan como registro histórico.
             </div>
-        {% elif object.status == 'annulled' %}
-            <div class="ops-milestones-terminal" role="status">
-                Este proyecto está anulado. Sus hitos no pueden modificarse.
-            </div>
         {% endif %}
 
         {% include "web/includes/project_milestone_list.html" %}

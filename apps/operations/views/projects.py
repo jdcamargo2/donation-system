@@ -43,13 +43,10 @@ from ..models import (
 from ..services import (
     get_project_financial_summary,
     OperationalEntityFinalizedError,
-    annul_project,
     ensure_operational_entity_is_editable,
     finish_project,
     log_create,
     log_delete,
-    PROJECT_STATUS_TRANSITIONS,
-    transition_project_status,
 )
 
 from .common import (
@@ -60,8 +57,6 @@ from .common import (
     OperationsPermissionRequiredMixin,
     PaginatedListMixin,
     RouteContextMixin,
-    StateTransitionContextMixin,
-    StateTransitionView,
     TerminalActionView,
     _protected_file_response,
     apply_list_filters,
@@ -100,17 +95,6 @@ class ProjectFinishView(TerminalActionView):
     requires_reason = False
 
 
-class ProjectAnnulView(TerminalActionView):
-    permission_required = 'operations.change_project'
-    model = Project
-    action_service = staticmethod(annul_project)
-    detail_url_name = 'project_detail'
-    action_title = _('Anular proyecto')
-    consequence = _('Solo puede anularse si no mantiene asignaciones activas. Esta acción es irreversible.')
-    submit_label = _('Confirmar anulación')
-    success_message = _('Proyecto anulado.')
-
-
 class ProjectListView(
     OperationsPermissionRequiredMixin,
     FilteredListContextMixin,
@@ -133,14 +117,12 @@ class ProjectListView(
             text_fields=('code', 'name'), date_field='start_date',
         ).order_by('code', 'pk')
 
-class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
+class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_project'
     model = Project
     template_name = 'web/project_detail.html'
     route_prefix = 'project'
     page_title = _('Proyecto')
-    transition_map = PROJECT_STATUS_TRANSITIONS
-    transition_url_name = 'project_status_transition'
 
     def get_queryset(self):
         # PRE: la vista consulta un proyecto autorizado por clave primaria.
@@ -164,11 +146,9 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
         POST: returns one coherent detail context with derived milestone progress and UI permissions.
         """
         context = super().get_context_data(**kwargs)
-        allowed_targets = PROJECT_STATUS_TRANSITIONS.get(self.object.status, ())
-        context['can_finish'] = Project.Status.CLOSED in allowed_targets
-        context['can_annul'] = (
-            Project.Status.ANNULLED in allowed_targets
-            and not self.object.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists()
+        context['can_finish'] = (
+            self.request.user.has_perm('operations.change_project')
+            and self.object.status == Project.Status.ACTIVE
         )
         visible_updates = get_visible_project_updates(self.object, self.request.user)
         update_paginator = Paginator(
@@ -274,12 +254,6 @@ class ProjectDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, Rou
     route_prefix = 'project'
     page_title = _('Eliminar proyecto')
     audit_summary = _('Proyecto eliminado.')
-
-
-class ProjectStatusTransitionView(StateTransitionView):
-    permission_required = 'operations.change_project'
-    transition_service = staticmethod(transition_project_status)
-    detail_url_name = 'project_detail'
 
 
 class ProjectDocumentCreateView(OperationsPermissionRequiredMixin, CreateView):

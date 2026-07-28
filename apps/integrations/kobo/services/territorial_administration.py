@@ -29,9 +29,7 @@ from apps.operations.services import log_action
 
 MAX_RECONCILIATION_BATCH = 100
 MAX_REASON_LENGTH = 500
-AVAILABLE_PROJECT_STATUSES = frozenset(
-    {Project.Status.PLANNED, Project.Status.ACTIVE, Project.Status.SUSPENDED}
-)
+AVAILABLE_PROJECT_STATUSES = frozenset({Project.Status.ACTIVE})
 
 MANAGE_MAPPINGS_PERMISSION = "kobo.manage_pastoral_zone_mappings"
 RESOLVE_CONFLICTS_PERMISSION = "kobo.resolve_territorial_conflicts"

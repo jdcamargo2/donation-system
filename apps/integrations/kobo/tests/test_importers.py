@@ -693,6 +693,8 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertNotContains(dashboard_response, "Levantamientos de campo")
 
         self.client.logout()
+        self.project.is_public = True
+        self.project.save(update_fields=["is_public"])
         public_response = self.client.get(
             reverse(
                 "public_portal:public_project_detail",

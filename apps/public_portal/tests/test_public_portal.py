@@ -22,6 +22,7 @@ class PublicPortalTests(TestCase):
         self.institution.save()
         self.project = create_project()
         self.project.status = Project.Status.ACTIVE
+        self.project.is_public = True
         self.project.description = 'Descripción pública del proyecto.'
         self.project.save()
         self.donation = create_donation(donor=self.institution)
@@ -55,10 +56,11 @@ class PublicPortalTests(TestCase):
             status=ProjectUpdate.Status.DRAFT,
         )
 
-    def create_approved_update_for_project_status(self, code, project_status):
+    def create_approved_update_for_project_status(self, code, project_status, *, is_public=True):
         project = create_project(code=code, name=f'Proyecto {project_status}')
         project.status = Project.Status.ACTIVE
-        project.save(update_fields=['status'])
+        project.is_public = is_public
+        project.save(update_fields=['status', 'is_public'])
         update = register_advance(
             project_id=project.pk,
             title=f'Avance aprobado {project_status}',
@@ -133,26 +135,29 @@ class PublicPortalTests(TestCase):
         self.assertNotContains(response, 'Ubicación')
         self.assertNotContains(response, 'Periodo')
 
-    def test_public_project_list_only_shows_active_projects(self):
-        planned_project = create_project(code='PRJ-PLAN', name='Proyecto planificado')
-        planned_project.status = Project.Status.PLANNED
-        planned_project.save()
-        suspended_project = create_project(code='PRJ-SUSP', name='Proyecto suspendido')
-        suspended_project.status = Project.Status.SUSPENDED
-        suspended_project.save()
+    def test_public_project_list_only_shows_active_public_projects(self):
+        private_active = create_project(code='PRJ-PRIVATE-ACTIVE', name='Activo no público')
+        private_active.status = Project.Status.ACTIVE
+        private_active.is_public = False
+        private_active.save(update_fields=['status', 'is_public'])
+        closed_public = create_project(code='PRJ-CLOSED-PUBLIC', name='Cerrado público')
+        closed_public.status = Project.Status.CLOSED
+        closed_public.is_public = True
+        closed_public.save(update_fields=['status', 'is_public'])
 
         response = self.client.get(reverse('public_portal:public_project_list'))
 
         self.assertContains(response, self.project.name)
-        self.assertNotContains(response, planned_project.name)
-        self.assertNotContains(response, suspended_project.name)
+        self.assertNotContains(response, private_active.name)
+        self.assertNotContains(response, closed_public.name)
 
-    def test_public_project_detail_for_non_active_project_returns_404(self):
-        planned_project = create_project(code='PRJ-PRIVATE', name='Proyecto no publicable')
-        planned_project.status = Project.Status.PLANNED
-        planned_project.save()
+    def test_public_project_detail_for_non_public_project_returns_404(self):
+        private_project = create_project(code='PRJ-PRIVATE', name='Proyecto no publicable')
+        private_project.status = Project.Status.ACTIVE
+        private_project.is_public = False
+        private_project.save(update_fields=['status', 'is_public'])
 
-        response = self.client.get(reverse('public_portal:public_project_detail', args=[planned_project.pk]))
+        response = self.client.get(reverse('public_portal:public_project_detail', args=[private_project.pk]))
 
         self.assertEqual(response.status_code, 404)
 
@@ -244,8 +249,8 @@ class PublicPortalTests(TestCase):
                 self.assertEqual(content.count('aria-current="page"'), 1)
 
     def test_public_list_empty_states_use_the_publication_messages(self):
-        self.project.status = Project.Status.SUSPENDED
-        self.project.save(update_fields=['status'])
+        self.project.is_public = False
+        self.project.save(update_fields=['is_public'])
 
         projects_response = self.client.get(reverse('public_portal:public_project_list'))
         updates_response = self.client.get(reverse('public_portal:public_updates_feed'))
@@ -279,7 +284,7 @@ class PublicPortalTests(TestCase):
         self.assertEqual(draft_response.status_code, 404)
         self.assertEqual(missing_response.status_code, 404)
 
-        self.project.status = Project.Status.SUSPENDED
+        self.project.status = Project.Status.CLOSED
         self.project.save(update_fields=['status'])
         inactive_project_response = self.client.get(public_url)
 
@@ -367,20 +372,21 @@ class PublicPortalTests(TestCase):
         self.assertNotContains(detail_response, self.pending_update.title)
         self.assertNotContains(feed_response, self.pending_update.title)
 
-    def test_public_portal_does_not_show_approved_evidence_from_non_active_project(self):
-        private_project = create_project(code='PRJ-NO-PUBLIC', name='Proyecto suspendido con evidencia')
+    def test_public_portal_does_not_show_approved_evidence_from_non_public_project(self):
+        private_project = create_project(code='PRJ-NO-PUBLIC', name='Proyecto privado con evidencia')
         private_project.status = Project.Status.ACTIVE
-        private_project.save()
+        private_project.is_public = True
+        private_project.save(update_fields=['status', 'is_public'])
         private_update = register_advance(
             project_id=private_project.pk,
             title='Avance aprobado que dejo de ser público',
-            description='No debe aparecer cuando el proyecto deja de estar activo.',
+            description='No debe aparecer cuando el proyecto deja de estar público.',
             created_by=self.user,
             reported_by=self.reporter,
         )
         publish_project_update(private_update.pk, self.user)
-        private_project.status = Project.Status.SUSPENDED
-        private_project.save(update_fields=['status'])
+        private_project.is_public = False
+        private_project.save(update_fields=['is_public'])
 
         feed_response = self.client.get(reverse('public_portal:public_updates_feed'))
         home_response = self.client.get(reverse('public_portal:public_home'))
@@ -403,8 +409,12 @@ class PublicPortalTests(TestCase):
         self.assertNotContains(feed_response, closed_update.title)
         self.assertEqual(detail_response.status_code, 404)
 
-    def test_published_update_count_excludes_suspended_and_closed_projects(self):
-        self.create_approved_update_for_project_status('PRJ-SUSP-COUNT', Project.Status.SUSPENDED)
+    def test_published_update_count_excludes_private_and_closed_projects(self):
+        self.create_approved_update_for_project_status(
+            'PRJ-PRIVATE-COUNT',
+            Project.Status.ACTIVE,
+            is_public=False,
+        )
         self.create_approved_update_for_project_status('PRJ-CLOSED-COUNT', Project.Status.CLOSED)
 
         response = self.client.get(reverse('public_portal:public_home'))
@@ -412,9 +422,10 @@ class PublicPortalTests(TestCase):
         self.assertEqual(response.context['summary']['published_update_count'], 1)
 
     def test_every_update_in_public_feed_links_to_an_available_public_detail(self):
-        suspended_project, suspended_update = self.create_approved_update_for_project_status(
-            'PRJ-SUSP-LINK',
-            Project.Status.SUSPENDED,
+        private_project, private_update = self.create_approved_update_for_project_status(
+            'PRJ-PRIVATE-LINK',
+            Project.Status.ACTIVE,
+            is_public=False,
         )
         closed_project, closed_update = self.create_approved_update_for_project_status(
             'PRJ-CLOSED-LINK',
@@ -423,9 +434,9 @@ class PublicPortalTests(TestCase):
 
         response = self.client.get(reverse('public_portal:public_updates_feed'))
 
-        self.assertNotContains(response, reverse('public_portal:public_project_detail', args=[suspended_project.pk]))
+        self.assertNotContains(response, reverse('public_portal:public_project_detail', args=[private_project.pk]))
         self.assertNotContains(response, reverse('public_portal:public_project_detail', args=[closed_project.pk]))
-        self.assertNotContains(response, suspended_update.title)
+        self.assertNotContains(response, private_update.title)
         self.assertNotContains(response, closed_update.title)
         for update in response.context['updates']:
             detail_url = reverse('public_portal:public_project_update_detail', args=[update.pk])
@@ -595,7 +606,8 @@ class PublicPortalTests(TestCase):
         for index in range(21):
             project = create_project(code=f'PRJ-PUB-{index:03d}', name=f'Proyecto público {index}')
             project.status = Project.Status.ACTIVE
-            project.save()
+            project.is_public = True
+            project.save(update_fields=['status', 'is_public'])
 
         response = self.client.get(reverse('public_portal:public_project_list'))
 
@@ -606,7 +618,8 @@ class PublicPortalTests(TestCase):
         for index in range(21):
             project = create_project(code=f'PRJ-UPD-{index:03d}', name=f'Proyecto avance {index}')
             project.status = Project.Status.ACTIVE
-            project.save()
+            project.is_public = True
+            project.save(update_fields=['status', 'is_public'])
             update = register_advance(
                 project_id=project.pk,
                 title=f'Avance aprobado {index}',
@@ -625,7 +638,8 @@ class PublicPortalTests(TestCase):
         for index in range(21):
             project = create_project(code=f'PRJ-PAGE-{index:03d}', name=f'Proyecto paginado {index}')
             project.status = Project.Status.ACTIVE
-            project.save()
+            project.is_public = True
+            project.save(update_fields=['status', 'is_public'])
 
         response = self.client.get(reverse('public_portal:public_project_list'))
         content = response.content.decode()
@@ -638,7 +652,8 @@ class PublicPortalTests(TestCase):
         for index in range(21):
             project = create_project(code=f'PRJ-QUERY-{index:03d}', name=f'Proyecto consulta {index}')
             project.status = Project.Status.ACTIVE
-            project.save()
+            project.is_public = True
+            project.save(update_fields=['status', 'is_public'])
 
         response = self.client.get(f"{reverse('public_portal:public_project_list')}?source=home")
 

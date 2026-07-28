@@ -5,7 +5,7 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import RequestFactory, TestCase
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 
 from apps.operations.admin import DonationAdmin, FundAllocationAdmin, ProjectAdmin
 from apps.operations.forms import DonationForm, FundAllocationForm, ProjectForm
@@ -17,7 +17,6 @@ from apps.operations.services import (
     InvalidStateTransitionError,
     transition_donation_status,
     transition_fund_allocation_status,
-    transition_project_status,
     validate_state_transition,
     finish_project,
 )
@@ -94,13 +93,19 @@ class StateTransitionServiceTests(TestCase):
             service=transition_donation_status,
         )
 
-    def test_project_transition_matrix(self):
-        self.assert_transition_matrix(
-            transitions=PROJECT_STATUS_TRANSITIONS,
-            statuses=Project.Status.values,
-            factory=self.create_project,
-            service=transition_project_status,
+    def test_project_lifecycle_allows_only_active_to_closed(self):
+        self.assertEqual(
+            PROJECT_STATUS_TRANSITIONS,
+            {
+                Project.Status.ACTIVE: frozenset({Project.Status.CLOSED}),
+                Project.Status.CLOSED: frozenset(),
+            },
         )
+        project = self.create_project(Project.Status.ACTIVE)
+        finished = finish_project(project.pk, actor=self.actor)
+        self.assertEqual(finished.status, Project.Status.CLOSED)
+        with self.assertRaises(InvalidStateTransitionError):
+            finish_project(project.pk, actor=self.actor)
 
     def test_allocation_transition_matrix(self):
         self.assert_transition_matrix(
@@ -137,13 +142,11 @@ class StateTransitionServiceTests(TestCase):
         donation.refresh_from_db()
         self.assertEqual(donation.status, Donation.Status.REGISTERED)
 
-    def test_transition_requires_authenticated_actor(self):
-        project = self.create_project(Project.Status.PLANNED)
+    def test_finish_project_requires_authenticated_actor(self):
+        project = self.create_project(Project.Status.ACTIVE)
 
         with self.assertRaises(InvalidStateTransitionError):
-            transition_project_status(
-                project.pk, actor=None, target_status=Project.Status.ACTIVE
-            )
+            finish_project(project.pk, actor=None)
 
     def test_project_with_incoherent_dates_cannot_close(self):
         project = self.create_project(Project.Status.ACTIVE)
@@ -209,6 +212,7 @@ class StateTransitionBoundaryTests(TestCase):
 
     def test_ordinary_forms_exclude_and_ignore_status(self):
         self.assertNotIn('status', ProjectForm().fields)
+        self.assertNotIn('is_public', ProjectForm().fields)
         self.assertNotIn('status', DonationForm().fields)
         self.assertNotIn('status', FundAllocationForm().fields)
 
@@ -223,53 +227,72 @@ class StateTransitionBoundaryTests(TestCase):
                 'estimated_budget': '1000.00',
                 'start_date': '',
                 'end_date': '',
-                'status': Project.Status.ACTIVE,
+                'status': Project.Status.CLOSED,
+                'is_public': True,
             },
         )
         self.assertTrue(form.is_valid(), form.errors)
-        self.assertEqual(form.save().status, Project.Status.PLANNED)
+        saved = form.save()
+        self.assertEqual(saved.status, Project.Status.ACTIVE)
+        self.assertFalse(saved.is_public)
 
-    def test_transition_route_is_post_only_and_requires_permission(self):
-        url = reverse(
-            'project_status_transition', args=(self.project.pk, Project.Status.ACTIVE)
+    def test_project_defaults_to_active_and_not_public(self):
+        project = Project.objects.create(
+            code='PRJ-DEFAULTS',
+            name='Proyecto por defecto',
+            estimated_budget=Decimal('100.00'),
         )
+        self.assertEqual(project.status, Project.Status.ACTIVE)
+        self.assertFalse(project.is_public)
+
         self.client.force_login(self.user)
-        self.assertEqual(self.client.get(url).status_code, 405)
+        response = self.client.post(
+            reverse('project_create'),
+            data={
+                'name': 'Proyecto web',
+                'description': '',
+                'objective': '',
+                'responsible_unit': '',
+                'location': '',
+                'estimated_budget': '100.00',
+                'start_date': '',
+                'end_date': '',
+                'status': Project.Status.CLOSED,
+                'is_public': True,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        created = Project.objects.get(name='Proyecto web')
+        self.assertEqual(created.status, Project.Status.ACTIVE)
+        self.assertFalse(created.is_public)
 
-        limited = get_user_model().objects.create_user(username='limited')
-        self.client.force_login(limited)
-        self.assertEqual(self.client.post(url).status_code, 403)
-        self.project.refresh_from_db()
-        self.assertEqual(self.project.status, Project.Status.PLANNED)
+    def test_removed_project_transition_and_annul_routes_do_not_exist(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse('project_status_transition', args=(self.project.pk, Project.Status.ACTIVE))
+        with self.assertRaises(NoReverseMatch):
+            reverse('project_annul', args=(self.project.pk,))
 
-    def test_detail_shows_only_allowed_transition_posts(self):
+    def test_detail_shows_finish_without_estado_or_annul(self):
         self.client.force_login(self.user)
 
         response = self.client.get(reverse('project_detail', args=(self.project.pk,)))
 
-        self.assertContains(
-            response,
-            reverse('project_status_transition', args=(self.project.pk, Project.Status.ACTIVE)),
-        )
-        self.assertNotContains(response, reverse('project_annul', args=(self.project.pk,)))
-        unallocated_project = create_project(code='PRJ-NAMED-ANNUL')
-        unallocated_response = self.client.get(
-            reverse('project_detail', args=(unallocated_project.pk,))
-        )
-        self.assertContains(
-            unallocated_response,
-            reverse('project_annul', args=(unallocated_project.pk,)),
-        )
-        self.assertNotContains(
-            response,
-            reverse('project_status_transition', args=(self.project.pk, Project.Status.SUSPENDED)),
-        )
+        self.assertContains(response, reverse('project_finish', args=(self.project.pk,)))
+        self.assertContains(response, 'Terminar proyecto')
+        self.assertNotContains(response, 'aria-label="Cambiar estado del proyecto"')
+        self.assertNotContains(response, 'Anular proyecto')
+        self.assertContains(response, self.project.get_status_display())
+
+        finish_project(self.project.pk, actor=self.user)
+        closed_response = self.client.get(reverse('project_detail', args=(self.project.pk,)))
+        self.assertNotContains(closed_response, 'Terminar proyecto')
+        self.assertContains(closed_response, 'Cerrado')
 
     def test_admin_status_is_readonly_and_save_cannot_bypass(self):
         request = RequestFactory().post('/admin/')
         request.user = self.user
         cases = (
-            (ProjectAdmin(Project, admin.site), self.project, Project.Status.ACTIVE),
+            (ProjectAdmin(Project, admin.site), self.project, Project.Status.CLOSED),
             (DonationAdmin(Donation, admin.site), self.donation, Donation.Status.ANNULLED),
             (FundAllocationAdmin(FundAllocation, admin.site), self.allocation, FundAllocation.Status.ACTIVE),
         )
@@ -281,3 +304,4 @@ class StateTransitionBoundaryTests(TestCase):
                 model_admin.save_model(request, instance, form=None, change=True)
                 instance.refresh_from_db()
                 self.assertEqual(instance.status, original_status)
+        self.assertIn('is_public', ProjectAdmin(Project, admin.site).get_readonly_fields(request, self.project))

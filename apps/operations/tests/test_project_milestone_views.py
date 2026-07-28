@@ -183,7 +183,7 @@ class ProjectMilestoneViewTests(TestCase):
         self.assertIn('No se realizaron cambios', ' '.join(self.response_messages(response)))
 
     def test_edit_terminal_project_redisplays_domain_error(self):
-        self.project.status = Project.Status.ANNULLED
+        self.project.status = Project.Status.CLOSED
         self.project.save(update_fields=('status', 'updated_at'))
 
         response = self.client.post(
@@ -192,7 +192,7 @@ class ProjectMilestoneViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'cerrados o anulados no admiten cambios')
+        self.assertContains(response, 'cerrados no admiten cambios')
         self.first.refresh_from_db()
         self.assertEqual(self.first.title, 'Primer hito')
 
@@ -343,13 +343,13 @@ class ProjectMilestoneViewTests(TestCase):
         self.assertEqual(self.second.position, 1)
 
     def test_delete_terminal_project_redisplays_domain_error(self):
-        self.project.status = Project.Status.ANNULLED
+        self.project.status = Project.Status.CLOSED
         self.project.save(update_fields=('status', 'updated_at'))
 
         response = self.client.post(self.milestone_url('project_milestone_delete'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'cerrados o anulados no admiten cambios')
+        self.assertContains(response, 'cerrados no admiten cambios')
         self.assertTrue(ProjectMilestone.objects.filter(pk=self.first.pk).exists())
 
     def test_htmx_delete_returns_partial_without_deleted_milestone(self):
@@ -463,11 +463,11 @@ class ProjectMilestoneViewTests(TestCase):
         self.assertEqual(domain_response.status_code, 403)
         self.assertContains(
             domain_response,
-            'cerrados o anulados no admiten cambios',
+            'cerrados no admiten cambios',
             status_code=403,
         )
 
-        self.project.status = Project.Status.PLANNED
+        self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=('status', 'updated_at'))
         limited_user = self.create_user_with_permissions(
             'milestone-htmx-view-only',

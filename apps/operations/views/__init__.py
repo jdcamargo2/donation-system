@@ -71,7 +71,6 @@ from .project_updates import (
     ProjectUpdateUpdateView,
 )
 from .projects import (
-    ProjectAnnulView,
     ProjectCreateView,
     ProjectDeleteView,
     ProjectDetailView,
@@ -80,7 +79,6 @@ from .projects import (
     ProjectDocumentDownloadView,
     ProjectFinishView,
     ProjectListView,
-    ProjectStatusTransitionView,
     ProjectUpdateChunkView,
     ProjectUpdateView,
 )
@@ -131,7 +129,6 @@ __all__ = [
     'InstitutionLegalDocumentDownloadView',
     'InstitutionListView',
     'InstitutionUpdateView',
-    'ProjectAnnulView',
     'ProjectCreateView',
     'ProjectCsvExportView',
     'ProjectDeleteView',
@@ -148,7 +145,6 @@ __all__ = [
     'ProjectMilestoneMoveDownView',
     'ProjectMilestoneMoveUpView',
     'ProjectMilestoneReopenView',
-    'ProjectStatusTransitionView',
     'ProjectUpdateAttachmentCreateView',
     'ProjectUpdateAttachmentDeleteView',
     'ProjectUpdateAttachmentDownloadView',
