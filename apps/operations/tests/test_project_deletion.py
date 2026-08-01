@@ -17,8 +17,6 @@ from apps.operations.roles import (
     ROLE_EXTERNAL_AUDITOR,
     ROLE_FIELD_OPERATOR,
     ROLE_PROJECT_COMMITTEE,
-    ROLE_PROJECT_UPDATE_DECIDER,
-    ROLE_PROJECT_UPDATE_REVIEWER,
     ROLE_SIGEDON_ADMIN,
 )
 from apps.operations.services import finish_project, publish_project, unpublish_project
@@ -206,8 +204,6 @@ class ProjectDeletionRoleTests(TestCase):
             ROLE_FIELD_OPERATOR,
             ROLE_EXTERNAL_AUDITOR,
             ROLE_PROJECT_COMMITTEE,
-            ROLE_PROJECT_UPDATE_REVIEWER,
-            ROLE_PROJECT_UPDATE_DECIDER,
         )
         for role_name in role_names:
             with self.subTest(role=role_name):

@@ -2,12 +2,11 @@ ROLE_SIGEDON_ADMIN = 'Administrador SIGEDON'
 ROLE_FIELD_OPERATOR = 'Operador de campo'
 ROLE_EXTERNAL_AUDITOR = 'Auditor externo'
 ROLE_PROJECT_COMMITTEE = 'Comité de proyectos'
-ROLE_PROJECT_UPDATE_REVIEWER = 'Revisor del Comité'
-ROLE_PROJECT_UPDATE_DECIDER = 'Decisor del Comité'
 
 
-# El grupo legado se conserva para no alterar membresías existentes; la sincronización
-# lo deja en solo lectura. La asignación a los roles funcionales nuevos es explícita.
+# Comité de proyectos is the single functional committee role.
+# Review, decision, and remediation resolution remain distinct permissions and
+# workflow actions within that role.
 COMMITTEE_READ_PERMISSION_CODENAMES = {
     'view_project',
     'view_projectupdate',
@@ -47,14 +46,8 @@ ROLE_PERMISSION_CODENAMES = {
     },
     ROLE_PROJECT_COMMITTEE: {
         *COMMITTEE_READ_PERMISSION_CODENAMES,
-    },
-    ROLE_PROJECT_UPDATE_REVIEWER: {
-        *COMMITTEE_READ_PERMISSION_CODENAMES,
         'review_projectupdate',
-        'resolve_projectupdateremediation',
-    },
-    ROLE_PROJECT_UPDATE_DECIDER: {
-        *COMMITTEE_READ_PERMISSION_CODENAMES,
         'decide_projectupdate',
+        'resolve_projectupdateremediation',
     },
 }

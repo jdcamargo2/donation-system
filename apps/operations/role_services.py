@@ -5,8 +5,6 @@ from .roles import (
     ROLE_FIELD_OPERATOR,
     ROLE_PERMISSION_CODENAMES,
     ROLE_PROJECT_COMMITTEE,
-    ROLE_PROJECT_UPDATE_DECIDER,
-    ROLE_PROJECT_UPDATE_REVIEWER,
     ROLE_SIGEDON_ADMIN,
 )
 
@@ -84,8 +82,6 @@ def sync_operation_roles():
             ROLE_FIELD_OPERATOR,
             ROLE_EXTERNAL_AUDITOR,
             ROLE_PROJECT_COMMITTEE,
-            ROLE_PROJECT_UPDATE_REVIEWER,
-            ROLE_PROJECT_UPDATE_DECIDER,
         }:
             group.permissions.add(
                 *[
@@ -104,6 +100,4 @@ def operation_role_names():
         ROLE_FIELD_OPERATOR,
         ROLE_EXTERNAL_AUDITOR,
         ROLE_PROJECT_COMMITTEE,
-        ROLE_PROJECT_UPDATE_REVIEWER,
-        ROLE_PROJECT_UPDATE_DECIDER,
     ]

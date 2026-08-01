@@ -12,7 +12,7 @@ from apps.operations.role_services import sync_operation_roles
 from apps.operations.roles import (
     ROLE_EXTERNAL_AUDITOR,
     ROLE_FIELD_OPERATOR,
-    ROLE_PROJECT_UPDATE_REVIEWER,
+    ROLE_PROJECT_COMMITTEE,
     ROLE_SIGEDON_ADMIN,
 )
 from apps.operations.services import (
@@ -30,7 +30,7 @@ class ProjectUpdateReviewTests(TestCase):
         self.committee_member = get_user_model().objects.create_user(
             username='committee-reviewer', password='pass-12345'
         )
-        self.committee_member.groups.add(Group.objects.get(name=ROLE_PROJECT_UPDATE_REVIEWER))
+        self.committee_member.groups.add(Group.objects.get(name=ROLE_PROJECT_COMMITTEE))
         self.field_operator = get_user_model().objects.create_user(
             username='field-reviewer', password='pass-12345'
         )
@@ -235,7 +235,7 @@ class ProjectUpdateReviewTests(TestCase):
         self.assertNotContains(response, reverse('project_update_review_create', args=[published_update.pk]))
         self.assertNotContains(response, 'Registrar revisión')
 
-    def test_review_permission_matrix_is_limited_to_reviewer_role(self):
+    def test_review_permission_matrix_is_limited_to_committee_role(self):
         auditor = get_user_model().objects.create_user(username='auditor-reviewer', password='pass-12345')
         auditor.groups.add(Group.objects.get(name=ROLE_EXTERNAL_AUDITOR))
         ordinary_user = get_user_model().objects.create_user(username='ordinary-permissions', password='pass-12345')
@@ -245,6 +245,8 @@ class ProjectUpdateReviewTests(TestCase):
         administrator.groups.add(Group.objects.get(name=ROLE_SIGEDON_ADMIN))
 
         self.assertTrue(self.committee_member.has_perm('operations.review_projectupdate'))
+        self.assertTrue(self.committee_member.has_perm('operations.decide_projectupdate'))
+        self.assertTrue(self.committee_member.has_perm('operations.resolve_projectupdateremediation'))
         self.assertFalse(self.field_operator.has_perm('operations.review_projectupdate'))
         self.assertFalse(auditor.has_perm('operations.review_projectupdate'))
         self.assertFalse(ordinary_user.has_perm('operations.review_projectupdate'))

@@ -12,12 +12,33 @@ from apps.operations.roles import (
     ROLE_EXTERNAL_AUDITOR,
     ROLE_FIELD_OPERATOR,
     ROLE_PROJECT_COMMITTEE,
-    ROLE_PROJECT_UPDATE_DECIDER,
-    ROLE_PROJECT_UPDATE_REVIEWER,
     ROLE_SIGEDON_ADMIN,
 )
 from apps.operations.services import register_advance
 from apps.operations.tests.helpers import create_project
+
+
+CANONICAL_ROLE_NAMES = (
+    ROLE_SIGEDON_ADMIN,
+    ROLE_FIELD_OPERATOR,
+    ROLE_EXTERNAL_AUDITOR,
+    ROLE_PROJECT_COMMITTEE,
+)
+
+COMMITTEE_TARGET_PERMISSION_CODENAMES = {
+    'view_project',
+    'view_projectupdate',
+    'view_projectdocument',
+    'view_projectupdateattachment',
+    'view_projectupdatereview',
+    'view_projectupdatereviewdecision',
+    'view_projectupdateremediation',
+    'view_projectupdateremediationattachment',
+    'review_projectupdate',
+    'decide_projectupdate',
+    'resolve_projectupdateremediation',
+    'view_territorial_administration',
+}
 
 
 class OperationRoleTests(TestCase):
@@ -50,24 +71,18 @@ class OperationRoleTests(TestCase):
 
         call_command('sync_sigedon_roles', stdout=output)
 
-        self.assertIn(ROLE_SIGEDON_ADMIN, output.getvalue())
-        self.assertIn(ROLE_FIELD_OPERATOR, output.getvalue())
-        self.assertIn(ROLE_EXTERNAL_AUDITOR, output.getvalue())
-        self.assertIn(ROLE_PROJECT_COMMITTEE, output.getvalue())
-        self.assertIn(ROLE_PROJECT_UPDATE_REVIEWER, output.getvalue())
-        self.assertIn(ROLE_PROJECT_UPDATE_DECIDER, output.getvalue())
+        for role_name in CANONICAL_ROLE_NAMES:
+            with self.subTest(role=role_name):
+                self.assertIn(role_name, output.getvalue())
 
     def test_sync_operation_roles_creates_required_groups(self):
-        for role_name in [
-            ROLE_SIGEDON_ADMIN,
-            ROLE_FIELD_OPERATOR,
-            ROLE_EXTERNAL_AUDITOR,
-            ROLE_PROJECT_COMMITTEE,
-            ROLE_PROJECT_UPDATE_REVIEWER,
-            ROLE_PROJECT_UPDATE_DECIDER,
-        ]:
+        for role_name in CANONICAL_ROLE_NAMES:
             with self.subTest(role=role_name):
                 self.assertTrue(Group.objects.filter(name=role_name).exists())
+        self.assertEqual(
+            Group.objects.filter(name__in=CANONICAL_ROLE_NAMES).count(),
+            4,
+        )
 
     def test_sigedon_admin_can_publish_without_review_or_decision_permissions(self):
         user = self.create_user_for_role('admin-role', ROLE_SIGEDON_ADMIN)
@@ -96,8 +111,6 @@ class OperationRoleTests(TestCase):
             ROLE_FIELD_OPERATOR,
             ROLE_EXTERNAL_AUDITOR,
             ROLE_PROJECT_COMMITTEE,
-            ROLE_PROJECT_UPDATE_REVIEWER,
-            ROLE_PROJECT_UPDATE_DECIDER,
         }:
             with self.subTest(role=role_name):
                 self.assertFalse(
@@ -142,8 +155,6 @@ class OperationRoleTests(TestCase):
             ROLE_FIELD_OPERATOR,
             ROLE_EXTERNAL_AUDITOR,
             ROLE_PROJECT_COMMITTEE,
-            ROLE_PROJECT_UPDATE_REVIEWER,
-            ROLE_PROJECT_UPDATE_DECIDER,
         }:
             with self.subTest(role=role_name):
                 self.assertFalse(
@@ -181,82 +192,58 @@ class OperationRoleTests(TestCase):
         self.assert_lacks_perm(user, 'decide_projectupdate')
         self.assert_lacks_perm(user, 'manage_project_publication')
 
-    def test_legacy_project_committee_permission_matrix_is_read_only(self):
+    def test_project_committee_permission_matrix(self):
         user = self.create_user_for_role('committee-role', ROLE_PROJECT_COMMITTEE)
+        actual_codenames = set(
+            Group.objects.get(name=ROLE_PROJECT_COMMITTEE).permissions.values_list(
+                'codename', flat=True
+            )
+        )
 
+        self.assertEqual(actual_codenames, COMMITTEE_TARGET_PERMISSION_CODENAMES)
+        self.assert_has_perm(user, 'review_projectupdate')
+        self.assert_has_perm(user, 'decide_projectupdate')
+        self.assert_has_perm(user, 'resolve_projectupdateremediation')
         for codename in {
-            'view_project',
-            'view_projectupdate',
-            'view_projectdocument',
-            'view_projectupdateattachment',
-            'view_projectupdatereview',
-            'view_projectupdatereviewdecision',
-        }:
-            with self.subTest(codename=codename):
-                self.assert_has_perm(user, codename)
-        for codename in {
+            'add_projectupdatereview',
+            'add_projectupdatereviewdecision',
+            'change_projectupdatereview',
+            'delete_projectupdatereview',
+            'change_projectupdatereviewdecision',
+            'delete_projectupdatereviewdecision',
+            'publish_projectupdate',
+            'submit_projectupdateremediation',
+            'manage_project_publication',
+            'view_donation',
+            'view_fundallocation',
+            'view_expense',
+            'view_auditlog',
+            'add_supportingdocument',
             'add_project',
             'change_project',
             'delete_project',
             'add_projectupdate',
             'change_projectupdate',
             'delete_projectupdate',
-            'add_projectupdateattachment',
-            'change_projectupdateattachment',
-            'delete_projectupdateattachment',
-            'change_projectupdatereview',
-            'delete_projectupdatereview',
-            'change_projectupdatereviewdecision',
-            'delete_projectupdatereviewdecision',
-            'publish_projectupdate',
-            'review_projectupdate',
-            'decide_projectupdate',
-            'manage_project_publication',
             'add_auditlog',
             'change_auditlog',
             'delete_auditlog',
         }:
             with self.subTest(codename=codename):
                 self.assert_lacks_perm(user, codename)
-
-    def test_reviewer_and_decider_permission_matrices_are_separate(self):
-        reviewer = self.create_user_for_role('reviewer-role', ROLE_PROJECT_UPDATE_REVIEWER)
-        decider = self.create_user_for_role('decider-role', ROLE_PROJECT_UPDATE_DECIDER)
-
-        self.assert_has_perm(reviewer, 'review_projectupdate')
-        self.assert_lacks_perm(reviewer, 'publish_projectupdate')
-        self.assert_lacks_perm(reviewer, 'decide_projectupdate')
-        self.assert_has_perm(decider, 'decide_projectupdate')
-        self.assert_lacks_perm(decider, 'publish_projectupdate')
-        self.assert_lacks_perm(decider, 'review_projectupdate')
-        for user in (reviewer, decider):
-            with self.subTest(user=user.username):
-                self.assert_lacks_perm(user, 'change_projectupdatereview')
-                self.assert_lacks_perm(user, 'delete_projectupdatereview')
-                self.assert_lacks_perm(user, 'change_projectupdatereviewdecision')
-                self.assert_lacks_perm(user, 'delete_projectupdatereviewdecision')
+        self.assertFalse(user.has_perm('kobo.change_koboasset'))
 
     def test_resync_removes_legacy_audit_mutation_permissions(self):
         protected_codenames = {'add_auditlog', 'change_auditlog', 'delete_auditlog'}
         legacy_permissions = Permission.objects.filter(
             content_type__app_label='operations', codename__in=protected_codenames
         )
-        for group in Group.objects.filter(
-            name__in=(
-                ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR,
-                ROLE_PROJECT_COMMITTEE, ROLE_PROJECT_UPDATE_REVIEWER, ROLE_PROJECT_UPDATE_DECIDER,
-            )
-        ):
+        for group in Group.objects.filter(name__in=CANONICAL_ROLE_NAMES):
             group.permissions.add(*legacy_permissions)
 
         sync_operation_roles()
 
-        for group in Group.objects.filter(
-            name__in=(
-                ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR,
-                ROLE_PROJECT_COMMITTEE, ROLE_PROJECT_UPDATE_REVIEWER, ROLE_PROJECT_UPDATE_DECIDER,
-            )
-        ):
+        for group in Group.objects.filter(name__in=CANONICAL_ROLE_NAMES):
             self.assertFalse(
                 group.permissions.filter(codename__in=protected_codenames).exists(),
                 group.name,
@@ -267,6 +254,7 @@ class OperationRoleTests(TestCase):
             'publish_projectupdate',
             'review_projectupdate',
             'decide_projectupdate',
+            'resolve_projectupdateremediation',
         }
         review_and_decision_crud_codenames = {
             'add_projectupdatereview',
@@ -276,32 +264,47 @@ class OperationRoleTests(TestCase):
             'change_projectupdatereviewdecision',
             'delete_projectupdatereviewdecision',
         }
+        out_of_scope_codenames = {
+            'submit_projectupdateremediation',
+            'view_donation',
+            'view_auditlog',
+        }
         groups = Group.objects.filter(name__in=(
             ROLE_SIGEDON_ADMIN,
             ROLE_PROJECT_COMMITTEE,
-            ROLE_PROJECT_UPDATE_REVIEWER,
-            ROLE_PROJECT_UPDATE_DECIDER,
         ))
         for group in groups:
             group.permissions.add(*Permission.objects.filter(
                 content_type__app_label='operations',
-                codename__in=functional_codenames | review_and_decision_crud_codenames,
+                codename__in=(
+                    functional_codenames
+                    | review_and_decision_crud_codenames
+                    | out_of_scope_codenames
+                ),
             ))
 
         sync_operation_roles()
 
-        expected = {
+        expected_functional = {
             ROLE_SIGEDON_ADMIN: {'publish_projectupdate'},
-            ROLE_PROJECT_COMMITTEE: set(),
-            ROLE_PROJECT_UPDATE_REVIEWER: {'review_projectupdate'},
-            ROLE_PROJECT_UPDATE_DECIDER: {'decide_projectupdate'},
+            ROLE_PROJECT_COMMITTEE: {
+                'review_projectupdate',
+                'decide_projectupdate',
+                'resolve_projectupdateremediation',
+            },
         }
         for group in groups:
             self.assertEqual(
                 set(group.permissions.filter(codename__in=functional_codenames).values_list('codename', flat=True)),
-                expected[group.name],
+                expected_functional[group.name],
             )
             self.assertFalse(group.permissions.filter(codename__in=review_and_decision_crud_codenames).exists())
+        committee_codenames = set(
+            Group.objects.get(name=ROLE_PROJECT_COMMITTEE).permissions.values_list(
+                'codename', flat=True
+            )
+        )
+        self.assertEqual(committee_codenames, COMMITTEE_TARGET_PERMISSION_CODENAMES)
 
     def test_field_operator_can_open_project_update_create_from_project(self):
         self.client.force_login(self.create_user_for_role('field-create-update', ROLE_FIELD_OPERATOR))
@@ -370,6 +373,7 @@ class OperationRoleTests(TestCase):
                 'view_auditlog',
                 'view_territorial_administration',
             },
+            ROLE_PROJECT_COMMITTEE: COMMITTEE_TARGET_PERMISSION_CODENAMES,
         }
 
         for role_name, codenames in expected_permissions.items():
@@ -382,29 +386,20 @@ class OperationRoleTests(TestCase):
     def test_sync_operation_roles_is_idempotent(self):
         first_snapshot = {
             group.name: set(group.permissions.values_list('codename', flat=True))
-            for group in Group.objects.filter(
-                name__in=[
-                    ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR,
-                    ROLE_PROJECT_COMMITTEE, ROLE_PROJECT_UPDATE_REVIEWER, ROLE_PROJECT_UPDATE_DECIDER,
-                ]
-            )
+            for group in Group.objects.filter(name__in=CANONICAL_ROLE_NAMES)
         }
 
         sync_operation_roles()
 
         second_snapshot = {
             group.name: set(group.permissions.values_list('codename', flat=True))
-            for group in Group.objects.filter(
-                name__in=[
-                    ROLE_SIGEDON_ADMIN, ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR,
-                    ROLE_PROJECT_COMMITTEE, ROLE_PROJECT_UPDATE_REVIEWER, ROLE_PROJECT_UPDATE_DECIDER,
-                ]
-            )
+            for group in Group.objects.filter(name__in=CANONICAL_ROLE_NAMES)
         }
         self.assertEqual(first_snapshot, second_snapshot)
-        self.assertEqual(Group.objects.filter(name=ROLE_SIGEDON_ADMIN).count(), 1)
-        self.assertEqual(Group.objects.filter(name=ROLE_FIELD_OPERATOR).count(), 1)
-        self.assertEqual(Group.objects.filter(name=ROLE_EXTERNAL_AUDITOR).count(), 1)
-        self.assertEqual(Group.objects.filter(name=ROLE_PROJECT_COMMITTEE).count(), 1)
-        self.assertEqual(Group.objects.filter(name=ROLE_PROJECT_UPDATE_REVIEWER).count(), 1)
-        self.assertEqual(Group.objects.filter(name=ROLE_PROJECT_UPDATE_DECIDER).count(), 1)
+        for role_name in CANONICAL_ROLE_NAMES:
+            with self.subTest(role=role_name):
+                self.assertEqual(Group.objects.filter(name=role_name).count(), 1)
+        self.assertEqual(
+            Group.objects.filter(name__in=CANONICAL_ROLE_NAMES).count(),
+            4,
+        )
