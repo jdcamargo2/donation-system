@@ -1,4 +1,6 @@
 from decimal import Decimal
+import re
+from pathlib import Path
 
 from django.test import TestCase
 from django.urls import reverse
@@ -8,6 +10,23 @@ from django.contrib.auth import get_user_model
 
 from apps.operations.models import AuditLog, Donation, Expense, FundAllocation
 from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project
+from web.tests.test_audit import SIGEDON_CSS, _extract_css_rule_block
+
+
+def _declaration_value(rule_body, property_name):
+    """
+    PRE: rule_body is a CSS declarations block.
+    POST: returns the declared value for property_name, or raises AssertionError.
+    """
+    match = re.search(
+        rf'(?<![\w-]){re.escape(property_name)}\s*:\s*([^;]+);',
+        rule_body,
+    )
+    if match is None:
+        raise AssertionError(
+            f'Expected declaration {property_name!r} in CSS rule body, got: {rule_body!r}'
+        )
+    return match.group(1).strip()
 
 
 class DashboardTests(TestCase):
@@ -197,3 +216,108 @@ class DashboardTests(TestCase):
         self.assertNotContains(response, donation.code)
         self.assertNotContains(response, 'Gastos recientes')
         self.assertNotContains(response, 'Acciones recientes de auditoría')
+
+
+class SidebarOverflowContractTests(TestCase):
+    """Regression: short/zoomed viewports must scroll nav without covering the footer."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username='sidebar-overflow-user',
+            password='pass-12345',
+        )
+        self.css_text = SIGEDON_CSS.read_text(encoding='utf-8')
+
+    def test_sidebar_overflow_contract_in_stylesheet(self):
+        sidebar_rule = _extract_css_rule_block(
+            self.css_text,
+            '.sigedon-sidebar',
+            exact_selector=True,
+        )
+        nav_rule = _extract_css_rule_block(
+            self.css_text,
+            '.sigedon-sidebar-nav',
+            exact_selector=True,
+        )
+        header_rule = _extract_css_rule_block(
+            self.css_text,
+            '.sigedon-sidebar-header',
+            exact_selector=True,
+        )
+        footer_rule = _extract_css_rule_block(
+            self.css_text,
+            '.sigedon-sidebar-footer',
+            exact_selector=True,
+        )
+
+        self.assertEqual(
+            _declaration_value(sidebar_rule, 'overflow'),
+            'hidden',
+            'Sidebar root must contain flex children (overflow: hidden), not scroll them.',
+        )
+        self.assertNotIn(
+            'overflow-y: auto',
+            sidebar_rule,
+            'Sidebar root must not remain the competing vertical scroll container.',
+        )
+        self.assertEqual(
+            _declaration_value(nav_rule, 'overflow-y'),
+            'auto',
+            'Nav must be the only vertical scroll region inside the sidebar.',
+        )
+        self.assertEqual(
+            _declaration_value(nav_rule, 'min-height'),
+            '0',
+            'Nav must stay shrinkable under a short viewport (min-height: 0).',
+        )
+        self.assertEqual(
+            _declaration_value(nav_rule, 'overscroll-behavior'),
+            'contain',
+            'Nav scroll must not chain to outer page scroll.',
+        )
+        self.assertEqual(
+            _declaration_value(nav_rule, 'flex'),
+            '1 1 auto',
+        )
+        self.assertEqual(
+            _declaration_value(header_rule, 'flex'),
+            '0 0 auto',
+            'Sidebar header must remain non-shrinking.',
+        )
+        self.assertEqual(
+            _declaration_value(footer_rule, 'flex'),
+            '0 0 auto',
+            'Sidebar footer must remain non-shrinking.',
+        )
+
+        later_css = self.css_text.split('.sigedon-sidebar-nav {', 1)[1]
+        self.assertNotRegex(
+            later_css,
+            r'\.sigedon-sidebar-nav\s*\{[^}]*overflow-y\s*:',
+            'No later .sigedon-sidebar-nav rule may reset overflow-y.',
+        )
+        self.assertNotRegex(
+            later_css,
+            r'\.sigedon-sidebar-nav\s*\{[^}]*min-height\s*:',
+            'No later .sigedon-sidebar-nav rule may reset min-height.',
+        )
+        self.assertNotIn('100dvh', self.css_text)
+
+    def test_sidebar_markup_preserves_nav_footer_toggle_and_logout(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('dashboard'))
+        html = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="sigedon-sidebar-nav"')
+        self.assertContains(response, 'class="sigedon-sidebar-footer"')
+        self.assertContains(response, 'data-sidebar-toggle')
+        self.assertContains(response, 'aria-label="Colapsar navegación"')
+        self.assertContains(response, 'Cerrar sesión')
+        self.assertContains(response, 'sigedon-logout-button')
+        self.assertIn('action="/accounts/logout/"', html)
+        self.assertNotContains(response, 'data-sidebar-mobile-toggle')
+        self.assertNotContains(response, 'data-bs-toggle="offcanvas"')
+        self.assertTrue(SIGEDON_CSS.is_file())
+        self.assertIn('web/css/sigedon.css', Path('templates/base.html').read_text())
