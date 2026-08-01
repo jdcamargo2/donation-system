@@ -86,9 +86,9 @@ class UploadTransactionBoundaryTests(TransactionTestCase):
         self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=('status',))
 
-    def draft(self):
+    def unpublished(self):
         return register_advance(
-            self.project.pk, 'Borrador', 'Contenido', created_by=self.actor, reported_by=self.actor
+            self.project.pk, 'No publicado', 'Contenido', created_by=self.actor, reported_by=self.actor
         )
 
     def storage_for(self, model, field):
@@ -96,7 +96,7 @@ class UploadTransactionBoundaryTests(TransactionTestCase):
         return storage, patch.object(model._meta.get_field(field), 'storage', storage)
 
     def test_advance_attachment_storage_is_outside_transaction_and_compensates_audit_failure(self):
-        update = self.draft()
+        update = self.unpublished()
         storage, storage_patch = self.storage_for(ProjectUpdateAttachment, 'file')
         audit_count = AuditLog.objects.count()
         with storage_patch, patch('apps.operations.services.log_create', side_effect=RuntimeError('audit failed')):
@@ -201,7 +201,7 @@ class UploadTransactionRaceTests(UploadTransactionBoundaryTests):
         return thread, results
 
     def test_publishing_between_upload_and_confirmation_compensates_attachment(self):
-        update = self.draft()
+        update = self.unpublished()
         storage = PausingStorage()
         audit_count = AuditLog.objects.count()
         with patch.object(ProjectUpdateAttachment._meta.get_field('file'), 'storage', storage):
@@ -223,7 +223,7 @@ class UploadTransactionRaceTests(UploadTransactionBoundaryTests):
         self.assertEqual(AuditLog.objects.count(), audit_count + 1)
 
     def test_submission_between_upload_and_confirmation_compensates_remediation_attachment(self):
-        update = self.draft()
+        update = self.unpublished()
         publish_project_update(update.pk, self.actor)
         review = create_project_update_review(update_id=update.pk, observations='Revisión.', actor=self.actor)
         decision = create_project_update_review_decision(

@@ -179,7 +179,7 @@ class EndToEndMVPFlowTests(TestCase):
         self.assertRedirects(review_response, reverse('project_update_detail', args=[approved_update.pk]))
         approved_update.refresh_from_db()
         self.assertEqual(approved_update.status, ProjectUpdate.Status.PUBLISHED)
-        self.assertEqual(pending_update.status, ProjectUpdate.Status.DRAFT)
+        self.assertEqual(pending_update.status, ProjectUpdate.Status.UNPUBLISHED)
 
         donation.refresh_from_db()
         allocation.refresh_from_db()

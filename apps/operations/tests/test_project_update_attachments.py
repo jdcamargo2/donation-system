@@ -37,9 +37,9 @@ class ProjectUpdateAttachmentImmutabilityTests(TestCase):
         self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=('status',))
 
-    def create_draft(self, title='Avance con adjunto'):
+    def create_unpublished(self, title='Avance con adjunto'):
         # PRE: self.project is ACTIVE and self.user is authenticated.
-        # POST: returns one DRAFT advance eligible for attachment mutations.
+        # POST: returns one UNPUBLISHED advance eligible for attachment mutations.
         return register_advance(
             project_id=self.project.pk,
             title=title,
@@ -48,8 +48,8 @@ class ProjectUpdateAttachmentImmutabilityTests(TestCase):
             reported_by=self.user,
         )
 
-    def add_draft_attachment(self, update, title='Soporte inicial'):
-        # PRE: update is DRAFT and the upload is an in-memory test file.
+    def add_unpublished_attachment(self, update, title='Soporte inicial'):
+        # PRE: update is UNPUBLISHED and the upload is an in-memory test file.
         # POST: creates one attachment through the official service and its audit event.
         return add_project_update_attachment(
             update_id=update.pk,
@@ -59,8 +59,8 @@ class ProjectUpdateAttachmentImmutabilityTests(TestCase):
         )
 
     def create_published_attachment(self):
-        update = self.create_draft()
-        attachment = self.add_draft_attachment(update)
+        update = self.create_unpublished()
+        attachment = self.add_unpublished_attachment(update)
         publish_project_update(update.pk, self.user)
         attachment.refresh_from_db()
         return update, attachment
@@ -70,7 +70,7 @@ class ProjectUpdateAttachmentImmutabilityTests(TestCase):
         audit_count = AuditLog.objects.count()
 
         with self.assertRaises(ProjectUpdateImmutableError):
-            self.add_draft_attachment(update, title='Adjunto tardío')
+            self.add_unpublished_attachment(update, title='Adjunto tardío')
         with self.assertRaises(ProjectUpdateImmutableError):
             ProjectUpdateAttachment.objects.create(
                 project_update=update,
@@ -97,10 +97,10 @@ class ProjectUpdateAttachmentImmutabilityTests(TestCase):
             attachment.project_update_id,
             attachment.uploaded_by_id,
         )
-        draft_target = self.create_draft(title='Otro borrador')
+        unpublished_target = self.create_unpublished(title='Otro avance no publicado')
         attachment.file = SimpleUploadedFile('replacement.pdf', b'replacement-data')
         attachment.title = 'Título alterado'
-        attachment.project_update = draft_target
+        attachment.project_update = unpublished_target
         attachment.uploaded_by = self.other_user
 
         with self.assertRaises(ProjectUpdateImmutableError):
@@ -131,9 +131,9 @@ class ProjectUpdateAttachmentImmutabilityTests(TestCase):
         attachment.refresh_from_db()
         self.assertEqual(attachment.title, 'Soporte inicial')
 
-    def test_draft_attachment_allows_service_and_ordinary_model_mutations(self):
-        update = self.create_draft()
-        attachment = self.add_draft_attachment(update)
+    def test_unpublished_attachment_allows_service_and_ordinary_model_mutations(self):
+        update = self.create_unpublished()
+        attachment = self.add_unpublished_attachment(update)
         attachment.title = 'Título corregido'
         attachment.save()
 
@@ -186,7 +186,7 @@ class ProjectUpdateAttachmentMultiUploadTests(TestCase):
         self.update = register_advance(
             project_id=self.project.pk,
             title='Avance para adjuntos múltiples',
-            description='Borrador con carga independiente de evidencias.',
+            description='Avance no publicado con carga independiente de evidencias.',
             created_by=self.user,
             reported_by=self.user,
         )

@@ -184,7 +184,7 @@ El MVP no incluye aprobación multinivel de gastos.
 Flujo del avance:
 
 ```text
-DRAFT
+UNPUBLISHED
 → PUBLISHED
 ```
 
@@ -199,7 +199,11 @@ Incluye:
 * evidencias;
 * publicación.
 
-Un avance publicado es inmutable.
+Un avance se registra inicialmente como **No publicado** (`UNPUBLISHED`): visible
+internamente, editable por usuarios autorizados, admite adjuntos y no aparece en
+el portal público. La publicación es una transición explícita; un avance
+publicado es inmutable, elegible para revisión y visible públicamente solo si el
+proyecto está activo y marcado como público.
 
 El progreso operativo del proyecto no se captura en el avance; se deriva de hitos verificables.
 

@@ -20,7 +20,7 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Volver</a>
-        {% if object.status == 'draft' and perms.operations.publish_projectupdate %}
+        {% if object.status == 'unpublished' and perms.operations.publish_projectupdate %}
             <form id="project-update-publish-form" method="post" action="{% url 'project_update_publish' object.pk %}">
                 {% csrf_token %}
                 <button
@@ -35,7 +35,7 @@
                 >Publicar</button>
             </form>
         {% endif %}
-        {% if object.status == 'draft' and perms.operations.change_projectupdate or object.status == 'draft' and perms.operations.add_projectupdateattachment or object.status == 'draft' and perms.operations.delete_projectupdate %}
+        {% if object.status == 'unpublished' and perms.operations.change_projectupdate or object.status == 'unpublished' and perms.operations.add_projectupdateattachment or object.status == 'unpublished' and perms.operations.delete_projectupdate %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Más acciones del avance">
                 Más
@@ -107,7 +107,7 @@
                         {% if perms.operations.view_projectupdateattachment %}
                             <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_attachment_download' attachment.pk %}">Descargar</a>
                         {% endif %}
-                        {% if object.status == 'draft' and perms.operations.delete_projectupdateattachment %}
+                        {% if object.status == 'unpublished' and perms.operations.delete_projectupdateattachment %}
                             <form
                                 id="project-update-attachment-delete-form-{{ attachment.pk }}"
                                 method="post"

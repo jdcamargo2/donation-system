@@ -176,6 +176,10 @@ DRAFT
 → PUBLISHED
 ```
 
+> **Superseded 2026-08-01:** the preliminary state label is now
+> `UNPUBLISHED` / No publicado. The lifecycle and publication approval remain
+> unchanged; see the decision dated 2026-08-01.
+
 ### Motivo
 
 El flujo anterior incorporaba estados de revisión y aprobación que aumentaban la complejidad y mezclaban responsabilidades distintas.
@@ -275,7 +279,7 @@ ni mediante un POST manipulado.
 * Un POST forjado con otro `reported_by` no altera la atribución del Operador.
 * `created_by` y `reported_by` siguen siendo conceptos distintos en el modelo;
   coinciden por regla de dominio solo en la creación por Operador de campo.
-* La edición de borradores por Administrador (cambio de responsable) no cambia.
+* La edición de avances no publicados por Administrador (cambio de responsable) no cambia.
 
 ---
 
@@ -385,3 +389,40 @@ financieros incompatibles alcancen los agregados, servicios o exportaciones.
 * Los formularios y el admin no permiten elegir moneda.
 * Los servicios rechazan moneda distinta de USD antes de persistir.
 * Los constraints de PostgreSQL son la garantía final de integridad.
+
+---
+
+## 2026-08-01 — Renombre del estado preliminar de avance
+
+### Decisión
+
+The ProjectUpdate preliminary state is renamed from DRAFT/Borrador to
+UNPUBLISHED/No publicado. The lifecycle and publication approval remain
+unchanged.
+
+```text
+UNPUBLISHED
+→ PUBLISHED
+```
+
+### Motivo
+
+This is a semantic clarification, not immediate publication. The preliminary
+state remains internally visible and editable before an explicit Admin
+publication step. Existing documentation that said publication required
+`change_projectupdate` is corrected: publication requires
+`publish_projectupdate`.
+
+### Consecuencias
+
+* Newly created advances remain `UNPUBLISHED` / No publicado.
+* No publicado: registrado internamente; editable por usuarios autorizados;
+  admite adjuntos; no aparece en el portal público.
+* Publicado: inmutable; elegible para revisión; visible públicamente solo si el
+  proyecto está activo y marcado como público.
+* Admin retains publication responsibility; Operator cannot publish.
+* `created_by` / `reported_by` semantics and the Operator self-report rule are
+  unchanged.
+* Remediation `DRAFT` / Borrador semantics are unchanged.
+* Historical decision text describing the prior DRAFT label remains as
+  superseded context under 2026-07-11.

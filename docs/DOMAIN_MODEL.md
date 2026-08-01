@@ -211,7 +211,7 @@ Representa un avance de proyecto.
 ### Estados
 
 ```text
-DRAFT
+UNPUBLISHED
 PUBLISHED
 ```
 
@@ -223,8 +223,12 @@ PUBLISHED
 ### Reglas
 
 * Solo puede crearse para proyectos activos.
-* La publicación constituye una transición explícita.
-* Un avance publicado es inmutable.
+* Un avance nuevo queda en `UNPUBLISHED` (No publicado): registrado internamente,
+  editable por usuarios autorizados, admite adjuntos y no aparece en el portal
+  público.
+* La publicación constituye una transición explícita a `PUBLISHED`.
+* Un avance publicado es inmutable, elegible para revisión y visible
+  públicamente solo si el proyecto está activo y marcado como público.
 * El creador técnico y la persona responsable del avance representan responsabilidades diferentes.
 * Para el Operador de campo, al crear un avance ambos coinciden con el actor autenticado; Administrador/superusuario pueden seleccionar otro `reported_by` elegible.
 * La revisión institucional no altera el estado del avance.

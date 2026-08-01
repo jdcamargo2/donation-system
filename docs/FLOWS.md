@@ -243,11 +243,11 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
      no puede delegar la responsabilidad a otro usuario;
    * el Administrador SIGEDON (o superusuario) conserva el selector de usuarios
      elegibles y puede atribuir el avance a otra persona responsable.
-3. El usuario puede adjuntar una o varias evidencias durante el registro o la edición en borrador.
+3. El usuario puede adjuntar una o varias evidencias durante el registro o la edición del avance no publicado.
    En los formularios de avance con opt-in de vista previa, la selección múltiple puede armarse
    de forma incremental en el cliente antes del envío; los archivos no se suben hasta el submit
    y los adjuntos ya persistidos no se gestionan desde esa vista previa.
-4. Desde el detalle de un avance en `DRAFT`, un usuario con `add_projectupdateattachment` puede agregar varios adjuntos en una sola carga.
+4. Desde el detalle de un avance en `UNPUBLISHED`, un usuario con `add_projectupdateattachment` puede agregar varios adjuntos en una sola carga.
    El mismo componente de vista previa local aplica en ese formulario independiente.
 5. Cada archivo persistido genera su propio evento de auditoría de creación.
 6. `created_by` se asigna automáticamente desde el usuario autenticado.
@@ -255,13 +255,13 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
    Para el Operador de campo, `created_by` y `reported_by` coinciden con el
    actor autenticado; para Administrador/superusuario pueden diferir cuando se
    delega la atribución.
-8. El avance se guarda en estado `DRAFT`.
-9. Un usuario con el permiso `change_projectupdate` puede iniciar la publicación.
+8. El avance se guarda en estado `UNPUBLISHED`.
+9. Un usuario con el permiso `publish_projectupdate` puede iniciar la publicación.
 10. El sistema valida nuevamente las condiciones de publicación.
 11. El avance pasa a estado `PUBLISHED`.
 12. Se registra la auditoría correspondiente.
 13. El avance queda bloqueado contra edición y eliminación.
-14. Los adjuntos permanecen privados y solo pueden agregarse o eliminarse mientras el avance esté en `DRAFT`; el avance publicado y sus adjuntos son inmutables.
+14. Los adjuntos permanecen privados y solo pueden agregarse o eliminarse mientras el avance esté en `UNPUBLISHED`; el avance publicado y sus adjuntos son inmutables.
 
 ### POST
 

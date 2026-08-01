@@ -35,9 +35,9 @@ class ProjectDocumentTests(TestCase):
             uploaded_by=self.user,
         )
 
-    def create_draft(self):
+    def create_unpublished(self):
         # PRE: el proyecto está activo.
-        # POST: retorna un avance DRAFT apto para recibir adjuntos.
+        # POST: retorna un avance UNPUBLISHED apto para recibir adjuntos.
         return register_advance(
             self.project.pk,
             'Avance con adjuntos',
@@ -143,7 +143,7 @@ class ProjectDocumentTests(TestCase):
         self.assertEqual(ProjectUpdateAttachment.objects.count(), 2)
 
     def test_published_update_rejects_new_attachment(self):
-        update = self.create_draft()
+        update = self.create_unpublished()
         publish_project_update(update.pk, self.user)
         self.client.force_login(self.user)
         response = self.client.post(
@@ -180,7 +180,7 @@ class ProjectDocumentTests(TestCase):
         self.assertTrue(ProjectDocument.objects.filter(pk=document.pk).exists())
 
     def test_published_update_attachment_cannot_be_deleted(self):
-        update = self.create_draft()
+        update = self.create_unpublished()
         attachment = ProjectUpdateAttachment.objects.create(
             project_update=update,
             file=SimpleUploadedFile('proof.pdf', b'proof'),

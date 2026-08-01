@@ -655,7 +655,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             project=project,
             title='Avance concurrente',
             description='Pendiente de dos revisores.',
-            status=ProjectUpdate.Status.DRAFT,
+            status=ProjectUpdate.Status.UNPUBLISHED,
             reported_by=reported_by,
         )
         project_update_id = project_update.pk

@@ -79,7 +79,7 @@ is_public == True
 
 ### Reglas
 
-* Los avances en estado `DRAFT` no se publican.
+* Los avances en estado `UNPUBLISHED` no se publican.
 * Un avance publicado no aparece si su proyecto deja de estar activo o deja de
   ser público.
 * Los datos privados asociados al avance permanecen protegidos.

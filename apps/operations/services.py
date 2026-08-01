@@ -440,11 +440,11 @@ def annul_fund_allocation(allocation_id: int, *, actor, reason) -> FundAllocatio
 def ensure_project_update_is_editable(project_update: ProjectUpdate) -> None:
     """
     PRE: project_update is a persisted advance targeted by ordinary editing.
-    POST: returns only for DRAFT; published advances fail without mutation.
+    POST: returns only for UNPUBLISHED; published advances fail without mutation.
     """
-    if project_update.status != ProjectUpdate.Status.DRAFT:
+    if project_update.status != ProjectUpdate.Status.UNPUBLISHED:
         raise ProjectUpdateImmutableError(
-            {'status': _('Solo los avances en borrador pueden editarse.')}
+            {'status': _('Solo los avances no publicados pueden editarse.')}
         )
 
 
@@ -1328,7 +1328,7 @@ def register_advance(
 ) -> ProjectUpdate:
     """
     PRE: project_id debe corresponder a un Project existente y apto para recibir avances.
-    POST: crea un avance DRAFT validado y deja una auditoría de creación.
+    POST: crea un avance UNPUBLISHED validado y deja una auditoría de creación.
     """
     with transaction.atomic():
         project = Project.objects.select_for_update().get(pk=project_id)
@@ -1344,14 +1344,14 @@ def register_advance(
             update_date=update_date or timezone.localdate(),
             created_by=created_by,
             reported_by=resolved_reporter,
-            status=ProjectUpdate.Status.DRAFT,
+            status=ProjectUpdate.Status.UNPUBLISHED,
         )
         project_update.full_clean()
         project_update.save()
         log_create(
             created_by,
             project_update,
-            _('Avance de proyecto creado como borrador con persona responsable asignada.'),
+            _('Avance de proyecto registrado como no publicado con persona responsable asignada.'),
         )
     _create_project_update_attachments(project_update, attachments, created_by)
     return project_update
@@ -1362,8 +1362,8 @@ def update_project_update(
     reported_by, actor, attachments=()
 ) -> ProjectUpdate:
     """
-    PRE: update_id identifies a DRAFT advance and submitted values are validated form data.
-    POST: atomically locks and updates only that draft's material fields, then returns it.
+    PRE: update_id identifies an UNPUBLISHED advance and submitted values are validated form data.
+    POST: atomically locks and updates only that unpublished advance's material fields, then returns it.
     """
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
@@ -1382,7 +1382,7 @@ def update_project_update(
         summary = (
             _('Atribución de la persona responsable del avance actualizada.')
             if reported_by_changed
-            else _('Borrador de avance actualizado.')
+            else _('Avance no publicado actualizado.')
         )
         log_update(actor, project_update, summary)
     _create_project_update_attachments(project_update, attachments, actor)
@@ -1391,10 +1391,10 @@ def update_project_update(
 
 def _create_project_update_attachments(project_update, files, actor) -> list[ProjectUpdateAttachment]:
     """
-    PRE: project_update está bloqueado o acaba de crearse como DRAFT; files ya superó validación de formulario.
+    PRE: project_update está bloqueado o acaba de crearse como UNPUBLISHED; files ya superó validación de formulario.
     POST: crea un adjunto por archivo y devuelve las filas persistidas.
     """
-    assert project_update.status == ProjectUpdate.Status.DRAFT
+    assert project_update.status == ProjectUpdate.Status.UNPUBLISHED
     return [
         add_project_update_attachment(
             update_id=project_update.pk,
@@ -1409,7 +1409,7 @@ def _create_project_update_attachments(project_update, files, actor) -> list[Pro
 def add_project_update_attachment(*, update_id: int, file, title: str, actor) -> ProjectUpdateAttachment:
     """
     PRE: update_id identifica un avance y file es un archivo validado.
-    POST: crea atómicamente un adjunto solo si el avance continúa DRAFT.
+    POST: crea atómicamente un adjunto solo si el avance continúa UNPUBLISHED.
     """
     with transaction.atomic():
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
@@ -1440,7 +1440,7 @@ def add_project_update_attachment(*, update_id: int, file, title: str, actor) ->
 def delete_project_update_attachment(*, attachment_id: int, actor) -> int:
     """
     PRE: attachment_id identifica un adjunto existente.
-    POST: elimina y audita el adjunto solo si su avance continúa DRAFT; retorna el avance padre.
+    POST: elimina y audita el adjunto solo si su avance continúa UNPUBLISHED; retorna el avance padre.
     """
     with transaction.atomic():
         attachment = ProjectUpdateAttachment.objects.select_related('project_update').get(pk=attachment_id)
@@ -1575,7 +1575,7 @@ def resolve_project_update_remediation(*, remediation_id, status, resolution_not
 
 def publish_project_update(update_id: int, actor) -> ProjectUpdate:
     """
-    PRE: update_id identifica un avance DRAFT y actor es un usuario autenticado.
+    PRE: update_id identifica un avance UNPUBLISHED y actor es un usuario autenticado.
     POST: cambia atómicamente el avance a PUBLISHED y registra una auditoría.
     """
     if not getattr(actor, 'is_authenticated', False):
@@ -1584,9 +1584,9 @@ def publish_project_update(update_id: int, actor) -> ProjectUpdate:
         project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
         project = Project.objects.select_for_update().get(pk=project_update.project_id)
         _validate_project_is_active_for_execution_or_updates(project)
-        if project_update.status != ProjectUpdate.Status.DRAFT:
+        if project_update.status != ProjectUpdate.Status.UNPUBLISHED:
             raise ValidationError(
-                {'status': _('Solo un avance en borrador puede publicarse.')}
+                {'status': _('Solo un avance no publicado puede publicarse.')}
             )
         validate_project_update_reporter(project_update.reported_by)
         project_update.status = ProjectUpdate.Status.PUBLISHED

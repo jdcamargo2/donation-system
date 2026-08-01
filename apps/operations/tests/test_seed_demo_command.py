@@ -39,6 +39,7 @@ class SeedSigedonDemoCommandTests(TestCase):
         self.assertTrue(Project.objects.filter(code='PRJ-DEMO-001').exists())
         self.assertTrue(Donation.objects.filter(code='DON-DEMO-001').exists())
         self.assertTrue(ProjectUpdate.objects.filter(status=ProjectUpdate.Status.PUBLISHED).exists())
+        self.assertTrue(ProjectUpdate.objects.filter(status=ProjectUpdate.Status.UNPUBLISHED).exists())
         self.assertFalse(Donation.objects.exclude(currency='USD').exists())
         self.assertFalse(Expense.objects.exclude(currency='USD').exists())
 

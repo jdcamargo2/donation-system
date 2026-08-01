@@ -490,7 +490,7 @@ class Command(BaseCommand):
                     "Se iniciaron reuniones con actores comunitarios y "
                     "representantes parroquiales."
                 ),
-                "status": ProjectUpdate.Status.DRAFT,
+                "status": ProjectUpdate.Status.UNPUBLISHED,
             },
             {
                 "project": projects["este"],
@@ -499,7 +499,7 @@ class Command(BaseCommand):
                     "Se encuentra en preparación el cronograma de visitas "
                     "y levantamiento de información."
                 ),
-                "status": ProjectUpdate.Status.DRAFT,
+                "status": ProjectUpdate.Status.UNPUBLISHED,
             },
         ]
 

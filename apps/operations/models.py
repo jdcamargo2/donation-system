@@ -334,14 +334,14 @@ class ProjectMilestone(models.Model):
 
 class ProjectUpdate(models.Model):
     class Status(models.TextChoices):
-        DRAFT = 'draft', _('Borrador')
+        UNPUBLISHED = 'unpublished', _('No publicado')
         PUBLISHED = 'published', _('Publicado')
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='updates')
     title = models.CharField(max_length=200)
     description = models.TextField()
     update_date = models.DateField(_('fecha del avance'), default=timezone.localdate)
-    status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.UNPUBLISHED)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -404,7 +404,7 @@ class ProjectUpdateAttachmentQuerySet(models.QuerySet):
             )
 
     # PRE: queryset targets attachments and kwargs do not move them to a PUBLISHED update.
-    # POST: updates only attachments belonging to DRAFT updates; published attachments remain unchanged.
+    # POST: updates only attachments belonging to UNPUBLISHED updates; published attachments remain unchanged.
     def update(self, **kwargs):
         self._ensure_no_published_attachments()
         target_project = kwargs.get('project_update', kwargs.get('project_update_id'))
@@ -422,7 +422,7 @@ class ProjectUpdateAttachmentQuerySet(models.QuerySet):
         return super().update(**kwargs)
 
     # PRE: queryset targets persisted project-update attachments.
-    # POST: deletes only attachments belonging to DRAFT updates; published attachments remain unchanged.
+    # POST: deletes only attachments belonging to UNPUBLISHED updates; published attachments remain unchanged.
     def delete(self):
         self._ensure_no_published_attachments()
         return super().delete()
@@ -592,7 +592,7 @@ class ProjectUpdateAttachment(models.Model):
     def save(self, *args, **kwargs):
         """
         PRE: the attachment has a valid parent update and ordinary mutation is requested.
-        POST: persists only an attachment associated with a DRAFT update.
+        POST: persists only an attachment associated with an UNPUBLISHED update.
         """
         self._ensure_parent_update_is_editable()
         return super().save(*args, **kwargs)
@@ -600,7 +600,7 @@ class ProjectUpdateAttachment(models.Model):
     def delete(self, *args, **kwargs):
         """
         PRE: the attachment is persisted and ordinary deletion is requested.
-        POST: deletes only an attachment whose parent update remains DRAFT.
+        POST: deletes only an attachment whose parent update remains UNPUBLISHED.
         """
         self._ensure_parent_update_is_editable()
         return super().delete(*args, **kwargs)

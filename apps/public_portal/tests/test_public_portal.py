@@ -53,13 +53,13 @@ class PublicPortalTests(TestCase):
             project=self.project,
             title='Avance rechazado privado',
             description='No debe mostrarse.',
-            status=ProjectUpdate.Status.DRAFT,
+            status=ProjectUpdate.Status.UNPUBLISHED,
         )
-        self.draft_update = ProjectUpdate.objects.create(
+        self.unpublished_update = ProjectUpdate.objects.create(
             project=self.project,
-            title='Avance borrador privado',
+            title='Avance no publicado privado',
             description='No debe mostrarse.',
-            status=ProjectUpdate.Status.DRAFT,
+            status=ProjectUpdate.Status.UNPUBLISHED,
         )
 
     def create_approved_update_for_project_status(self, code, project_status, *, is_public=True):
@@ -235,7 +235,7 @@ class PublicPortalTests(TestCase):
         self.assertNotIn('public-notice-inline', content)
 
     def test_public_project_detail_empty_updates_explains_publication_policy(self):
-        self.approved_update.status = ProjectUpdate.Status.DRAFT
+        self.approved_update.status = ProjectUpdate.Status.UNPUBLISHED
         self.approved_update.save(update_fields=['status'])
 
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
@@ -302,14 +302,14 @@ class PublicPortalTests(TestCase):
         public_url = reverse('public_portal:public_project_update_detail', args=[self.approved_update.pk])
 
         response = self.client.get(public_url)
-        draft_response = self.client.get(
+        unpublished_response = self.client.get(
             reverse('public_portal:public_project_update_detail', args=[self.pending_update.pk])
         )
         missing_response = self.client.get(reverse('public_portal:public_project_update_detail', args=[999999]))
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'public_portal/public_project_update_detail.html')
-        self.assertEqual(draft_response.status_code, 404)
+        self.assertEqual(unpublished_response.status_code, 404)
         self.assertEqual(missing_response.status_code, 404)
 
         self.project.status = Project.Status.CLOSED
@@ -380,7 +380,7 @@ class PublicPortalTests(TestCase):
         self.assertContains(response, self.approved_update.title)
         self.assertNotContains(response, self.pending_update.title)
         self.assertNotContains(response, self.rejected_update.title)
-        self.assertNotContains(response, self.draft_update.title)
+        self.assertNotContains(response, self.unpublished_update.title)
 
     def test_public_updates_feed_only_shows_approved_updates(self):
         response = self.client.get(reverse('public_portal:public_updates_feed'))
@@ -388,13 +388,13 @@ class PublicPortalTests(TestCase):
         self.assertContains(response, self.approved_update.title)
         self.assertNotContains(response, self.pending_update.title)
         self.assertNotContains(response, self.rejected_update.title)
-        self.assertNotContains(response, self.draft_update.title)
+        self.assertNotContains(response, self.unpublished_update.title)
 
     def test_public_project_detail_does_not_expose_operational_file_urls(self):
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
         self.assertNotContains(response, '/media/')
 
-    def test_public_portal_does_not_show_draft_update(self):
+    def test_public_portal_does_not_show_unpublished_update(self):
         detail_response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
         feed_response = self.client.get(reverse('public_portal:public_updates_feed'))
         self.assertNotContains(detail_response, self.pending_update.title)

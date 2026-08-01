@@ -480,9 +480,15 @@ Representa un avance de proyecto.
 #### Estados
 
 ```text
-draft
+unpublished
 published
 ```
+
+`UNPUBLISHED` / No publicado: registrado internamente; editable por usuarios
+autorizados; admite adjuntos; no aparece en el portal público.
+
+`PUBLISHED` / Publicado: inmutable; elegible para revisión; visible públicamente
+solo si el proyecto está activo y marcado como público.
 
 #### Relaciones
 

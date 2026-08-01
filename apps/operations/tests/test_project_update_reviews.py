@@ -39,9 +39,9 @@ class ProjectUpdateReviewTests(TestCase):
         self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=('status',))
 
-    def create_draft_update(self):
+    def create_unpublished_update(self):
         # PRE: self.project is ACTIVE and can receive advances.
-        # POST: returns a persisted DRAFT advance without a committee review.
+        # POST: returns a persisted UNPUBLISHED advance without a committee review.
         return register_advance(
             project_id=self.project.pk,
             title='Avance para revisión documental',
@@ -53,7 +53,7 @@ class ProjectUpdateReviewTests(TestCase):
     def create_published_update(self):
         # PRE: self.project is ACTIVE and self.field_operator is authenticated.
         # POST: returns a PUBLISHED advance eligible for exactly one review.
-        project_update = self.create_draft_update()
+        project_update = self.create_unpublished_update()
         return publish_project_update(project_update.pk, self.field_operator)
 
     def create_review(self, project_update=None, observations='Documentación revisada por el Comité.'):
@@ -85,16 +85,16 @@ class ProjectUpdateReviewTests(TestCase):
         self.assertEqual(project_update.description, before['description'])
         self.assertEqual(project_update.updated_at, before['updated_at'])
 
-    def test_review_rejects_draft_update(self):
-        draft_update = self.create_draft_update()
+    def test_review_rejects_unpublished_update(self):
+        unpublished_update = self.create_unpublished_update()
 
         with self.assertRaises(ProjectUpdateReviewError):
             create_project_update_review(
-                update_id=draft_update.pk,
+                update_id=unpublished_update.pk,
                 observations='Observación no permitida.',
                 actor=self.committee_member,
             )
-        self.assertFalse(ProjectUpdateReview.objects.filter(project_update=draft_update).exists())
+        self.assertFalse(ProjectUpdateReview.objects.filter(project_update=unpublished_update).exists())
         self.assertFalse(AuditLog.objects.filter(model_name='Revisión documental de avance').exists())
 
     def test_review_rejects_blank_observations(self):
@@ -119,9 +119,9 @@ class ProjectUpdateReviewTests(TestCase):
         self.assertFalse(ProjectUpdateReview.objects.filter(project_update=published_update).exists())
         self.assertFalse(AuditLog.objects.filter(model_name='Revisión documental de avance').exists())
 
-    def test_model_validation_rejects_draft_updates_and_blank_observations(self):
-        draft_review = ProjectUpdateReview(
-            project_update=self.create_draft_update(),
+    def test_model_validation_rejects_unpublished_updates_and_blank_observations(self):
+        unpublished_review = ProjectUpdateReview(
+            project_update=self.create_unpublished_update(),
             observations='Observación inválida.',
         )
         blank_review = ProjectUpdateReview(
@@ -130,7 +130,7 @@ class ProjectUpdateReviewTests(TestCase):
         )
 
         with self.assertRaisesMessage(Exception, 'Solo los avances publicados'):
-            draft_review.full_clean()
+            unpublished_review.full_clean()
         with self.assertRaisesMessage(Exception, 'Las observaciones del Comité son obligatorias'):
             blank_review.full_clean()
 
@@ -150,9 +150,9 @@ class ProjectUpdateReviewTests(TestCase):
     def test_review_form_only_exposes_observations(self):
         self.assertEqual(list(ProjectUpdateReviewForm().fields), ['observations'])
 
-    def test_committee_can_create_and_view_review_but_not_review_drafts(self):
+    def test_committee_can_create_and_view_review_but_not_review_unpublished(self):
         published_update = self.create_published_update()
-        draft_update = self.create_draft_update()
+        unpublished_update = self.create_unpublished_update()
         self.client.force_login(self.committee_member)
 
         self.assertEqual(
@@ -160,7 +160,7 @@ class ProjectUpdateReviewTests(TestCase):
             200,
         )
         self.assertEqual(
-            self.client.get(reverse('project_update_review_create', args=[draft_update.pk])).status_code,
+            self.client.get(reverse('project_update_review_create', args=[unpublished_update.pk])).status_code,
             403,
         )
         create_response = self.client.post(
@@ -207,14 +207,14 @@ class ProjectUpdateReviewTests(TestCase):
         self.assertFalse(ProjectUpdateReview.objects.filter(project_update=published_update).exists())
 
     def test_user_without_review_permission_cannot_distinguish_update_state(self):
-        draft_update = self.create_draft_update()
+        unpublished_update = self.create_unpublished_update()
         published_update = self.create_published_update()
         reviewed_update = self.create_published_update()
         self.create_review(reviewed_update)
         user = get_user_model().objects.create_user(username='review-state-probe', password='pass-12345')
         self.client.force_login(user)
 
-        for project_update in (draft_update, published_update, reviewed_update):
+        for project_update in (unpublished_update, published_update, reviewed_update):
             with self.subTest(project_update=project_update.pk):
                 response = self.client.get(reverse('project_update_review_create', args=[project_update.pk]))
 
@@ -254,16 +254,16 @@ class ProjectUpdateReviewTests(TestCase):
 
     def test_review_interface_only_offers_creation_for_unreviewed_published_updates(self):
         published_update = self.create_published_update()
-        draft_update = self.create_draft_update()
+        unpublished_update = self.create_unpublished_update()
         self.client.force_login(self.committee_member)
 
         published_response = self.client.get(reverse('project_update_detail', args=[published_update.pk]))
-        draft_response = self.client.get(reverse('project_update_detail', args=[draft_update.pk]))
+        unpublished_response = self.client.get(reverse('project_update_detail', args=[unpublished_update.pk]))
 
         self.assertContains(published_response, reverse('project_update_review_create', args=[published_update.pk]))
         self.assertContains(published_response, 'Publicado')
-        self.assertContains(draft_response, 'Sin revisión del Comité')
-        self.assertNotContains(draft_response, reverse('project_update_review_create', args=[draft_update.pk]))
+        self.assertContains(unpublished_response, 'Sin revisión del Comité')
+        self.assertNotContains(unpublished_response, reverse('project_update_review_create', args=[unpublished_update.pk]))
 
         review = self.create_review(published_update)
         reviewed_response = self.client.get(reverse('project_update_detail', args=[published_update.pk]))

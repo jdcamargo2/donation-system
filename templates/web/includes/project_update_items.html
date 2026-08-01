@@ -1,7 +1,7 @@
 {% for update in project_updates %}
     {% include "web/includes/project_update_item.html" %}
 {% empty %}
-    <div class="list-group-item text-muted">No hay avances publicados{% if perms.operations.view_projectupdate %} ni borradores registrados{% endif %} para este proyecto.</div>
+    <div class="list-group-item text-muted">No hay avances publicados{% if perms.operations.view_projectupdate %} ni avances no publicados registrados{% endif %} para este proyecto.</div>
 {% endfor %}
 {% if project_update_page.has_next %}
 <a

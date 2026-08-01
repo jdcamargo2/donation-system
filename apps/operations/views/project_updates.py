@@ -407,7 +407,7 @@ class ProjectUpdateUpdateView(OperationsPermissionRequiredMixin, RouteContextMix
 
     def dispatch(self, request, *args, **kwargs):
         # PRE: request targets ordinary editing and permission handling remains authoritative.
-        # POST: permits DRAFT advances only; published advances return 403.
+        # POST: permits UNPUBLISHED advances only; published advances return 403.
         if request.user.is_authenticated and request.user.has_perm(self.permission_required):
             project_update = get_object_or_404(ProjectUpdate, pk=kwargs['pk'])
             try:
@@ -423,7 +423,7 @@ class ProjectUpdateUpdateView(OperationsPermissionRequiredMixin, RouteContextMix
 
     def form_valid(self, form):
         """
-        PRE: form is valid and the route targets a DRAFT advance.
+        PRE: form is valid and the route targets an UNPUBLISHED advance.
         POST: updates through the locked domain service or redisplays domain errors.
         """
         try:
@@ -496,7 +496,7 @@ class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, FormV
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
-        # PRE: form.cleaned_data['files'] is a validated non-empty upload list; parent update is DRAFT.
+        # PRE: form.cleaned_data['files'] is a validated non-empty upload list; parent update is UNPUBLISHED.
         # POST: persists one attachment per file via the domain helper, then redirects once to detail.
         try:
             _create_project_update_attachments(
@@ -528,7 +528,7 @@ class ProjectUpdateAttachmentDeleteView(OperationsPermissionRequiredMixin, View)
 
     def post(self, request, *args, **kwargs):
         # PRE: el usuario tiene permiso y pk identifica un adjunto.
-        # POST: elimina mediante el servicio solo si el avance padre es DRAFT.
+        # POST: elimina mediante el servicio solo si el avance padre es UNPUBLISHED.
         try:
             update_id = delete_project_update_attachment(
                 attachment_id=kwargs['pk'], actor=request.user

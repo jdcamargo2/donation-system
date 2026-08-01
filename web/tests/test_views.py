@@ -230,13 +230,13 @@ class OperationalDetailViewTests(TestCase):
         self.assertContains(response, 'Sin hitos definidos')
         self.assertContains(
             response,
-            'No hay avances publicados ni borradores registrados para este proyecto.',
+            'No hay avances publicados ni avances no publicados registrados para este proyecto.',
         )
         self.assertContains(response, 'Este proyecto todavía no tiene documentos.')
 
-    def test_authorized_user_sees_published_and_draft_updates(self):
-        draft = register_advance(
-            self.project.pk, 'Borrador interno', 'Detalle', created_by=self.user, reported_by=self.user
+    def test_authorized_user_sees_published_and_unpublished_updates(self):
+        unpublished = register_advance(
+            self.project.pk, 'No publicado interno', 'Detalle', created_by=self.user, reported_by=self.user
         )
         published = register_advance(
             self.project.pk, 'Publicado operativo', 'Detalle', created_by=self.user, reported_by=self.user
@@ -245,12 +245,12 @@ class OperationalDetailViewTests(TestCase):
 
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
-        self.assertContains(response, draft.title)
+        self.assertContains(response, unpublished.title)
         self.assertContains(response, published.title)
 
     def test_user_without_update_view_permission_sees_only_published_updates(self):
-        draft = register_advance(
-            self.project.pk, 'Borrador privado', 'Detalle', created_by=self.user, reported_by=self.user
+        unpublished = register_advance(
+            self.project.pk, 'No publicado privado', 'Detalle', created_by=self.user, reported_by=self.user
         )
         published = register_advance(
             self.project.pk, 'Publicado visible', 'Detalle', created_by=self.user, reported_by=self.user
@@ -263,7 +263,7 @@ class OperationalDetailViewTests(TestCase):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
         self.assertContains(response, published.title)
-        self.assertNotContains(response, draft.title)
+        self.assertNotContains(response, unpublished.title)
 
     def test_donation_detail_renders_restrictions_and_related_allocations(self):
         response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))

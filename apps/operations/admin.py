@@ -337,7 +337,7 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
         POST: status is always readonly; published material fields are readonly.
         """
         readonly = set(super().get_readonly_fields(request, obj))
-        if obj and obj.status != ProjectUpdate.Status.DRAFT:
+        if obj and obj.status != ProjectUpdate.Status.UNPUBLISHED:
             readonly.update(
                 ('project', 'title', 'description', 'update_date', 'reported_by')
             )
@@ -375,7 +375,7 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         """
         PRE: admin form is valid and obj is new or targets an existing advance.
-        POST: creates DRAFT only and saves material changes only on existing DRAFT advances.
+        POST: creates UNPUBLISHED only and saves material changes only on existing UNPUBLISHED advances.
         """
         if change:
             persisted = ProjectUpdate.objects.get(pk=obj.pk)
@@ -386,20 +386,20 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
             obj.created_by = persisted.created_by
         else:
             validate_project_update_reporter(obj.reported_by)
-            obj.status = ProjectUpdate.Status.DRAFT
+            obj.status = ProjectUpdate.Status.UNPUBLISHED
             obj.created_by = request.user if request.user.is_authenticated else None
         super().save_model(request, obj, form, change)
         if change:
             summary = (
                 _('Atribución de la persona responsable del avance actualizada desde administración.')
-                if reported_by_changed else _('Borrador de avance actualizado desde administración.')
+                if reported_by_changed else _('Avance no publicado actualizado desde administración.')
             )
             log_update(request.user, obj, summary)
         else:
             log_create(
                 request.user,
                 obj,
-                _('Avance de proyecto creado como borrador con persona responsable asignada desde administración.'),
+                _('Avance de proyecto registrado como no publicado con persona responsable asignada desde administración.'),
             )
 
 
@@ -453,14 +453,14 @@ class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         # PRE: el formulario admin contiene un adjunto nuevo o modificado.
-        # POST: guarda solo cuando el avance padre continúa DRAFT.
+        # POST: guarda solo cuando el avance padre continúa UNPUBLISHED.
         project_update = ProjectUpdate.objects.get(pk=obj.project_update_id)
         ensure_project_update_is_editable(project_update)
         super().save_model(request, obj, form, change)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == 'project_update':
-            kwargs['queryset'] = ProjectUpdate.objects.filter(status=ProjectUpdate.Status.DRAFT)
+            kwargs['queryset'] = ProjectUpdate.objects.filter(status=ProjectUpdate.Status.UNPUBLISHED)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def has_change_permission(self, request, obj=None):
@@ -475,13 +475,13 @@ class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
 
     def delete_model(self, request, obj):
         # PRE: obj is an attachment selected for ordinary admin deletion.
-        # POST: deletes only an attachment whose parent update remains DRAFT.
+        # POST: deletes only an attachment whose parent update remains UNPUBLISHED.
         ensure_project_update_is_editable(obj.project_update)
         return super().delete_model(request, obj)
 
     def delete_queryset(self, request, queryset):
         # PRE: queryset contains attachments selected by the admin bulk delete action.
-        # POST: deletes the batch only when every parent update remains DRAFT.
+        # POST: deletes the batch only when every parent update remains UNPUBLISHED.
         for attachment in queryset.select_related('project_update'):
             ensure_project_update_is_editable(attachment.project_update)
         return super().delete_queryset(request, queryset)

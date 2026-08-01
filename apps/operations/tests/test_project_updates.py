@@ -32,9 +32,9 @@ class ProjectUpdateTests(TestCase):
         self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=('status',))
 
-    def create_draft(self):
+    def create_unpublished(self):
         # PRE: self.project está activo y self.user puede ser atribuido en auditoría.
-        # POST: retorna un avance DRAFT persistido con fecha válida.
+        # POST: retorna un avance UNPUBLISHED persistido con fecha válida.
         return register_advance(
             project_id=self.project.pk,
             title='Avance operativo',
@@ -44,13 +44,15 @@ class ProjectUpdateTests(TestCase):
             reported_by=self.reported_by,
         )
 
-    def test_new_project_update_is_draft(self):
-        update = self.create_draft()
+    def test_new_project_update_is_unpublished(self):
+        update = self.create_unpublished()
 
-        self.assertEqual(update.status, ProjectUpdate.Status.DRAFT)
-        self.assertTrue(AuditLog.objects.filter(
+        self.assertEqual(update.status, ProjectUpdate.Status.UNPUBLISHED)
+        audit = AuditLog.objects.get(
             entity_id=str(update.pk), action=AuditLog.Action.CREATED, user=self.user
-        ).exists())
+        )
+        self.assertIn('no publicado', audit.summary.lower())
+        self.assertNotIn('borrador', audit.summary.lower())
 
     def test_register_advance_keeps_technical_creator_and_institutional_reporter_separate(self):
         update = register_advance(
@@ -193,8 +195,8 @@ class ProjectUpdateTests(TestCase):
         self.assertContains(response_with_reporter, self.reported_by.get_username())
         self.assertContains(project_response, f'Persona responsable del avance: {self.reported_by.get_username()}')
 
-    def test_draft_can_be_edited(self):
-        update = self.create_draft()
+    def test_unpublished_can_be_edited(self):
+        update = self.create_unpublished()
 
         edited = update_project_update(
             update_id=update.pk,
@@ -212,8 +214,8 @@ class ProjectUpdateTests(TestCase):
             entity_id=str(update.pk), action=AuditLog.Action.UPDATED, user=self.editor
         ).exists())
 
-    def test_draft_cannot_be_reassigned_to_closed_project(self):
-        update = self.create_draft()
+    def test_unpublished_cannot_be_reassigned_to_closed_project(self):
+        update = self.create_unpublished()
         target_project = create_project(code='PRJ-UPDATE-CLOSED-TARGET')
         target_project.status = Project.Status.CLOSED
         target_project.save(update_fields=('status',))
@@ -233,8 +235,8 @@ class ProjectUpdateTests(TestCase):
         self.assertEqual(update.project, self.project)
         self.assertEqual(update.title, 'Avance operativo')
 
-    def test_draft_update_view_changes_reported_by(self):
-        update = self.create_draft()
+    def test_unpublished_update_view_changes_reported_by(self):
+        update = self.create_unpublished()
         self.client.force_login(self.editor)
 
         response = self.client.post(
@@ -256,7 +258,7 @@ class ProjectUpdateTests(TestCase):
         ).exists())
 
     def test_publish_changes_status_to_published_via_post(self):
-        update = self.create_draft()
+        update = self.create_unpublished()
         self.client.force_login(self.user)
 
         get_response = self.client.get(reverse('project_update_publish', args=[update.pk]))
@@ -301,7 +303,7 @@ class ProjectUpdateTests(TestCase):
                         reported_by=reporter,
                     )
 
-    def test_historical_draft_without_responsible_person_cannot_publish_or_audit(self):
+    def test_historical_unpublished_without_responsible_person_cannot_publish_or_audit(self):
         update = ProjectUpdate.objects.create(
             project=self.project,
             title='Avance histórico sin responsable para publicar',
@@ -313,13 +315,13 @@ class ProjectUpdateTests(TestCase):
             publish_project_update(update.pk, self.user)
 
         update.refresh_from_db()
-        self.assertEqual(update.status, ProjectUpdate.Status.DRAFT)
+        self.assertEqual(update.status, ProjectUpdate.Status.UNPUBLISHED)
         self.assertFalse(AuditLog.objects.filter(
             entity_id=str(update.pk), action=AuditLog.Action.PUBLISHED
         ).exists())
 
     def test_changing_responsible_person_creates_safe_audit_summary(self):
-        update = self.create_draft()
+        update = self.create_unpublished()
         replacement = create_user('replacement-reporter')
         replacement.email = 'replacement@example.com'
         replacement.save(update_fields=('email',))
@@ -340,7 +342,7 @@ class ProjectUpdateTests(TestCase):
         self.assertNotIn(replacement.email, audit.summary)
 
     def test_publish_rejects_closed_project(self):
-        update = self.create_draft()
+        update = self.create_unpublished()
         self.project.status = Project.Status.CLOSED
         self.project.save(update_fields=('status',))
 
@@ -348,12 +350,12 @@ class ProjectUpdateTests(TestCase):
             publish_project_update(update.pk, self.user)
 
         update.refresh_from_db()
-        self.assertEqual(update.status, ProjectUpdate.Status.DRAFT)
+        self.assertEqual(update.status, ProjectUpdate.Status.UNPUBLISHED)
         self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=('status',))
 
     def test_published_project_update_cannot_be_edited(self):
-        update = self.create_draft()
+        update = self.create_unpublished()
         update.reported_by = self.user
         update.save(update_fields=('reported_by',))
         publish_project_update(update.pk, self.user)
@@ -505,7 +507,7 @@ class ProjectUpdateDetailTests(TestCase):
         self.assertNotContains(published_response, 'Más acciones del avance')
         self.assertNotContains(published_response, 'Agregar adjuntos')
 
-    def test_draft_detail_shows_plural_add_attachments_action(self):
+    def test_unpublished_detail_shows_plural_add_attachments_action(self):
         self.client.force_login(self.user)
         response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
 
@@ -589,7 +591,7 @@ class ProjectUpdateDetailTests(TestCase):
         end = content.index('</div>', start) + len('</div>')
         return content[start:end]
 
-    def test_draft_attachment_actions_render_download_and_delete_as_siblings(self):
+    def test_unpublished_attachment_actions_render_download_and_delete_as_siblings(self):
         attachment = self._create_attachment()
         download_url = reverse('project_update_attachment_download', args=[attachment.pk])
         delete_url = reverse('project_update_attachment_delete', args=[attachment.pk])
@@ -684,7 +686,7 @@ class ProjectUpdateChunkTests(TestCase):
         self.project.save(update_fields=('status',))
         self.client.force_login(self.user)
 
-    def create_updates(self, count, *, project=None, status=ProjectUpdate.Status.DRAFT):
+    def create_updates(self, count, *, project=None, status=ProjectUpdate.Status.UNPUBLISHED):
         # PRE: count is non-negative and project is persisted when provided.
         # POST: returns count updates whose created_at values are equal for pk tie-break tests.
         target_project = project or self.project
@@ -763,7 +765,7 @@ class ProjectUpdateChunkTests(TestCase):
             6,
             status=ProjectUpdate.Status.PUBLISHED,
         )
-        draft_updates = self.create_updates(3)
+        unpublished_updates = self.create_updates(3)
         viewer = get_user_model().objects.create_user(
             username='chunk-project-viewer',
             password='pass-12345',
@@ -785,8 +787,8 @@ class ProjectUpdateChunkTests(TestCase):
         ]
         self.assertEqual(chunk_ids, detail_ids)
         self.assertEqual(chunk_ids, [update.pk for update in reversed(published_updates[-5:])])
-        for draft in draft_updates:
-            self.assertNotContains(chunk_response, draft.title)
+        for unpublished in unpublished_updates:
+            self.assertNotContains(chunk_response, unpublished.title)
 
     def test_chunk_requires_authentication_permission_and_existing_project(self):
         chunk_url = reverse('project_update_chunk', args=[self.project.pk])

@@ -417,7 +417,7 @@ class OperationsPermissionTests(TestCase):
         self.assertEqual(edit_response.status_code, 200)
         self.assertEqual(publish_response.status_code, 403)
         self.project_update.refresh_from_db()
-        self.assertEqual(self.project_update.status, 'draft')
+        self.assertEqual(self.project_update.status, 'unpublished')
 
     def test_publish_projectupdate_permission_can_publish_without_editing(self):
         self.client.force_login(create_user_with_permissions(
@@ -439,7 +439,7 @@ class OperationsPermissionTests(TestCase):
         )
         self.assertEqual(edit_response.status_code, 403)
         self.assertEqual(get_publish_response.status_code, 405)
-        self.assertEqual(self.project_update.status, 'draft')
+        self.assertEqual(self.project_update.status, 'unpublished')
 
         publish_response = self.client.post(publish_url)
         published_list_response = self.client.get(reverse('project_update_list'))
@@ -457,7 +457,7 @@ class OperationsPermissionTests(TestCase):
         self.assertNotContains(list_response, f'action="{publish_url}"')
         self.assertEqual(publish_response.status_code, 403)
         self.project_update.refresh_from_db()
-        self.assertEqual(self.project_update.status, 'draft')
+        self.assertEqual(self.project_update.status, 'unpublished')
 
     def test_project_update_list_omits_arbitrary_progress_representation(self):
         self.client.force_login(
@@ -507,7 +507,7 @@ class OperationsPermissionTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.project_update.refresh_from_db()
-        self.assertEqual(self.project_update.status, 'draft')
+        self.assertEqual(self.project_update.status, 'unpublished')
 
     def test_user_with_view_auditlog_permission_can_access_audit_log_list(self):
         self.client.force_login(create_user_with_permissions('view-auditlog', 'view_auditlog'))
