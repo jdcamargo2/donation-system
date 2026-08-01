@@ -363,6 +363,88 @@ El monto ejecutado y el saldo se derivan de los gastos no anulados.
 
 ---
 
+### 5.4a. `operations_expenserequest`
+
+Representa una solicitud de gasto gobernada sobre una asignación.
+
+Campos principales: `code` (único/inmutable, prefijo `SGS`), `fund_allocation_id`,
+`requested_by_id`, `requested_amount`, `purpose`, `requested_date`, `status`,
+metadatos de decisión (`decision_note`, `decided_by_id`, `decided_at`), reserva
+(`reserved_amount`, `reserved_at`), enlace opcional `expense_id` (OneToOne),
+metadatos terminales y timestamps.
+
+#### Estados
+
+```text
+pending_decision
+approved_reserved
+denied
+withdrawn
+fulfilled
+annulled
+```
+
+#### Índices
+
+```text
+ops_expreq_status_idx
+ops_expreq_alloc_status_idx
+ops_expreq_req_by_status_idx
+ops_expreq_req_date_idx
+ops_expreq_decided_at_idx
+ops_expreq_created_at_idx
+```
+
+#### Constraints (migración `0027`)
+
+Constraints nombrados por estado/monto, entre ellos:
+
+```text
+operations_expenserequest_requested_amount_gt_zero
+operations_expenserequest_reserved_amount_gte_zero
+operations_expenserequest_reserved_lte_requested
+operations_expenserequest_fulfilled_requires_expense
+operations_expenserequest_non_fulfilled_no_expense
+operations_expenserequest_approved_fulfilled_meta
+operations_expenserequest_denied_requires_decision
+operations_expenserequest_terminal_requires_meta
+operations_expenserequest_pending_clean_slate
+operations_expenserequest_denied_no_reservation
+operations_expenserequest_withdrawn_no_decision
+operations_expenserequest_approved_no_terminal
+operations_expenserequest_fulfilled_no_terminal
+operations_expenserequest_annulled_no_expense
+```
+
+#### Relaciones
+
+```text
+FundAllocation 1 ──< ExpenseRequest
+ExpenseRequest 0..1 ── 1 Expense   (solo en fulfilled)
+ExpenseRequest 1 ──< ExpenseRequestAttachment
+ExpenseRequest 1 ──< ExpenseRequestEvent
+```
+
+### 5.4b. `operations_expenserequestattachment`
+
+Evidencia opcional de solicitud (`file`, `title`, `uploaded_by_id`, `uploaded_at`,
+`notes`). Mutable solo mientras el padre esté en `pending_decision`.
+
+### 5.4c. `operations_expenserequestevent`
+
+Historial estructurado append-only de la solicitud. Índices:
+
+```text
+ops_expreq_evt_req_created_idx
+ops_expreq_evt_type_crtd_idx
+```
+
+En PostgreSQL, la migración `0029_expense_request_event_append_only` instala el
+trigger `operations_expenserequestevent_append_only` que rechaza `UPDATE`,
+`DELETE` y `TRUNCATE`. Complementa `AuditLog`; no lo sustituye.
+
+---
+
 ### 5.5. `operations_expense`
 
 Representa un gasto registrado contra una asignación.
@@ -629,6 +711,7 @@ Mantiene los próximos números disponibles para los códigos operativos.
 | `project`         | `PRJ`   |
 | `donation`        | `DON`   |
 | `fund_allocation` | `ASG`   |
+| `expense_request` | `SGS`   |
 | `expense`         | `GAS`   |
 
 #### Ejemplos
@@ -637,6 +720,7 @@ Mantiene los próximos números disponibles para los códigos operativos.
 PRJ-000001
 DON-000001
 ASG-000001
+SGS-000001
 GAS-000001
 ```
 

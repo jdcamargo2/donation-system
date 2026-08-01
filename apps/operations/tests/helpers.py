@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 
-from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project
+from apps.operations.models import Donation, Expense, ExpenseRequest, FundAllocation, Institution, Project
 
 
 TEST_DATE = date(2026, 7, 8)
@@ -64,4 +64,27 @@ def create_expense(
         provider_or_recipient='Provider A',
         payment_method='bank_transfer',
         status=status,
+    )
+
+
+def create_expense_request(
+    *,
+    fund_allocation=None,
+    requested_by=None,
+    requested_amount=Decimal('15.00'),
+    purpose='Solicitud de gasto de prueba',
+    requested_date=TEST_DATE,
+    status=ExpenseRequest.Status.PENDING_DECISION,
+    code='',
+    **extra_fields,
+):
+    return ExpenseRequest.objects.create(
+        code=code,
+        fund_allocation=fund_allocation or create_allocation(),
+        requested_by=requested_by or create_user(username='expense-request-actor'),
+        requested_amount=requested_amount,
+        purpose=purpose,
+        requested_date=requested_date,
+        status=status,
+        **extra_fields,
     )

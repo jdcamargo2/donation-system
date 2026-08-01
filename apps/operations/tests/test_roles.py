@@ -38,6 +38,10 @@ COMMITTEE_TARGET_PERMISSION_CODENAMES = {
     'decide_projectupdate',
     'resolve_projectupdateremediation',
     'view_territorial_administration',
+    'view_expenserequest',
+    'decide_expenserequest',
+    'view_expenserequestattachment',
+    'view_expenserequestevent',
 }
 
 
@@ -94,6 +98,11 @@ class OperationRoleTests(TestCase):
             'delete_projectupdatereviewdecision', 'review_projectupdate', 'decide_projectupdate',
             'resolve_projectupdateremediation',
             'delete_project',
+            'decide_expenserequest',
+            'delete_expenserequest',
+            'add_expenserequestevent',
+            'change_expenserequestevent',
+            'delete_expenserequestevent',
         }
 
         for permission in operations_permissions:
@@ -391,6 +400,14 @@ class OperationRoleTests(TestCase):
                 'add_projectupdateremediationattachment',
                 'delete_projectupdateremediationattachment',
                 'submit_projectupdateremediation',
+                'view_expenserequest',
+                'add_expenserequest',
+                'change_expenserequest',
+                'withdraw_expenserequest',
+                'view_expenserequestattachment',
+                'add_expenserequestattachment',
+                'delete_expenserequestattachment',
+                'view_expenserequestevent',
             },
             ROLE_EXTERNAL_AUDITOR: {
                 'view_institution',
@@ -402,6 +419,9 @@ class OperationRoleTests(TestCase):
                 'view_projectupdate',
                 'view_auditlog',
                 'view_territorial_administration',
+                'view_expenserequest',
+                'view_expenserequestattachment',
+                'view_expenserequestevent',
             },
             ROLE_PROJECT_COMMITTEE: COMMITTEE_TARGET_PERMISSION_CODENAMES,
         }

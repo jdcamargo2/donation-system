@@ -153,6 +153,23 @@ python manage.py test web.tests.test_dashboard
 python manage.py test apps.operations.tests.test_roles
 ```
 
+### Solicitudes de gasto (ER1)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_expense_request_models \
+  apps.operations.tests.test_expense_request_roles \
+  apps.operations.tests.test_expense_request_operational_codes \
+  apps.operations.tests.test_expense_request_events \
+  apps.operations.tests.test_expense_request_attachments \
+  apps.operations.tests.test_roles \
+  apps.operations.tests.test_operational_codes
+```
+
+Los tests de trigger PostgreSQL y concurrencia de códigos `SGS` se omiten de
+forma limpia bajo SQLite (`skipUnless`); deben ejecutarse contra una base
+PostgreSQL desechable para validar la defensa append-only.
+
 ### Concurrencia
 
 ```bash

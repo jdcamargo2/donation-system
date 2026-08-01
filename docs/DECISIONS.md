@@ -88,11 +88,39 @@ La integridad concurrente de SIGEDON depende de transacciones, bloqueos reales d
 
 ---
 
+## 2026-08-01 — Solicitudes de gasto (Expense Request) como paso gobernado
+
+### Decisión
+
+`ExpenseRequest` es una entidad separada de `Expense`. No existe estado `DRAFT`.
+El prefijo operativo es `SGS` (`namespace=expense_request`). Los adjuntos de
+solicitud se congelan al salir de `PENDING_DECISION`. La trazabilidad combina
+eventos estructurados e inmutables (`ExpenseRequestEvent`) con `AuditLog`.
+Administrador SIGEDON puede crear solicitudes pero no decidirlas
+(`decide_expenserequest` exclusividad del Comité). La edición queda limitada al
+creador mientras la solicitud esté pendiente (enforcement de ownership en ER2).
+La entrada directa ordinaria de gastos se retira progresivamente como parte del
+flujo gobernado.
+
+### Motivo
+
+Separar la decisión/reserva de la ejecución contable evita contaminar `Expense`
+con estados de aprobación y permite trazabilidad financiera explícita.
+
+### Consecuencias
+
+* Cadena: Donation → FundAllocation → ExpenseRequest → Expense.
+* `Expense` conserva solo `REGISTERED` / `ANNULLED`.
+* ER1 entrega modelos, constraints, permisos, secuencia `SGS` y trigger
+  append-only; ER2 implementará reservas y servicios de ciclo de vida.
+
+---
+
 ## 2026-07-11 — Códigos operativos transaccionales
 
 ### Decisión
 
-Los proyectos, donaciones, asignaciones y gastos utilizan secuencias operativas bloqueadas transaccionalmente.
+Los proyectos, donaciones, asignaciones, solicitudes de gasto y gastos utilizan secuencias operativas bloqueadas transaccionalmente.
 
 ### Formatos
 
@@ -100,6 +128,7 @@ Los proyectos, donaciones, asignaciones y gastos utilizan secuencias operativas 
 PRJ-000001
 DON-000001
 ASG-000001
+SGS-000001
 GAS-000001
 ```
 

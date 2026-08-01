@@ -35,6 +35,23 @@ Antes de continuar, debe completarse la configuración mínima requerida en `.en
 python manage.py migrate
 ```
 
+Las migraciones `0026`–`0029` de `operations` introducen `ExpenseRequest`,
+constraints, la secuencia operativa `expense_request`/`SGS` y el trigger
+append-only de `ExpenseRequestEvent`. Deben aplicarse solo sobre bases
+autorizadas; no se documenta aquí su aplicación sobre `db_sigedon` activa.
+
+Tras migrar un entorno desechable o de staging, sincronizar roles y verificar
+secuencias:
+
+```bash
+python manage.py sync_sigedon_roles
+python manage.py reconcile_operational_code_sequences
+```
+
+`reconcile_operational_code_sequences` es detect-only e incluye el namespace
+`expense_request` (`SGS`). `sync_sigedon_roles` aplica la matriz canónica de
+permisos de solicitud de gasto sin mutar eventos.
+
 ### 1.5. Crear un superusuario
 
 ```bash

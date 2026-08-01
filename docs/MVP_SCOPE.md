@@ -96,6 +96,37 @@ Los proyectos no pueden eliminarse por la UI operativa, URLs, Django Admin ni
 ORM de aplicación. La anulación sigue aplicada a donaciones, asignaciones y
 gastos; no a proyectos.
 
+### 3.3a. Solicitudes de gasto
+
+Una solicitud de gasto (`ExpenseRequest`) es el paso gobernado entre asignación
+y gasto. La cadena operativa del MVP es:
+
+```text
+Donation
+→ FundAllocation
+→ ExpenseRequest
+→ Expense
+```
+
+Todo gasto futuro debe originarse en una solicitud aprobada con fondos
+reservados. La reserva financiera y los servicios de ciclo de vida se completan
+en checkpoints posteriores (ER2/UI); ER1 establece modelos, permisos, evidencias
+y eventos inmutables.
+
+Estados:
+
+```text
+PENDING_DECISION
+APPROVED_RESERVED
+DENIED
+WITHDRAWN
+FULFILLED
+ANNULLED
+```
+
+No existe estado `DRAFT`. Los adjuntos de solicitud son opcionales, distintos de
+`SupportingDocument`, y se congelan al salir de `PENDING_DECISION`.
+
 ### 3.3. Donaciones
 
 Incluye:
@@ -154,6 +185,16 @@ La ejecución parcial o completa se calcula automáticamente.
 ### 3.5. Gastos
 
 Un gasto representa una ejecución monetaria previamente autorizada fuera del sistema.
+En la cadena gobernada, todo gasto futuro debe proceder de una `ExpenseRequest`
+aprobada y reservada; el bloqueo de creación directa ordinaria se completa en
+checkpoints posteriores. `Expense` conserva únicamente:
+
+```text
+REGISTERED
+ANNULLED
+```
+
+No se introducen estados de aprobación o pendiente en `Expense`.
 
 Incluye:
 
@@ -177,7 +218,8 @@ REGISTERED
 ANNULLED
 ```
 
-El MVP no incluye aprobación multinivel de gastos.
+El registro de gasto permanece como ejecución contable; la decisión de aprobación
+vive en `ExpenseRequest`, no en `Expense`.
 
 ### 3.6. Avances
 
@@ -407,6 +449,7 @@ Formatos:
 PRJ-000001
 DON-000001
 ASG-000001
+SGS-000001
 GAS-000001
 ```
 

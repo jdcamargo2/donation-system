@@ -29,9 +29,19 @@ REVIEW_AND_DECISION_MUTATION_PERMISSION_CODENAMES = frozenset(
         'resolve_projectupdateremediation',
     }
 )
+EXPENSE_REQUEST_ADMIN_EXCLUDED_PERMISSION_CODENAMES = frozenset(
+    {
+        'decide_expenserequest',
+        'delete_expenserequest',
+        'add_expenserequestevent',
+        'change_expenserequestevent',
+        'delete_expenserequestevent',
+    }
+)
 ADMIN_EXCLUDED_PERMISSION_CODENAMES = (
     AUDIT_MUTATION_PERMISSION_CODENAMES
     | REVIEW_AND_DECISION_MUTATION_PERMISSION_CODENAMES
+    | EXPENSE_REQUEST_ADMIN_EXCLUDED_PERMISSION_CODENAMES
     | frozenset({'delete_project'})
 )
 KOBO_TERRITORIAL_ADMIN_PERMISSION_CODENAMES = frozenset(

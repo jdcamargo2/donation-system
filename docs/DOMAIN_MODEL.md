@@ -163,6 +163,38 @@ ANNULLED
 * La ejecución parcial o completa se deriva de los gastos asociados.
 * Una asignación no debe interpretarse como un gasto.
 
+## 5a. `ExpenseRequest`
+
+Representa una solicitud de gasto gobernada sobre una asignación de fondos.
+
+### Estados
+
+```text
+PENDING_DECISION
+  → APPROVED_RESERVED
+  → FULFILLED
+
+PENDING_DECISION
+  → DENIED
+
+PENDING_DECISION
+  → WITHDRAWN
+
+PENDING_DECISION / APPROVED_RESERVED
+  → ANNULLED
+```
+
+### Reglas
+
+* El monto solicitado debe ser positivo.
+* El código operativo `SGS-######` es único e inmutable.
+* La moneda se deriva de la asignación/donación (USD); no hay columna `currency`.
+* Los adjuntos (`ExpenseRequestAttachment`) son opcionales y mutables solo en
+  `PENDING_DECISION`.
+* `ExpenseRequestEvent` es append-only y complementa `AuditLog`.
+* Las mutaciones de ciclo de vida (reserva, decisión, cumplimiento) pertenecen a
+  servicios ER2; el modelo ER1 no expone métodos de transición.
+
 ## 5. `Expense`
 
 Representa un gasto registrado contra una asignación de fondos.
@@ -183,6 +215,8 @@ ANNULLED
 * La anulación requiere una justificación.
 * El código operativo es único e inmutable.
 * Los gastos anulados no participan en saldos ni métricas.
+* Todo gasto futuro debe originarse en una `ExpenseRequest` aprobada y reservada
+  (enforcement completo en ER2/UI).
 
 ## 6. `SupportingDocument`
 

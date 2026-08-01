@@ -59,6 +59,11 @@ review_projectupdate
 decide_projectupdate
 resolve_projectupdateremediation
 delete_project
+decide_expenserequest
+delete_expenserequest
+add_expenserequestevent
+change_expenserequestevent
+delete_expenserequestevent
 ```
 
 ### Permisos territoriales Kobo (automáticos)
@@ -87,6 +92,8 @@ Clarificación:
 * donaciones;
 * asignaciones de fondos;
 * gastos;
+* solicitudes de gasto (crear, editar propias pendientes, cumplir, retirar,
+  anular; **sin** decidir);
 * documentos;
 * avances;
 * publicación de avances;
@@ -123,6 +130,8 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
 * No puede anular un proyecto: `Project` no admite estado anulado.
 * No puede eliminar un proyecto.
 * No recibe permisos de revisión, decisión ni resolución de remediaciones del Comité.
+* No recibe `decide_expenserequest` (solo el Comité decide solicitudes de gasto).
+* No recibe `delete_expenserequest` ni permisos de mutación de `ExpenseRequestEvent`.
 * No recibe automáticamente permisos técnicos generales de Kobo distintos de los cinco territoriales.
 
 ## 2. Operador de campo
@@ -143,6 +152,14 @@ operations.change_projectupdateremediation
 operations.add_projectupdateremediationattachment
 operations.delete_projectupdateremediationattachment
 operations.submit_projectupdateremediation
+operations.view_expenserequest
+operations.add_expenserequest
+operations.change_expenserequest
+operations.withdraw_expenserequest
+operations.view_expenserequestattachment
+operations.add_expenserequestattachment
+operations.delete_expenserequestattachment
+operations.view_expenserequestevent
 ```
 
 ### Puede
@@ -195,6 +212,9 @@ operations.view_expense
 operations.view_supportingdocument
 operations.view_projectupdate
 operations.view_auditlog
+operations.view_expenserequest
+operations.view_expenserequestattachment
+operations.view_expenserequestevent
 kobo.view_territorial_administration
 ```
 
@@ -209,6 +229,7 @@ Puede consultar:
 * donaciones;
 * asignaciones;
 * gastos;
+* solicitudes de gasto y su evidencia/historial (solo lectura);
 * soportes;
 * avances;
 * auditoría;
@@ -254,6 +275,10 @@ operations.view_projectupdateremediationattachment
 operations.review_projectupdate
 operations.decide_projectupdate
 operations.resolve_projectupdateremediation
+operations.view_expenserequest
+operations.decide_expenserequest
+operations.view_expenserequestattachment
+operations.view_expenserequestevent
 kobo.view_territorial_administration
 ```
 
@@ -266,6 +291,8 @@ kobo.view_territorial_administration
 * registrar una revisión institucional (`review_projectupdate`);
 * registrar una decisión institucional (`decide_projectupdate`);
 * resolver remediaciones (`resolve_projectupdateremediation`);
+* consultar solicitudes de gasto y su evidencia;
+* aprobar o denegar solicitudes de gasto (`decide_expenserequest`);
 * consultar el hub territorial en modo lectura.
 
 ### No recibe

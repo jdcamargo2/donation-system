@@ -77,6 +77,18 @@ aplicación. `python manage.py verify_postgres_security` verifica, de forma
 solo de lectura, que el rol runtime conectado no tenga esos privilegios y
 que el trigger esté instalado.
 
+### Eventos de solicitud de gasto
+
+`ExpenseRequestEvent` es append-only en ORM (QuerySet/manager + `save`/`delete`)
+y, en PostgreSQL, mediante el trigger
+`operations_expenserequestevent_append_only` (migración
+`0029_expense_request_event_append_only`). Ningún rol canónico recibe permisos
+de mutación de eventos. Complementa `AuditLog`; no lo sustituye.
+
+Los adjuntos de solicitud (`ExpenseRequestAttachment`) son evidencia privada del
+panel interno: mutables solo en `PENDING_DECISION` y sin ruta pública de media
+en ER1.
+
 Las acciones críticas deben registrar, como mínimo:
 
 * actor;
