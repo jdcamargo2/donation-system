@@ -10,6 +10,7 @@ from django.views.generic import DetailView, FormView, ListView
 
 from ..choices import BUDGET_CATEGORY_CHOICES
 from ..expense_request_services import (
+    annul_expense_request,
     approve_expense_request,
     create_expense_request,
     deny_expense_request,
@@ -23,6 +24,7 @@ from ..forms import (
 )
 from ..models import ExpenseRequest, Project, ZERO_MONEY
 from ..selectors import (
+    annullable_expense_requests_for_user,
     attachment_display_filename,
     decidable_pending_expense_requests_for_user,
     get_expense_request_financial_display,
@@ -107,6 +109,24 @@ def _decision_action_flags(*, user, expense_request):
     return {
         'can_approve_expense_request': can_decide,
         'can_deny_expense_request': can_decide,
+    }
+
+
+def _annul_action_flags(*, user, expense_request):
+    """
+    PRE: expense_request is visible to user; permissions are effective, not role names.
+    POST: returns annul flag for PENDING_DECISION or APPROVED_RESERVED with annul_expenserequest.
+    """
+    can_annul = (
+        expense_request.status
+        in {
+            ExpenseRequest.Status.PENDING_DECISION,
+            ExpenseRequest.Status.APPROVED_RESERVED,
+        }
+        and user.has_perm('operations.annul_expenserequest')
+    )
+    return {
+        'can_annul_expense_request': can_annul,
     }
 
 
@@ -301,6 +321,9 @@ class ExpenseRequestDetailView(
         )
         context.update(
             _decision_action_flags(user=user, expense_request=expense_request)
+        )
+        context.update(
+            _annul_action_flags(user=user, expense_request=expense_request)
         )
         if context['can_approve_expense_request']:
             context.update(_approval_preview_context(expense_request))
@@ -587,6 +610,83 @@ class ExpenseRequestWithdrawView(TerminalActionView):
             add_service_errors_to_form(form, error)
             return self.form_invalid(form)
         messages.success(self.request, self.success_message)
+        return HttpResponseRedirect(self.get_success_url())
+
+
+class ExpenseRequestAnnulView(TerminalActionView):
+    permission_required = 'operations.annul_expenserequest'
+    model = ExpenseRequest
+    template_name = 'web/expense_request_annul.html'
+    detail_url_name = 'expense_request_detail'
+    action_title = _('Anular solicitud de gasto')
+    submit_label = _('Anular solicitud')
+    is_destructive = True
+    requires_reason = True
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: annul route must not leak non-visible or non-annullable rows.
+        # POST: loads PENDING_DECISION/APPROVED_RESERVED request or 404 before form handling.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.object = get_object_or_404(
+                annullable_expense_requests_for_user(request.user).select_related(
+                    'fund_allocation',
+                    'fund_allocation__project',
+                ),
+                pk=kwargs['pk'],
+            )
+            # Skip TerminalActionView.dispatch object load (unscoped model queryset).
+            return FormView.dispatch(self, request, *args, **kwargs)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        # PRE: self.object is an annullable request loaded for confirmation display.
+        # POST: provides summary context and status-specific consequence copy; no mutation.
+        context = super().get_context_data(**kwargs)
+        expense_request = self.object
+        is_reserved = expense_request.status == ExpenseRequest.Status.APPROVED_RESERVED
+        reserved_amount = (
+            expense_request.reserved_amount
+            if expense_request.reserved_amount is not None
+            else ZERO_MONEY
+        )
+        context.update(
+            {
+                'expense_request': expense_request,
+                'annul_is_reserved': is_reserved,
+                'annul_requested_amount': expense_request.requested_amount,
+                'annul_reserved_amount': reserved_amount,
+                'cancel_url': reverse('expense_request_detail', args=[expense_request.pk]),
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        # PRE: mandatory reason is valid; actor may annul; pre-action status drives success copy.
+        # POST: annuls through the domain service or redisplays errors without partial writes.
+        had_active_reservation = (
+            self.object.status == ExpenseRequest.Status.APPROVED_RESERVED
+        )
+        try:
+            self.object = annul_expense_request(
+                self.object,
+                reason=form.cleaned_data['reason'],
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        except PermissionDenied:
+            raise
+        except Exception:
+            form.add_error(None, EXPENSE_REQUEST_DECISION_FAILURE_MESSAGE)
+            return self.form_invalid(form)
+        if had_active_reservation:
+            messages.success(
+                self.request,
+                _('Solicitud anulada. La reserva fue liberada.'),
+            )
+        else:
+            messages.success(self.request, _('Solicitud de gasto anulada.'))
         return HttpResponseRedirect(self.get_success_url())
 
 

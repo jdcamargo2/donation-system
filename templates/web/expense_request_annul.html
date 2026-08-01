@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% load operations_format %}
+
+{% block title %}{{ action_title }} - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="card ops-confirmation-card border-danger">
+    <div class="card-body">
+        <h1 class="h4">{{ action_title }}</h1>
+        <div class="ops-expense-metadata-grid mb-4">
+            <div><span class="ops-detail-label">Solicitud</span><span>{{ expense_request.code }}</span></div>
+            <div>
+                <span class="ops-detail-label">Proyecto</span>
+                <span>{{ expense_request.fund_allocation.project.code }} · {{ expense_request.fund_allocation.project.name }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Categoría</span>
+                <span>{{ expense_request.fund_allocation.get_budget_category_display }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Estado actual</span>
+                <span>{{ expense_request.get_status_display }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Monto solicitado</span>
+                <span class="ops-money text-nowrap">USD {{ annul_requested_amount|money_es }}</span>
+            </div>
+            {% if annul_is_reserved %}
+                <div>
+                    <span class="ops-detail-label">Monto reservado</span>
+                    <span class="ops-money text-nowrap">USD {{ annul_reserved_amount|money_es }}</span>
+                </div>
+            {% endif %}
+        </div>
+        <div class="alert alert-danger" role="alert">
+            {% if annul_is_reserved %}
+                <p class="mb-1">
+                    La solicitud quedará anulada y se liberará la reserva de
+                    USD {{ annul_reserved_amount|money_es }}.
+                </p>
+                <p class="mb-0">El monto volverá a estar disponible en la asignación.</p>
+            {% else %}
+                <p class="mb-1">
+                    La solicitud quedará anulada y no podrá ser evaluada por el Comité.
+                </p>
+                <p class="mb-0">Esta acción no afecta el saldo de la asignación.</p>
+            {% endif %}
+        </div>
+        <form method="post" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
+            {% endif %}
+            {% for field in form %}
+                <div class="mb-3">
+                    {% include "web/includes/ops_form_field_label.html" with field=field %}
+                    {{ field }}
+                    {% if field.errors %}<div class="text-danger small" role="alert">{{ field.errors|striptags }}</div>{% endif %}
+                </div>
+            {% endfor %}
+            <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Cancelar</a>
+            <button type="submit" class="btn btn-danger">{{ submit_label }}</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

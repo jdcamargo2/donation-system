@@ -323,8 +323,17 @@ rechazo.
     `APPROVED_RESERVED` sin registrar un `Expense`;
   * la denegación es terminal, exige motivo y no crea reserva;
   * estado no pendiente en GET de acción → 404; errores de servicio (saldo,
-    estado obsoleto) se muestran en el formulario sin escrituras parciales;
-  * aún no hay UI de anulación administrativa ni de cumplimiento.
+    estado obsoleto) se muestran en el formulario sin escrituras parciales.
+* ER4B añade la UI de anulación administrativa:
+  * solo `annul_expenserequest` anula (`expense_request_annul`); bajo roles
+    canónicos es exclusivo del Administrador;
+  * admite `PENDING_DECISION` (sin efecto financiero) y `APPROVED_RESERVED`
+    (libera la reserva completa; el historial de decisión/reserva se preserva);
+  * exige motivo obligatorio; el mensaje de éxito distingue pendiente vs
+    reserva liberada según el estado previo a la mutación;
+  * estado no anulable en GET → 404; fallos de evento/auditoría se muestran en
+    el formulario con rollback completo;
+  * aún no hay UI de cumplimiento ni mutación de adjuntos protegidos.
 
 ---
 

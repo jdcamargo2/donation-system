@@ -199,22 +199,22 @@ Cobertura focalizada:
 
 `test_expense_request_concurrency` se omite bajo SQLite (`skipUnless`).
 
-### Solicitudes de gasto — UI de listado/detalle (ER3A), solicitante (ER3B) y decisión del Comité (ER4A)
+### Solicitudes de gasto — UI de listado/detalle (ER3A), solicitante (ER3B), decisión del Comité (ER4A) y anulación administrativa (ER4B)
 
 ```bash
 python manage.py test \
+  apps.operations.tests.test_expense_request_admin_annul_ui \
   apps.operations.tests.test_expense_request_committee_ui \
   apps.operations.tests.test_expense_request_requester_ui \
   apps.operations.tests.test_expense_request_forms \
   apps.operations.tests.test_expense_request_views \
   apps.operations.tests.test_expense_request_ui \
   apps.operations.tests.test_expense_request_permissions \
+  apps.operations.tests.test_expense_request_annulment \
   apps.operations.tests.test_expense_request_services \
   apps.operations.tests.test_expense_request_balances \
   apps.operations.tests.test_role_based_ui \
   apps.operations.tests.test_permissions \
-  apps.operations.tests.test_internal_experience \
-  web.tests.test_required_field_indicators \
   --noinput
 ```
 
@@ -228,11 +228,13 @@ Cobertura focalizada:
 * defensa de POST forzado (asignación ajena, requester/status/código);
 * aprobación/denegación del Comité con reserva atómica y motivo obligatorio;
 * exclusión de Admin/Operador/Auditor de las rutas de decisión;
-* saldo insuficiente y estado obsoleto sin escrituras parciales;
+* anulación administrativa (Admin) de pendientes y aprobadas-reservadas;
+* motivo obligatorio; liberación de reserva; preservación del historial de decisión;
+* saldo/estado obsoleto y fallos de evento/auditoría sin escrituras parciales;
 * ítem de sidebar entre Asignaciones y Gastos;
 * regresión de navegación, permisos y panel.
 
-ER4A no cubre cumplir/anular administrativamente ni adjuntos protegidos.
+ER4B no cubre cumplir ni adjuntos protegidos.
 
 ### Concurrencia
 

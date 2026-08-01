@@ -114,9 +114,11 @@ e integración de anulación del gasto enlazado. ER3A añade listado/detalle con
 visibilidad por permisos efectivos. ER3B añade la UI del solicitante (crear
 desde proyecto; Admin también crea en global; editar/retirar solo propias
 pendientes). ER4A añade la UI de decisión del Comité (aprobar con reserva
-atómica; denegar con motivo obligatorio). Aún no hay UI de cumplimiento ni
-anulación administrativa, ni adjuntos protegidos. ER1 estableció modelos,
-permisos, evidencias y eventos inmutables.
+atómica; denegar con motivo obligatorio). ER4B añade la UI de anulación
+administrativa (Admin anula pendientes o aprobadas-reservadas con motivo
+obligatorio; la reserva se libera cuando aplica; el historial de decisión se
+preserva). Aún no hay UI de cumplimiento ni adjuntos protegidos. ER1 estableció
+modelos, permisos, evidencias y eventos inmutables.
 
 Estados:
 

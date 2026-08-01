@@ -6,30 +6,37 @@
         <a class="btn btn-outline-danger" href="{% url 'expense_request_deny' expense_request.pk %}">Denegar</a>
     {% endif %}
 {% endif %}
-{% if can_edit_expense_request or can_withdraw_expense_request %}
-    {% if can_edit_expense_request %}
-        <a class="btn btn-primary" href="{% url 'expense_request_update' expense_request.pk %}">Editar</a>
-    {% endif %}
-    {% if can_withdraw_expense_request %}
-        <div class="dropdown">
-            <button
-                class="btn btn-outline-secondary dropdown-toggle"
-                type="button"
-                id="expense-request-actions-{{ expense_request.pk }}"
-                data-bs-toggle="dropdown"
-                data-bs-boundary="viewport"
-                aria-expanded="false"
-                aria-label="Más acciones para {{ expense_request.code }}"
-            >
-                Más
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="expense-request-actions-{{ expense_request.pk }}">
+{% if can_edit_expense_request %}
+    <a class="btn btn-primary" href="{% url 'expense_request_update' expense_request.pk %}">Editar</a>
+{% endif %}
+{% if can_withdraw_expense_request or can_annul_expense_request %}
+    <div class="dropdown">
+        <button
+            class="btn btn-outline-secondary dropdown-toggle"
+            type="button"
+            id="expense-request-actions-{{ expense_request.pk }}"
+            data-bs-toggle="dropdown"
+            data-bs-boundary="viewport"
+            aria-expanded="false"
+            aria-label="Más acciones para {{ expense_request.code }}"
+        >
+            Más
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="expense-request-actions-{{ expense_request.pk }}">
+            {% if can_withdraw_expense_request %}
                 <li>
                     <a class="dropdown-item text-danger" href="{% url 'expense_request_withdraw' expense_request.pk %}">
                         Retirar
                     </a>
                 </li>
-            </ul>
-        </div>
-    {% endif %}
+            {% endif %}
+            {% if can_annul_expense_request %}
+                <li>
+                    <a class="dropdown-item text-danger" href="{% url 'expense_request_annul' expense_request.pk %}">
+                        Anular solicitud
+                    </a>
+                </li>
+            {% endif %}
+        </ul>
+    </div>
 {% endif %}

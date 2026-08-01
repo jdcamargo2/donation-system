@@ -410,3 +410,23 @@ def decidable_pending_expense_requests_for_user(user):
     return visible_expense_requests_for_user(user).filter(
         status=ExpenseRequest.Status.PENDING_DECISION,
     )
+
+
+def annullable_expense_requests_for_user(user):
+    """
+    PRE: caller enforces annul_expenserequest at the view layer when loading routes.
+    POST: returns visible PENDING_DECISION or APPROVED_RESERVED rows for admin annulment.
+
+    Empty when the user lacks annul_expenserequest. Does not check role names.
+    Terminal/non-annullable rows are excluded so GET action pages resolve as 404.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return ExpenseRequest.objects.none()
+    if not user.has_perm('operations.annul_expenserequest'):
+        return ExpenseRequest.objects.none()
+    return visible_expense_requests_for_user(user).filter(
+        status__in=(
+            ExpenseRequest.Status.PENDING_DECISION,
+            ExpenseRequest.Status.APPROVED_RESERVED,
+        ),
+    )

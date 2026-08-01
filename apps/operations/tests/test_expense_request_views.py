@@ -436,6 +436,7 @@ class ExpenseRequestViewTests(TestCase):
         )
         self.assertTrue(committee.context['can_approve_expense_request'])
         self.assertTrue(committee.context['can_deny_expense_request'])
+        self.assertFalse(committee.context['can_annul_expense_request'])
         self.assertEqual(committee.context['approval_requested_amount'], Decimal('40.00'))
 
         self.client.force_login(self.admin)
@@ -444,4 +445,21 @@ class ExpenseRequestViewTests(TestCase):
         )
         self.assertFalse(admin.context['can_approve_expense_request'])
         self.assertFalse(admin.context['can_deny_expense_request'])
+        self.assertTrue(admin.context['can_annul_expense_request'])
         self.assertNotIn('approval_requested_amount', admin.context)
+
+    def test_detail_exposes_annul_flag_for_approved_reserved_admin_only(self):
+        approved = approve_expense_request(self.own_request, actor=self.committee)
+        self.client.force_login(self.admin)
+        admin = self.client.get(
+            reverse('expense_request_detail', args=[approved.pk])
+        )
+        self.assertTrue(admin.context['can_annul_expense_request'])
+        self.assertFalse(admin.context['can_approve_expense_request'])
+
+        self.client.force_login(self.committee)
+        committee = self.client.get(
+            reverse('expense_request_detail', args=[approved.pk])
+        )
+        self.assertFalse(committee.context['can_annul_expense_request'])
+        self.assertFalse(committee.context['can_approve_expense_request'])

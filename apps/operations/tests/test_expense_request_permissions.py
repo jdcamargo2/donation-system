@@ -161,3 +161,28 @@ class ExpenseRequestPermissionTests(TestCase):
             ).status_code,
             200,
         )
+
+    def test_annul_routes_require_annul_permission(self):
+        for user in (self.operator, self.committee, self.auditor):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                self.assertEqual(
+                    self.client.get(
+                        reverse('expense_request_annul', args=[self.own_request.pk])
+                    ).status_code,
+                    403,
+                )
+                self.assertEqual(
+                    self.client.post(
+                        reverse('expense_request_annul', args=[self.own_request.pk]),
+                        {'reason': 'Anulación administrativa con motivo suficiente.'},
+                    ).status_code,
+                    403,
+                )
+        self.client.force_login(self.admin)
+        self.assertEqual(
+            self.client.get(
+                reverse('expense_request_annul', args=[self.own_request.pk])
+            ).status_code,
+            200,
+        )
