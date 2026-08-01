@@ -111,6 +111,8 @@ Se conserva porque:
 
 * contiene pruebas de regresión;
 * la mayoría de los templates operativos continúan bajo `templates/web`;
+* las etiquetas de formularios operativos centralizan la marca de obligatoriedad en
+  `templates/web/includes/ops_form_field_label.html` (según `field.field.required`);
 * mantiene compatibilidad estructural durante la consolidación modular del proyecto.
 
 ## 3. Capas arquitectónicas

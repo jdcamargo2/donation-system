@@ -357,6 +357,7 @@ class OperationalDetailViewTests(TestCase):
         self.assertIn('ops-form-grid', source)
         self.assertIn('ops-form-field ops-field', source)
         self.assertIn('web/includes/ops_form_field_control.html', source)
+        self.assertIn('web/includes/ops_form_field_label.html', source)
 
     def test_file_upload_preview_javascript_is_progressive_and_local_only(self):
         source = Path('static/web/js/file_upload_preview.js').read_text()

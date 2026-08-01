@@ -17,7 +17,7 @@
             {% endif %}
             {% for field in form %}
                 <div class="mb-3">
-                    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {% include "web/includes/ops_form_field_label.html" with field=field %}
                     {{ field }}
                     {% if field.errors %}<div class="text-danger small" role="alert">{{ field.errors|striptags }}</div>{% endif %}
                 </div>

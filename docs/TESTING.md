@@ -227,7 +227,24 @@ No debe reportar:
 
 Esta verificación no sustituye al formateo, al análisis estático ni a la revisión del código.
 
-## 9. Regla para nuevos cambios
+## 9. Indicadores de campos obligatorios (formularios operativos)
+
+Contrato de la marca `*` en formularios operativos de `templates/web/`:
+
+* la fuente de verdad es `field.field.required` de Django;
+* la marca se renderiza únicamente mediante
+  `templates/web/includes/ops_form_field_label.html`;
+* los campos opcionales y los campos ocultos no reciben marca;
+* el marcador usa `aria-hidden="true"` (decorativo para lectores de pantalla);
+* las pruebas Django verifican el contrato HTML (etiqueta, clase y `aria-hidden`),
+  no el espaciado visual;
+* los campos con obligatoriedad condicional solo en `clean()` (por ejemplo
+  `ExpenseForm.support_file`) son una preocupación aparte: no exponen
+  `required=True` y por tanto no muestran `*` hasta que el formulario Python lo declare.
+
+Módulo focalizado: `web.tests.test_required_field_indicators`.
+
+## 10. Regla para nuevos cambios
 
 Todo cambio funcional debe incluir pruebas sobre los casos relevantes.
 
@@ -244,7 +261,7 @@ Como mínimo, deben considerarse:
 
 No todos los cambios requieren exactamente la misma combinación, pero cualquier exclusión debe ser coherente con el riesgo del cambio.
 
-## 10. Pruebas de permisos
+## 11. Pruebas de permisos
 
 Las funcionalidades restringidas deben comprobar:
 
@@ -257,7 +274,7 @@ Las funcionalidades restringidas deben comprobar:
 
 Ocultar un botón no constituye una prueba suficiente de autorización.
 
-## 11. Pruebas de acciones terminales
+## 12. Pruebas de acciones terminales
 
 Las acciones de publicación, cierre, anulación, eliminación, rechazo o restauración deben validar:
 
@@ -273,7 +290,7 @@ Las acciones de publicación, cierre, anulación, eliminación, rechazo o restau
 
 También debe probarse que la acción no pueda ejecutarse mediante `GET`.
 
-## 12. Pruebas de archivos
+## 13. Pruebas de archivos
 
 Las pruebas de archivos privados deben comprobar:
 
@@ -317,7 +334,7 @@ del cambio correspondiente, incluyendo humo de reemplazo/remoción en `ProjectDo
 `ExpenseForm.support_file`, `SupportingDocumentForm.document`,
 `InstitutionForm.legal_document` y `ProjectUpdateRemediationAttachmentForm.file`.
 
-## 13. Pruebas de auditoría
+## 14. Pruebas de auditoría
 
 Las pruebas sobre `AuditLog` deben comprobar:
 
@@ -330,7 +347,7 @@ Las pruebas sobre `AuditLog` deben comprobar:
 * protección desde el panel de administración;
 * ausencia de permisos incompatibles en los roles operativos.
 
-## 14. Pruebas del portal público
+## 15. Pruebas del portal público
 
 El portal debe comprobar:
 
@@ -343,7 +360,7 @@ El portal debe comprobar:
 * ausencia de firmas y documentos privados;
 * consistencia entre páginas y respuestas JSON.
 
-## 15. Pruebas de KoboToolbox
+## 16. Pruebas de KoboToolbox
 
 La integración debe comprobar:
 
@@ -374,7 +391,7 @@ Las pruebas de locking real de Kobo están marcadas explícitamente con
 `Requires PostgreSQL row-level locking` en `test_concurrency.py` y las clases
 concurrentes de importación, priorización y routing. No se validan con SQLite.
 
-## 16. Flujo recomendado antes de integrar cambios
+## 17. Flujo recomendado antes de integrar cambios
 
 Ejecutar:
 
@@ -387,7 +404,7 @@ git diff --check
 
 Cuando el cambio afecte concurrencia o comportamiento específico de PostgreSQL, la suite correspondiente debe ejecutarse contra PostgreSQL.
 
-## 17. Criterio de aceptación
+## 18. Criterio de aceptación
 
 Un cambio se considera listo cuando:
 
