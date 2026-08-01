@@ -216,18 +216,25 @@ Tipos principales de archivos:
 
 * documentos del proyecto;
 * adjuntos de avances;
+* adjuntos de remediación;
+* documento legal de institución;
 * soportes de gastos;
 * adjuntos Kobo.
 
 Los archivos privados:
 
 * no se publican mediante `FileField.url`;
-* se descargan mediante vistas autorizadas;
+* se previsualizan (`disposition=inline`, lista blanca estricta) y se descargan
+  (`disposition=attachment`) mediante vistas autorizadas y acotadas al padre;
 * requieren autenticación y permisos cuando corresponda;
 * conservan trazabilidad;
-* no deben exponerse directamente desde el almacenamiento.
+* no deben exponerse directamente desde el almacenamiento;
+* en desarrollo local tampoco se monta `MEDIA_ROOT` vía `static()`; el acceso
+  ocurre solo por los endpoints protegidos.
 
 La visibilidad de cada archivo debe definirse explícitamente según su naturaleza y contexto.
+El helper compartido vive en `apps/operations/file_access.py`. El contrato de UI
+reutilizable está en `templates/web/includes/protected_file_item.html`.
 
 ### 5.1. Vista previa local de selección (adjuntos de avance, documento de proyecto, soportes de gasto, documento legal de institución y adjuntos de remediación)
 

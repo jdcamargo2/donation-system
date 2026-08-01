@@ -8,6 +8,11 @@ urlpatterns = [
     path('institutions/new/', views.InstitutionCreateView.as_view(), name='institution_create'),
     path('institutions/<int:pk>/', views.InstitutionDetailView.as_view(), name='institution_detail'),
     path(
+        'institutions/<int:pk>/legal-document/preview/',
+        views.InstitutionLegalDocumentPreviewView.as_view(),
+        name='institution_legal_document_preview',
+    ),
+    path(
         'institutions/<int:pk>/legal-document/download/',
         views.InstitutionLegalDocumentDownloadView.as_view(),
         name='institution_legal_document_download',
@@ -87,12 +92,39 @@ urlpatterns = [
     path('remediations/<int:pk>/resolve/', views.ProjectUpdateRemediationResolveView.as_view(), name='project_update_remediation_resolve'),
     path('remediations/<int:pk>/attachments/create/', views.ProjectUpdateRemediationAttachmentCreateView.as_view(), name='project_update_remediation_attachment_create'),
     path('remediation-attachments/<int:pk>/delete/', views.ProjectUpdateRemediationAttachmentDeleteView.as_view(), name='project_update_remediation_attachment_delete'),
-    path('remediation-attachments/<int:pk>/download/', views.ProjectUpdateRemediationAttachmentDownloadView.as_view(), name='project_update_remediation_attachment_download'),
+    path(
+        'remediations/<int:remediation_pk>/attachments/<int:pk>/preview/',
+        views.ProjectUpdateRemediationAttachmentPreviewView.as_view(),
+        name='project_update_remediation_attachment_preview',
+    ),
+    path(
+        'remediations/<int:remediation_pk>/attachments/<int:pk>/download/',
+        views.ProjectUpdateRemediationAttachmentDownloadView.as_view(),
+        name='project_update_remediation_attachment_download',
+    ),
     path('projects/<int:project_pk>/documents/create/', views.ProjectDocumentCreateView.as_view(), name='project_document_create'),
-    path('project-documents/<int:pk>/download/', views.ProjectDocumentDownloadView.as_view(), name='project_document_download'),
+    path(
+        'projects/<int:project_pk>/documents/<int:pk>/preview/',
+        views.ProjectDocumentPreviewView.as_view(),
+        name='project_document_preview',
+    ),
+    path(
+        'projects/<int:project_pk>/documents/<int:pk>/download/',
+        views.ProjectDocumentDownloadView.as_view(),
+        name='project_document_download',
+    ),
     path('project-documents/<int:pk>/delete/', views.ProjectDocumentDeleteView.as_view(), name='project_document_delete'),
     path('updates/<int:update_pk>/attachments/create/', views.ProjectUpdateAttachmentCreateView.as_view(), name='project_update_attachment_create'),
-    path('update-attachments/<int:pk>/download/', views.ProjectUpdateAttachmentDownloadView.as_view(), name='project_update_attachment_download'),
+    path(
+        'projects/<int:project_pk>/updates/<int:update_pk>/attachments/<int:pk>/preview/',
+        views.ProjectUpdateAttachmentPreviewView.as_view(),
+        name='project_update_attachment_preview',
+    ),
+    path(
+        'projects/<int:project_pk>/updates/<int:update_pk>/attachments/<int:pk>/download/',
+        views.ProjectUpdateAttachmentDownloadView.as_view(),
+        name='project_update_attachment_download',
+    ),
     path('update-attachments/<int:pk>/delete/', views.ProjectUpdateAttachmentDeleteView.as_view(), name='project_update_attachment_delete'),
     path('updates/<int:pk>/delete/', views.ProjectUpdateDeleteView.as_view(), name='project_update_delete'),
     path('donations/', views.DonationListView.as_view(), name='donation_list'),
@@ -124,9 +156,24 @@ urlpatterns = [
         name='supporting_document_create_for_expense',
     ),
     path(
-        'documents/<int:pk>/download/',
+        'expenses/<int:expense_pk>/documents/<int:pk>/preview/',
+        views.SupportingDocumentPreviewView.as_view(),
+        name='supporting_document_preview',
+    ),
+    path(
+        'expenses/<int:expense_pk>/documents/<int:pk>/download/',
         views.SupportingDocumentDownloadView.as_view(),
         name='supporting_document_download',
+    ),
+    path(
+        'projects/<int:project_pk>/supporting-documents/<int:pk>/preview/',
+        views.ProjectSupportingDocumentPreviewView.as_view(),
+        name='project_supporting_document_preview',
+    ),
+    path(
+        'projects/<int:project_pk>/supporting-documents/<int:pk>/download/',
+        views.ProjectSupportingDocumentDownloadView.as_view(),
+        name='project_supporting_document_download',
     ),
     path(
         'documents/<int:pk>/delete/',

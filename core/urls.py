@@ -15,7 +15,6 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
@@ -28,5 +27,6 @@ urlpatterns = [
     path('', include('web.urls')),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Private operational media is never mounted via static() — not even in DEBUG.
+# Access files only through authenticated protected preview/download endpoints.
+# Public STATIC assets continue to be served by Django's staticfiles app in DEBUG.

@@ -133,6 +133,7 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
 operations.view_project
 operations.view_projectupdate
 operations.add_projectupdate
+operations.view_projectupdateattachment
 operations.view_supportingdocument
 operations.add_supportingdocument
 operations.view_projectupdateremediation
@@ -150,7 +151,11 @@ operations.submit_projectupdateremediation
 * consultar avances;
 * registrar avances;
 * cargar uno o varios adjuntos durante el registro;
-* consultar soportes autorizados;
+* consultar y descargar evidencias de avance asociadas a proyectos que puede ver
+  (`view_projectupdateattachment`), sin obtener edición/eliminación/publicación
+  de adjuntos salvo permisos adicionales;
+* consultar soportes autorizados (incluido un listado de proyecto sin montos ni
+  datos financieros del gasto);
 * registrar soportes permitidos;
 * gestionar remediaciones propias (crear, editar, adjuntar, enviar).
 

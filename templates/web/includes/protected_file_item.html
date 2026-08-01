@@ -1,0 +1,23 @@
+{# Explicit protected-file action contract. Preview safety is decided server-side. #}
+{% if file_actions %}
+<div class="ops-protected-file-actions d-flex flex-wrap gap-2 align-items-center">
+    {% if file_actions.can_preview and file_actions.preview_url %}
+        <a
+            class="btn btn-sm btn-outline-primary"
+            href="{{ file_actions.preview_url }}"
+            target="_blank"
+            rel="noopener"
+            aria-label="Ver {{ file_actions.file_label|default:file_actions.file_name }}"
+        >Ver</a>
+    {% elif file_actions.can_download %}
+        <span class="small text-muted">Vista previa no disponible</span>
+    {% endif %}
+    {% if file_actions.can_download and file_actions.download_url %}
+        <a
+            class="btn btn-sm btn-outline-primary"
+            href="{{ file_actions.download_url }}"
+            aria-label="Descargar {{ file_actions.file_label|default:file_actions.file_name }}"
+        >Descargar</a>
+    {% endif %}
+</div>
+{% endif %}

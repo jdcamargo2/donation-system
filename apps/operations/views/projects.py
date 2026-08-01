@@ -38,6 +38,7 @@ from ..models import (
     Project,
     ProjectDocument,
     ProjectUpdate,
+    SupportingDocument,
 )
 
 from ..services import (
@@ -59,9 +60,9 @@ from .common import (
     PaginatedListMixin,
     RouteContextMixin,
     TerminalActionView,
-    _protected_file_response,
     apply_list_filters,
 )
+from ..file_access import build_protected_file_actions
 from .project_milestone_context import (
     build_project_milestone_context,
     project_milestone_prefetch,
@@ -208,7 +209,46 @@ class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
         context['project_update_page'] = update_page
         context['project_update_count'] = update_paginator.count
         context['has_more_project_updates'] = update_page.has_next()
-        context['project_documents'] = self.object.detail_documents
+        user = self.request.user
+        can_view_project_document = user.has_perm('operations.view_projectdocument')
+        can_delete_project_document = user.has_perm('operations.delete_projectdocument')
+        project_documents = list(self.object.detail_documents)
+        for document in project_documents:
+            document.file_actions = build_protected_file_actions(
+                file_field=document.file,
+                file_label=document.title,
+                uploaded_at=document.created_at,
+                can_download=can_view_project_document,
+                preview_url_name='project_document_preview',
+                download_url_name='project_document_download',
+                url_args=(self.object.pk, document.pk),
+                delete_url=reverse('project_document_delete', args=[document.pk])
+                if can_delete_project_document
+                else None,
+                can_delete=can_delete_project_document,
+            )
+        context['project_documents'] = project_documents
+        # Narrow project-level support listing: title + upload date only (no financial fields).
+        can_view_support = user.has_perm('operations.view_supportingdocument')
+        if can_view_support:
+            support_docs = list(
+                SupportingDocument.objects.select_related('expense__allocation')
+                .filter(expense__allocation__project_id=self.object.pk)
+                .order_by('-uploaded_at', '-pk')
+            )
+            for document in support_docs:
+                document.file_actions = build_protected_file_actions(
+                    file_field=document.document,
+                    file_label=document.title,
+                    uploaded_at=document.uploaded_at,
+                    can_download=True,
+                    preview_url_name='project_supporting_document_preview',
+                    download_url_name='project_supporting_document_download',
+                    url_args=(self.object.pk, document.pk),
+                )
+            context['project_supporting_documents'] = support_docs
+        else:
+            context['project_supporting_documents'] = ()
         context.update(
             build_project_milestone_context(self.object, self.request.user)
         )
@@ -320,19 +360,6 @@ class ProjectDocumentCreateView(OperationsPermissionRequiredMixin, CreateView):
 
     def get_success_url(self):
         return reverse('project_detail', args=[self.project.pk])
-
-
-class ProjectDocumentDownloadView(OperationsPermissionRequiredMixin, DetailView):
-    permission_required = 'operations.view_projectdocument'
-    model = ProjectDocument
-
-    def get(self, request, *args, **kwargs):
-        # PRE: el usuario tiene permiso de lectura y pk identifica un documento.
-        # POST: descarga el archivo sin revelar su ruta de almacenamiento.
-        return _protected_file_response(
-            self.get_object().file,
-            missing_message=_('El documento de proyecto no está disponible.'),
-        )
 
 
 class ProjectDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView):

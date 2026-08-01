@@ -442,6 +442,15 @@ Los adjuntos Kobo:
 
 Las firmas y otros archivos sensibles no pueden marcarse como candidatos públicos.
 
+Las evidencias descargadas se sirven solo mediante endpoints protegidos:
+
+* preview (`kobo:project_submission_evidence`) — inline con la lista blanca compartida;
+* download (`kobo:project_submission_evidence_download`) — attachment para todo archivo autorizado.
+
+Se reutiliza `apps.operations.file_access.protected_file_response` sin debilitar
+las reglas de `privacy_level`, estado `DOWNLOADED`, submission `IMPORTED` ni
+permisos `kobo.view_kobosubmission` / elevación sensible.
+
 ## 13. Histórico: revisión manual por proyecto
 
 La revisión ordinaria asociada a un proyecto permite:

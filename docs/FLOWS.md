@@ -262,6 +262,10 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 12. Se registra la auditoría correspondiente.
 13. El avance queda bloqueado contra edición y eliminación.
 14. Los adjuntos permanecen privados y solo pueden agregarse o eliminarse mientras el avance esté en `UNPUBLISHED`; el avance publicado y sus adjuntos son inmutables.
+15. Usuarios autorizados pueden previsualizar (lista blanca) o descargar evidencias
+    persistidas mediante endpoints anidados al proyecto/avance; `UNPUBLISHED` vs
+    `PUBLISHED` no bloquea la lectura interna autorizada.
+16. La vista previa de carga (cliente) no sustituye la vista previa persistida (servidor).
 
 ### POST
 

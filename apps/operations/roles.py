@@ -24,6 +24,7 @@ ROLE_PERMISSION_CODENAMES = {
         'view_project',
         'view_projectupdate',
         'add_projectupdate',
+        'view_projectupdateattachment',
         'view_supportingdocument',
         'add_supportingdocument',
         'view_projectupdateremediation',

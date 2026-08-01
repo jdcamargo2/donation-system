@@ -113,7 +113,7 @@ class ProjectDocumentTests(TestCase):
     def test_download_project_document_with_permission(self):
         document = self.create_document()
         self.client.force_login(self.user)
-        response = self.client.get(reverse('project_document_download', args=[document.pk]))
+        response = self.client.get(reverse('project_document_download', args=[self.project.pk, document.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Disposition'], 'attachment; filename="plan.pdf"')
 
@@ -121,7 +121,7 @@ class ProjectDocumentTests(TestCase):
         document = self.create_document()
         user = get_user_model().objects.create_user('sin-permiso', password='pass-12345')
         self.client.force_login(user)
-        response = self.client.get(reverse('project_document_download', args=[document.pk]))
+        response = self.client.get(reverse('project_document_download', args=[self.project.pk, document.pk]))
         self.assertEqual(response.status_code, 403)
 
     def test_create_project_update_with_multiple_attachments(self):
@@ -157,7 +157,7 @@ class ProjectDocumentTests(TestCase):
         document = self.create_document()
         self.client.force_login(self.user)
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
-        self.assertContains(response, reverse('project_document_download', args=[document.pk]))
+        self.assertContains(response, reverse('project_document_download', args=[self.project.pk, document.pk]))
         self.assertNotContains(response, document.file.url)
 
     def test_detail_document_delete_uses_post_confirmation_with_get_fallback(self):

@@ -587,13 +587,30 @@ class ProjectUpdateDetailTests(TestCase):
         )
 
     def _attachment_actions_markup(self, content):
-        start = content.index('class="ops-project-update-attachment-actions"')
-        end = content.index('</div>', start) + len('</div>')
-        return content[start:end]
+        marker = 'ops-project-update-attachment-actions'
+        start = content.index(marker)
+        # Walk nested divs until the outer actions container closes.
+        open_div = content.rfind('<div', 0, start)
+        depth = 0
+        idx = open_div
+        while idx < len(content):
+            next_open = content.find('<div', idx)
+            next_close = content.find('</div>', idx)
+            if next_close == -1:
+                break
+            if next_open != -1 and next_open < next_close:
+                depth += 1
+                idx = next_open + 4
+                continue
+            depth -= 1
+            idx = next_close + len('</div>')
+            if depth == 0:
+                return content[start:idx]
+        return content[start:]
 
     def test_unpublished_attachment_actions_render_download_and_delete_as_siblings(self):
         attachment = self._create_attachment()
-        download_url = reverse('project_update_attachment_download', args=[attachment.pk])
+        download_url = reverse('project_update_attachment_download', args=[self.project.pk, self.project_update.pk, attachment.pk])
         delete_url = reverse('project_update_attachment_delete', args=[attachment.pk])
 
         response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
@@ -629,7 +646,7 @@ class ProjectUpdateDetailTests(TestCase):
 
     def test_published_attachment_actions_show_download_without_delete(self):
         attachment = self._create_attachment(title='Evidencia publicada')
-        download_url = reverse('project_update_attachment_download', args=[attachment.pk])
+        download_url = reverse('project_update_attachment_download', args=[self.project.pk, self.project_update.pk, attachment.pk])
         delete_url = reverse('project_update_attachment_delete', args=[attachment.pk])
         publish_project_update(self.project_update.pk, self.user)
 
@@ -649,13 +666,14 @@ class ProjectUpdateDetailTests(TestCase):
 
     def test_view_only_attachment_actions_show_download_without_delete_or_dropdown(self):
         attachment = self._create_attachment(title='Evidencia solo lectura')
-        download_url = reverse('project_update_attachment_download', args=[attachment.pk])
+        download_url = reverse('project_update_attachment_download', args=[self.project.pk, self.project_update.pk, attachment.pk])
         delete_url = reverse('project_update_attachment_delete', args=[attachment.pk])
         viewer = get_user_model().objects.create_user(
             username='detail-attachment-viewer',
             password='pass-12345',
         )
         viewer.user_permissions.add(*Permission.objects.filter(codename__in=(
+            'view_project',
             'view_projectupdate',
             'view_projectupdateattachment',
         )))

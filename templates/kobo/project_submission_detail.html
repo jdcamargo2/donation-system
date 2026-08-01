@@ -33,7 +33,7 @@
     {% if can_view_sensitive %}<section class="card card-body border-warning mb-3"><h2 class="h5">Datos internos sensibles</h2><dl class="row mb-0">{% for key, value in sensitive_data.items %}<dt class="col-sm-4">{{ key }}</dt><dd class="col-sm-8">{{ value|default_if_none:"—" }}</dd>{% endfor %}</dl></section>{% endif %}
 
     <section class="card card-body"><h2 class="h5">Evidencias descargadas</h2><div class="list-group list-group-flush">
-        {% for evidence in evidences %}<div class="list-group-item px-0 d-flex justify-content-between align-items-center"><div><strong>{{ evidence.file.name|default:"Evidencia" }}</strong><div class="small text-muted">{{ evidence.content_type }} · {{ evidence.size_bytes|default_if_none:"—" }} bytes · {{ evidence.get_privacy_level_display }}</div></div><a class="btn btn-sm btn-outline-primary" href="{% url 'kobo:project_submission_evidence' submission.pk evidence.pk %}">Ver evidencia</a></div>{% empty %}<div class="text-muted">No hay evidencias descargadas disponibles.</div>{% endfor %}
+        {% for evidence in evidences %}<div class="list-group-item px-0 d-flex justify-content-between align-items-center gap-3"><div><strong>{{ evidence.file.name|default:"Evidencia" }}</strong><div class="small text-muted">{{ evidence.content_type }} · {{ evidence.size_bytes|default_if_none:"—" }} bytes · {{ evidence.get_privacy_level_display }}</div></div>{% include "web/includes/protected_file_item.html" with file_actions=evidence.file_actions %}</div>{% empty %}<div class="text-muted">No hay evidencias descargadas disponibles.</div>{% endfor %}
     </div></section>
 </div>
 {% endblock %}

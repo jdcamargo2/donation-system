@@ -237,7 +237,8 @@ El MVP separa:
 * soportes financieros;
 * adjuntos Kobo.
 
-Los archivos privados se descargan mediante endpoints autorizados.
+Los archivos privados se previsualizan y descargan mediante endpoints autorizados
+(parent-scoped). No se exponen vía `FileField.url` ni montaje público de `MEDIA_ROOT`.
 
 ### 3.9. Auditoría
 

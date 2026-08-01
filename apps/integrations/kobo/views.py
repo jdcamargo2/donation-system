@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.core.files.storage import default_storage
 from django.core.exceptions import PermissionDenied, RequestDataTooBig, ValidationError
 from django.db.models import Count, Q
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -674,13 +674,26 @@ def project_submission_detail(request, pk):
         evidences = evidences.exclude(
             privacy_level=KoboAttachment.PrivacyLevel.PRIVATE
         )
+    from apps.operations.file_access import build_protected_file_actions
+
+    evidence_list = list(evidences)
+    for evidence in evidence_list:
+        evidence.file_actions = build_protected_file_actions(
+            file_field=evidence.file,
+            file_label=evidence.file.name.rsplit("/", 1)[-1] if evidence.file else "Evidencia",
+            uploaded_at=None,
+            can_download=True,
+            preview_url_name="kobo:project_submission_evidence",
+            download_url_name="kobo:project_submission_evidence_download",
+            url_args=(submission.pk, evidence.pk),
+        )
     return render(
         request,
         "kobo/project_submission_detail.html",
         {
             "submission": submission,
             "normalized_payload": normalized_payload,
-            "evidences": evidences,
+            "evidences": evidence_list,
             "can_view_sensitive": can_view_sensitive,
             "project_submission_detail_rows": _project_submission_detail_rows(
                 submission
@@ -821,12 +834,44 @@ def project_rejected_submission_restore(request, project_pk, pk):
 @login_required
 @permission_required("kobo.view_kobosubmission", raise_exception=True)
 def project_submission_evidence(request, pk, attachment_pk):
+    """
+    Protected inline preview for downloaded Kobo evidence.
+    Preserves existing URL name; authorization and privacy gates unchanged.
+    """
+    from apps.operations.file_access import DISPOSITION_INLINE, protected_file_response
+
+    attachment = _authorized_kobo_attachment(request, pk, attachment_pk)
+    return protected_file_response(
+        attachment.file,
+        disposition=DISPOSITION_INLINE,
+        missing_message="La evidencia solicitada no está disponible.",
+    )
+
+
+@login_required
+@permission_required("kobo.view_kobosubmission", raise_exception=True)
+def project_submission_evidence_download(request, pk, attachment_pk):
+    """Protected attachment download for downloaded Kobo evidence."""
+    from apps.operations.file_access import (
+        DISPOSITION_ATTACHMENT,
+        protected_file_response,
+    )
+
+    attachment = _authorized_kobo_attachment(request, pk, attachment_pk)
+    return protected_file_response(
+        attachment.file,
+        disposition=DISPOSITION_ATTACHMENT,
+        missing_message="La evidencia solicitada no está disponible.",
+    )
+
+
+def _authorized_kobo_attachment(request, submission_pk, attachment_pk):
     if not settings.KOBO_ENABLED:
         raise Http404
     attachment = get_object_or_404(
         KoboAttachment.objects.select_related("submission"),
         pk=attachment_pk,
-        submission_id=pk,
+        submission_id=submission_pk,
         submission__status=KoboSubmission.Status.IMPORTED,
         submission__project__isnull=False,
         submission__asset__is_active=True,
@@ -839,16 +884,7 @@ def project_submission_evidence(request, pk, attachment_pk):
         raise Http404
     if not attachment.file:
         raise Http404
-    safe_filename = attachment.file.name.rsplit("/", 1)[-1]
-    try:
-        stored_file = attachment.file.open("rb")
-    except (FileNotFoundError, OSError) as exc:
-        raise Http404 from exc
-    return FileResponse(
-        stored_file,
-        content_type=attachment.content_type or "application/octet-stream",
-        filename=safe_filename,
-    )
+    return attachment
 
 
 @login_required

@@ -152,7 +152,7 @@ class SupportingDocumentWorkflowTests(TestCase):
         self.assertContains(response, 'Recibo visible')
         self.assertContains(response, 'Nota visible del soporte.')
         self.assertContains(response, 'Eliminar')
-        self.assertContains(response, reverse('supporting_document_download', args=[document.pk]))
+        self.assertContains(response, reverse('supporting_document_download', args=[self.expense.pk, document.pk]))
         self.assertNotContains(response, document.document.url)
 
     def test_anonymous_user_cannot_download_supporting_document(self):
@@ -162,7 +162,7 @@ class SupportingDocumentWorkflowTests(TestCase):
             document=self.uploaded_file('private.pdf'),
         )
 
-        response = self.client.get(reverse('supporting_document_download', args=[document.pk]))
+        response = self.client.get(reverse('supporting_document_download', args=[self.expense.pk, document.pk]))
 
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse('login'), response['Location'])
@@ -176,7 +176,7 @@ class SupportingDocumentWorkflowTests(TestCase):
         limited_user = get_user_model().objects.create_user(username='no-download-support', password='pass-12345')
         self.client.force_login(limited_user)
 
-        response = self.client.get(reverse('supporting_document_download', args=[document.pk]))
+        response = self.client.get(reverse('supporting_document_download', args=[self.expense.pk, document.pk]))
 
         self.assertEqual(response.status_code, 403)
 
@@ -191,7 +191,7 @@ class SupportingDocumentWorkflowTests(TestCase):
         auditor.groups.add(Group.objects.get(name=ROLE_EXTERNAL_AUDITOR))
         self.client.force_login(auditor)
 
-        response = self.client.get(reverse('supporting_document_download', args=[document.pk]))
+        response = self.client.get(reverse('supporting_document_download', args=[self.expense.pk, document.pk]))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(b''.join(response.streaming_content), b'audit-content')

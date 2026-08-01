@@ -72,12 +72,13 @@ from ..services import (
     update_project_update,
 )
 
+from ..file_access import build_protected_file_actions
+
 from .common import (
     DeleteAuditMixin,
     OperationsPermissionRequiredMixin,
     PaginatedListMixin,
     RouteContextMixin,
-    _protected_file_response,
     add_service_errors_to_form,
 )
 
@@ -119,6 +120,35 @@ class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMix
             'committee_review__reviewed_by',
             'committee_review__decision__remediation',
         ).prefetch_related('attachments')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        can_download = (
+            user.has_perm('operations.view_project')
+            and user.has_perm('operations.view_projectupdateattachment')
+        )
+        can_delete = (
+            self.object.status == ProjectUpdate.Status.UNPUBLISHED
+            and user.has_perm('operations.delete_projectupdateattachment')
+        )
+        attachments = list(self.object.attachments.all())
+        for attachment in attachments:
+            attachment.file_actions = build_protected_file_actions(
+                file_field=attachment.file,
+                file_label=attachment.title or str(attachment),
+                uploaded_at=attachment.created_at,
+                can_download=can_download,
+                preview_url_name='project_update_attachment_preview',
+                download_url_name='project_update_attachment_download',
+                url_args=(self.object.project_id, self.object.pk, attachment.pk),
+                delete_url=reverse('project_update_attachment_delete', args=[attachment.pk])
+                if can_delete
+                else None,
+                can_delete=can_delete,
+            )
+        context['detail_attachments'] = attachments
+        return context
 
 
 class ProjectUpdateReviewCreateView(OperationsPermissionRequiredMixin, FormView):
@@ -241,7 +271,41 @@ class ProjectUpdateRemediationDetailView(OperationsPermissionRequiredMixin, Deta
     template_name = 'web/project_update_remediation_detail.html'
 
     def get_queryset(self):
-        return ProjectUpdateRemediation.objects.select_related('decision__review__project_update', 'created_by', 'submitted_by', 'resolved_by').prefetch_related('attachments')
+        return ProjectUpdateRemediation.objects.select_related(
+            'decision__review__project_update',
+            'created_by',
+            'submitted_by',
+            'resolved_by',
+        ).prefetch_related('attachments')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        can_download = user.has_perm('operations.view_projectupdateremediationattachment')
+        can_delete = (
+            self.object.status == ProjectUpdateRemediation.Status.DRAFT
+            and user.has_perm('operations.delete_projectupdateremediationattachment')
+        )
+        attachments = list(self.object.attachments.all())
+        for attachment in attachments:
+            attachment.file_actions = build_protected_file_actions(
+                file_field=attachment.file,
+                file_label=attachment.title or str(attachment),
+                uploaded_at=attachment.created_at,
+                can_download=can_download,
+                preview_url_name='project_update_remediation_attachment_preview',
+                download_url_name='project_update_remediation_attachment_download',
+                url_args=(self.object.pk, attachment.pk),
+                delete_url=reverse(
+                    'project_update_remediation_attachment_delete',
+                    args=[attachment.pk],
+                )
+                if can_delete
+                else None,
+                can_delete=can_delete,
+            )
+        context['detail_attachments'] = attachments
+        return context
 
 
 class ProjectUpdateRemediationUpdateView(OperationsPermissionRequiredMixin, FormView):
@@ -318,14 +382,6 @@ class ProjectUpdateRemediationAttachmentDeleteView(OperationsPermissionRequiredM
         except ProjectUpdateRemediationError as exc:
             raise PermissionDenied(exc.messages[0]) from exc
         return HttpResponseRedirect(reverse('project_update_remediation_detail', args=[remediation_id]))
-
-
-class ProjectUpdateRemediationAttachmentDownloadView(OperationsPermissionRequiredMixin, DetailView):
-    permission_required = 'operations.view_projectupdateremediationattachment'
-    model = ProjectUpdateRemediationAttachment
-
-    def get(self, request, *args, **kwargs):
-        return _protected_file_response(self.get_object().file, missing_message=_('El adjunto de remediación no está disponible.'))
 
 
 class ProjectUpdateCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):
@@ -508,19 +564,6 @@ class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, FormV
             add_service_errors_to_form(form, exc)
             return self.form_invalid(form)
         return HttpResponseRedirect(reverse('project_update_detail', args=[self.project_update.pk]))
-
-
-class ProjectUpdateAttachmentDownloadView(OperationsPermissionRequiredMixin, DetailView):
-    permission_required = 'operations.view_projectupdateattachment'
-    model = ProjectUpdateAttachment
-
-    def get(self, request, *args, **kwargs):
-        # PRE: el usuario tiene permiso de lectura y pk identifica un adjunto.
-        # POST: descarga el archivo sin revelar su ruta de almacenamiento.
-        return _protected_file_response(
-            self.get_object().file,
-            missing_message=_('El adjunto del avance no está disponible.'),
-        )
 
 
 class ProjectUpdateAttachmentDeleteView(OperationsPermissionRequiredMixin, View):

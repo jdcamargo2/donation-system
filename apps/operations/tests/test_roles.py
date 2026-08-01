@@ -169,6 +169,7 @@ class OperationRoleTests(TestCase):
         self.assert_has_perm(user, 'view_project')
         self.assert_has_perm(user, 'view_projectupdate')
         self.assert_has_perm(user, 'add_projectupdate')
+        self.assert_has_perm(user, 'view_projectupdateattachment')
         self.assert_lacks_perm(user, 'add_project')
         self.assert_lacks_perm(user, 'change_donation')
         self.assert_lacks_perm(user, 'change_projectupdate')
@@ -380,6 +381,7 @@ class OperationRoleTests(TestCase):
                 'view_project',
                 'view_projectupdate',
                 'add_projectupdate',
+                'view_projectupdateattachment',
                 'view_supportingdocument',
                 'add_supportingdocument',
                 'view_projectupdateremediation',

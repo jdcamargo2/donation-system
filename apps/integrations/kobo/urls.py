@@ -68,6 +68,11 @@ urlpatterns = [
         name="project_submission_evidence",
     ),
     path(
+        "project-submissions/<int:pk>/evidence/<int:attachment_pk>/download/",
+        views.project_submission_evidence_download,
+        name="project_submission_evidence_download",
+    ),
+    path(
         "projects/<int:project_pk>/pending-submissions/",
         views.project_pending_submission_list,
         name="project_pending_submission_list",

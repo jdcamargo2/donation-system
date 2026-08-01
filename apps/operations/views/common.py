@@ -23,18 +23,19 @@ from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404
 
 from django.http import (
-    FileResponse,
-    Http404,
     HttpResponseRedirect,
 )
 
 from django.urls import reverse
 
-from django.utils.text import get_valid_filename
-
 from django.utils.dateparse import parse_date
 
 from django.utils.translation import gettext_lazy as _
+
+from ..file_access import (
+    DISPOSITION_ATTACHMENT,
+    protected_file_response,
+)
 
 from django.views import View
 
@@ -485,18 +486,13 @@ class DeleteAuditMixin:
         return response
 
 
-def _protected_file_response(file_field, *, missing_message):
+def _protected_file_response(file_field, *, missing_message, disposition=DISPOSITION_ATTACHMENT):
     """
     PRE: file_field belongs to an authorized object and missing_message is safe.
-    POST: streams an existing file as an attachment using only a safe basename;
-    otherwise raises Http404 without exposing its storage path.
+    POST: streams via protected_file_response (inline preview or attachment).
     """
-    if not file_field or not file_field.name:
-        raise Http404(missing_message)
-    stored_basename = file_field.name.replace('\\', '/').rsplit('/', 1)[-1]
-    safe_filename = get_valid_filename(stored_basename) or 'documento'
-    try:
-        file_handle = file_field.open('rb')
-    except (FileNotFoundError, OSError) as exc:
-        raise Http404(missing_message) from exc
-    return FileResponse(file_handle, as_attachment=True, filename=safe_filename)
+    return protected_file_response(
+        file_field,
+        disposition=disposition,
+        missing_message=missing_message,
+    )

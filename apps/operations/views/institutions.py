@@ -1,6 +1,6 @@
 from django.db.models import Count
 
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 
 from django.utils.translation import gettext_lazy as _
 
@@ -14,6 +14,8 @@ from django.views.generic import (
 
 from ..forms import InstitutionForm
 
+from ..file_access import build_protected_file_actions
+
 from ..models import (
     AuditLog,
     Institution,
@@ -26,9 +28,7 @@ from .common import (
     OperationsPermissionRequiredMixin,
     PaginatedListMixin,
     RouteContextMixin,
-    _protected_file_response,
 )
-
 
 class InstitutionListView(
     OperationsPermissionRequiredMixin,
@@ -75,24 +75,19 @@ class InstitutionDetailView(OperationsPermissionRequiredMixin, RouteContextMixin
         context['recent_institution_donations'] = recent_donations
         context['institution_donation_count'] = donation_count
         context['has_more_institution_donations'] = donation_count > len(recent_donations)
+        if self.object.legal_document:
+            context['legal_document_file_actions'] = build_protected_file_actions(
+                file_field=self.object.legal_document,
+                file_label=_('Documento legal'),
+                uploaded_at=None,
+                can_download=True,
+                preview_url_name='institution_legal_document_preview',
+                download_url_name='institution_legal_document_download',
+                url_args=(self.object.pk,),
+            )
+        else:
+            context['legal_document_file_actions'] = None
         return context
-
-
-class InstitutionLegalDocumentDownloadView(OperationsPermissionRequiredMixin, DetailView):
-    permission_required = 'operations.view_institution'
-    model = Institution
-
-    def get(self, request, *args, **kwargs):
-        """
-        PRE: user is authenticated with view_institution and pk identifies an
-        institution whose legal document exists in storage.
-        POST: returns an attachment response without mutation or storage paths.
-        """
-        institution = self.get_object()
-        return _protected_file_response(
-            institution.legal_document,
-            missing_message=_('El documento legal no está disponible.'),
-        )
 
 
 class InstitutionCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, CreateView):

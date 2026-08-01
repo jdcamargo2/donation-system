@@ -94,7 +94,7 @@
             <h2 id="project-update-attachments-title" class="h5 mb-0">Evidencias y adjuntos</h2>
         </div>
         <div class="ops-project-update-attachment-list">
-            {% for attachment in object.attachments.all %}
+            {% for attachment in detail_attachments %}
                 <div class="ops-project-update-attachment-item">
                     <div class="ops-project-update-attachment-name">
                         <i class="bi bi-file-earmark ops-project-update-attachment-icon" aria-hidden="true"></i>
@@ -103,15 +103,13 @@
                             <div class="small text-muted">Cargado el {{ attachment.created_at }}</div>
                         </div>
                     </div>
-                    <div class="ops-project-update-attachment-actions">
-                        {% if perms.operations.view_projectupdateattachment %}
-                            <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_attachment_download' attachment.pk %}">Descargar</a>
-                        {% endif %}
-                        {% if object.status == 'unpublished' and perms.operations.delete_projectupdateattachment %}
+                    <div class="ops-project-update-attachment-actions d-flex flex-wrap gap-2 align-items-center">
+                        {% include "web/includes/protected_file_item.html" with file_actions=attachment.file_actions %}
+                        {% if attachment.file_actions.can_delete and attachment.file_actions.delete_url %}
                             <form
                                 id="project-update-attachment-delete-form-{{ attachment.pk }}"
                                 method="post"
-                                action="{% url 'project_update_attachment_delete' attachment.pk %}"
+                                action="{{ attachment.file_actions.delete_url }}"
                             >
                                 {% csrf_token %}
                                 <button
@@ -123,6 +121,7 @@
                                     data-confirm-text="El adjunto dejará de estar disponible en el avance."
                                     data-confirm-confirm-label="Sí, eliminar"
                                     data-confirm-variant="danger"
+                                    aria-label="Eliminar {{ attachment.title|default:attachment }}"
                                 >Eliminar</button>
                             </form>
                         {% endif %}

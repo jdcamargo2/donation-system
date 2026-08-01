@@ -35,6 +35,8 @@ from ..models import (
     Expense,
 )
 
+from ..file_access import build_protected_file_actions
+
 from ..selectors import with_expense_list_support
 
 from ..services import (
@@ -104,6 +106,32 @@ class ExpenseDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
             'allocation__project',
             'terminal_by',
         ).prefetch_related('supporting_documents')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        can_download = user.has_perm('operations.view_supportingdocument')
+        can_delete = (
+            self.object.status != Expense.Status.ANNULLED
+            and user.has_perm('operations.delete_supportingdocument')
+        )
+        documents = list(self.object.supporting_documents.all())
+        for document in documents:
+            document.file_actions = build_protected_file_actions(
+                file_field=document.document,
+                file_label=document.title,
+                uploaded_at=document.uploaded_at,
+                can_download=can_download,
+                preview_url_name='supporting_document_preview',
+                download_url_name='supporting_document_download',
+                url_args=(self.object.pk, document.pk),
+                delete_url=reverse('supporting_document_delete', args=[document.pk])
+                if can_delete
+                else None,
+                can_delete=can_delete,
+            )
+        context['detail_supporting_documents'] = documents
+        return context
 
 
 class ExpenseCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):

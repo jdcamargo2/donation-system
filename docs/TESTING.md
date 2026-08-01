@@ -295,13 +295,17 @@ También debe probarse que la acción no pueda ejecutarse mediante `GET`.
 Las pruebas de archivos privados deben comprobar:
 
 * autenticación;
-* autorización;
-* pertenencia del archivo;
-* respuesta ante un archivo inexistente;
-* protección frente a URLs directas;
+* autorización (permisos canónicos, sin nombres de rol hardcodeados);
+* pertenencia del archivo al padre (rutas anidadas / querysets acotados);
+* preview en línea solo para la lista blanca de extensiones;
+* download con `Content-Disposition: attachment` para tipos autorizados;
+* cabeceras `X-Content-Type-Options: nosniff` y `Cache-Control: private, no-store`;
+* respuesta ante un archivo inexistente (fila o almacenamiento);
+* protección frente a URLs directas y ausencia de montaje DEBUG de `MEDIA_ROOT`;
 * separación entre archivos públicos y privados;
-* privacidad de adjuntos Kobo;
+* privacidad de adjuntos Kobo (preview + download separados);
 * comportamiento de archivos asociados a entidades anuladas o no publicadas;
+* cobertura de roles (Admin, Operador, Auditor, Comité, anónimo, permiso directo);
 * carga múltiple de adjuntos de avance en registro/edición y en la ruta independiente del detalle;
 * contrato de widget/plantilla del opt-in `data-file-upload-preview` en los campos de
   adjuntos de `ProjectUpdate` (atributo, contenedores de lista/resumen, help text y exclusión
@@ -326,6 +330,8 @@ Las pruebas de archivos privados deben comprobar:
 * inclusión única de `file_upload_preview.js` en `templates/base.html`;
 * un evento de auditoría `CREATED` por cada adjunto persistido;
 * rechazo de altas o bajas de adjuntos cuando el avance ya está `PUBLISHED`.
+
+Módulo dedicado de preview/download: `apps.operations.tests.test_protected_file_preview`.
 
 La vista previa client-side de selección (fusión incremental o reemplazo de un solo archivo,
 miniaturas, `DataTransfer`, enfoque tras quitar y limpieza de object URLs) no está cubierta

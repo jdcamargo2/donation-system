@@ -207,22 +207,21 @@
                     <div class="small text-muted">{{ document.get_document_type_display }} · {{ document.created_at }}</div>
                     {% if document.description %}<div>{{ document.description }}</div>{% endif %}
                 </div>
-                <div class="d-flex gap-2">
-                    {% if perms.operations.view_projectdocument %}
-                        <a class="btn btn-sm btn-outline-primary" href="{% url 'project_document_download' document.pk %}">Descargar</a>
-                    {% endif %}
-                    {% if perms.operations.delete_projectdocument %}
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                    {% include "web/includes/protected_file_item.html" with file_actions=document.file_actions %}
+                    {% if document.file_actions.can_delete and document.file_actions.delete_url %}
                         <a
                             class="btn btn-sm btn-outline-danger"
-                            href="{% url 'project_document_delete' document.pk %}"
+                            href="{{ document.file_actions.delete_url }}"
                             data-confirm-action
                             data-confirm-form="project-document-delete-form-{{ document.pk }}"
                             data-confirm-title="¿Eliminar este documento?"
                             data-confirm-text="El archivo dejará de estar disponible en el proyecto."
                             data-confirm-confirm-label="Sí, eliminar"
                             data-confirm-variant="danger"
+                            aria-label="Eliminar {{ document.title }}"
                         >Eliminar</a>
-                        <form id="project-document-delete-form-{{ document.pk }}" method="post" action="{% url 'project_document_delete' document.pk %}">
+                        <form id="project-document-delete-form-{{ document.pk }}" method="post" action="{{ document.file_actions.delete_url }}">
                             {% csrf_token %}
                         </form>
                     {% endif %}
@@ -233,6 +232,28 @@
         {% endfor %}
     </div>
 </section>
+
+{% if perms.operations.view_supportingdocument %}
+<section class="mt-4" aria-labelledby="project-supporting-documents-title">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 id="project-supporting-documents-title" class="h5 mb-0">Documentos de soporte</h2>
+    </div>
+    <p class="small text-muted mb-3">Archivos de soporte vinculados al proyecto. No se muestran montos ni datos financieros del gasto.</p>
+    <div class="list-group">
+        {% for document in project_supporting_documents %}
+            <div class="list-group-item d-flex justify-content-between align-items-center gap-3">
+                <div>
+                    <strong>{{ document.title }}</strong>
+                    <div class="small text-muted">Cargado el {{ document.uploaded_at }}</div>
+                </div>
+                {% include "web/includes/protected_file_item.html" with file_actions=document.file_actions %}
+            </div>
+        {% empty %}
+            <div class="list-group-item text-muted">Este proyecto todavía no tiene documentos de soporte.</div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}

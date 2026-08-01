@@ -119,11 +119,12 @@ La protección de las operaciones financieras incluye:
 Los documentos operativos privados:
 
 * no se sirven mediante URLs directas del campo de archivo;
-* se descargan mediante endpoints autorizados;
+* se previsualizan y descargan mediante endpoints autorizados separados;
 * requieren autenticación cuando corresponda;
-* verifican permisos;
-* validan la pertenencia del archivo a la entidad solicitada;
-* separan explícitamente la información pública de la privada.
+* verifican permisos canónicos del modelo (no nombres de rol);
+* validan la pertenencia del archivo a la entidad padre solicitada (rutas anidadas);
+* separan explícitamente la información pública de la privada;
+* no se montan vía `static(MEDIA_URL, …)` ni siquiera en `DEBUG`.
 
 No debe utilizarse directamente:
 
@@ -134,6 +135,40 @@ file_field.url
 para exponer archivos privados a usuarios finales.
 
 La publicación de una entidad no implica automáticamente que todos sus archivos asociados sean públicos.
+
+### 6.0. Vista previa persistida versus vista previa de carga
+
+| Concepto | Alcance |
+|----------|---------|
+| Vista previa de carga (upload preview) | Solo cliente, antes del submit; no sustituye autorización del servidor |
+| Vista previa persistida (persisted preview) | Respuesta autenticada del servidor para un archivo ya almacenado |
+
+Autorización:
+
+* preview y download comparten la misma autorización;
+* el alcance por objeto padre es obligatorio;
+* se gobierna por permisos Django, no por comprobaciones de nombre de rol;
+* el portal público no recibe adjuntos privados.
+
+Lista blanca de vista previa en línea (extensión → MIME controlado por el servidor):
+
+* `.png` → `image/png`
+* `.jpg` / `.jpeg` → `image/jpeg`
+* `.webp` → `image/webp`
+* `.gif` → `image/gif`
+* `.pdf` → `application/pdf`
+* `.txt` → `text/plain; charset=utf-8`
+
+No se renderizan en línea: SVG, HTML/HTM, XML, JavaScript, Office, ZIP/RAR/7Z,
+ejecutables ni binarios desconocidos. Esos tipos conservan descarga protegida.
+
+Cabeceras obligatorias en preview y download:
+
+* `X-Content-Type-Options: nosniff`
+* `Cache-Control: private, no-store`
+
+Implementación compartida: `apps/operations/file_access.py`
+(`get_safe_persisted_file_preview_type`, `protected_file_response`).
 
 ### 6.1. Vista previa local de selección de archivos
 

@@ -256,7 +256,7 @@ class ProjectUpdateRemediationAttachmentPreviewTests(TestCase):
         self.assertContains(detail, 'Evidencia remediación')
         self.assertContains(
             detail,
-            reverse('project_update_remediation_attachment_download', args=[attachment.pk]),
+            reverse('project_update_remediation_attachment_download', args=[remediation.pk, attachment.pk]),
         )
         self.assertNotContains(detail, attachment.file.url)
 
@@ -361,7 +361,7 @@ class ProjectUpdateRemediationAttachmentPreviewTests(TestCase):
         self.client.force_login(self.author)
 
         response = self.client.get(
-            reverse('project_update_remediation_attachment_download', args=[attachment.pk]),
+            reverse('project_update_remediation_attachment_download', args=[remediation.pk, attachment.pk]),
         )
 
         self.assertEqual(response.status_code, 200)
@@ -383,7 +383,7 @@ class ProjectUpdateRemediationAttachmentPreviewTests(TestCase):
         self.client.force_login(limited)
 
         response = self.client.get(
-            reverse('project_update_remediation_attachment_download', args=[attachment.pk]),
+            reverse('project_update_remediation_attachment_download', args=[remediation.pk, attachment.pk]),
         )
 
         self.assertEqual(response.status_code, 403)
@@ -400,7 +400,7 @@ class ProjectUpdateRemediationAttachmentPreviewTests(TestCase):
         self.client.force_login(self.author)
 
         response = self.client.get(
-            reverse('project_update_remediation_attachment_download', args=[attachment.pk]),
+            reverse('project_update_remediation_attachment_download', args=[remediation.pk, attachment.pk]),
         )
 
         self.assertEqual(response.status_code, 404)
@@ -428,6 +428,6 @@ class ProjectUpdateRemediationAttachmentPreviewTests(TestCase):
 
         self.assertContains(
             response,
-            reverse('project_update_remediation_attachment_download', args=[attachment.pk]),
+            reverse('project_update_remediation_attachment_download', args=[remediation.pk, attachment.pk]),
         )
         self.assertNotContains(response, attachment.file.url)
