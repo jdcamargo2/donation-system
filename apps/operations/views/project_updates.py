@@ -337,6 +337,11 @@ class ProjectUpdateCreateView(OperationsPermissionRequiredMixin, RouteContextMix
     route_prefix = 'project_update'
     page_title = _('Nuevo avance de proyecto')
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
     def form_valid(self, form):
         self.object = register_advance(
             project_id=form.cleaned_data['project'].pk,
@@ -362,6 +367,11 @@ class ProjectUpdateCreateForProjectView(OperationsPermissionRequiredMixin, Route
     def dispatch(self, request, *args, **kwargs):
         self.project = get_object_or_404(Project, pk=kwargs['project_pk'])
         return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -405,6 +415,11 @@ class ProjectUpdateUpdateView(OperationsPermissionRequiredMixin, RouteContextMix
             except ProjectUpdateImmutableError as exc:
                 raise PermissionDenied(exc.messages[0]) from exc
         return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
 
     def form_valid(self, form):
         """

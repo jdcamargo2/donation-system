@@ -96,7 +96,6 @@ class Command(BaseCommand):
         updates = self._create_project_updates(
             projects=projects,
             operator=users.get("operator"),
-            reviewer=users.get("admin"),
         )
 
         self.stdout.write("")
@@ -469,11 +468,10 @@ class Command(BaseCommand):
         *,
         projects: dict[str, Project],
         operator,
-        reviewer,
     ) -> list[ProjectUpdate]:
         """
         PRE: los proyectos están activos.
-        POST: crea avances demo en estados coherentes.
+        POST: crea avances demo en estados coherentes con created_by=reported_by=operator.
         """
         definitions = [
             {
@@ -516,7 +514,7 @@ class Command(BaseCommand):
                     "update_date": date.today(),
                     "status": data["status"],
                     "created_by": operator,
-                    "reported_by": reviewer,
+                    "reported_by": operator,
                 },
             )
 

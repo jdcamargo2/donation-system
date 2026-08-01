@@ -214,6 +214,32 @@ class RequiredFieldIndicatorProjectUpdateTests(TestCase):
         assert_required_marker(self, labels, 'title')
         assert_optional_marker(self, labels, 'attachments')
 
+    def test_operator_project_update_reported_by_visible_without_required_marker(self):
+        from django.contrib.auth.models import Group
+
+        from apps.operations.role_services import sync_operation_roles
+        from apps.operations.roles import ROLE_FIELD_OPERATOR
+
+        sync_operation_roles()
+        from django.contrib.auth import get_user_model
+
+        operator = get_user_model().objects.create_user(
+            username='operador_required_marker', password='pass-12345'
+        )
+        operator.groups.add(Group.objects.get(name=ROLE_FIELD_OPERATOR))
+        self.client.force_login(operator)
+
+        response = self.client.get(
+            reverse('project_update_create_for_project', args=[self.project.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        labels = inventory_labels(response.content.decode())
+        label = field_label(labels, 'reported_by')
+        self.assertIsNotNone(label)
+        self.assertIn('Persona responsable del avance', label['text'])
+        assert_optional_marker(self, labels, 'reported_by')
+        assert_required_marker(self, labels, 'title')
+
     def test_standalone_attachment_required_file_marker(self):
         update = register_advance(
             self.project.pk,

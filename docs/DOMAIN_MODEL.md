@@ -226,6 +226,7 @@ PUBLISHED
 * La publicación constituye una transición explícita.
 * Un avance publicado es inmutable.
 * El creador técnico y la persona responsable del avance representan responsabilidades diferentes.
+* Para el Operador de campo, al crear un avance ambos coinciden con el actor autenticado; Administrador/superusuario pueden seleccionar otro `reported_by` elegible.
 * La revisión institucional no altera el estado del avance.
 * `ProjectUpdate` no almacena porcentaje de progreso; el progreso operativo del proyecto se deriva de hitos (`ProjectMilestone`).
 

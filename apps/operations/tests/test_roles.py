@@ -314,6 +314,34 @@ class OperationRoleTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_field_operator_cannot_edit_or_publish_project_update(self):
+        operator = self.create_user_for_role('field-no-edit-publish', ROLE_FIELD_OPERATOR)
+        self.client.force_login(operator)
+
+        self.assertEqual(
+            self.client.get(reverse('project_update_update', args=[self.project_update.pk])).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(reverse('project_update_publish', args=[self.project_update.pk])).status_code,
+            403,
+        )
+
+    def test_auditor_and_committee_cannot_create_project_updates(self):
+        for role_name, username in (
+            (ROLE_EXTERNAL_AUDITOR, 'auditor-no-create-update'),
+            (ROLE_PROJECT_COMMITTEE, 'committee-no-create-update'),
+        ):
+            with self.subTest(role=role_name):
+                self.client.force_login(self.create_user_for_role(username, role_name))
+                self.assertEqual(self.client.get(reverse('project_update_create')).status_code, 403)
+                self.assertEqual(
+                    self.client.get(
+                        reverse('project_update_create_for_project', args=[self.project.pk])
+                    ).status_code,
+                    403,
+                )
+
     def test_field_operator_cannot_open_project_update_publish(self):
         self.client.force_login(self.create_user_for_role('field-publish-update', ROLE_FIELD_OPERATOR))
 

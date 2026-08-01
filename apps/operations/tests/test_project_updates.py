@@ -3,7 +3,7 @@ from pathlib import Path
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
 from django.db import connection
 from django.test import RequestFactory, TestCase
@@ -819,3 +819,182 @@ class ProjectUpdateChunkTests(TestCase):
             self.client.get(reverse('project_update_chunk', args=[projects[1].pk]))
 
         self.assertEqual(len(one_update_queries), len(five_update_queries))
+
+
+class OperatorProjectUpdateSelfReportTests(TestCase):
+    def setUp(self):
+        from apps.operations.role_services import sync_operation_roles
+        from apps.operations.roles import ROLE_FIELD_OPERATOR, ROLE_SIGEDON_ADMIN
+
+        sync_operation_roles()
+        User = get_user_model()
+        self.operator = User.objects.create_user(username='operador_demo', password='pass-12345')
+        self.operator.groups.add(Group.objects.get(name=ROLE_FIELD_OPERATOR))
+        self.admin = User.objects.create_user(username='admin_demo', password='pass-12345')
+        self.admin.groups.add(Group.objects.get(name=ROLE_SIGEDON_ADMIN))
+        self.eligible_other = create_user('eligible-other-reporter')
+        self.project = create_project(code='PRJ-OP-SELF-REPORT')
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
+
+    def test_operator_form_disables_reported_by_as_self(self):
+        help_text = (
+            'El responsable se asigna automáticamente al usuario que registra el avance.'
+        )
+        for form_class in (ProjectUpdateForm, ProjectUpdateForProjectForm):
+            with self.subTest(form_class=form_class.__name__):
+                form = form_class(user=self.operator)
+                field = form.fields['reported_by']
+
+                self.assertIn('reported_by', form.fields)
+                self.assertTrue(field.disabled)
+                self.assertEqual(field.initial, self.operator)
+                self.assertEqual(list(field.queryset), [self.operator])
+                self.assertEqual(field.label, 'Persona responsable del avance')
+                self.assertEqual(str(field.help_text), help_text)
+                self.assertFalse(field.required)
+
+    def test_admin_form_keeps_enabled_eligible_reporter_selector(self):
+        form = ProjectUpdateForm(user=self.admin)
+        field = form.fields['reported_by']
+
+        self.assertFalse(field.disabled)
+        self.assertTrue(field.required)
+        self.assertIn(self.operator, field.queryset)
+        self.assertIn(self.admin, field.queryset)
+        self.assertIn(self.eligible_other, field.queryset)
+
+    def test_operator_create_pages_render_disabled_self_reporter(self):
+        self.client.force_login(self.operator)
+        help_text = (
+            'El responsable se asigna automáticamente al usuario que registra el avance.'
+        )
+        pages = (
+            reverse('project_update_create'),
+            reverse('project_update_create_for_project', args=[self.project.pk]),
+        )
+        for url in pages:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'Persona responsable del avance')
+                self.assertContains(response, 'operador_demo')
+                self.assertContains(response, 'disabled')
+                self.assertContains(response, help_text)
+                self.assertContains(response, 'name="reported_by"')
+
+    def test_operator_form_ignores_forged_reported_by_in_post_data(self):
+        form = ProjectUpdateForProjectForm(
+            data={
+                'title': 'Avance forjado',
+                'description': 'El POST intenta otro responsable.',
+                'update_date': '2026-07-12',
+                'reported_by': self.eligible_other.pk,
+            },
+            user=self.operator,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data['reported_by'], self.operator)
+
+    def test_operator_creation_routes_persist_self_as_reporter(self):
+        self.client.force_login(self.operator)
+        routes = (
+            (
+                reverse('project_update_create'),
+                {
+                    'project': self.project.pk,
+                    'title': 'Avance ruta general',
+                    'description': 'Creado por operador en ruta general.',
+                    'update_date': '2026-07-12',
+                    'reported_by': self.eligible_other.pk,
+                },
+                reverse('project_update_list'),
+                'Avance ruta general',
+            ),
+            (
+                reverse('project_update_create_for_project', args=[self.project.pk]),
+                {
+                    'title': 'Avance ruta proyecto',
+                    'description': 'Creado por operador en ruta de proyecto.',
+                    'update_date': '2026-07-12',
+                    'reported_by': self.eligible_other.pk,
+                },
+                reverse('project_detail', args=[self.project.pk]),
+                'Avance ruta proyecto',
+            ),
+        )
+        for url, payload, success_url, title in routes:
+            with self.subTest(title=title):
+                response = self.client.post(url, data=payload)
+                update = ProjectUpdate.objects.get(title=title)
+
+                self.assertRedirects(response, success_url)
+                self.assertEqual(update.created_by, self.operator)
+                self.assertEqual(update.reported_by, self.operator)
+                self.assertNotEqual(update.reported_by, self.eligible_other)
+
+    def test_register_advance_forces_operator_reporter_despite_submitted_value(self):
+        update = register_advance(
+            project_id=self.project.pk,
+            title='Avance servicio operador',
+            description='El servicio ignora el reporter forjado.',
+            created_by=self.operator,
+            reported_by=self.eligible_other,
+        )
+
+        self.assertEqual(update.created_by, self.operator)
+        self.assertEqual(update.reported_by, self.operator)
+        self.assertNotEqual(update.reported_by, self.eligible_other)
+
+    def test_register_advance_preserves_admin_delegated_reporter(self):
+        update = register_advance(
+            project_id=self.project.pk,
+            title='Avance servicio admin',
+            description='El admin puede delegar responsabilidad.',
+            created_by=self.admin,
+            reported_by=self.eligible_other,
+        )
+
+        self.assertEqual(update.created_by, self.admin)
+        self.assertEqual(update.reported_by, self.eligible_other)
+
+    def test_operator_creation_with_attachment_keeps_operator_actors(self):
+        from tempfile import TemporaryDirectory
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import override_settings
+
+        media = TemporaryDirectory()
+        self.addCleanup(media.cleanup)
+        override = override_settings(MEDIA_ROOT=media.name)
+        override.enable()
+        self.addCleanup(override.disable)
+
+        self.client.force_login(self.operator)
+        upload = SimpleUploadedFile('evidencia.pdf', b'operator-proof')
+        response = self.client.post(
+            reverse('project_update_create_for_project', args=[self.project.pk]),
+            data={
+                'title': 'Avance con adjunto operador',
+                'description': 'Incluye evidencia.',
+                'update_date': '2026-07-12',
+                'reported_by': self.eligible_other.pk,
+                'attachments': [upload],
+            },
+        )
+        update = ProjectUpdate.objects.get(title='Avance con adjunto operador')
+        attachment = update.attachments.get()
+
+        self.assertRedirects(response, reverse('project_detail', args=[self.project.pk]))
+        self.assertEqual(update.created_by, self.operator)
+        self.assertEqual(update.reported_by, self.operator)
+        self.assertEqual(attachment.uploaded_by, self.operator)
+        self.assertTrue(AuditLog.objects.filter(
+            entity_id=str(update.pk), action=AuditLog.Action.CREATED, user=self.operator
+        ).exists())
+        self.assertTrue(AuditLog.objects.filter(
+            entity_id=str(attachment.pk),
+            action=AuditLog.Action.CREATED,
+            user=self.operator,
+        ).exists())

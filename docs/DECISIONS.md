@@ -246,6 +246,39 @@ La persona que introduce la información en el sistema no necesariamente es la r
 
 ---
 
+## 2026-08-01 — Operador de campo: created_by y reported_by coinciden al crear
+
+### Decisión
+
+Para el rol funcional **Operador de campo**, la creación de un avance de
+proyecto exige:
+
+```text
+created_by == reported_by == actor autenticado
+```
+
+El campo `Persona responsable del avance` permanece visible en el formulario,
+pero en modo no editable, con el operador autenticado preasignado.
+
+La delegación de `reported_by` a otro usuario elegible permanece disponible
+para Administrador SIGEDON y superusuario.
+
+### Motivo
+
+El Operador de campo registra avances sobre trabajo propio; no debe poder
+atribuir la responsabilidad del contenido a otro usuario mediante el formulario
+ni mediante un POST manipulado.
+
+### Consecuencias
+
+* El servicio `register_advance` resuelve el reporter de forma autoritativa.
+* Un POST forjado con otro `reported_by` no altera la atribución del Operador.
+* `created_by` y `reported_by` siguen siendo conceptos distintos en el modelo;
+  coinciden por regla de dominio solo en la creación por Operador de campo.
+* La edición de borradores por Administrador (cambio de responsable) no cambia.
+
+---
+
 ## 2026-07-12 — Auditoría append-only
 
 ### Decisión

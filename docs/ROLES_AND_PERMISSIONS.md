@@ -154,6 +154,9 @@ operations.submit_projectupdateremediation
 * registrar soportes permitidos;
 * gestionar remediaciones propias (crear, editar, adjuntar, enviar).
 
+Al registrar un avance, el usuario autenticado se asigna automáticamente como
+persona responsable. El campo se muestra en modo no editable.
+
 Los datos de Kobo ya integrados en un proyecto pueden seguir siendo visibles
 cuando el acceso se gobierna por `operations.view_project`; eso no implica
 acceso al panel de administración territorial.

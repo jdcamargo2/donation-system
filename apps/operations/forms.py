@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django import forms
 from django.contrib.admin.widgets import FilteredSelectMultiple
+from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import AdminUserCreationForm, UserChangeForm
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
@@ -17,7 +18,10 @@ from .models import (
     ProjectUpdate, ProjectUpdateReview, ProjectUpdateReviewDecision,
     ProjectUpdateRemediation, SupportingDocument,
 )
-from .project_update_responsibles import eligible_project_update_reporters
+from .project_update_responsibles import (
+    actor_must_self_report_project_update,
+    eligible_project_update_reporters,
+)
 from .role_services import (
     functional_role_groups,
     get_user_functional_roles,
@@ -287,10 +291,24 @@ class ProjectMilestoneForm(BootstrapFormMixin, forms.ModelForm):
 
 
 class ProjectUpdateResponsibleFormMixin:
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user=None, **kwargs):
+        # PRE: optional authenticated actor for role-aware reported_by presentation.
+        # POST: Operator sees a disabled self-reporter field; Admin/superuser keep the selector.
         super().__init__(*args, **kwargs)
-        self.fields['reported_by'].required = True
-        self.fields['reported_by'].queryset = eligible_project_update_reporters()
+        field = self.fields['reported_by']
+        field.label = _('Persona responsable del avance')
+        if actor_must_self_report_project_update(user):
+            field.queryset = get_user_model()._default_manager.filter(pk=user.pk)
+            field.initial = user
+            field.disabled = True
+            field.required = False
+            field.empty_label = None
+            field.help_text = _(
+                'El responsable se asigna automáticamente al usuario que registra el avance.'
+            )
+        else:
+            field.required = True
+            field.queryset = eligible_project_update_reporters()
 
 
 class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, forms.ModelForm):

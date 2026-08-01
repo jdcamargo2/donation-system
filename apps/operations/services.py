@@ -28,7 +28,10 @@ from .models import (
     SupportingDocument,
     ZERO_MONEY,
 )
-from .project_update_responsibles import validate_project_update_reporter
+from .project_update_responsibles import (
+    resolve_project_update_reporter,
+    validate_project_update_reporter,
+)
 from .public_portal_cache import invalidate_public_portal_cache
 
 
@@ -1330,14 +1333,17 @@ def register_advance(
     with transaction.atomic():
         project = Project.objects.select_for_update().get(pk=project_id)
         _validate_project_is_active_for_execution_or_updates(project)
-        validate_project_update_reporter(reported_by)
+        resolved_reporter = resolve_project_update_reporter(
+            actor=created_by,
+            submitted_reporter=reported_by,
+        )
         project_update = ProjectUpdate(
             project=project,
             title=title,
             description=description,
             update_date=update_date or timezone.localdate(),
             created_by=created_by,
-            reported_by=reported_by,
+            reported_by=resolved_reporter,
             status=ProjectUpdate.Status.DRAFT,
         )
         project_update.full_clean()

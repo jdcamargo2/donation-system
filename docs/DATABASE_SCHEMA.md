@@ -502,6 +502,10 @@ reported_by_id
 → Persona responsable del contenido del avance
 ```
 
+Para el Operador de campo, al crear un avance ambos apuntan al actor autenticado.
+Administrador SIGEDON y superusuario pueden seleccionar un `reported_by_id`
+distinto entre usuarios elegibles.
+
 ---
 
 ### 5.9. `operations_projectupdateattachment`

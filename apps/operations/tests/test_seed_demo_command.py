@@ -64,3 +64,14 @@ class SeedSigedonDemoCommandTests(TestCase):
         self.assertEqual(Project.objects.filter(code='PRJ-DEMO-002').count(), 1)
         self.assertEqual(Donation.objects.filter(code='DON-DEMO-001').count(), 1)
         self.assertEqual(ProjectUpdate.objects.filter(title='Levantamiento territorial inicial').count(), 1)
+
+    def test_seed_operator_created_updates_self_report(self):
+        self.run_seed()
+
+        operator = get_user_model().objects.get(username='operador_demo')
+        operator_updates = ProjectUpdate.objects.filter(created_by=operator)
+        self.assertTrue(operator_updates.exists())
+        for update in operator_updates:
+            with self.subTest(title=update.title):
+                self.assertEqual(update.created_by, operator)
+                self.assertEqual(update.reported_by, operator)
