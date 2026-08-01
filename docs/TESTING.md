@@ -286,16 +286,20 @@ Las pruebas de archivos privados deben comprobar:
 * privacidad de adjuntos Kobo;
 * comportamiento de archivos asociados a entidades anuladas o no publicadas;
 * carga múltiple de adjuntos de avance en registro/edición y en la ruta independiente del detalle;
-* contrato de widget/plantilla del opt-in `data-file-upload-preview` solo en los campos de
+* contrato de widget/plantilla del opt-in `data-file-upload-preview` en los campos de
   adjuntos de `ProjectUpdate` (atributo, contenedores de lista/resumen, help text y exclusión
   de formularios no habilitados);
+* contrato de opt-in de un solo archivo en `ProjectDocumentForm.file` (atributo de widget,
+  wrapper/list/summary renderizados, ausencia de `multiple`, y remount tras redisplay por
+  validación);
 * inclusión única de `file_upload_preview.js` en `templates/base.html`;
 * un evento de auditoría `CREATED` por cada adjunto persistido;
 * rechazo de altas o bajas de adjuntos cuando el avance ya está `PUBLISHED`.
 
-La vista previa client-side de selección (fusión incremental, miniaturas, `DataTransfer`,
-enfoque tras quitar y limpieza de object URLs) no está cubierta por el cliente HTTP de Django;
-debe validarse manualmente en navegador según la checklist del cambio correspondiente.
+La vista previa client-side de selección (fusión incremental o reemplazo de un solo archivo,
+miniaturas, `DataTransfer`, enfoque tras quitar y limpieza de object URLs) no está cubierta
+por el cliente HTTP de Django; debe validarse manualmente en navegador según la checklist
+del cambio correspondiente, incluyendo humo de reemplazo/remoción en `ProjectDocument`.
 
 ## 13. Pruebas de auditoría
 

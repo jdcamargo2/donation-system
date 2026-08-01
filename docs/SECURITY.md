@@ -133,13 +133,15 @@ La publicación de una entidad no implica automáticamente que todos sus archivo
 
 ### 6.1. Vista previa local de selección de archivos
 
-La vista previa de selección en formularios de adjuntos de avance:
+La vista previa de selección en formularios de adjuntos de avance y en la carga pendiente
+de `ProjectDocument`:
 
 * opera solo en el cliente y no envía archivos hasta el submit del formulario;
 * no almacena nombres ni contenido en persistencia del navegador;
 * no sustituye la validación ni los controles de acceso del servidor;
-* no gestiona ni elimina adjuntos ya persistidos;
-* mantiene el input nativo como autoridad de la selección enviada.
+* no gestiona ni elimina adjuntos o documentos ya persistidos;
+* mantiene el input nativo como autoridad de la selección enviada;
+* no altera el perímetro de descarga privada ni la validación autoritativa del servidor.
 
 ## 7. Seguridad de KoboToolbox
 

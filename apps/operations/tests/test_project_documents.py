@@ -6,6 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from apps.operations.forms import ProjectDocumentForm
 from apps.operations.models import Project, ProjectDocument, ProjectUpdateAttachment
 from apps.operations.services import publish_project_update, register_advance
 from apps.operations.tests.helpers import create_project, create_user
@@ -61,15 +62,53 @@ class ProjectDocumentTests(TestCase):
         self.assertRedirects(response, reverse('project_detail', args=[self.project.pk]))
         self.assertEqual(document.uploaded_by, self.user)
 
-    def test_project_document_form_does_not_opt_into_file_upload_preview(self):
+    def test_project_document_form_opts_into_single_file_upload_preview(self):
+        form = ProjectDocumentForm()
+        field = form.fields['file']
+
+        self.assertEqual(field.widget.attrs.get('data-file-upload-preview'), 'true')
+        self.assertFalse(field.widget.allow_multiple_selected)
+        rendered = str(field.widget.render('file', None))
+        self.assertIn('data-file-upload-preview="true"', rendered)
+        self.assertNotIn('multiple', rendered)
+
+    def test_project_document_create_page_renders_file_upload_preview_contract(self):
         self.client.force_login(self.user)
         response = self.client.get(reverse('project_document_create', args=[self.project.pk]))
+        content = response.content.decode()
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'type="file"')
-        self.assertNotContains(response, 'data-file-upload-preview')
-        self.assertNotContains(response, 'ops-file-upload-preview')
-        self.assertNotContains(response, 'data-file-upload-list')
+        self.assertContains(response, 'data-file-upload-preview')
+        self.assertContains(response, 'class="ops-file-upload"')
+        self.assertContains(response, 'data-file-upload-list')
+        self.assertContains(response, 'data-file-upload-summary')
+        self.assertContains(response, 'enctype="multipart/form-data"')
+        self.assertContains(response, 'csrfmiddlewaretoken')
+        self.assertContains(response, 'type="submit"')
+        self.assertContains(response, 'Cancelar')
+        self.assertEqual(content.count('type="file"'), 1)
+        self.assertNotIn('multiple', content.split('type="file"')[1].split('>')[0])
+
+    def test_project_document_validation_redisplay_keeps_preview_mounts(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('project_document_create', args=[self.project.pk]),
+            data={
+                'document_type': ProjectDocument.DocumentType.PROPOSAL,
+                'title': 'Sin archivo',
+                'description': 'Falta el archivo requerido.',
+            },
+        )
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(response.context['form'], 'file', 'Este campo es obligatorio.')
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'data-file-upload-preview')
+        self.assertContains(response, 'data-file-upload-list')
+        self.assertContains(response, 'data-file-upload-summary')
+        self.assertEqual(content.count('type="file"'), 1)
+        self.assertNotIn('multiple', content.split('type="file"')[1].split('>')[0])
 
     def test_download_project_document_with_permission(self):
         document = self.create_document()

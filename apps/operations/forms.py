@@ -365,6 +365,13 @@ class ProjectDocumentForm(BootstrapFormMixin, forms.ModelForm):
             'file': _('Archivo'),
             'description': _('Descripción'),
         }
+        widgets = {
+            'file': forms.FileInput(
+                attrs={
+                    'data-file-upload-preview': 'true',
+                }
+            ),
+        }
 
 
 class ProjectUpdateAttachmentForm(BootstrapFormMixin, forms.Form):
