@@ -11,6 +11,7 @@ from django.urls import reverse
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate
 from apps.operations.services import publish_project_update, register_advance
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_expense, create_institution, create_project, create_user
+from web.tests.test_required_field_indicators import assert_required_marker, field_label, inventory_labels
 
 
 class AuthenticatedViewTests(TestCase):
@@ -21,6 +22,18 @@ class AuthenticatedViewTests(TestCase):
         self.donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
         self.allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('50.00'))
         self.expense = create_expense(allocation=self.allocation, amount=Decimal('10.00'))
+
+    def test_allocation_create_budget_category_label_is_categoria(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('allocation_create'))
+        self.assertEqual(response.status_code, 200)
+        labels = inventory_labels(response.content.decode())
+        label = field_label(labels, 'budget_category')
+
+        self.assertIsNotNone(label)
+        self.assertEqual(label['text'].replace('*', '').strip(), 'Categoría')
+        self.assertNotIn('Categoría presupuestaria', label['text'])
+        assert_required_marker(self, labels, 'budget_category')
 
     def test_anonymous_users_are_redirected_from_protected_views(self):
         protected_urls = [

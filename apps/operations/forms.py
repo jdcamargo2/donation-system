@@ -494,7 +494,7 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
         labels = {
             'donation': _('Donación'),
             'project': _('Proyecto'),
-            'budget_category': _('Categoría presupuestaria'),
+            'budget_category': _('Categoría'),
             'amount': _('Monto'),
             'responsible_person': _('Responsable'),
             'allocation_date': _('Fecha de asignación'),

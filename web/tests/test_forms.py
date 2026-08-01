@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 
 from django import forms
 
-from apps.operations.choices import OPERATING_CURRENCY_CHOICES
+from apps.operations.choices import BUDGET_CATEGORY_CHOICES, OPERATING_CURRENCY_CHOICES
 from apps.operations.forms import DonationForm, ExpenseForm, FundAllocationForm, InstitutionForm, ProjectForm
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, SupportingDocument
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_expense, create_institution, create_project
@@ -413,6 +413,25 @@ class FormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn('amount', form.errors)
         self.assertIn('saldo disponible', form.errors['amount'][0])
+
+    def test_allocation_form_budget_category_label_is_categoria(self):
+        form = FundAllocationForm()
+        field = form.fields['budget_category']
+        choices = list(field.choices)
+        empty_choices = [choice for choice in choices if choice[0] == '']
+        category_choices = [(value, str(label)) for value, label in choices if value != '']
+        expected_category_choices = [(value, str(label)) for value, label in BUDGET_CATEGORY_CHOICES]
+
+        self.assertIn('budget_category', form.fields)
+        self.assertEqual(field.label, 'Categoría')
+        self.assertNotEqual(field.label, 'Categoría presupuestaria')
+        self.assertTrue(field.required)
+        self.assertIsInstance(field.widget, forms.Select)
+        self.assertNotIsInstance(field.widget, forms.SelectMultiple)
+        self.assertEqual(category_choices, expected_category_choices)
+        self.assertEqual(len(empty_choices), 1)
+        self.assertEqual(empty_choices[0][0], '')
+        self.assertEqual(choices[0], empty_choices[0])
 
     def test_allocation_form_excludes_donation_without_balance(self):
         create_allocation(donation=self.donation, project=self.project, amount=self.donation.amount)
