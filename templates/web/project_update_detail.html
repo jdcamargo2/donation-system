@@ -108,22 +108,23 @@
                             <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_attachment_download' attachment.pk %}">Descargar</a>
                         {% endif %}
                         {% if object.status == 'draft' and perms.operations.delete_projectupdateattachment %}
-                            <div class="dropdown">
-                                <button class="btn btn-sm btn-outline-secondary ops-project-update-attachment-more" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Acciones del archivo {{ attachment.title|default:attachment }}">⋮</button>
-                                <form id="project-update-attachment-delete-form-{{ attachment.pk }}" method="post" action="{% url 'project_update_attachment_delete' attachment.pk %}">
-                                    {% csrf_token %}
-                                    <button
-                                        class="dropdown-item text-danger"
-                                        type="submit"
-                                        data-confirm-action
-                                        data-confirm-form="project-update-attachment-delete-form-{{ attachment.pk }}"
-                                        data-confirm-title="¿Eliminar este archivo?"
-                                        data-confirm-text="El adjunto dejará de estar disponible en el avance."
-                                        data-confirm-confirm-label="Sí, eliminar"
-                                        data-confirm-variant="danger"
-                                    >Eliminar</button>
-                                </form>
-                            </div>
+                            <form
+                                id="project-update-attachment-delete-form-{{ attachment.pk }}"
+                                method="post"
+                                action="{% url 'project_update_attachment_delete' attachment.pk %}"
+                            >
+                                {% csrf_token %}
+                                <button
+                                    class="btn btn-sm btn-outline-danger"
+                                    type="submit"
+                                    data-confirm-action
+                                    data-confirm-form="project-update-attachment-delete-form-{{ attachment.pk }}"
+                                    data-confirm-title="¿Eliminar este archivo?"
+                                    data-confirm-text="El adjunto dejará de estar disponible en el avance."
+                                    data-confirm-confirm-label="Sí, eliminar"
+                                    data-confirm-variant="danger"
+                                >Eliminar</button>
+                            </form>
                         {% endif %}
                     </div>
                 </div>

@@ -467,10 +467,10 @@ class ProjectUpdateDetailTests(TestCase):
         attachment_delete_url = reverse('project_update_attachment_delete', args=[attachment.pk])
         self.assertIn(f'id="project-update-publish-form" method="post" action="{publish_url}"', content)
         self.assertIn(f'id="project-update-delete-form" method="post" action="{delete_url}"', content)
-        self.assertIn(
-            f'id="project-update-attachment-delete-form-{attachment.pk}" method="post" action="{attachment_delete_url}"',
-            content,
-        )
+        attachment_actions = self._attachment_actions_markup(content)
+        self.assertIn(f'id="project-update-attachment-delete-form-{attachment.pk}"', attachment_actions)
+        self.assertIn('method="post"', attachment_actions)
+        self.assertIn(f'action="{attachment_delete_url}"', attachment_actions)
         self.assertContains(response, 'data-confirm-title="¿Publicar este avance?"')
         self.assertContains(response, 'data-confirm-title="¿Eliminar este avance?"')
         self.assertContains(response, 'data-confirm-title="¿Eliminar este archivo?"')
@@ -575,6 +575,105 @@ class ProjectUpdateDetailTests(TestCase):
             self.client.get(reverse('project_update_detail', args=[projects[1].pk]))
 
         self.assertEqual(len(one_attachment_queries), len(five_attachment_queries))
+
+    def _create_attachment(self, *, title='Evidencia de acciones'):
+        return ProjectUpdateAttachment.objects.create(
+            project_update=self.project_update,
+            title=title,
+            file='project_update_attachments/acciones.pdf',
+            uploaded_by=self.user,
+        )
+
+    def _attachment_actions_markup(self, content):
+        start = content.index('class="ops-project-update-attachment-actions"')
+        end = content.index('</div>', start) + len('</div>')
+        return content[start:end]
+
+    def test_draft_attachment_actions_render_download_and_delete_as_siblings(self):
+        attachment = self._create_attachment()
+        download_url = reverse('project_update_attachment_download', args=[attachment.pk])
+        delete_url = reverse('project_update_attachment_delete', args=[attachment.pk])
+
+        response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
+        content = response.content.decode()
+        actions = self._attachment_actions_markup(content)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f'href="{download_url}"', actions)
+        self.assertIn('>Descargar</a>', actions)
+        self.assertEqual(actions.count('>Descargar</a>'), 1)
+        self.assertIn(f'id="project-update-attachment-delete-form-{attachment.pk}"', actions)
+        self.assertIn('method="post"', actions)
+        self.assertIn(f'action="{delete_url}"', actions)
+        self.assertIn('name="csrfmiddlewaretoken"', actions)
+        self.assertIn('data-confirm-action', actions)
+        self.assertIn('data-confirm-title="¿Eliminar este archivo?"', actions)
+        self.assertIn(
+            'data-confirm-text="El adjunto dejará de estar disponible en el avance."',
+            actions,
+        )
+        self.assertIn('data-confirm-confirm-label="Sí, eliminar"', actions)
+        self.assertIn('data-confirm-variant="danger"', actions)
+        self.assertIn('>Eliminar</button>', actions)
+        self.assertEqual(actions.count('>Eliminar</button>'), 1)
+        self.assertIn('class="btn btn-sm btn-outline-danger"', actions)
+        self.assertIn('type="submit"', actions)
+        self.assertNotIn('⋮', actions)
+        self.assertNotIn('ops-project-update-attachment-more', actions)
+        self.assertNotIn('data-bs-toggle="dropdown"', actions)
+        self.assertNotIn('dropdown-item', actions)
+        self.assertNotIn('dropdown-menu', actions)
+        self.assertNotIn('class="dropdown"', actions)
+
+    def test_published_attachment_actions_show_download_without_delete(self):
+        attachment = self._create_attachment(title='Evidencia publicada')
+        download_url = reverse('project_update_attachment_download', args=[attachment.pk])
+        delete_url = reverse('project_update_attachment_delete', args=[attachment.pk])
+        publish_project_update(self.project_update.pk, self.user)
+
+        response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
+        content = response.content.decode()
+        actions = self._attachment_actions_markup(content)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f'href="{download_url}"', actions)
+        self.assertIn('>Descargar</a>', actions)
+        self.assertNotIn(f'project-update-attachment-delete-form-{attachment.pk}', actions)
+        self.assertNotIn(delete_url, actions)
+        self.assertNotIn('>Eliminar</button>', actions)
+        self.assertNotIn('⋮', actions)
+        self.assertNotIn('ops-project-update-attachment-more', actions)
+        self.assertNotIn('data-bs-toggle="dropdown"', actions)
+
+    def test_view_only_attachment_actions_show_download_without_delete_or_dropdown(self):
+        attachment = self._create_attachment(title='Evidencia solo lectura')
+        download_url = reverse('project_update_attachment_download', args=[attachment.pk])
+        delete_url = reverse('project_update_attachment_delete', args=[attachment.pk])
+        viewer = get_user_model().objects.create_user(
+            username='detail-attachment-viewer',
+            password='pass-12345',
+        )
+        viewer.user_permissions.add(*Permission.objects.filter(codename__in=(
+            'view_projectupdate',
+            'view_projectupdateattachment',
+        )))
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
+        content = response.content.decode()
+        actions = self._attachment_actions_markup(content)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f'href="{download_url}"', actions)
+        self.assertIn('>Descargar</a>', actions)
+        self.assertNotIn(f'project-update-attachment-delete-form-{attachment.pk}', actions)
+        self.assertNotIn(delete_url, actions)
+        self.assertNotIn('>Eliminar</button>', actions)
+        self.assertNotIn('⋮', actions)
+        self.assertNotIn('ops-project-update-attachment-more', actions)
+        self.assertNotIn('data-bs-toggle="dropdown"', actions)
+        self.assertNotIn('class="dropdown"', actions)
+        self.assertNotIn('dropdown-menu', actions)
 
 
 class ProjectUpdateChunkTests(TestCase):
