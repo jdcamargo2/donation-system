@@ -17,7 +17,7 @@ from apps.operations.models import (
     Project,
     reserve_operational_code,
 )
-from apps.operations.services import create_expense, create_fund_allocation
+from apps.operations.services import create_expense_legacy as create_expense, create_fund_allocation
 from apps.operations.tests.helpers import TEST_DATE, create_donation, create_institution, create_project
 
 

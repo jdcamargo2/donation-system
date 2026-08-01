@@ -24,7 +24,7 @@ from apps.operations.services import (
     add_project_update_attachment,
     add_project_update_remediation_attachment,
     create_supporting_document,
-    create_expense,
+    create_expense_legacy as create_expense,
     create_project_update_remediation,
     create_project_update_review,
     create_project_update_review_decision,

@@ -991,8 +991,78 @@ def update_fund_allocation(
         return locked_allocation
 
 
-# PRE: allocation is active, actor is optional for non-request callers, and support_file is a real uploaded document.
-# POST: creates one REGISTERED expense with protected support after locking Donation then FundAllocation.
+# PRE: caller already holds Donation → FundAllocation → Project locks inside an atomic block;
+#      stored_support_name is a persisted private file name; reservation_credit may unlock one consumed reservation.
+# POST: creates one REGISTERED Expense + SupportingDocument; optional Expense EXECUTED audit; no parent re-lock.
+def _create_expense_locked(
+    *,
+    allocation,
+    expense_date,
+    category,
+    amount,
+    reason,
+    provider_or_recipient,
+    payment_method,
+    description,
+    observations,
+    stored_support_name,
+    support_title='',
+    support_notes='',
+    actor=None,
+    reservation_credit=ZERO_MONEY,
+    write_expense_audit=True,
+):
+    assert transaction.get_connection().in_atomic_block
+    if not stored_support_name:
+        raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
+    ensure_operational_entity_is_editable(allocation)
+    locked_project = allocation.project
+    if getattr(locked_project, 'pk', None) is None:
+        locked_project = Project.objects.get(pk=allocation.project_id)
+    _validate_project_is_active_for_execution_or_updates(locked_project)
+    donation = allocation.donation
+    if getattr(donation, 'pk', None) is None:
+        donation = Donation.objects.get(pk=allocation.donation_id)
+    _validate_operating_currency(donation.currency, 'allocation')
+    _validate_expense_balance(
+        allocation,
+        amount,
+        reservation_credit=reservation_credit,
+    )
+    expense = Expense(
+        allocation=allocation,
+        expense_date=expense_date,
+        category=category,
+        amount=amount,
+        currency=OPERATING_CURRENCY,
+        reason=reason,
+        provider_or_recipient=provider_or_recipient,
+        payment_method=payment_method,
+        description=description,
+        observations=observations,
+        status=Expense.Status.REGISTERED,
+    )
+    expense.full_clean()
+    expense.save()
+    SupportingDocument.objects.create(
+        expense=expense,
+        title=support_title or stored_support_name,
+        document=stored_support_name,
+        notes=support_notes or '',
+    )
+    if write_expense_audit and getattr(actor, 'is_authenticated', False):
+        log_action(
+            actor,
+            AuditLog.Action.EXECUTED,
+            expense,
+            _('Gasto %(code)s registrado por %(amount)s %(currency)s.')
+            % {'code': expense.code, 'amount': expense.amount, 'currency': expense.currency},
+        )
+    return expense
+
+
+# PRE: any application caller attempts ordinary standalone expense creation.
+# POST: always rejects; new expenses must originate from fulfill_expense_request.
 def create_expense(
     *,
     allocation,
@@ -1009,46 +1079,63 @@ def create_expense(
     support_title='',
     support_file=None,
 ):
+    raise ValidationError(
+        _('El gasto debe registrarse desde una solicitud de gasto aprobada.')
+    )
+
+
+# PRE: trusted legacy/import/test callers need the historical direct expense path with locks.
+# POST: creates one REGISTERED expense with support after Donation → FundAllocation → Project locks.
+# Not for views/forms; reservation_credit remains ZERO_MONEY (cannot consume ExpenseRequest reservations).
+def create_expense_legacy(
+    *,
+    allocation,
+    expense_date,
+    category,
+    amount,
+    reason,
+    provider_or_recipient,
+    payment_method,
+    description,
+    observations,
+    currency=OPERATING_CURRENCY,
+    actor=None,
+    support_title='',
+    support_file=None,
+    support_notes='',
+):
     _validate_operating_currency(currency)
     if not support_file:
         raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
     support_document = SupportingDocument(title=support_title or support_file.name)
     with _stored_upload(support_document, 'document', support_file) as stored_name, transaction.atomic():
-        allocation_reference = FundAllocation.objects.only('donation_id').get(pk=allocation.pk)
+        allocation_reference = FundAllocation.objects.only('donation_id', 'project_id').get(
+            pk=allocation.pk
+        )
         Donation.objects.select_for_update().get(pk=allocation_reference.donation_id)
-        locked_allocation = FundAllocation.objects.select_for_update().get(pk=allocation.pk)
-        locked_project = Project.objects.select_for_update().get(pk=locked_allocation.project_id)
-        ensure_operational_entity_is_editable(locked_allocation)
-        _validate_project_is_active_for_execution_or_updates(locked_project)
-        _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
-        _validate_expense_balance(locked_allocation, amount)
-        expense = Expense(
+        locked_allocation = (
+            FundAllocation.objects.select_for_update()
+            .select_related('donation', 'project')
+            .get(pk=allocation.pk)
+        )
+        Project.objects.select_for_update().get(pk=locked_allocation.project_id)
+        return _create_expense_locked(
             allocation=locked_allocation,
             expense_date=expense_date,
             category=category,
             amount=amount,
-            currency=OPERATING_CURRENCY,
             reason=reason,
             provider_or_recipient=provider_or_recipient,
             payment_method=payment_method,
             description=description,
             observations=observations,
-            status=Expense.Status.REGISTERED,
+            stored_support_name=stored_name,
+            support_title=support_title or support_file.name,
+            support_notes=support_notes,
+            actor=actor,
+            reservation_credit=ZERO_MONEY,
+            write_expense_audit=True,
         )
-        expense.full_clean()
-        expense.save()
-        SupportingDocument.objects.create(
-            expense=expense,
-            title=support_title or support_file.name,
-            document=stored_name,
-        )
-        if getattr(actor, 'is_authenticated', False):
-            log_action(
-                actor, AuditLog.Action.EXECUTED, expense,
-                _('Gasto %(code)s registrado por %(amount)s %(currency)s.')
-                % {'code': expense.code, 'amount': expense.amount, 'currency': expense.currency},
-            )
-        return expense
 
 
 # PRE: expense is REGISTERED and proposed values plus support preserve a verifiable executed payment.
@@ -1186,31 +1273,123 @@ def delete_supporting_document(*, document_id: int, actor) -> int:
 def annul_expense(expense_id: int, *, actor, reason: str) -> Expense:
     """
     PRE: actor is authenticated, reason is valid, and expense_id identifies a REGISTERED expense.
-    POST: locks Donation, FundAllocation and Expense, sets terminal metadata once and audits exactly once.
+    POST: locks Donation, FundAllocation and Expense; when linked, also locks ExpenseRequest;
+          annuls the expense, restores allocation balance, and records linked request event/audit
+          without recreating a reservation or changing request status.
     """
     if not getattr(actor, 'is_authenticated', False):
         raise ValidationError({'actor': _('La anulación exige un usuario autenticado.')})
     clean_reason = validate_terminal_reason(reason)
     with transaction.atomic():
-        reference = Expense.objects.select_related('allocation').only('allocation_id', 'allocation__donation_id').get(pk=expense_id)
+        reference = Expense.objects.select_related('allocation').only(
+            'allocation_id',
+            'allocation__donation_id',
+        ).get(pk=expense_id)
         Donation.objects.select_for_update().get(pk=reference.allocation.donation_id)
-        FundAllocation.objects.select_for_update().get(pk=reference.allocation_id)
+        locked_allocation = FundAllocation.objects.select_for_update().get(
+            pk=reference.allocation_id
+        )
         expense = Expense.objects.select_for_update().get(pk=expense_id)
         if expense.status != Expense.Status.REGISTERED:
             raise ExpenseFinalizedError(_('El estado actual del gasto no admite anulación.'))
+
+        from .expense_request_services import (
+            _allocation_available_balance,
+            _json_safe_money,
+            _record_expense_request_audit,
+            _record_expense_request_event,
+        )
+        from .models import ExpenseRequest, ExpenseRequestEvent
+
+        linked_request = (
+            ExpenseRequest.objects.select_for_update()
+            .filter(expense_id=expense.pk)
+            .first()
+        )
+        balance_before = None
+        if linked_request is not None:
+            if linked_request.status != ExpenseRequest.Status.FULFILLED:
+                raise ValidationError(
+                    {
+                        'expense': _(
+                            'La solicitud enlazada al gasto no está en estado cumplido.'
+                        )
+                    }
+                )
+            balance_before = _allocation_available_balance(locked_allocation)
+
+        expense_status_before = expense.status
         expense.status = Expense.Status.ANNULLED
         expense.terminal_reason = clean_reason
         expense.terminal_at = timezone.now()
         expense.terminal_by = actor
         expense.full_clean()
-        expense.save(update_fields=('status', 'terminal_reason', 'terminal_at', 'terminal_by', 'updated_at'))
+        expense.save(
+            update_fields=(
+                'status',
+                'terminal_reason',
+                'terminal_at',
+                'terminal_by',
+                'updated_at',
+            )
+        )
         log_action(
             actor,
             AuditLog.Action.EXPENSE_CANCELLED,
             expense,
             _('Gasto %(code)s anulado; se liberaron %(amount)s %(currency)s. Motivo: %(reason)s')
-            % {'code': expense.code, 'amount': expense.amount, 'currency': expense.currency, 'reason': clean_reason},
+            % {
+                'code': expense.code,
+                'amount': expense.amount,
+                'currency': expense.currency,
+                'reason': clean_reason,
+            },
         )
+
+        if linked_request is not None:
+            from .financials import quantize_money as _quantize_money
+
+            restored_amount = _quantize_money(expense.amount)
+            balance_after = _allocation_available_balance(locked_allocation)
+            _record_expense_request_event(
+                expense_request=linked_request,
+                event_type=ExpenseRequestEvent.EventType.LINKED_EXPENSE_ANNULLED,
+                actor=actor,
+                from_status=ExpenseRequest.Status.FULFILLED,
+                to_status=ExpenseRequest.Status.FULFILLED,
+                allocation_balance_before=balance_before,
+                allocation_balance_after=balance_after,
+                reason=clean_reason,
+                expense=expense,
+                executed_amount=restored_amount,
+                released_amount=restored_amount,
+                metadata={
+                    'request_code': linked_request.code,
+                    'expense_code': expense.code,
+                    'expense_status_before': expense_status_before,
+                    'expense_status_after': expense.status,
+                    'request_status': ExpenseRequest.Status.FULFILLED,
+                    'reservation_recreated': False,
+                    'executed_amount': _json_safe_money(restored_amount),
+                    'released_amount': _json_safe_money(restored_amount),
+                },
+            )
+            _record_expense_request_audit(
+                actor=actor,
+                action=AuditLog.Action.EXPENSE_CANCELLED,
+                expense_request=linked_request,
+                summary=_(
+                    'Gasto enlazado %(expense)s anulado desde solicitud cumplida %(request)s; '
+                    'se restauraron %(amount)s USD sobre la asignación. '
+                    'La solicitud permanece cumplida; no se recrea reserva. Motivo: %(reason)s'
+                )
+                % {
+                    'expense': expense.code,
+                    'request': linked_request.code,
+                    'amount': restored_amount,
+                    'reason': clean_reason,
+                },
+            )
         return expense
 
 

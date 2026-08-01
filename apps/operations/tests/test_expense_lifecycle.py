@@ -12,7 +12,7 @@ from apps.operations.models import AuditLog, Expense, Project
 from apps.operations.services import (
     ExpenseFinalizedError,
     annul_expense,
-    create_expense,
+    create_expense_legacy as create_expense,
     update_expense,
 )
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_user

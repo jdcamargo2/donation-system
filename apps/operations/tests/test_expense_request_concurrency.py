@@ -14,10 +14,13 @@ from django.test import TransactionTestCase
 
 from apps.operations.expense_request_services import (
     ExpenseRequestAlreadyDecidedError,
+    ExpenseRequestAlreadyFulfilledError,
     ExpenseRequestBalanceError,
     ExpenseRequestStateError,
+    annul_expense_request,
     approve_expense_request,
     create_expense_request,
+    fulfill_expense_request,
     update_expense_request,
 )
 from apps.operations.models import (
@@ -26,12 +29,13 @@ from apps.operations.models import (
     ExpenseRequest,
     ExpenseRequestEvent,
     OperationalCodeSequence,
+    SupportingDocument,
     OPERATIONAL_CODE_PREFIXES,
     ZERO_MONEY,
 )
 from apps.operations.role_services import sync_operation_roles
 from apps.operations.roles import ROLE_FIELD_OPERATOR, ROLE_PROJECT_COMMITTEE, ROLE_SIGEDON_ADMIN
-from apps.operations.services import create_expense
+from apps.operations.services import create_expense, create_expense_legacy, annul_expense
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_project
 
 
@@ -224,7 +228,7 @@ class ExpenseRequestConcurrencyTests(TransactionTestCase):
             ).pk
 
         def spend():
-            return create_expense(
+            return create_expense_legacy(
                 allocation=type(allocation).objects.get(pk=allocation.pk),
                 expense_date=TEST_DATE,
                 category='food',
@@ -316,3 +320,276 @@ class ExpenseRequestConcurrencyTests(TransactionTestCase):
         else:
             self.assertEqual(request.status, ExpenseRequest.Status.PENDING_DECISION)
             self.assertEqual(request.requested_amount, Decimal('55.00'))
+
+    def _approve_request(self, amount, allocation=None):
+        allocation = allocation or create_allocation(amount=Decimal('2000.00'))
+        request = create_expense_request(
+            fund_allocation=allocation,
+            requested_amount=amount,
+            purpose='Solicitud aprobada para concurrencia ER2D',
+            requested_date=TEST_DATE,
+            actor=self.admin,
+        )
+        return approve_expense_request(request, actor=self.committee_a), allocation
+
+    def test_fulfill_vs_fulfill_same_request(self):
+        request, allocation = self._approve_request(Decimal('500.00'))
+
+        def fulfill(actor_id):
+            actor = get_user_model().objects.get(pk=actor_id)
+            return fulfill_expense_request(
+                ExpenseRequest.objects.get(pk=request.pk),
+                expense_date=TEST_DATE,
+                amount=Decimal('500.00'),
+                reason='Cumplimiento concurrente exacto',
+                provider_or_recipient='Proveedor',
+                payment_method='bank_transfer',
+                description='',
+                support_file=SimpleUploadedFile(f'{actor_id}.pdf', b'%PDF soporte'),
+                support_title='Factura',
+                category='food',
+                actor=actor,
+            ).pk
+
+        admin_b = self._user('er2d-admin-b', ROLE_SIGEDON_ADMIN)
+        results = self.run_concurrently(
+            [
+                lambda: fulfill(self.admin.pk),
+                lambda: fulfill(admin_b.pk),
+            ]
+        )
+        self.assert_one_success_one_domain_error(
+            results,
+            (
+                ExpenseRequestAlreadyFulfilledError,
+                ExpenseRequestStateError,
+                ValidationError,
+            ),
+        )
+        request.refresh_from_db()
+        self.assertEqual(request.status, ExpenseRequest.Status.FULFILLED)
+        self.assertEqual(Expense.objects.count(), 1)
+        self.assertEqual(SupportingDocument.objects.count(), 1)
+        self.assertEqual(
+            ExpenseRequestEvent.objects.filter(
+                expense_request=request,
+                event_type=ExpenseRequestEvent.EventType.EXPENSE_REGISTERED,
+            ).count(),
+            1,
+        )
+
+    def test_fulfill_vs_annul_request(self):
+        request, allocation = self._approve_request(Decimal('400.00'))
+
+        def fulfill():
+            actor = get_user_model().objects.get(pk=self.admin.pk)
+            return fulfill_expense_request(
+                ExpenseRequest.objects.get(pk=request.pk),
+                expense_date=TEST_DATE,
+                amount=Decimal('400.00'),
+                reason='Cumplimiento frente a anulación',
+                provider_or_recipient='Proveedor',
+                payment_method='bank_transfer',
+                description='',
+                support_file=SimpleUploadedFile('fulfill.pdf', b'%PDF soporte'),
+                support_title='Factura',
+                category='food',
+                actor=actor,
+            ).status
+
+        def annul():
+            actor = get_user_model().objects.get(pk=self.admin.pk)
+            return annul_expense_request(
+                ExpenseRequest.objects.get(pk=request.pk),
+                reason='Anulación concurrente con motivo válido.',
+                actor=actor,
+            ).status
+
+        results = self.run_concurrently([fulfill, annul])
+        successes = [value for outcome, value in results if outcome == 'success']
+        errors = [value for outcome, value in results if outcome == 'error']
+        self.assertEqual(len(successes), 1, results)
+        self.assertEqual(len(errors), 1, results)
+        request.refresh_from_db()
+        allocation.refresh_from_db()
+        self.assertIn(
+            request.status,
+            {
+                ExpenseRequest.Status.FULFILLED,
+                ExpenseRequest.Status.ANNULLED,
+            },
+        )
+        if request.status == ExpenseRequest.Status.FULFILLED:
+            self.assertEqual(Expense.objects.count(), 1)
+            self.assertEqual(allocation.executed_amount, Decimal('400.00'))
+            self.assertEqual(allocation.reserved_amount, ZERO_MONEY)
+        else:
+            self.assertEqual(Expense.objects.count(), 0)
+            self.assertEqual(allocation.reserved_amount, ZERO_MONEY)
+            self.assertEqual(allocation.available_balance, allocation.amount)
+        self.assertGreaterEqual(allocation.available_balance, ZERO_MONEY)
+
+    def test_fulfill_vs_direct_expense_bypass(self):
+        request, allocation = self._approve_request(Decimal('300.00'))
+
+        def fulfill():
+            actor = get_user_model().objects.get(pk=self.admin.pk)
+            return fulfill_expense_request(
+                ExpenseRequest.objects.get(pk=request.pk),
+                expense_date=TEST_DATE,
+                amount=Decimal('300.00'),
+                reason='Cumplimiento frente a bypass',
+                provider_or_recipient='Proveedor',
+                payment_method='bank_transfer',
+                description='',
+                support_file=SimpleUploadedFile('ok.pdf', b'%PDF soporte'),
+                support_title='Factura',
+                category='food',
+                actor=actor,
+            ).pk
+
+        def bypass():
+            return create_expense(
+                allocation=type(allocation).objects.get(pk=allocation.pk),
+                expense_date=TEST_DATE,
+                category='food',
+                amount=Decimal('300.00'),
+                reason='Bypass directo prohibido',
+                provider_or_recipient='Proveedor',
+                payment_method='bank_transfer',
+                description='',
+                observations='',
+                support_file=SimpleUploadedFile('bypass.pdf', b'%PDF soporte'),
+            ).pk
+
+        results = self.run_concurrently([fulfill, bypass])
+        successes = [value for outcome, value in results if outcome == 'success']
+        errors = [value for outcome, value in results if outcome == 'error']
+        self.assertEqual(len(successes), 1, results)
+        self.assertEqual(len(errors), 1, results)
+        self.assertIsInstance(errors[0], ValidationError)
+        request.refresh_from_db()
+        self.assertEqual(request.status, ExpenseRequest.Status.FULFILLED)
+        self.assertEqual(Expense.objects.count(), 1)
+
+    def test_partial_fulfill_vs_competing_approval(self):
+        """
+        allocation=2000, A reserved=1200 fulfill for 800, B pending=900 approve.
+        Acceptable serial outcomes differ; invariant executed + reserved <= allocation.
+        """
+        allocation = create_allocation(amount=Decimal('2000.00'))
+        request_a = create_expense_request(
+            fund_allocation=allocation,
+            requested_amount=Decimal('1200.00'),
+            purpose='Solicitud A parcialmente cumplida concurrente',
+            requested_date=TEST_DATE,
+            actor=self.admin,
+        )
+        approve_expense_request(request_a, actor=self.committee_a)
+        request_b = create_expense_request(
+            fund_allocation=allocation,
+            requested_amount=Decimal('900.00'),
+            purpose='Solicitud B pendiente concurrente con A',
+            requested_date=TEST_DATE,
+            actor=self.operator,
+        )
+
+        def fulfill_a():
+            actor = get_user_model().objects.get(pk=self.admin.pk)
+            return fulfill_expense_request(
+                ExpenseRequest.objects.get(pk=request_a.pk),
+                expense_date=TEST_DATE,
+                amount=Decimal('800.00'),
+                reason='Cumplimiento parcial concurrente',
+                provider_or_recipient='Proveedor',
+                payment_method='bank_transfer',
+                description='',
+                support_file=SimpleUploadedFile('partial.pdf', b'%PDF soporte'),
+                support_title='Factura',
+                category='food',
+                actor=actor,
+            ).pk
+
+        def approve_b():
+            actor = get_user_model().objects.get(pk=self.committee_b.pk)
+            return approve_expense_request(
+                ExpenseRequest.objects.get(pk=request_b.pk),
+                actor=actor,
+            ).pk
+
+        results = self.run_concurrently([fulfill_a, approve_b])
+        # Both can succeed: after A fulfills for 800, available becomes 1200, B's 900 fits.
+        # Or approve B first (available was 800) then B fails balance; A still fulfills.
+        allocation.refresh_from_db()
+        request_a.refresh_from_db()
+        request_b.refresh_from_db()
+        self.assertEqual(request_a.status, ExpenseRequest.Status.FULFILLED)
+        executed = allocation.executed_amount
+        reserved = allocation.reserved_amount
+        self.assertLessEqual(executed + reserved, allocation.amount)
+        self.assertGreaterEqual(allocation.available_balance, ZERO_MONEY)
+        self.assertEqual(executed, Decimal('800.00'))
+        successes = [outcome for outcome, _ in results if outcome == 'success']
+        self.assertGreaterEqual(len(successes), 1, results)
+        if request_b.status == ExpenseRequest.Status.APPROVED_RESERVED:
+            self.assertEqual(reserved, Decimal('900.00'))
+            self.assertEqual(len(successes), 2)
+        else:
+            self.assertEqual(request_b.status, ExpenseRequest.Status.PENDING_DECISION)
+            self.assertEqual(reserved, ZERO_MONEY)
+
+    def test_linked_expense_annul_vs_approval_serializes(self):
+        allocation = create_allocation(amount=Decimal('1000.00'))
+        request = create_expense_request(
+            fund_allocation=allocation,
+            requested_amount=Decimal('400.00'),
+            purpose='Solicitud cumplida para anulación concurrente',
+            requested_date=TEST_DATE,
+            actor=self.admin,
+        )
+        approve_expense_request(request, actor=self.committee_a)
+        fulfilled = fulfill_expense_request(
+            request,
+            expense_date=TEST_DATE,
+            amount=Decimal('400.00'),
+            reason='Gasto a anular concurrentemente',
+            provider_or_recipient='Proveedor',
+            payment_method='bank_transfer',
+            description='',
+            support_file=SimpleUploadedFile('linked.pdf', b'%PDF soporte'),
+            support_title='Factura',
+            category='food',
+            actor=self.admin,
+        )
+        pending = create_expense_request(
+            fund_allocation=allocation,
+            requested_amount=Decimal('700.00'),
+            purpose='Aprobación concurrente con anulación enlazada',
+            requested_date=TEST_DATE,
+            actor=self.operator,
+        )
+
+        def annul_linked():
+            actor = get_user_model().objects.get(pk=self.admin.pk)
+            return annul_expense(
+                fulfilled.expense_id,
+                actor=actor,
+                reason='Anulación concurrente del gasto enlazado.',
+            ).pk
+
+        def approve_pending():
+            actor = get_user_model().objects.get(pk=self.committee_b.pk)
+            return approve_expense_request(
+                ExpenseRequest.objects.get(pk=pending.pk),
+                actor=actor,
+            ).pk
+
+        results = self.run_concurrently([annul_linked, approve_pending])
+        allocation.refresh_from_db()
+        pending.refresh_from_db()
+        executed = allocation.executed_amount
+        reserved = allocation.reserved_amount
+        self.assertLessEqual(executed + reserved, allocation.amount)
+        self.assertGreaterEqual(allocation.available_balance, ZERO_MONEY)
+        successes = [outcome for outcome, _ in results if outcome == 'success']
+        self.assertGreaterEqual(len(successes), 1, results)

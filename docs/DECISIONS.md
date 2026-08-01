@@ -115,8 +115,10 @@ con estados de aprobación y permite trazabilidad financiera explícita.
   append-only.
 * ER2A–ER2C implementan agregación de reservas, saldo disponible
   reservation-aware, y servicios de creación/edición/retiro/denegación/aprobación
-  con reserva atómica. El cumplimiento (`FULFILLED`) y la creación del
-  `Expense` final quedan para ER2D.
+  con reserva atómica.
+* ER2D–ER2E implementan cumplimiento (`FULFILLED` → `Expense`), anulación
+  administrativa de solicitudes, integración de anulación del gasto enlazado y
+  retiro del `create_expense()` público como camino ordinario.
 
 ---
 
@@ -147,10 +149,13 @@ pendientes, y evita doble conteo entre ejecución y reserva.
 ### Consecuencias
 
 * Pendiente, denegada, retirada, anulada o cumplida no cuentan como reserva.
-* La creación directa de `Expense` no puede consumir fondos ya reservados.
+* La creación directa pública de `Expense` está retirada; el legado
+  `create_expense_legacy` tampoco puede consumir fondos ya reservados.
 * Aprobación, eventos (`APPROVED`, `RESERVATION_CREATED`) y `AuditLog` son
-  atómicos bajo bloqueo `Donation → FundAllocation → ExpenseRequest`.
-* El cumplimiento (consumo de reserva → `Expense`) permanece pendiente en ER2D.
+  atómicos bajo bloqueo `Donation → FundAllocation → Project → ExpenseRequest`.
+* ER2D–ER2E: cumplimiento exacto/parcial, anulación administrativa de
+  solicitudes, anulación de gasto enlazado sin recrear reserva, y gobernanza de
+  `create_expense()`.
 
 ## 2026-07-11 — Códigos operativos transaccionales
 

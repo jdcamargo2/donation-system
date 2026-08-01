@@ -170,16 +170,19 @@ Los tests de trigger PostgreSQL y concurrencia de códigos `SGS` se omiten de
 forma limpia bajo SQLite (`skipUnless`); deben ejecutarse contra una base
 PostgreSQL desechable para validar la defensa append-only.
 
-### Solicitudes de gasto — reservas y servicios (ER2A–ER2C)
+### Solicitudes de gasto — reservas, cumplimiento y anulación (ER2A–ER2E)
 
 ```bash
 python manage.py test \
+  apps.operations.tests.test_expense_request_fulfillment \
+  apps.operations.tests.test_expense_request_annulment \
+  apps.operations.tests.test_expense_request_concurrency \
   apps.operations.tests.test_expense_request_services \
   apps.operations.tests.test_expense_request_balances \
-  apps.operations.tests.test_expense_request_concurrency \
   apps.operations.tests.test_expense_lifecycle \
-  apps.operations.tests.test_roles \
+  apps.operations.tests.test_services \
   apps.operations.tests.test_concurrency \
+  apps.operations.tests.test_roles \
   --noinput
 ```
 
@@ -187,8 +190,11 @@ Cobertura focalizada:
 
 * saldos reservation-aware y selectores sin multiplicación por join;
 * create / update / withdraw / deny / approve;
-* concurrencia PostgreSQL de aprobaciones, gasto directo vs reserva, y
-  update vs approve;
+* cumplimiento exacto/parcial, eventos y rollbacks;
+* anulación administrativa pendiente/reservada;
+* anulación de gasto enlazado sin recrear reserva;
+* rechazo de `create_expense()` público;
+* concurrencia PostgreSQL (fulfill vs fulfill/annul/bypass/approval);
 * regresión de ciclo de vida de `Expense` y roles.
 
 `test_expense_request_concurrency` se omite bajo SQLite (`skipUnless`).

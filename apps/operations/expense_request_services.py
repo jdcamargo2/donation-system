@@ -1,4 +1,4 @@
-"""Expense Request lifecycle services (ER2A–ER2C): create, update, withdraw, deny, approve."""
+"""Expense Request lifecycle services (ER2A–ER2E): create through fulfill and annul."""
 
 from decimal import Decimal
 
@@ -17,9 +17,12 @@ from .models import (
     ExpenseRequestEvent,
     FundAllocation,
     Project,
+    SupportingDocument,
     ZERO_MONEY,
 )
 from .services import (
+    _create_expense_locked,
+    _stored_upload,
     ensure_operational_entity_is_editable,
     log_action,
     validate_terminal_reason,
@@ -47,6 +50,14 @@ class ExpenseRequestAlreadyDecidedError(ValidationError):
 
 class ExpenseRequestAmountError(ValidationError):
     """Raised when a requested amount is not a positive operational amount."""
+
+
+class ExpenseRequestAlreadyFulfilledError(ValidationError):
+    """Raised when fulfillment is attempted on an already-linked or fulfilled request."""
+
+
+class ExpenseRequestReservationError(ValidationError):
+    """Raised when reservation metadata is missing or malformed for fulfillment/annulment."""
 
 
 def _ensure_request_permission(actor, codename):
@@ -660,4 +671,413 @@ def approve_expense_request(request, *, decision_note='', actor) -> ExpenseReque
             'fund_allocation',
             'requested_by',
             'decided_by',
+        ).get(pk=locked_request.pk)
+
+
+def _ensure_request_is_approved_reserved_for_fulfillment(request):
+    """
+    PRE: request is a locked ExpenseRequest row proposed for fulfillment.
+    POST: returns only for APPROVED_RESERVED with usable reservation and no linked expense.
+    """
+    if request.status == ExpenseRequest.Status.FULFILLED or request.expense_id is not None:
+        raise ExpenseRequestAlreadyFulfilledError(
+            {'status': _('La solicitud ya tiene un gasto registrado y no admite cumplimiento.')}
+        )
+    if request.status != ExpenseRequest.Status.APPROVED_RESERVED:
+        raise ExpenseRequestStateError(
+            {
+                'status': _(
+                    'Solo las solicitudes aprobadas con reserva admiten el registro del gasto.'
+                )
+            }
+        )
+    if request.reserved_amount is None or request.reserved_amount <= ZERO_MONEY:
+        raise ExpenseRequestReservationError(
+            {
+                'reserved_amount': _(
+                    'La solicitud no tiene una reserva activa válida para cumplir.'
+                )
+            }
+        )
+
+
+def _validate_fulfillment_amount(amount, reserved_amount):
+    """
+    PRE: amount is the proposed final expense amount; reserved_amount is the locked reservation.
+    POST: returns quantized amount when 0 < amount <= reserved_amount.
+    """
+    try:
+        normalized = quantize_money(amount)
+    except Exception as exc:
+        raise ExpenseRequestAmountError(
+            {'amount': _('El monto del gasto debe ser un valor monetario válido.')}
+        ) from exc
+    if normalized <= ZERO_MONEY:
+        raise ExpenseRequestAmountError(
+            {'amount': _('El monto del gasto debe ser positivo.')}
+        )
+    reserved = quantize_money(reserved_amount)
+    if normalized > reserved:
+        raise ExpenseRequestAmountError(
+            {
+                'amount': _(
+                    'El monto del gasto no puede superar el monto reservado de la solicitud.'
+                )
+            }
+        )
+    return normalized
+
+
+# PRE: actor has fulfill_expenserequest; request is APPROVED_RESERVED; support_file is mandatory;
+#      0 < amount <= reserved_amount; remaining Expense fields are operational.
+# POST: atomically creates Expense + SupportingDocument, links OneToOne, sets FULFILLED,
+#       consumes reservation (partial release when amount < reserved), writes events and audits.
+def fulfill_expense_request(
+    request,
+    *,
+    expense_date,
+    amount,
+    reason,
+    provider_or_recipient,
+    payment_method,
+    description,
+    support_file,
+    support_title,
+    category,
+    support_notes='',
+    observations='',
+    actor,
+) -> ExpenseRequest:
+    _ensure_request_permission(actor, 'fulfill_expenserequest')
+    if not support_file:
+        raise ValidationError({'support_file': _('Todo gasto debe tener un documento soporte.')})
+    clean_reason = reason.strip() if isinstance(reason, str) else ''
+    if not clean_reason:
+        raise ValidationError({'reason': _('El motivo del gasto es obligatorio.')})
+    clean_provider = (
+        provider_or_recipient.strip()
+        if isinstance(provider_or_recipient, str)
+        else ''
+    )
+    if not clean_provider:
+        raise ValidationError(
+            {'provider_or_recipient': _('El proveedor o destinatario es obligatorio.')}
+        )
+    support_document = SupportingDocument(
+        title=support_title or getattr(support_file, 'name', 'soporte')
+    )
+
+    with _stored_upload(
+        support_document, 'document', support_file
+    ) as stored_name, transaction.atomic():
+        allocation_id = ExpenseRequest.objects.only('fund_allocation_id').get(
+            pk=request.pk
+        ).fund_allocation_id
+        # Canonical order shared with approve: Donation → FundAllocation → Project → ExpenseRequest.
+        locked_allocation = _lock_allocation_parents(allocation_id)
+        locked_request = ExpenseRequest.objects.select_for_update().get(pk=request.pk)
+        _ensure_request_is_approved_reserved_for_fulfillment(locked_request)
+        _validate_request_allocation(locked_allocation)
+
+        executed_amount = _validate_fulfillment_amount(
+            amount,
+            locked_request.reserved_amount,
+        )
+        reserved_amount = quantize_money(locked_request.reserved_amount)
+        released_amount = quantize_money(reserved_amount - executed_amount)
+
+        balance_before = _allocation_available_balance(locked_allocation)
+
+        # Credit this reservation for Expense.clean() without excluding other active reservations.
+        locked_allocation.annotated_reserved_amount = get_allocation_reserved_amount(
+            locked_allocation,
+            exclude_request_id=locked_request.pk,
+        )
+        expense = _create_expense_locked(
+            allocation=locked_allocation,
+            expense_date=expense_date,
+            category=category,
+            amount=executed_amount,
+            reason=clean_reason,
+            provider_or_recipient=clean_provider,
+            payment_method=payment_method,
+            description=description or '',
+            observations=observations or '',
+            stored_support_name=stored_name,
+            support_title=support_title or getattr(support_file, 'name', 'soporte'),
+            support_notes=support_notes or '',
+            actor=actor,
+            reservation_credit=reserved_amount,
+            write_expense_audit=True,
+        )
+        if hasattr(locked_allocation, 'annotated_reserved_amount'):
+            delattr(locked_allocation, 'annotated_reserved_amount')
+
+        locked_request.expense = expense
+        locked_request.status = ExpenseRequest.Status.FULFILLED
+        locked_request.full_clean()
+        locked_request.save(
+            update_fields=(
+                'expense',
+                'status',
+                'updated_at',
+            )
+        )
+
+        balance_after = _allocation_available_balance(locked_allocation)
+        expected_after = quantize_money(balance_before + released_amount)
+        if balance_after != expected_after:
+            raise ExpenseRequestBalanceError(
+                {'status': _('El cumplimiento no pudo consolidarse de forma consistente.')}
+            )
+
+        common_metadata = {
+            'request_code': locked_request.code,
+            'expense_code': expense.code,
+            'allocation_code': locked_allocation.code,
+            'requested_amount': _json_safe_money(locked_request.requested_amount),
+            'reserved_amount': _json_safe_money(reserved_amount),
+            'executed_amount': _json_safe_money(executed_amount),
+            'released_amount': _json_safe_money(released_amount),
+        }
+        _record_expense_request_event(
+            expense_request=locked_request,
+            event_type=ExpenseRequestEvent.EventType.EXPENSE_REGISTERED,
+            actor=actor,
+            from_status=ExpenseRequest.Status.APPROVED_RESERVED,
+            to_status=ExpenseRequest.Status.FULFILLED,
+            allocation_balance_before=balance_before,
+            allocation_balance_after=balance_after,
+            expense=expense,
+            reserved_amount=reserved_amount,
+            executed_amount=executed_amount,
+            released_amount=released_amount,
+            metadata=common_metadata,
+        )
+        _record_expense_request_event(
+            expense_request=locked_request,
+            event_type=ExpenseRequestEvent.EventType.RESERVATION_CONSUMED,
+            actor=actor,
+            from_status=ExpenseRequest.Status.APPROVED_RESERVED,
+            to_status=ExpenseRequest.Status.FULFILLED,
+            allocation_balance_before=balance_before,
+            allocation_balance_after=balance_after,
+            expense=expense,
+            reserved_amount=reserved_amount,
+            executed_amount=executed_amount,
+            released_amount=released_amount,
+            metadata={
+                **common_metadata,
+                'reservation_active_after': False,
+                'narrative': (
+                    'La reserva dejó de estar activa al registrar el gasto final.'
+                ),
+            },
+        )
+        if released_amount > ZERO_MONEY:
+            _record_expense_request_event(
+                expense_request=locked_request,
+                event_type=ExpenseRequestEvent.EventType.UNUSED_RESERVATION_RELEASED,
+                actor=actor,
+                from_status=ExpenseRequest.Status.APPROVED_RESERVED,
+                to_status=ExpenseRequest.Status.FULFILLED,
+                allocation_balance_before=balance_before,
+                allocation_balance_after=balance_after,
+                expense=expense,
+                reserved_amount=reserved_amount,
+                executed_amount=executed_amount,
+                released_amount=released_amount,
+                metadata={
+                    'released_amount': _json_safe_money(released_amount),
+                    'expense_code': expense.code,
+                    'request_code': locked_request.code,
+                },
+            )
+
+        release_clause = ''
+        if released_amount > ZERO_MONEY:
+            release_clause = _(
+                ' %(released)s USD de reserva no utilizada liberados.'
+            ) % {'released': released_amount}
+        _record_expense_request_audit(
+            actor=actor,
+            action=AuditLog.Action.EXECUTED,
+            expense_request=locked_request,
+            summary=_(
+                'Solicitud %(request)s con reserva aprobada de %(reserved)s USD cumplida: '
+                'gasto %(expense)s registrado por %(executed)s USD.%(release)s '
+                'Saldo %(before)s→%(after)s USD.'
+            )
+            % {
+                'request': locked_request.code,
+                'reserved': reserved_amount,
+                'expense': expense.code,
+                'executed': executed_amount,
+                'release': release_clause,
+                'before': balance_before,
+                'after': balance_after,
+            },
+        )
+        return ExpenseRequest.objects.select_related(
+            'fund_allocation',
+            'requested_by',
+            'decided_by',
+            'expense',
+        ).get(pk=locked_request.pk)
+
+
+def _ensure_request_is_annullable(request):
+    """
+    PRE: request is a locked ExpenseRequest row proposed for administrative annulment.
+    POST: returns only for PENDING_DECISION or APPROVED_RESERVED without linked expense.
+    """
+    if request.expense_id is not None:
+        raise ExpenseRequestStateError(
+            {
+                'expense': _(
+                    'Una solicitud con gasto enlazado no admite anulación administrativa.'
+                )
+            }
+        )
+    if request.status in {
+        ExpenseRequest.Status.PENDING_DECISION,
+        ExpenseRequest.Status.APPROVED_RESERVED,
+    }:
+        return
+    if request.status == ExpenseRequest.Status.ANNULLED:
+        raise ExpenseRequestStateError(
+            {'status': _('La solicitud ya está anulada.')}
+        )
+    raise ExpenseRequestStateError(
+        {
+            'status': _(
+                'Solo las solicitudes pendientes o aprobadas con reserva admiten anulación.'
+            )
+        }
+    )
+
+
+# PRE: actor has annul_expenserequest; request is PENDING_DECISION or APPROVED_RESERVED; reason mandatory.
+# POST: transitions to ANNULLED; releases full reservation when previously approved; atomic events/audit.
+def annul_expense_request(request, *, reason, actor) -> ExpenseRequest:
+    _ensure_request_permission(actor, 'annul_expenserequest')
+    clean_reason = validate_terminal_reason(reason)
+
+    with transaction.atomic():
+        allocation_id = ExpenseRequest.objects.only('fund_allocation_id').get(
+            pk=request.pk
+        ).fund_allocation_id
+        locked_allocation = _lock_allocation_parents(allocation_id)
+        locked_request = ExpenseRequest.objects.select_for_update().get(pk=request.pk)
+        _ensure_request_is_annullable(locked_request)
+
+        from_status = locked_request.status
+        had_active_reservation = (
+            from_status == ExpenseRequest.Status.APPROVED_RESERVED
+            and locked_request.reserved_amount is not None
+            and locked_request.reserved_amount > ZERO_MONEY
+        )
+        released_amount = (
+            quantize_money(locked_request.reserved_amount)
+            if had_active_reservation
+            else ZERO_MONEY
+        )
+        balance_before = _allocation_available_balance(locked_allocation)
+
+        now = timezone.now()
+        locked_request.status = ExpenseRequest.Status.ANNULLED
+        locked_request.terminal_reason = clean_reason
+        locked_request.terminal_by = actor
+        locked_request.terminal_at = now
+        # Preserve decision/reservation history when annulling an approved reservation.
+        locked_request.full_clean()
+        locked_request.save(
+            update_fields=(
+                'status',
+                'terminal_reason',
+                'terminal_by',
+                'terminal_at',
+                'updated_at',
+            )
+        )
+
+        balance_after = _allocation_available_balance(locked_allocation)
+        expected_after = quantize_money(balance_before + released_amount)
+        if balance_after != expected_after:
+            raise ExpenseRequestBalanceError(
+                {'status': _('La anulación no pudo consolidarse de forma consistente.')}
+            )
+
+        _record_expense_request_event(
+            expense_request=locked_request,
+            event_type=ExpenseRequestEvent.EventType.ANNULLED,
+            actor=actor,
+            from_status=from_status,
+            to_status=ExpenseRequest.Status.ANNULLED,
+            allocation_balance_before=balance_before,
+            allocation_balance_after=balance_after,
+            reason=clean_reason,
+            reserved_amount=locked_request.reserved_amount,
+            released_amount=released_amount if had_active_reservation else None,
+            metadata={
+                'from_status': from_status,
+                'had_active_reservation': had_active_reservation,
+                'released_amount': (
+                    _json_safe_money(released_amount) if had_active_reservation else None
+                ),
+            },
+        )
+        if had_active_reservation:
+            _record_expense_request_event(
+                expense_request=locked_request,
+                event_type=ExpenseRequestEvent.EventType.RESERVATION_RELEASED,
+                actor=actor,
+                from_status=from_status,
+                to_status=ExpenseRequest.Status.ANNULLED,
+                allocation_balance_before=balance_before,
+                allocation_balance_after=balance_after,
+                reason=clean_reason,
+                reserved_amount=released_amount,
+                released_amount=released_amount,
+                metadata={
+                    'released_amount': _json_safe_money(released_amount),
+                    'allocation_code': locked_allocation.code,
+                },
+            )
+
+        if had_active_reservation:
+            summary = _(
+                'Solicitud %(code)s anulada por %(actor)s; se liberó la reserva de '
+                '%(released)s USD sobre asignación %(allocation)s. '
+                'Saldo %(before)s→%(after)s USD. Motivo: %(reason)s'
+            ) % {
+                'code': locked_request.code,
+                'actor': actor.get_username(),
+                'released': released_amount,
+                'allocation': locked_allocation.code,
+                'before': balance_before,
+                'after': balance_after,
+                'reason': clean_reason,
+            }
+        else:
+            summary = _(
+                'Solicitud %(code)s anulada por %(actor)s sobre asignación %(allocation)s '
+                '(sin efecto financiero). Motivo: %(reason)s'
+            ) % {
+                'code': locked_request.code,
+                'actor': actor.get_username(),
+                'allocation': locked_allocation.code,
+                'reason': clean_reason,
+            }
+        _record_expense_request_audit(
+            actor=actor,
+            action=AuditLog.Action.ANNULLED,
+            expense_request=locked_request,
+            summary=summary,
+        )
+        return ExpenseRequest.objects.select_related(
+            'fund_allocation',
+            'requested_by',
+            'decided_by',
+            'terminal_by',
         ).get(pk=locked_request.pk)

@@ -214,13 +214,15 @@ rechazo.
 
 ---
 
-## 4a. Flujo de solicitud de gasto (ER2A–ER2C)
+## 4a. Flujo de solicitud de gasto (ER2A–ER2E)
 
 ### Actores
 
 * Creación / edición / retiro: Administrador SIGEDON u Operador de campo (sobre
   solicitudes propias).
 * Decisión (aprobar / denegar): Comité de proyectos (`decide_expenserequest`).
+* Cumplimiento y anulación administrativa: Administrador SIGEDON
+  (`fulfill_expenserequest`, `annul_expenserequest`).
 
 ### PRE (creación)
 
@@ -247,7 +249,7 @@ rechazo.
 
 ### Pasos (aprobación)
 
-1. Bloqueo canónico: `Donation → FundAllocation → ExpenseRequest`.
+1. Bloqueo canónico: `Donation → FundAllocation → Project → ExpenseRequest`.
 2. Recalcula ejecutado y reservas (excluyendo la solicitud actual).
 3. Si el saldo es insuficiente: falla sin mutar, sin eventos ni auditoría.
 4. Si alcanza: fija `APPROVED_RESERVED`, `reserved_amount = requested_amount`,
@@ -263,10 +265,44 @@ rechazo.
 * Denegación: solo Comité, motivo obligatorio; `PENDING_DECISION → DENIED`;
   sin efecto financiero.
 
+### Cumplimiento (ER2D)
+
+* Solo `APPROVED_RESERVED` sin gasto enlazado; `0 < amount <= reserved_amount`.
+* Bloqueo: `Donation → FundAllocation → Project → ExpenseRequest`.
+* Crea `Expense` + `SupportingDocument` vía `_create_expense_locked` con
+  `reservation_credit = reserved_amount`.
+* Transiciona a `FULFILLED` y enlaza OneToOne; preserva metadatos de reserva.
+* Eventos: `EXPENSE_REGISTERED`, `RESERVATION_CONSUMED`, y
+  `UNUSED_RESERVATION_RELEASED` solo si hay diferencia positiva.
+* Identidad: `available_after = available_before + (reserved − executed)`.
+
+### Anulación administrativa de solicitud (ER2E)
+
+* Admite `PENDING_DECISION` o `APPROVED_RESERVED`; motivo terminal obligatorio.
+* Pendiente: sin efecto financiero; solo evento `ANNULLED`.
+* Aprobada: libera la reserva completa (`ANNULLED` + `RESERVATION_RELEASED`) y
+  preserva historial de decisión/reserva.
+* Cumplida / denegada / retirada / anulada: rechazada.
+
+### Anulación del gasto enlazado
+
+* `annul_expense` restaura el saldo del gasto.
+* La solicitud permanece `FULFILLED`; no se recrea reserva.
+* Emite `LINKED_EXPENSE_ANNULLED` + auditoría de solicitud, además de
+  `EXPENSE_CANCELLED` del gasto.
+
+### Gobernanza de creación de gastos
+
+* `create_expense()` público rechaza creación directa ordinaria.
+* Camino normal: `fulfill_expense_request`.
+* `create_expense_legacy()` solo para tests/importaciones controladas.
+* UI ordinaria de gasto nuevo puede quedar visible temporalmente; el servicio ya
+  bloquea el bypass.
+
 ### POST
 
-* Solo `APPROVED_RESERVED` reduce el saldo disponible de la asignación.
-* Cumplimiento (`FULFILLED`) y creación del `Expense` final: pendientes ER2D.
+* Solo `APPROVED_RESERVED` reduce el saldo disponible por reserva.
+* `FULFILLED` convierte reserva en ejecución (exacta o parcial).
 * No hay UI ordinaria de solicitud en este checkpoint.
 
 ---

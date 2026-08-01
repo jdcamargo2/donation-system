@@ -133,6 +133,8 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
 * No recibe `decide_expenserequest` (solo el Comité decide solicitudes de gasto).
 * Puede crear, editar y retirar solicitudes de gasto **propias** en
   `PENDING_DECISION`; la aprobación/reserva es exclusiva del Comité.
+* Puede cumplir solicitudes aprobadas (`fulfill_expenserequest`) y anular
+  administrativamente pendientes o reservadas (`annul_expenserequest`).
 * No recibe `delete_expenserequest` ni permisos de mutación de `ExpenseRequestEvent`.
 * No recibe automáticamente permisos técnicos generales de Kobo distintos de los cinco territoriales.
 

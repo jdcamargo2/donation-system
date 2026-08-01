@@ -50,7 +50,9 @@ python manage.py reconcile_operational_code_sequences
 
 `reconcile_operational_code_sequences` es detect-only e incluye el namespace
 `expense_request` (`SGS`). `sync_sigedon_roles` aplica la matriz canónica de
-permisos de solicitud de gasto sin mutar eventos.
+permisos de solicitud de gasto (incluida fulfillment/anulación administrativa)
+sin mutar eventos. No ejecutar sync de roles ni migraciones contra `db_sigedon`
+activo durante checkpoints de desarrollo de solicitudes.
 
 ### 1.5. Crear un superusuario
 

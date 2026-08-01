@@ -195,13 +195,16 @@ PENDING_DECISION / APPROVED_RESERVED
 * Los adjuntos (`ExpenseRequestAttachment`) son opcionales y mutables solo en
   `PENDING_DECISION`.
 * `ExpenseRequestEvent` es append-only y complementa `AuditLog`.
-* Servicios ER2A–ER2C (`apps/operations/expense_request_services.py`):
+* Servicios ER2A–ER2E (`apps/operations/expense_request_services.py`):
   * creación → `PENDING_DECISION` (sin reserva);
   * edición / retiro → solo solicitante original y solo pendiente;
   * denegación / aprobación → solo `decide_expenserequest` (Comité);
-  * aprobación reserva atómicamente `requested_amount`.
-* El cumplimiento (`FULFILLED`) y la creación del `Expense` enlazado quedan
-  pendientes en ER2D.
+  * aprobación reserva atómicamente `requested_amount`;
+  * cumplimiento (`fulfill_expense_request`) → `FULFILLED` + `Expense` enlazado;
+  * anulación administrativa (`annul_expense_request`) → `ANNULLED` con liberación
+    de reserva si estaba aprobada.
+* La anulación del `Expense` enlazado deja la solicitud en `FULFILLED` y emite
+  `LINKED_EXPENSE_ANNULLED` sin recrear reserva.
 * Agregación autoritativa de reservas: `get_allocation_reserved_amount()` en
   `apps/operations/financials.py` (solo `APPROVED_RESERVED`).
 
@@ -226,9 +229,10 @@ ANNULLED
 * La anulación requiere una justificación.
 * El código operativo es único e inmutable.
 * Los gastos anulados no participan en saldos ni métricas.
-* Todo gasto futuro debe originarse en una `ExpenseRequest` aprobada y reservada
-  (enforcement completo de creación ordinaria en ER2D/UI; la validación de saldo
-  ya resta reservas activas).
+* Todo gasto futuro debe originarse en una `ExpenseRequest` aprobada y reservada.
+* `create_expense()` público rechaza la creación directa ordinaria; el camino
+  canónico es `fulfill_expense_request` (primitiva `_create_expense_locked`).
+* `create_expense_legacy()` queda solo para tests/importaciones controladas.
 
 ## 6. `SupportingDocument`
 

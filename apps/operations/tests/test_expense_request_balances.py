@@ -11,7 +11,8 @@ from apps.operations.models import Expense, ExpenseRequest, ZERO_MONEY
 from apps.operations.selectors import with_allocation_list_metrics
 from apps.operations.services import (
     _validate_expense_balance,
-    create_expense,
+    create_expense as create_expense_public,
+    create_expense_legacy as create_expense,
     get_allocation_financial_summary,
     update_expense,
 )
@@ -203,6 +204,27 @@ class ExpenseRequestBalanceTests(TestCase):
             0,
         )
         self.assertEqual(self.allocation.available_balance, Decimal('30.00'))
+
+    def test_public_create_expense_rejects_direct_creation(self):
+        with self.assertRaisesMessage(
+            Exception,
+            'El gasto debe registrarse desde una solicitud de gasto aprobada.',
+        ):
+            create_expense_public(
+                allocation=self.allocation,
+                expense_date=TEST_DATE,
+                category='food',
+                amount=Decimal('10.00'),
+                reason='Intento directo',
+                provider_or_recipient='Proveedor',
+                payment_method='bank_transfer',
+                description='',
+                observations='',
+                actor=self.requester,
+                support_title='Factura',
+                support_file=SimpleUploadedFile('directo.pdf', b'%PDF-1.4 soporte'),
+            )
+        self.assertEqual(Expense.objects.count(), 0)
 
     def test_existing_expense_update_respects_reservations(self):
         expense = create_expense(

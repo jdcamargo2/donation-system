@@ -89,9 +89,9 @@ Los adjuntos de solicitud (`ExpenseRequestAttachment`) son evidencia privada del
 panel interno: mutables solo en `PENDING_DECISION` y sin ruta pública de media
 en ER1/ER2C (rutas protegidas de adjunto pendientes de UI).
 
-Los servicios de ciclo de vida (ER2B–ER2C) escriben `ExpenseRequestEvent` y
+Los servicios de ciclo de vida (ER2B–ER2E) escriben `ExpenseRequestEvent` y
 `AuditLog` en la misma transacción que la mutación. El fallo de evento o
-auditoría revierte la solicitud/reserva. No se exponen filas de
+auditoría revierte la solicitud/reserva/cumplimiento. No se exponen filas de
 `ExpenseRequest` en el portal público.
 
 Las acciones críticas deben registrar, como mínimo:

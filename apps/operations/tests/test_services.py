@@ -12,7 +12,8 @@ from django.contrib.auth.models import Permission
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ZERO_MONEY
 from apps.operations.services import (
     _validate_operating_currency,
-    create_expense as create_expense_service,
+    create_expense as create_expense_public,
+    create_expense_legacy as create_expense_service,
     create_fund_allocation,
     get_allocation_financial_summary,
     get_dashboard_metrics,
@@ -392,6 +393,15 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(expense.allocation, allocation)
         self.assertEqual(expense.amount, Decimal('20.00'))
+
+    def test_public_create_expense_rejects_direct_standalone_path(self):
+        allocation = self.create_allocation(amount=Decimal('60.00'))
+        with self.assertRaisesMessage(
+            ValidationError,
+            'El gasto debe registrarse desde una solicitud de gasto aprobada.',
+        ):
+            create_expense_public(**self.expense_service_data(allocation, Decimal('20.00')))
+        self.assertFalse(allocation.expenses.exists())
 
     def test_create_expense_service_rejects_closed_project(self):
         project = self.create_project(code='PRJ-EXP-CLOSED', status=Project.Status.CLOSED)

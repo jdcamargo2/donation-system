@@ -109,8 +109,9 @@ Donation
 ```
 
 Todo gasto futuro debe originarse en una solicitud aprobada con fondos
-reservados. La reserva financiera y los servicios de ciclo de vida se completan
-en checkpoints posteriores (ER2/UI); ER1 establece modelos, permisos, evidencias
+reservados. ER2A–ER2E completan reserva, cumplimiento, anulación administrativa
+e integración de anulación del gasto enlazado. La UI ordinaria de solicitudes
+queda para checkpoints posteriores; ER1 estableció modelos, permisos, evidencias
 y eventos inmutables.
 
 Estados:
@@ -186,8 +187,8 @@ La ejecución parcial o completa se calcula automáticamente.
 
 Un gasto representa una ejecución monetaria previamente autorizada fuera del sistema.
 En la cadena gobernada, todo gasto futuro debe proceder de una `ExpenseRequest`
-aprobada y reservada; el bloqueo de creación directa ordinaria se completa en
-checkpoints posteriores. `Expense` conserva únicamente:
+aprobada y reservada. `create_expense()` público rechaza la creación directa;
+el camino canónico es `fulfill_expense_request`. `Expense` conserva únicamente:
 
 ```text
 REGISTERED
