@@ -4,6 +4,20 @@ Este documento describe los principales flujos operativos de SIGEDON, incluyendo
 
 ## 1. Flujo de proyecto
 
+```text
+Create Project
+    ↓
+ACTIVE + Private
+    ├── Edit
+    ├── Publish
+    │      ↓
+    │   ACTIVE + Public
+    │      └── Unpublish → ACTIVE + Private
+    └── Finish
+           ↓
+       CLOSED + Private
+```
+
 ### PRE
 
 * El usuario posee permisos para gestionar proyectos.
@@ -14,26 +28,33 @@ Este documento describe los principales flujos operativos de SIGEDON, incluyendo
 
 1. El usuario registra el proyecto.
 2. El sistema reserva un código operativo con prefijo `PRJ`.
-3. El proyecto se crea con el estado seleccionado.
-4. Se pueden asociar documentos, asignaciones de fondos y avances.
-5. Según las reglas del dominio, el proyecto puede:
-
-   * activarse;
-   * suspenderse;
-   * cerrarse;
-   * anularse.
-6. Las acciones críticas generan auditoría.
+3. El proyecto se crea automáticamente como `ACTIVE` y privado (`is_public=False`).
+   No hay selector genérico de estado ni de publicación en el formulario ordinario.
+4. Mientras permanece `ACTIVE` puede editarse, recibir documentos, asignaciones,
+   avances e hitos.
+5. Publicar en portal / retirar del portal (`publish_project` /
+   `unpublish_project`) son acciones `POST` con CSRF, permiso
+   `operations.manage_project_publication` y auditoría. Solo un proyecto
+   `ACTIVE` puede publicarse.
+6. Terminar proyecto (`finish_project`) es `POST` confirmado, irreversible y
+   terminal: pasa a `CLOSED`, fuerza `is_public=False`, escribe metadatos
+   terminales y audita el cierre.
+7. No existen flujos de suspensión, reactivación, anulación ni eliminación de
+   proyecto. Las acciones críticas generan auditoría.
 
 ### POST
 
 * El proyecto conserva un código único e inmutable.
-* El proyecto queda disponible para las operaciones permitidas por su estado.
+* Un proyecto activo queda disponible para las operaciones permitidas.
+* Un proyecto cerrado queda inmutable para cambios operativos ordinarios y
+  privado respecto al portal.
 * Las acciones realizadas conservan trazabilidad.
 
 ### 1.1. Flujo de hitos verificables
 
 1. El servicio bloquea el proyecto y sus hitos mediante `select_for_update()`.
-2. Los proyectos cerrados o anulados rechazan toda mutación de hitos.
+2. Solo un proyecto `ACTIVE` admite mutaciones de hitos; un proyecto `CLOSED`
+   rechaza toda mutación.
 3. Crear añade un hito pendiente al final; eliminar compacta las posiciones.
 4. Completar y reabrir actualizan únicamente el estado y metadatos del hito.
 5. Reordenar intercambia hitos adyacentes mediante una posición temporal libre.
@@ -70,9 +91,9 @@ Los formularios no exponen proyecto, posición ni metadatos de finalización. Un
 protección CSRF.
 
 El detalle interno presenta una checklist ordenada y calcula su progreso con
-`get_milestone_progress()` sobre hitos precargados. Los proyectos cerrados o
-anulados conservan esa información como registro histórico, pero no muestran
-acciones de mutación.
+`get_milestone_progress()` sobre hitos precargados. Los proyectos cerrados
+conservan esa información como registro histórico, pero no muestran acciones
+de mutación.
 
 En navegadores con JavaScript, HTMX usa un contrato de fragmentos según la
 operación: completar y reabrir sustituyen solo la fila afectada y actualizan el
@@ -299,15 +320,20 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 ### PRE
 
 * La información cumple las reglas de visibilidad pública.
-* La entidad no se encuentra anulada.
+* El proyecto cumple `status=ACTIVE` e `is_public=True`.
+* Los avances publicados siguen sujetos a la visibilidad del proyecto padre.
+* La entidad financiera no se encuentra anulada cuando aplique.
 * Los datos son consultados mediante selectores públicos.
 
 ### Pasos
 
 1. El portal consulta exclusivamente selectores y consultas públicas.
-2. Se seleccionan proyectos autorizados para publicación.
-3. Solo se incluyen avances en estado `PUBLISHED`.
-4. Se excluyen entidades anuladas.
+2. Listado, detalle, avances y métricas de proyecto exigen
+   `ACTIVE` + `is_public=True`.
+3. Solo se incluyen avances en estado `PUBLISHED` cuyo proyecto padre sigue
+   activo y público.
+4. Se excluyen entidades anuladas (donaciones, asignaciones, gastos y demás
+   entidades que admiten anulación).
 5. Todas las operaciones monetarias publicables ya están expresadas en USD.
 6. Se eliminan campos privados o internos.
 7. Las respuestas autorizadas pueden almacenarse temporalmente en caché.
@@ -318,6 +344,9 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 * El portal publica únicamente información autorizada.
 * No se exponen datos privados, financieros individuales ni técnicos.
 * La capa pública no modifica información operativa.
+* Tras publicar, retirar del portal o terminar un proyecto previamente público,
+  la aplicación invalida la caché del portal (invalidación amplia del cache
+  por defecto; no se garantiza invalidación por clave individual).
 
 ---
 

@@ -226,7 +226,8 @@ Las mutaciones utilizan solicitudes `POST`.
 
 Django protege los formularios mediante CSRF.
 
-Las acciones terminales, como cerrar, anular, publicar, eliminar o restaurar:
+Las acciones terminales, como cerrar, anular, publicar, eliminar o restaurar
+(según la entidad):
 
 * no deben ejecutarse mediante `GET`;
 * requieren permiso;
@@ -234,7 +235,25 @@ Las acciones terminales, como cerrar, anular, publicar, eliminar o restaurar:
 * deben usar protección CSRF;
 * deben generar auditoría cuando corresponda.
 
+Para `Project`, terminar, publicar y retirar del portal usan `POST` con CSRF.
+Un proyecto no se anula ni se elimina como acción terminal operativa.
+
 Las solicitudes `GET` deben limitarse a operaciones de consulta.
+
+## 10.1. Publicación y no eliminación de proyectos
+
+* Publicar y retirar del portal requieren
+  `operations.manage_project_publication`.
+* Esos endpoints son solo `POST` y están protegidos por CSRF.
+* Los selectores públicos usan `status=ACTIVE` e `is_public=True`.
+* La eliminación de proyectos está bloqueada en UI operativa, Django Admin,
+  modelo (`Project.delete()`) y queryset (`QuerySet.delete()`).
+* La administración directa de base de datos, `flush`, teardown de pruebas y
+  destrucción de la base quedan fuera de las garantías de aplicación; no se
+  describe un trigger PostgreSQL que impida borrar proyectos.
+* La invalidación de caché del portal ocurre solo después de cambios exitosos
+  del ciclo de publicación (publicar, retirar, o terminar un proyecto que
+  estaba público), mediante limpieza amplia del cache por defecto.
 
 ## 11. Datos públicos
 
@@ -255,6 +274,9 @@ El portal público no debe exponer:
 * identificadores técnicos innecesarios.
 
 La información pública debe obtenerse mediante selectores y consultas explícitamente diseñadas para publicación.
+
+Los selectores de proyecto del portal requieren `ACTIVE` e `is_public=True`;
+ninguna de las dos condiciones basta por sí sola.
 
 No debe reutilizarse directamente el contexto del panel interno.
 

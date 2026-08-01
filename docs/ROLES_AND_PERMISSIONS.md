@@ -15,7 +15,8 @@ delete_auditlog
 ### Puede gestionar
 
 * instituciones;
-* proyectos;
+* proyectos (crear, editar mientras estén `ACTIVE`, publicar/retirar del portal,
+  terminar);
 * hitos verificables de proyectos, incluidos completar, reabrir y reordenar;
 * donaciones;
 * asignaciones de fondos;
@@ -23,12 +24,37 @@ delete_auditlog
 * documentos;
 * avances;
 * publicación de avances;
-* acciones terminales;
+* acciones terminales de entidades que las admiten (por ejemplo anular
+  donaciones, asignaciones o gastos; terminar proyectos);
 * consulta de auditoría.
+
+### Permisos específicos de proyecto
+
+Recibe, entre otros:
+
+```text
+operations.add_project
+operations.change_project
+operations.view_project
+operations.manage_project_publication
+```
+
+* `change_project` habilita editar un proyecto `ACTIVE` y terminar el proyecto
+  (`finish_project` / «Terminar proyecto»).
+* `manage_project_publication` habilita publicar y retirar del portal. Solo
+  Administrador SIGEDON recibe este permiso.
+
+No recibe de forma efectiva `operations.delete_project`: el permiso técnico
+generado por Django puede existir, pero no se asigna a roles operativos y no
+habilita eliminación. Los proyectos no pueden eliminarse ni siquiera por
+superusuarios a través de Django Admin; el modelo y el queryset rechazan
+`delete()`.
 
 ### Restricciones
 
 * No puede crear, modificar ni eliminar registros de `AuditLog`.
+* No puede anular un proyecto: `Project` no admite estado anulado.
+* No puede eliminar un proyecto.
 * No recibe automáticamente permisos técnicos de KoboToolbox.
 * Los permisos `kobo.*` deben asignarse por separado.
 
@@ -60,6 +86,7 @@ add_supportingdocument
 ### No puede
 
 * crear proyectos;
+* publicar ni retirar proyectos del portal;
 * gestionar donaciones;
 * gestionar asignaciones;
 * registrar gastos;
@@ -106,6 +133,7 @@ No puede:
 * modificar información;
 * anular registros;
 * eliminar registros;
+* publicar ni retirar proyectos del portal;
 * ejecutar acciones terminales.
 
 ## 4. Comité de proyectos
@@ -136,6 +164,7 @@ add_projectupdatereviewdecision
 
 * modificar el contenido original del avance;
 * publicar avances;
+* publicar ni retirar proyectos del portal;
 * eliminar avances;
 * modificar una revisión ya registrada;
 * modificar una decisión ya registrada.
@@ -232,6 +261,9 @@ El superusuario:
 * No debe utilizarse como cuenta operativa diaria.
 * Su uso debe limitarse a tareas excepcionales de configuración, soporte o recuperación.
 * La existencia del rol no sustituye la asignación correcta de permisos a usuarios ordinarios.
+* Incluso como superusuario, Django Admin no permite eliminar proyectos: el Admin
+  deniega la eliminación y el modelo/queryset la rechazan. La garantía es de
+  aplicación, no de base de datos.
 
 ## 8. Usuario autenticado sin permisos
 

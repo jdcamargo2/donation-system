@@ -459,7 +459,8 @@ La ausencia de un botón en la interfaz no demuestra que el permiso esté correc
 * existencia de registros;
 * moneda operativa USD;
 * estados anulados;
-* filtros de publicación;
+* filtros de publicación: un proyecto público de métricas debe estar
+  `ACTIVE` e `is_public=True`;
 * fechas y estados operativos;
 * selectores utilizados por el dashboard o portal.
 

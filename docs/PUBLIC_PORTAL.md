@@ -8,7 +8,7 @@ El portal público permite publicar información institucional autorizada sin ex
 
 Su propósito es ofrecer una vista básica de transparencia sobre:
 
-* proyectos activos;
+* proyectos activos y públicos;
 * avances publicados;
 * métricas agregadas;
 * datos JSON autorizados.
@@ -43,20 +43,23 @@ Las rutas JSON no constituyen una API pública avanzada.
 
 ## 3. Proyectos publicados
 
-Solo se publican proyectos en estado:
+Un proyecto aparece en el portal solo cuando cumple ambas condiciones:
 
 ```text
-ACTIVE
+Project.status == ACTIVE
+AND
+Project.is_public == True
 ```
 
-Los proyectos:
+### Reglas
 
-* suspendidos;
-* cerrados;
-* anulados;
-* planificados;
-
-no deben aparecer en el portal público, salvo que una regla futura de publicación indique expresamente lo contrario.
+* `ACTIVE` solo es insuficiente.
+* `is_public=True` solo es insuficiente.
+* Un proyecto `ACTIVE` privado no aparece en listado ni detalle públicos.
+* Un proyecto `CLOSED` permanece oculto aunque exista un dato inconsistente con
+  `is_public=True`; los selectores públicos filtran por ambas condiciones.
+* No existen estados `PLANNED`, `SUSPENDED` ni `ANNULLED` para `Project`; la
+  elegibilidad pública se define únicamente con `ACTIVE` + `is_public`.
 
 ## 4. Avances publicados
 
@@ -66,18 +69,23 @@ Solo se muestran avances en estado:
 PUBLISHED
 ```
 
-Además, el proyecto asociado debe continuar en estado:
+Además, el proyecto padre debe cumplir:
 
 ```text
-ACTIVE
+status == ACTIVE
+AND
+is_public == True
 ```
 
 ### Reglas
 
 * Los avances en estado `DRAFT` no se publican.
-* Un avance publicado no aparece si su proyecto deja de estar activo.
+* Un avance publicado no aparece si su proyecto deja de estar activo o deja de
+  ser público.
 * Los datos privados asociados al avance permanecen protegidos.
 * La publicación del avance no implica la publicación automática de todos sus adjuntos.
+* Asignaciones y métricas públicas respetan el mismo límite de visibilidad del
+  proyecto (`ACTIVE` + `is_public=True`).
 
 ## 5. Métricas públicas
 
@@ -172,6 +180,11 @@ Tiempos de caché de referencia:
 * La caché no sustituye las validaciones de publicación.
 * Una respuesta obtenida desde caché debe haber sido generada previamente mediante selectores públicos autorizados.
 * Los tiempos pueden ajustarse según la infraestructura y la frecuencia de actualización.
+* Tras un cambio exitoso del ciclo de publicación del proyecto (publicar,
+  retirar del portal, o terminar un proyecto que estaba público), la aplicación
+  invalida la caché del portal. La implementación actual limpia el cache por
+  defecto de forma amplia (`cache.clear()`); no se promete invalidación
+  confiable por clave individual de vista.
 
 ## 10. Separación arquitectónica
 
@@ -216,8 +229,8 @@ La selección de información debe realizarse mediante consultas o selectores di
 
 Estos selectores deben:
 
-* filtrar por estado;
-* excluir información anulada;
+* filtrar por `status=ACTIVE` e `is_public=True` en proyectos;
+* excluir información anulada de entidades que admiten anulación;
 * limitar campos;
 * aplicar reglas de privacidad;
 * calcular agregados autorizados;
@@ -230,8 +243,8 @@ No debe enviarse al template un objeto completo si solo se requiere una parte de
 
 El portal público se considera correctamente protegido cuando:
 
-* solo aparecen proyectos activos;
-* solo aparecen avances publicados;
+* solo aparecen proyectos con `ACTIVE` e `is_public=True`;
+* solo aparecen avances publicados de esos proyectos;
 * no se exponen datos privados;
 * no se exponen entidades anuladas;
 * las métricas utilizan únicamente USD;

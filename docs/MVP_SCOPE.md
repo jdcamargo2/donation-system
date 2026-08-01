@@ -62,21 +62,39 @@ Permite registrar:
 * ubicación;
 * presupuesto estimado;
 * fechas;
-* estado;
+* estado operativo;
+* visibilidad pública (`is_public`);
 * documentos;
 * avances;
 * resumen financiero;
 * levantamientos Kobo asociados.
 
-Estados:
+Estados operativos:
 
 ```text
-PLANNED
 ACTIVE
-SUSPENDED
 CLOSED
-ANNULLED
 ```
+
+Todo proyecto nuevo se crea automáticamente como `ACTIVE` y privado
+(`is_public=False`). El estado no es editable manualmente. No existen estados
+`PLANNED`, `SUSPENDED` ni `ANNULLED` para proyecto, ni flujos de activación,
+suspensión, reactivación, anulación o reapertura.
+
+La única transición es `ACTIVE` → `CLOSED`, mediante «Terminar proyecto»
+(`finish_project()`). Terminar es irreversible, fuerza `is_public=False` y
+registra metadatos terminales y auditoría de cierre.
+
+Publicación:
+
+* `is_public` es independiente del estado operativo;
+* publicar y retirar del portal son acciones explícitas y auditadas;
+* requieren el permiso `operations.manage_project_publication`;
+* la visibilidad pública exige `status=ACTIVE` e `is_public=True`.
+
+Los proyectos no pueden eliminarse por la UI operativa, URLs, Django Admin ni
+ORM de aplicación. La anulación sigue aplicada a donaciones, asignaciones y
+gastos; no a proyectos.
 
 ### 3.3. Donaciones
 
@@ -240,8 +258,8 @@ No se permite:
 
 Incluye:
 
-* proyectos activos;
-* avances publicados;
+* proyectos con `status=ACTIVE` e `is_public=True`;
+* avances publicados de esos proyectos;
 * métricas agregadas;
 * JSON público autorizado;
 * navegación pública.
@@ -389,7 +407,7 @@ Los códigos:
 
 ## 7. Acciones terminales
 
-Cerrar, anular o eliminar requiere:
+Cerrar, anular o eliminar (según la entidad) requiere:
 
 * solicitud `POST`;
 * permiso;
@@ -398,6 +416,10 @@ Cerrar, anular o eliminar requiere:
 * motivo, cuando corresponda;
 * auditoría;
 * bloqueo posterior, cuando aplique.
+
+Para `Project`, la única acción terminal operativa es terminar
+(`ACTIVE` → `CLOSED`). Un proyecto no se anula ni se elimina. Anular y eliminar
+siguen aplicando a otras entidades operativas cuando el dominio lo permite.
 
 ## 8. Eliminaciones protegidas
 

@@ -40,8 +40,15 @@ La suite cubre:
 * servicios de dominio;
 * constraints;
 * generación de códigos;
-* estados y transiciones;
-* acciones terminales;
+* estados y transiciones de proyecto (`ACTIVE`/`CLOSED`, sin estados obsoletos);
+* defaults `ACTIVE` + privado (`is_public=False`);
+* publicar/retirar con permiso `manage_project_publication`;
+* selectores públicos de doble condición;
+* terminar proyecto y retiro automático de visibilidad pública;
+* rutas eliminadas de cambio genérico de estado, anulación o eliminación de
+  proyecto;
+* bloqueos de eliminación en instancia, queryset y Admin (incluido superusuario);
+* acciones terminales de otras entidades (anular/eliminar donde aplique);
 * auditoría;
 * archivos protegidos;
 * permisos;
@@ -75,7 +82,8 @@ La suite cubre:
 
 La suite cubre:
 
-* proyectos públicos;
+* proyectos públicos (`ACTIVE` + `is_public=True`);
+* exclusión de proyectos privados o cerrados;
 * avances publicados;
 * métricas agregadas;
 * privacidad;
@@ -295,8 +303,8 @@ Las pruebas sobre `AuditLog` deben comprobar:
 
 El portal debe comprobar:
 
-* publicación exclusiva de proyectos autorizados;
-* inclusión únicamente de avances publicados;
+* publicación exclusiva de proyectos con `ACTIVE` e `is_public=True`;
+* inclusión únicamente de avances publicados de esos proyectos;
 * exclusión de entidades anuladas;
 * exclusión de datos privados;
 * persistencia exclusiva de operaciones monetarias en USD;

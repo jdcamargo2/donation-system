@@ -41,23 +41,68 @@ Representa un proyecto, programa o línea de acción.
 ### Estados
 
 ```text
-PLANNED
 ACTIVE
-SUSPENDED
 CLOSED
-ANNULLED
 ```
 
-### Reglas
+Estado por defecto: `ACTIVE`.
 
-* Solo los proyectos activos pueden recibir nuevos avances.
+No existen estados `PLANNED`, `SUSPENDED` ni `ANNULLED` para `Project`.
+
+### Publicación
+
+Campo independiente del estado operativo:
+
+```text
+is_public = False | True
+```
+
+Valor por defecto: `False` (privado).
+
+Estado operativo y visibilidad pública son dimensiones separadas. Solo un
+proyecto `ACTIVE` puede publicarse. Un proyecto `CLOSED` nunca es público:
+`finish_project()` / «Terminar proyecto» fuerza `is_public=False`.
+
+Los selectores del portal público exigen ambas condiciones:
+
+```text
+status = ACTIVE
+AND
+is_public = True
+```
+
+### Ciclo de vida
+
+```text
+ACTIVE → CLOSED
+```
+
+| Transición | Cómo ocurre | Reversible |
+| --- | --- | --- |
+| `ACTIVE` → `CLOSED` | Solo mediante `finish_project()` / «Terminar proyecto» | No |
+
+Reglas del ciclo:
+
+* Todo proyecto nuevo nace `ACTIVE` y privado (`is_public=False`).
+* El estado no es editable manualmente (formularios ordinarios, dropdown genérico o Admin).
+* No hay flujos de activación, suspensión, reactivación, anulación ni reapertura.
+* Terminar es terminal e irreversible: fija `status=CLOSED`, `is_public=False`, metadatos terminales (`terminal_at`, `terminal_by`, `terminal_reason`) y una entrada de auditoría de cierre.
+* Un `Project` no puede anularse.
+* Un `Project` no puede eliminarse por la UI operativa, URLs, Django Admin, `Project.delete()` ni `Project.objects...delete()`. La administración directa de base de datos queda fuera de la garantía de aplicación.
+
+### Reglas operativas
+
+* Solo los proyectos activos pueden recibir nuevas asignaciones, avances y mutaciones de hitos.
+* Los gastos y avances de proyecto requieren un proyecto `ACTIVE`.
+* Un proyecto cerrado es inmutable para cambios operativos ordinarios.
+* La selección operativa Kobo usa proyectos `ACTIVE`; la visibilidad pública no afecta elegibilidad financiera ni Kobo interna.
 * El presupuesto estimado no puede ser negativo.
 * La fecha final no puede ser anterior a la fecha inicial.
 * El código operativo es único e inmutable.
 * El monto financiado se deriva únicamente de las asignaciones no anuladas financiadas en USD.
 * El monto ejecutado se deriva únicamente de gastos efectivos en USD sobre donaciones USD.
 * PostgreSQL impide monedas distintas de USD en donaciones y gastos.
-* Los proyectos cerrados o anulados no deben recibir nuevas operaciones incompatibles con su estado.
+* Los proyectos cerrados no deben recibir nuevas operaciones incompatibles con su estado.
 
 ### 2.1. `ProjectMilestone`
 
@@ -69,7 +114,7 @@ Reglas:
 * El progreso se deriva de hitos completados sobre el total; no se persiste en `Project`.
 * Un proyecto sin hitos tiene progreso indefinido.
 * Completar o reabrir hitos no modifica `Project.status`.
-* Los proyectos cerrados o anulados conservan sus hitos visibles, pero no admiten mutaciones.
+* Los proyectos cerrados conservan sus hitos visibles, pero no admiten mutaciones.
 * Completar exige un actor autenticado y conserva fecha y actor mientras este exista.
 * Si el actor se elimina posteriormente, `completed_by` puede quedar en `NULL` sin perder la fecha ni la completitud histórica.
 * Crear, editar, completar, reabrir, eliminar y reordenar se ejecutan mediante servicios atómicos y auditados.

@@ -1,5 +1,9 @@
 # Auditoría del core operativo de SIGEDON
 
+> Historical audit snapshot. Some Project lifecycle findings were superseded by
+> the ACTIVE → CLOSED lifecycle, explicit publication controls, and Project
+> non-deletion policy implemented in July 2026.
+
 ## Resumen ejecutivo
 
 El MVP operativo es **funcional pero no está listo para operar como sistema financiero/auditable sin una fase de endurecimiento**. El flujo principal puede recorrerse desde institución hasta revisión de avances, las vistas aplican permisos de modelo, y los servicios de asignaciones/gastos usan transacciones y bloqueos. Las 104 pruebas de `apps.operations` y las 65 pruebas heredadas de `web` pasan.

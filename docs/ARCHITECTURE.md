@@ -15,6 +15,24 @@ Gestión de archivos privados
 
 La arquitectura busca mantener separadas las responsabilidades de presentación, dominio, persistencia, publicación pública e integración externa.
 
+## 1.1. Arquitectura de `Project`
+
+`Project` se modela con dos ejes independientes:
+
+```text
+Ciclo operativo:     ACTIVE → CLOSED
+Visibilidad pública: is_public = False | True
+```
+
+* Los servicios de dominio controlan publicación (`publish_project` /
+  `unpublish_project`) y el cierre terminal (`finish_project`), que fuerza
+  `is_public=False`.
+* Los formularios ordinarios no cambian `status` ni `is_public`.
+* Los selectores públicos exigen ambas condiciones (`ACTIVE` + `is_public=True`).
+* El modelo y el queryset bloquean la eliminación; Admin y capas de URL
+  aportan defensa en profundidad. La administración directa de base de datos
+  queda fuera de esa garantía.
+
 ## 2. Componentes
 
 ### 2.1. `core/`

@@ -215,9 +215,10 @@ Representa un proyecto institucional.
 | `estimated_budget` | `DecimalField`  | Mayor o igual a cero               |
 | `start_date`       | `DateField`     | Opcional                           |
 | `end_date`         | `DateField`     | Opcional                           |
-| `status`           | `CharField`     | Obligatorio                        |
-| `terminal_reason`  | `TextField`     | Opcional                           |
-| `terminal_at`      | `DateTimeField` | Opcional                           |
+| `status`           | `CharField`     | Obligatorio; por defecto `active`  |
+| `is_public`        | `BooleanField`  | Obligatorio; por defecto `FALSE`   |
+| `terminal_reason`  | `TextField`     | Opcional; metadato terminal        |
+| `terminal_at`      | `DateTimeField` | Opcional; metadato terminal        |
 | `terminal_by_id`   | `ForeignKey`    | Opcional, referencia a `auth_user` |
 | `created_at`       | `DateTimeField` | Automático                         |
 | `updated_at`       | `DateTimeField` | Automático                         |
@@ -233,12 +234,22 @@ estimated_budget >= 0
 #### Estados
 
 ```text
-planned
 active
-suspended
 closed
-annulled
 ```
+
+Valor por defecto de `status`: `active`.
+
+`is_public` es independiente del estado operativo. Valor por defecto: `FALSE`.
+
+Metadatos terminales (`terminal_at`, `terminal_by`, `terminal_reason`) se
+completan al terminar el proyecto (`ACTIVE` → `CLOSED`).
+
+La eliminación de filas de `operations_project` está bloqueada en la capa de
+aplicación/ORM (`Project.delete()`, queryset `delete()`, Admin y UI). No existe
+un trigger de base de datos que impida el `DELETE` SQL directo; administración
+directa de PostgreSQL, `flush`, teardown de pruebas y destrucción de la base
+quedan fuera de esa garantía.
 
 #### Relaciones
 
