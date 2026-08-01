@@ -1,16 +1,82 @@
 # Roles y permisos de SIGEDON
 
-Este documento define los roles operativos de SIGEDON, sus permisos, capacidades y restricciones.
+Este documento es la guía canónica de roles y permisos de SIGEDON. Define exactamente cuatro roles funcionales, su construcción, la administración de usuarios y grupos, y el contrato de sincronización.
+
+## 0. Visión general
+
+SIGEDON tiene exactamente cuatro roles funcionales canónicos:
+
+```text
+Administrador SIGEDON
+Operador de campo
+Auditor externo
+Comité de proyectos
+```
+
+### Invariante administrativa
+
+```text
+usuario ordinario
+→ cero o un rol funcional SIGEDON
+→ grupos técnicos opcionales
+→ permisos directos opcionales
+```
+
+Reglas:
+
+* Un usuario ordinario puede tener **cero o un** rol funcional SIGEDON.
+* Los grupos técnicos son independientes del rol funcional.
+* Los permisos directos (`auth_user_user_permissions`) son independientes.
+* Superusuarios y cuentas de servicio pueden no tener rol funcional.
+* La tabla M2M `auth_user_groups` permite estructuralmente varios grupos; la regla administrativa de SIGEDON admite **como máximo un** grupo de rol funcional canónico por usuario.
+* Los grupos legacy `Revisor del Comité` y `Decisor del Comité` ya no existen.
+* Las constantes `ROLE_PROJECT_UPDATE_REVIEWER` y `ROLE_PROJECT_UPDATE_DECIDER` ya no existen.
 
 ## 1. Administrador SIGEDON
 
-El Administrador SIGEDON recibe todos los permisos de la aplicación `operations`, excepto los relacionados con la mutación del registro de auditoría:
+### Construcción del rol
+
+El Administrador SIGEDON recibe:
+
+1. todos los permisos de la aplicación `operations`, **excepto** los listados en `ADMIN_EXCLUDED_PERMISSION_CODENAMES`;
+2. más los cinco permisos de administración territorial Kobo.
+
+### Exclusiones explícitas (`ADMIN_EXCLUDED_PERMISSION_CODENAMES`)
+
+Admin **no** recibe:
 
 ```text
 add_auditlog
 change_auditlog
 delete_auditlog
+add_projectupdatereview
+change_projectupdatereview
+delete_projectupdatereview
+add_projectupdatereviewdecision
+change_projectupdatereviewdecision
+delete_projectupdatereviewdecision
+review_projectupdate
+decide_projectupdate
+resolve_projectupdateremediation
+delete_project
 ```
+
+### Permisos territoriales Kobo (automáticos)
+
+Admin recibe automáticamente al sincronizar:
+
+```text
+kobo.view_territorial_administration
+kobo.manage_pastoral_zone_mappings
+kobo.resolve_territorial_conflicts
+kobo.change_territorial_identity_status
+kobo.run_territorial_reconciliation
+```
+
+Clarificación:
+
+* los permisos de administración territorial son automáticos vía `sync_sigedon_roles`;
+* los demás permisos generales de administración Kobo (`view_koboasset`, `change_kobosubmission`, etc.) permanecen separados y se asignan manualmente cuando corresponde.
 
 ### Puede gestionar
 
@@ -26,7 +92,8 @@ delete_auditlog
 * publicación de avances;
 * acciones terminales de entidades que las admiten (por ejemplo anular
   donaciones, asignaciones o gastos; terminar proyectos);
-* consulta de auditoría.
+* consulta de auditoría;
+* administración territorial Kobo (mappings, conflictos, identidad, reconciliación).
 
 ### Permisos específicos de proyecto
 
@@ -55,23 +122,27 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
 * No puede crear, modificar ni eliminar registros de `AuditLog`.
 * No puede anular un proyecto: `Project` no admite estado anulado.
 * No puede eliminar un proyecto.
-* No recibe automáticamente permisos técnicos de KoboToolbox.
-* Los permisos `kobo.*` deben asignarse por separado.
-
-El Hub territorial requiere `kobo.view_territorial_administration`. Las
-operaciones requieren además permisos explícitos de mappings, estado de
-identidad, resolución de conflictos o reconciliación.
+* No recibe permisos de revisión, decisión ni resolución de remediaciones del Comité.
+* No recibe automáticamente permisos técnicos generales de Kobo distintos de los cinco territoriales.
 
 ## 2. Operador de campo
 
-### Permisos
+### Conjunto exacto de permisos
 
 ```text
-view_project
-view_projectupdate
-add_projectupdate
-view_supportingdocument
-add_supportingdocument
+operations.view_project
+operations.view_projectupdate
+operations.add_projectupdate
+operations.view_supportingdocument
+operations.add_supportingdocument
+operations.view_projectupdateremediation
+operations.view_projectupdateremediationattachment
+operations.add_projectupdateremediation
+operations.change_projectupdateremediation
+operations.add_projectupdateremediationattachment
+operations.delete_projectupdateremediationattachment
+operations.submit_projectupdateremediation
+kobo.view_territorial_administration
 ```
 
 ### Puede
@@ -81,38 +152,41 @@ add_supportingdocument
 * registrar avances;
 * cargar uno o varios adjuntos durante el registro;
 * consultar soportes autorizados;
-* registrar soportes permitidos.
+* registrar soportes permitidos;
+* gestionar remediaciones propias (crear, editar, adjuntar, enviar);
+* consultar el hub territorial en modo lectura.
 
 ### No puede
 
 * crear proyectos;
 * publicar ni retirar proyectos del portal;
-* gestionar donaciones;
-* gestionar asignaciones;
-* registrar gastos;
-* editar avances después del registro;
+* gestionar finanzas (donaciones, asignaciones, gastos);
+* consultar la auditoría global;
+* revisar ni decidir avances en nombre del Comité;
+* resolver remediaciones;
 * publicar avances;
-* revisar avances en nombre del Comité;
-* consultar la auditoría global.
+* configurar mappings territoriales, resolver conflictos, cambiar estados de
+  identidad ni ejecutar reconciliación.
 
 ## 3. Auditor externo
 
-### Permisos
+### Conjunto exacto de permisos
 
 ```text
-view_institution
-view_project
-view_donation
-view_fundallocation
-view_expense
-view_supportingdocument
-view_projectupdate
-view_auditlog
+operations.view_institution
+operations.view_project
+operations.view_donation
+operations.view_fundallocation
+operations.view_expense
+operations.view_supportingdocument
+operations.view_projectupdate
+operations.view_auditlog
+kobo.view_territorial_administration
 ```
 
 ### Alcance
 
-El Auditor externo es un rol de solo lectura.
+El Auditor externo es un rol de **solo lectura**.
 
 Puede consultar:
 
@@ -123,7 +197,8 @@ Puede consultar:
 * gastos;
 * soportes;
 * avances;
-* auditoría.
+* auditoría;
+* hub territorial (lectura).
 
 ### Restricciones
 
@@ -134,21 +209,31 @@ No puede:
 * anular registros;
 * eliminar registros;
 * publicar ni retirar proyectos del portal;
-* ejecutar acciones terminales.
+* ejecutar acciones terminales;
+* revisar, decidir ni resolver remediaciones.
 
 ## 4. Comité de proyectos
 
-### Permisos
+Comité de proyectos es **un único rol funcional**. La revisión, la decisión y la
+resolución de remediaciones son permisos y acciones de flujo distintos dentro
+de ese rol; no son tres roles separados. El estado del flujo impide secuencias
+inválidas.
+
+### Conjunto exacto de permisos
 
 ```text
-view_project
-view_projectupdate
-view_projectdocument
-view_projectupdateattachment
-view_projectupdatereview
-add_projectupdatereview
-view_projectupdatereviewdecision
-add_projectupdatereviewdecision
+operations.view_project
+operations.view_projectupdate
+operations.view_projectdocument
+operations.view_projectupdateattachment
+operations.view_projectupdatereview
+operations.view_projectupdatereviewdecision
+operations.view_projectupdateremediation
+operations.view_projectupdateremediationattachment
+operations.review_projectupdate
+operations.decide_projectupdate
+operations.resolve_projectupdateremediation
+kobo.view_territorial_administration
 ```
 
 ### Puede
@@ -157,8 +242,28 @@ add_projectupdatereviewdecision
 * consultar avances;
 * consultar documentos de proyecto;
 * consultar evidencias de avances;
-* registrar una revisión institucional;
-* registrar una decisión institucional.
+* registrar una revisión institucional (`review_projectupdate`);
+* registrar una decisión institucional (`decide_projectupdate`);
+* resolver remediaciones (`resolve_projectupdateremediation`);
+* consultar el hub territorial en modo lectura.
+
+### No recibe
+
+Comité **no** recibe permisos CRUD de mutación sobre las entidades de revisión o
+decisión:
+
+```text
+add_projectupdatereview
+change_projectupdatereview
+delete_projectupdatereview
+add_projectupdatereviewdecision
+change_projectupdatereviewdecision
+delete_projectupdatereviewdecision
+```
+
+Esas codenames existen en Django y se excluyen de Admin; el Comité opera mediante
+las acciones de flujo `review_projectupdate`, `decide_projectupdate` y
+`resolve_projectupdateremediation`.
 
 ### No puede
 
@@ -166,16 +271,88 @@ add_projectupdatereviewdecision
 * publicar avances;
 * publicar ni retirar proyectos del portal;
 * eliminar avances;
-* modificar una revisión ya registrada;
-* modificar una decisión ya registrada.
+* modificar una revisión o decisión ya registrada vía CRUD genérico;
+* gestionar finanzas.
 
-La revisión y la decisión institucional se registran en entidades separadas y no alteran el estado ni el contenido del avance.
+La revisión, la decisión y la remediación se registran en entidades separadas y
+no alteran el contenido inmutable del avance publicado.
 
-## 5. Administración técnica de KoboToolbox
+## 5. Administración de usuarios (UserAdmin)
 
-La administración técnica de Kobo utiliza permisos de la aplicación `kobo`.
+SIGEDON reemplaza el UserAdmin estándar con `SigedonUserAdmin`.
 
-### Permisos representativos
+Campos relevantes en el panel:
+
+| Concepto | Campo / etiqueta |
+| --- | --- |
+| Rol funcional SIGEDON | `functional_role` — opcional, selección única |
+| Grupos técnicos adicionales | `groups` — selector filtrado |
+| Permisos directos | `user_permissions` |
+
+Comportamiento:
+
+* el rol funcional es opcional y de selección única (incluye «Ninguno»);
+* al cambiar el rol se eliminan únicamente membresías de roles funcionales previos;
+* los grupos técnicos se conservan salvo deselección explícita;
+* los permisos directos son independientes del rol y de los grupos técnicos;
+* los grupos canónicos se excluyen del selector de grupos técnicos;
+* un usuario con cero rol funcional es válido;
+* el bypass de superusuario permanece;
+* las cuentas de servicio pueden operar solo con permisos directos.
+
+## 6. Administración de grupos (GroupAdmin)
+
+SIGEDON reemplaza el GroupAdmin estándar con `SigedonGroupAdmin`.
+
+* Los cuatro grupos canónicos son visibles pero de solo lectura en Django admin.
+* Sus nombres no pueden cambiarse.
+* Sus matrices de permisos no pueden editarse desde el admin.
+* Los grupos canónicos no pueden eliminarse.
+* Una eliminación masiva mixta que incluya un grupo canónico se bloquea por completo.
+* Los grupos técnicos / no canónicos permanecen editables.
+* Shell, ORM y SQL directo quedan fuera de esta protección de capa admin; la
+  fuente autoritativa de las matrices canónicas es `sync_sigedon_roles`.
+
+## 7. Sincronización de roles
+
+Comando:
+
+```bash
+python manage.py sync_sigedon_roles
+```
+
+### Contrato
+
+* asegura que existen los cuatro grupos canónicos;
+* reemplaza la matriz de permisos de cada grupo canónico desde el código;
+* preserva grupos no canónicos;
+* preserva membresías de usuarios;
+* no elimina grupos técnicos;
+* es idempotente;
+* debe ejecutarse después de un despliegue, una restauración o un cambio en la
+  matriz de roles.
+
+### Salida esperada
+
+```text
+Roles operativos de SIGEDON sincronizados.
+- Administrador SIGEDON: <n> permisos
+- Operador de campo: <n> permisos
+- Auditor externo: <n> permisos
+- Comité de proyectos: <n> permisos
+```
+
+Advertencia: las ediciones manuales a permisos de grupos canónicos no son
+autoritativas y serán sobrescritas por la sincronización.
+
+Instrucciones operativas detalladas: [Operaciones](OPERATIONS.md).
+
+## 8. Administración técnica de KoboToolbox
+
+La administración técnica general de Kobo utiliza permisos de la aplicación
+`kobo` distintos de los territoriales automáticos.
+
+### Permisos representativos (manuales)
 
 ```text
 view_koboasset
@@ -184,7 +361,8 @@ view_kobosubmission
 change_kobosubmission
 ```
 
-La matriz real puede incluir permisos adicionales según los modelos y acciones técnicas disponibles.
+La matriz real puede incluir permisos adicionales según los modelos y acciones
+técnicas disponibles.
 
 Los antiguos permisos de binding no conceden administración territorial. La
 operación vigente se centra en ver la integración, gestionar mappings, resolver
@@ -200,13 +378,15 @@ change_territorial_identity_status
 run_territorial_reconciliation
 ```
 
-`Administrador SIGEDON` recibe los cinco permisos al sincronizar roles. Operador
-de campo, Auditor externo y Comité reciben únicamente
-`view_territorial_administration`; no pueden configurar mappings, resolver
-conflictos, cambiar estados ni ejecutar reconciliación. Ninguna acción se concede
-por poseer solamente `change_kobosubmission`.
+Asignación automática vía sincronización:
 
-### Permite
+* `Administrador SIGEDON` → los cinco permisos;
+* Operador de campo, Auditor externo y Comité → únicamente
+  `view_territorial_administration`.
+
+Ninguna acción territorial se concede por poseer solamente `change_kobosubmission`.
+
+### Permite (con permisos técnicos generales asignados)
 
 * descubrir activos;
 * configurar activos;
@@ -219,13 +399,12 @@ por poseer solamente `change_kobosubmission`.
 
 ### Restricciones
 
-* Estos permisos deben asignarse únicamente a personal técnico autorizado.
-* Los permisos técnicos generales no forman parte automática de ningún rol
-  operativo; la excepción explícita son los permisos territoriales descritos arriba.
+* Los permisos técnicos generales deben asignarse únicamente a personal técnico autorizado.
+* Los permisos técnicos generales no forman parte automática de ningún rol operativo.
 * El acceso técnico a Kobo no implica permiso para modificar información financiera.
 * Los payloads crudos y los adjuntos sensibles permanecen protegidos.
 
-## 6. Flujo Kobo asociado a proyectos
+## 9. Flujo Kobo asociado a proyectos
 
 La consulta ordinaria de fichas asociadas a un proyecto requiere:
 
@@ -246,14 +425,15 @@ operations.change_project
 * Un usuario puede consultar resultados normalizados sin acceder necesariamente al payload original.
 * La integración Kobo no debe utilizar permisos operativos para exponer información técnica sensible.
 
-## 7. Superusuario de Django
+## 10. Superusuario de Django
 
 El superusuario:
 
 * ignora la matriz ordinaria de permisos;
 * puede acceder al panel de administración;
 * puede utilizar herramientas técnicas;
-* puede consultar y operar sobre todos los módulos habilitados.
+* puede consultar y operar sobre todos los módulos habilitados;
+* puede no tener ningún rol funcional SIGEDON.
 
 ### Restricciones de uso
 
@@ -265,7 +445,7 @@ El superusuario:
   deniega la eliminación y el modelo/queryset la rechazan. La garantía es de
   aplicación, no de base de datos.
 
-## 8. Usuario autenticado sin permisos
+## 11. Usuario autenticado sin permisos
 
 Un usuario autenticado sin permisos específicos puede iniciar sesión y abrir el dashboard básico.
 
@@ -278,9 +458,10 @@ No recibe:
 * consultas sensibles;
 * acciones operativas.
 
-La autenticación por sí sola no concede acceso al dominio funcional.
+La autenticación por sí sola no concede acceso al dominio funcional. Cero rol
+funcional es un estado válido.
 
-## 9. Usuario público
+## 12. Usuario público
 
 El usuario público no requiere autenticación.
 
@@ -303,7 +484,7 @@ No puede acceder a:
 * notas internas;
 * datos anulados.
 
-## 10. Control de acceso en el dashboard
+## 13. Control de acceso en el dashboard
 
 El dashboard filtra tanto la presentación visual como la consulta de datos.
 
@@ -333,7 +514,7 @@ Cuando el usuario carece de un permiso:
 * la información no debe enviarse al contexto del template;
 * el control no debe depender únicamente de ocultar elementos en la interfaz.
 
-## 11. Principios de autorización
+## 14. Principios de autorización
 
 La matriz de permisos sigue estas reglas:
 
@@ -344,22 +525,5 @@ La matriz de permisos sigue estas reglas:
 * los permisos de consulta no implican permisos de modificación;
 * las acciones críticas requieren permisos explícitos;
 * la interfaz no sustituye las validaciones de backend;
-* el superusuario no representa un rol operativo ordinario.
-
-## 12. Sincronización de roles
-
-Los grupos y permisos se crean o actualizan mediante:
-
-```bash
-python manage.py sync_sigedon_roles
-```
-
-La operación debe ser:
-
-* idempotente;
-* segura frente a ejecuciones repetidas;
-* capaz de añadir permisos faltantes;
-* capaz de eliminar permisos incompatibles heredados;
-* consistente con la matriz definida en el código.
-
-Después de modificar la definición de roles, debe ejecutarse nuevamente el comando y verificarse el resultado mediante pruebas automatizadas.
+* el superusuario no representa un rol operativo ordinario;
+* un usuario ordinario tiene como máximo un rol funcional canónico.

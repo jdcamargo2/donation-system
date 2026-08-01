@@ -271,15 +271,20 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 
 ### Pasos
 
-1. El Comité consulta el avance y sus evidencias.
-2. El revisor registra sus observaciones.
+Los actores «revisor» y «usuario autorizado» son acciones dentro del único rol
+funcional **Comité de proyectos**; no son roles separados. El estado del flujo
+impide secuencias inválidas.
+
+1. Un miembro del Comité de proyectos consulta el avance y sus evidencias.
+2. Un actor con permiso de revisión registra sus observaciones.
 3. Se crea una instancia de `ProjectUpdateReview`.
 4. Se conserva:
 
    * el revisor;
    * la fecha;
    * las observaciones.
-5. Posteriormente, un usuario autorizado registra una decisión.
+5. Posteriormente, un actor con permiso de decisión (mismo rol funcional)
+   registra una decisión.
 6. Se crea `ProjectUpdateReviewDecision`.
 7. La decisión puede ser:
 

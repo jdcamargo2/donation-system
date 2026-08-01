@@ -43,6 +43,9 @@ python manage.py createsuperuser
 
 ### 1.6. Sincronizar roles y permisos
 
+Sincroniza los cuatro roles canónicos desde código. No modifica membresías.
+Detalle: [§3 Sincronización de roles](#3-sincronización-de-roles).
+
 ```bash
 python manage.py sync_sigedon_roles
 ```
@@ -96,22 +99,61 @@ python manage.py seed_sigedon_demo
 
 ## 3. Sincronización de roles
 
-Los roles y permisos deben sincronizarse después de:
-
-* un despliegue inicial;
-* una restauración de base de datos;
-* cambios en la matriz de permisos;
-* una actualización del sistema;
-* modificaciones en grupos operativos;
-* incorporación o eliminación de modelos protegidos.
-
-Comando:
+Comando autoritativo para las matrices de los cuatro roles funcionales canónicos:
 
 ```bash
 python manage.py sync_sigedon_roles
 ```
 
-La operación debe ser idempotente y retirar permisos incompatibles heredados.
+La matriz completa de permisos por rol está en
+[Roles y permisos](ROLES_AND_PERMISSIONS.md).
+
+### Cuándo ejecutarlo
+
+* despliegue inicial o actualización del sistema;
+* restauración de base de datos;
+* cambios en la matriz de roles definida en código;
+* incorporación o eliminación de modelos/permisos protegidos por los roles.
+
+### Contrato exacto (cuatro grupos)
+
+El comando:
+
+* asegura que existen exactamente estos cuatro grupos canónicos:
+  `Administrador SIGEDON`, `Operador de campo`, `Auditor externo`,
+  `Comité de proyectos`;
+* **reemplaza** la matriz de permisos de cada grupo canónico desde el código;
+* **no toca** membresías de usuarios (`auth_user_groups`);
+* **preserva** grupos técnicos / no canónicos;
+* **no elimina** grupos técnicos;
+* es **idempotente**.
+
+### Salida esperada
+
+```text
+Roles operativos de SIGEDON sincronizados.
+- Administrador SIGEDON: <n> permisos
+- Operador de campo: <n> permisos
+- Auditor externo: <n> permisos
+- Comité de proyectos: <n> permisos
+```
+
+### Verificación posterior
+
+```bash
+# Contar grupos canónicos (esperado: 4)
+python manage.py shell -c "from django.contrib.auth.models import Group; from apps.operations.role_services import operation_role_names; print(Group.objects.filter(name__in=operation_role_names()).count())"
+
+# Listar permisos de un rol
+python manage.py shell -c "from django.contrib.auth.models import Group; g=Group.objects.get(name='Comité de proyectos'); print(g.permissions.count()); print(*sorted(f'{p.content_type.app_label}.{p.codename}' for p in g.permissions.all()), sep='\n')"
+```
+
+### Advertencias
+
+* No editar manualmente permisos de grupos canónicos en Django admin: están
+  protegidos como solo lectura y, en cualquier caso, `sync_sigedon_roles`
+  sobrescribe esas matrices.
+* El comando no asigna ni quita usuarios de grupos.
 
 ## 4. Operación inicial de KoboToolbox
 

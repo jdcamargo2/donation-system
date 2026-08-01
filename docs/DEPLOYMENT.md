@@ -127,6 +127,9 @@ python manage.py collectstatic --noinput
 
 ### 5.4. Sincronizar roles
 
+Sincroniza los cuatro roles funcionales canónicos. No modifica membresías de
+usuarios. Runbook completo: [Operaciones §3](OPERATIONS.md#3-sincronización-de-roles).
+
 ```bash
 python manage.py sync_sigedon_roles
 ```
@@ -201,10 +204,15 @@ Después deben crearse las cuentas operativas y asignarse los grupos correspondi
 
 * El superusuario debe reservarse para administración técnica.
 * No debe utilizarse como cuenta operativa diaria.
+* Un usuario ordinario puede tener como máximo un rol funcional canónico.
 * Cada usuario debe contar únicamente con los permisos necesarios.
-* Los permisos técnicos `kobo.*` deben asignarse por separado.
+* Los permisos técnicos generales `kobo.*` (distintos de los territoriales
+  automáticos) deben asignarse por separado.
 * Las cuentas compartidas deben evitarse.
 * Las credenciales iniciales deben cambiarse de forma segura.
+
+Detalle de roles y admin: [Roles y permisos](ROLES_AND_PERMISSIONS.md).
+Runbook de sincronización: [Operaciones §3](OPERATIONS.md#3-sincronización-de-roles).
 
 ## 8. Gestión de archivos
 

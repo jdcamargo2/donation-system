@@ -1111,13 +1111,15 @@ Incluye:
 * correo electrónico;
 * fechas de acceso.
 
-SIGEDON utiliza el modelo estándar de usuario de Django.
+SIGEDON utiliza el modelo estándar de usuario de Django (`auth.User`). No existe
+un modelo propio de rol ni de perfil de rol: los roles funcionales se representan
+mediante grupos Django.
 
 ### 7.2. `auth_group`
 
 Contiene los grupos de permisos.
 
-Grupos operativos sincronizados:
+Exactamente cuatro grupos funcionales canónicos, sincronizados desde código:
 
 ```text
 Administrador SIGEDON
@@ -1125,6 +1127,10 @@ Operador de campo
 Auditor externo
 Comité de proyectos
 ```
+
+También pueden existir grupos técnicos no canónicos. Las matrices de permisos
+de los grupos canónicos se sincronizan desde el código mediante
+`sync_sigedon_roles`; las ediciones manuales a esas matrices no son autoritativas.
 
 ### 7.3. `auth_permission`
 
@@ -1147,6 +1153,14 @@ Tabla intermedia:
 auth_user ↔ auth_group
 ```
 
+The database M2M permits multiple groups structurally, while SIGEDON’s
+administrative invariant permits at most one canonical functional-role group
+per user.
+
+Esa invariante de un solo rol funcional se aplica mediante `SigedonUserAdmin` y
+helpers de rol (`get_user_functional_role`, `set_user_functional_role`). No existe
+una restricción a nivel de base de datos que la imponga.
+
 ### 7.5. `auth_group_permissions`
 
 Tabla intermedia:
@@ -1155,11 +1169,15 @@ Tabla intermedia:
 auth_group ↔ auth_permission
 ```
 
+Para grupos canónicos, el contenido de esta tabla se reemplaza desde código al
+ejecutar `sync_sigedon_roles`.
+
 ### 7.6. `auth_user_user_permissions`
 
 Contiene permisos asignados directamente a usuarios.
 
-Su uso debe reservarse para excepciones controladas.
+Son independientes del rol funcional y de los grupos técnicos. Su uso debe
+reservarse para excepciones controladas (por ejemplo cuentas de servicio).
 
 ## 8. Tablas internas de Django
 

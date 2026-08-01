@@ -315,14 +315,15 @@ Puede:
 * consultar avances;
 * registrar avances;
 * cargar adjuntos durante el registro;
-* consultar y registrar soportes autorizados.
+* consultar y registrar soportes autorizados;
+* gestionar remediaciones propias según el flujo.
 
 No puede:
 
 * publicar avances;
 * editar avances después del registro;
 * gestionar finanzas;
-* revisar en nombre del Comité.
+* revisar, decidir ni resolver en nombre del Comité.
 
 ### 4.3. Auditor externo
 
@@ -341,14 +342,20 @@ No puede modificar información.
 
 ### 4.4. Comité de proyectos
 
+Un único rol funcional. El mismo rol puede revisar, decidir y resolver
+remediaciones según el estado del flujo; no son roles separados.
+
 Puede:
 
 * consultar proyectos y avances;
 * consultar documentos y evidencias;
 * registrar una revisión;
-* registrar una decisión institucional.
+* registrar una decisión institucional;
+* resolver remediaciones cuando el flujo lo permita.
 
 No puede modificar el contenido original del avance.
+
+Los permisos exactos están en [Roles y permisos](ROLES_AND_PERMISSIONS.md).
 
 ### 4.5. Administración técnica de Kobo
 
@@ -465,7 +472,7 @@ El MVP se considera cerrado cuando:
 * los archivos privados requieren autorización;
 * la auditoría es append-only;
 * los avances se registran y publican;
-* el Comité puede revisar y decidir;
+* el Comité de proyectos (un rol) puede revisar, decidir y resolver remediaciones;
 * el portal publica únicamente datos autorizados;
 * las fichas 1, 10 y 11 funcionan;
 * PostgreSQL está soportado;

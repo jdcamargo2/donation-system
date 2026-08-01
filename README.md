@@ -102,13 +102,17 @@ El paquete `web` se conserva como componente histórico de compatibilidad para l
 
 ## Roles operativos
 
+Cuatro roles funcionales canónicos:
+
 * Administrador SIGEDON
 * Operador de campo
 * Auditor externo
 * Comité de proyectos
-* Administrador técnico de Kobo mediante permisos `kobo.*`
-* Superusuario de Django
-* Usuario público no autenticado
+
+Un usuario ordinario puede tener como máximo un rol funcional SIGEDON (cero o
+uno). Los permisos técnicos de Kobo (`kobo.*`), el superusuario de Django y el
+usuario público no autenticado son controles separados, no roles funcionales
+adicionales.
 
 La matriz completa de roles y permisos se encuentra en:
 
