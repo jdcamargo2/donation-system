@@ -276,7 +276,10 @@ class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, f
         label=_('Adjuntos'),
         required=False,
         help_text=_('Puede seleccionar varios archivos a la vez.'),
-        widget=MultipleFileInput(attrs={'data-file-upload': 'multiple'}),
+        widget=MultipleFileInput(attrs={
+            'data-file-upload': 'multiple',
+            'data-file-upload-preview': 'true',
+        }),
     )
 
     class Meta:
@@ -312,7 +315,10 @@ class ProjectUpdateForProjectForm(ProjectUpdateResponsibleFormMixin, BootstrapFo
         label=_('Adjuntos'),
         required=False,
         help_text=_('Puede seleccionar varios archivos a la vez.'),
-        widget=MultipleFileInput(attrs={'data-file-upload': 'multiple'}),
+        widget=MultipleFileInput(attrs={
+            'data-file-upload': 'multiple',
+            'data-file-upload-preview': 'true',
+        }),
     )
 
     class Meta:
@@ -365,7 +371,10 @@ class ProjectUpdateAttachmentForm(BootstrapFormMixin, forms.Form):
     files = MultipleFileField(
         label=_('Archivos'),
         help_text=_('Puede seleccionar varios archivos a la vez.'),
-        widget=MultipleFileInput(attrs={'data-file-upload': 'multiple'}),
+        widget=MultipleFileInput(attrs={
+            'data-file-upload': 'multiple',
+            'data-file-upload-preview': 'true',
+        }),
     )
 
 

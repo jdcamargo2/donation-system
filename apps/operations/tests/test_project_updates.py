@@ -115,8 +115,44 @@ class ProjectUpdateTests(TestCase):
                 self.assertFalse(field.required)
                 self.assertEqual(str(field.help_text), help_text)
                 self.assertTrue(field.widget.allow_multiple_selected)
-                self.assertIn('multiple', str(field.widget.render('attachments', None)))
+                self.assertEqual(field.widget.attrs.get('data-file-upload'), 'multiple')
+                self.assertEqual(field.widget.attrs.get('data-file-upload-preview'), 'true')
+                rendered = str(field.widget.render('attachments', None))
+                self.assertIn('multiple', rendered)
+                self.assertIn('data-file-upload-preview="true"', rendered)
                 self.assertIn(help_text, form.as_p())
+
+    def test_project_update_create_pages_render_file_upload_preview_contract(self):
+        self.client.force_login(self.user)
+        help_text = 'Puede seleccionar varios archivos a la vez.'
+        pages = (
+            ('project_update_create', reverse('project_update_create')),
+            (
+                'project_update_create_for_project',
+                reverse('project_update_create_for_project', args=[self.project.pk]),
+            ),
+        )
+
+        for label, url in pages:
+            with self.subTest(page=label):
+                response = self.client.get(url)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'data-file-upload-preview')
+                self.assertContains(response, 'data-file-upload-list')
+                self.assertContains(response, 'data-file-upload-summary')
+                self.assertContains(response, 'class="ops-file-upload"')
+                self.assertContains(response, 'class="ops-file-upload-preview"')
+                self.assertContains(response, 'class="ops-file-upload-summary"')
+                self.assertContains(response, 'type="file"')
+                self.assertContains(response, 'multiple')
+                self.assertContains(response, help_text)
+                self.assertEqual(response.content.decode().count('type="file"'), 1)
+                self.assertNotContains(response, 'name="title" data-file-upload-preview')
+                for field_name in ('project', 'title', 'description', 'update_date', 'reported_by'):
+                    if field_name == 'project' and label == 'project_update_create_for_project':
+                        continue
+                    self.assertContains(response, f'name="{field_name}"')
 
     def test_create_for_project_view_keeps_creator_and_reporter_separate(self):
         self.client.force_login(self.user)

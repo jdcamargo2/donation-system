@@ -32,7 +32,7 @@
                             <span class="required-mark">*</span>
                         {% endif %}
                     </label>
-                    {{ field }}
+                    {% include "web/includes/ops_form_field_control.html" with field=field %}
                     {% if field.help_text %}
                         <div class="form-text">{{ field.help_text }}</div>
                     {% endif %}

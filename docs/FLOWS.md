@@ -231,7 +231,11 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
    * fecha real;
    * persona responsable del avance.
 2. El usuario puede adjuntar una o varias evidencias durante el registro o la edición en borrador.
+   En los formularios de avance con opt-in de vista previa, la selección múltiple puede armarse
+   de forma incremental en el cliente antes del envío; los archivos no se suben hasta el submit
+   y los adjuntos ya persistidos no se gestionan desde esa vista previa.
 3. Desde el detalle de un avance en `DRAFT`, un usuario con `add_projectupdateattachment` puede agregar varios adjuntos en una sola carga.
+   El mismo componente de vista previa local aplica en ese formulario independiente.
 4. Cada archivo persistido genera su propio evento de auditoría de creación.
 5. `created_by` se asigna automáticamente desde el usuario autenticado.
 6. `reported_by` conserva la persona responsable del contenido del avance.

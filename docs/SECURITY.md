@@ -131,6 +131,16 @@ para exponer archivos privados a usuarios finales.
 
 La publicación de una entidad no implica automáticamente que todos sus archivos asociados sean públicos.
 
+### 6.1. Vista previa local de selección de archivos
+
+La vista previa de selección en formularios de adjuntos de avance:
+
+* opera solo en el cliente y no envía archivos hasta el submit del formulario;
+* no almacena nombres ni contenido en persistencia del navegador;
+* no sustituye la validación ni los controles de acceso del servidor;
+* no gestiona ni elimina adjuntos ya persistidos;
+* mantiene el input nativo como autoridad de la selección enviada.
+
 ## 7. Seguridad de KoboToolbox
 
 La integración con KoboToolbox protege:

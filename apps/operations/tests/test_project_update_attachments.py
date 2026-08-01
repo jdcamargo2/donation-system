@@ -203,7 +203,33 @@ class ProjectUpdateAttachmentMultiUploadTests(TestCase):
         self.assertEqual(field.label, 'Archivos')
         self.assertEqual(str(field.help_text), 'Puede seleccionar varios archivos a la vez.')
         self.assertTrue(field.widget.allow_multiple_selected)
-        self.assertIn('multiple', str(field.widget.render('files', None)))
+        self.assertEqual(field.widget.attrs.get('data-file-upload'), 'multiple')
+        self.assertEqual(field.widget.attrs.get('data-file-upload-preview'), 'true')
+        rendered = str(field.widget.render('files', None))
+        self.assertIn('multiple', rendered)
+        self.assertIn('data-file-upload-preview="true"', rendered)
+
+    def test_standalone_attachment_page_renders_file_upload_preview_contract(self):
+        self.client.force_login(self.user)
+        help_text = 'Puede seleccionar varios archivos a la vez.'
+
+        response = self.client.get(
+            reverse('project_update_attachment_create', args=[self.update.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-file-upload-preview')
+        self.assertContains(response, 'data-file-upload-list')
+        self.assertContains(response, 'data-file-upload-summary')
+        self.assertContains(response, 'class="ops-file-upload"')
+        self.assertContains(response, 'class="ops-file-upload-preview"')
+        self.assertContains(response, 'class="ops-file-upload-summary"')
+        self.assertContains(response, 'type="file"')
+        self.assertContains(response, 'multiple')
+        self.assertContains(response, 'name="files"')
+        self.assertContains(response, help_text)
+        self.assertEqual(response.content.decode().count('type="file"'), 1)
+        self.assertEqual(response.content.decode().count('data-file-upload-preview'), 2)
 
     def test_standalone_route_accepts_multiple_files_with_one_audit_each(self):
         self.client.force_login(self.user)

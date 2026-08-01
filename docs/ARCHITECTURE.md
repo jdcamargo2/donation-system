@@ -222,6 +222,31 @@ Los archivos privados:
 
 La visibilidad de cada archivo debe definirse explícitamente según su naturaleza y contexto.
 
+### 5.1. Vista previa local de selección (adjuntos de avance)
+
+Los formularios de carga de adjuntos de `ProjectUpdate` pueden activar una vista previa
+client-side mediante el atributo explícito `data-file-upload-preview`.
+
+En la fase actual, el opt-in aplica únicamente a:
+
+* `ProjectUpdateForm.attachments`;
+* `ProjectUpdateForProjectForm.attachments`;
+* `ProjectUpdateAttachmentForm.files`.
+
+Comportamiento:
+
+* la vista previa es local al navegador y no sube archivos hasta el envío del formulario;
+* el `input[type=file]` nativo permanece visible y es la fuente autoritativa de la selección;
+* en entradas múltiples, la selección pendiente puede construirse de forma incremental y
+  permiten quitar archivos individuales antes del submit cuando el navegador soporta
+  `DataTransfer`;
+* las imágenes raster (JPEG, PNG, WebP, GIF) pueden mostrar una miniatura local con
+  `URL.createObjectURL`; SVG, PDF y documentos no se incrustan;
+* no se persisten nombres ni contenido en `localStorage`/`sessionStorage`;
+* la vista previa no sustituye la validación ni el almacenamiento del backend;
+* los adjuntos ya persistidos siguen gestionándose solo con las acciones de servidor
+  existentes (detalle, descarga, eliminación en borrador).
+
 ## 6. Base de datos
 
 ### 6.1. Desarrollo

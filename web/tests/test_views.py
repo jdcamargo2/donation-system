@@ -114,6 +114,7 @@ class AuthenticationLayoutTests(TestCase):
         self.assertNotContains(response, 'class="sigedon-main-wrapper"')
         self.assertNotContains(response, 'web/css/sigedon.css')
         self.assertNotContains(response, 'web/js/ops_forms.js')
+        self.assertNotContains(response, 'web/js/file_upload_preview.js')
         self.assertNotContains(response, 'flatpickr')
         self.assertNotContains(response, 'autoNumeric')
 
@@ -167,6 +168,7 @@ class AuthenticationLayoutTests(TestCase):
         self.assertNotIn('flatpickr', source)
         self.assertNotIn('autoNumeric', source)
         self.assertNotIn('ops_forms.js', source)
+        self.assertNotIn('file_upload_preview.js', source)
         self.assertIn("web/css/auth.css", source)
         self.assertIn('{% block title %}', source)
         self.assertIn('{% block extra_css %}', source)
@@ -301,7 +303,10 @@ class OperationalDetailViewTests(TestCase):
         self.assertIn("vendor/flatpickr/l10n/es.js", source)
         self.assertIn("vendor/autonumeric/autoNumeric.min.js", source)
         self.assertIn("web/js/ops_forms.js", source)
+        self.assertIn("web/js/file_upload_preview.js", source)
+        self.assertEqual(source.count("web/js/file_upload_preview.js"), 1)
         self.assertLess(source.index("vendor/autonumeric/autoNumeric.min.js"), source.index("web/js/ops_forms.js"))
+        self.assertLess(source.index("web/js/ops_forms.js"), source.index("web/js/file_upload_preview.js"))
         self.assertNotIn("cdn.jsdelivr.net/npm/flatpickr", source)
         self.assertNotIn("cdn.jsdelivr.net/npm/autonumeric", source)
         self.assertNotIn("cdn.jsdelivr.net/npm/autoNumeric", source)
@@ -336,12 +341,37 @@ class OperationalDetailViewTests(TestCase):
         self.assertIn('grid-column: 1 / -1;', source)
         self.assertIn('input[type="number"]::-webkit-inner-spin-button', source)
         self.assertIn('-moz-appearance: textfield;', source)
+        self.assertIn('.ops-file-upload', source)
+        self.assertIn('.ops-file-upload-preview', source)
+        self.assertIn('.ops-file-upload-item', source)
+        self.assertIn('.ops-file-upload-thumbnail', source)
+        self.assertIn('.ops-file-upload-meta', source)
+        self.assertIn('.ops-file-upload-name', source)
+        self.assertIn('.ops-file-upload-details', source)
+        self.assertIn('.ops-file-upload-remove', source)
+        self.assertIn('.ops-file-upload-summary', source)
 
     def test_generic_form_template_marks_fields_for_compact_grid_layout(self):
         source = Path('templates/web/object_form.html').read_text()
 
         self.assertIn('ops-form-grid', source)
         self.assertIn('ops-form-field ops-field', source)
+        self.assertIn('web/includes/ops_form_field_control.html', source)
+
+    def test_file_upload_preview_javascript_is_progressive_and_local_only(self):
+        source = Path('static/web/js/file_upload_preview.js').read_text()
+
+        self.assertIn("document.addEventListener('DOMContentLoaded'", source)
+        self.assertIn('htmx:afterSwap', source)
+        self.assertIn('.ops-file-upload[data-file-upload-preview]', source)
+        self.assertIn('DataTransfer', source)
+        self.assertIn('URL.createObjectURL', source)
+        self.assertIn('URL.revokeObjectURL', source)
+        self.assertNotIn('innerHTML', source)
+        self.assertNotIn('localStorage', source)
+        self.assertNotIn('sessionStorage', source)
+        self.assertNotIn('fetch(', source)
+        self.assertNotIn('XMLHttpRequest', source)
 
 
 class CrudFlowTests(TestCase):

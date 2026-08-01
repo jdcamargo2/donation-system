@@ -61,6 +61,16 @@ class ProjectDocumentTests(TestCase):
         self.assertRedirects(response, reverse('project_detail', args=[self.project.pk]))
         self.assertEqual(document.uploaded_by, self.user)
 
+    def test_project_document_form_does_not_opt_into_file_upload_preview(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('project_document_create', args=[self.project.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'type="file"')
+        self.assertNotContains(response, 'data-file-upload-preview')
+        self.assertNotContains(response, 'ops-file-upload-preview')
+        self.assertNotContains(response, 'data-file-upload-list')
+
     def test_download_project_document_with_permission(self):
         document = self.create_document()
         self.client.force_login(self.user)
