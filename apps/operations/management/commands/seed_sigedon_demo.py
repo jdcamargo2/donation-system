@@ -18,6 +18,7 @@ from apps.operations.models import (
     Project,
     ProjectUpdate,
 )
+from apps.operations.role_services import set_user_functional_role
 
 
 DEFAULT_DEMO_PASSWORD = "0214"
@@ -177,7 +178,8 @@ class Command(BaseCommand):
 
             user.set_password(password)
             user.save(update_fields=["password"])
-            user.groups.set([group])
+            # Shared write contract: replace only the functional SIGEDON role.
+            set_user_functional_role(user, group)
 
             result[key] = user
 

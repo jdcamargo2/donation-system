@@ -2,8 +2,12 @@ import re
 from decimal import Decimal
 
 from django import forms
-from django.db.models import Q
+from django.contrib.admin.widgets import FilteredSelectMultiple
+from django.contrib.auth.forms import AdminUserCreationForm, UserChangeForm
+from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
 from .choices import OPERATING_CURRENCY
@@ -14,6 +18,12 @@ from .models import (
     ProjectUpdateRemediation, SupportingDocument,
 )
 from .project_update_responsibles import eligible_project_update_reporters
+from .role_services import (
+    functional_role_groups,
+    get_user_functional_roles,
+    operation_role_names,
+    set_user_functional_role,
+)
 
 
 SELECT_PLACEHOLDER = _('Seleccione una opción')
@@ -745,3 +755,206 @@ class SupportingDocumentForm(BootstrapFormMixin, forms.ModelForm):
                 }
             ),
         }
+
+
+# ---------------------------------------------------------------------------
+# Django admin: single functional SIGEDON role + technical groups
+# ---------------------------------------------------------------------------
+
+FUNCTIONAL_ROLE_HELP = _(
+    'Como máximo un rol funcional SIGEDON. Deje «Ninguno» para cuentas de '
+    'servicio o superusuarios sin rol operativo.'
+)
+TECHNICAL_GROUPS_HELP = _(
+    'Grupos técnicos no funcionales. Los roles SIGEDON se asignan arriba '
+    'en «Rol funcional SIGEDON».'
+)
+MULTI_ROLE_INCONSISTENCY = _(
+    'Este usuario tiene más de un rol funcional SIGEDON. Seleccione un único '
+    'rol (o «Ninguno») y guarde para reparar la inconsistencia.'
+)
+
+
+class SigedonUserRoleFormMixin:
+    """
+    Shared admin-form behavior: one optional functional role, technical groups
+    excluding canonical roles, and an M2M save path that does not wipe the role.
+
+    Concrete forms must declare ``functional_role`` themselves so Django's
+    DeclarativeFieldsMetaclass registers it (plain mixins do not).
+    """
+
+    def _configure_role_fields(self):
+        """
+        PRE: form fields include functional_role and groups.
+        POST: querysets and labels separate canonical roles from technical groups.
+        """
+        self.fields['functional_role'].queryset = functional_role_groups()
+        self.fields['functional_role'].empty_label = _('Ninguno')
+        self.fields['functional_role'].required = False
+        self.fields['functional_role'].help_text = FUNCTIONAL_ROLE_HELP
+
+        groups_field = self.fields['groups']
+        groups_field.queryset = (
+            Group.objects.exclude(name__in=operation_role_names()).order_by('name')
+        )
+        groups_field.label = _('Grupos técnicos adicionales')
+        groups_field.required = False
+        groups_field.help_text = TECHNICAL_GROUPS_HELP
+
+    def _set_functional_role_initial(self):
+        """
+        PRE: self.instance may be a persisted user.
+        POST: initial functional_role reflects 0/1 roles; multi-role stays empty
+              and records a repairable inconsistency flag.
+        """
+        self._functional_role_inconsistency = False
+        if not self.instance.pk:
+            self.fields['functional_role'].initial = None
+            return
+        roles = list(get_user_functional_roles(self.instance))
+        if len(roles) == 1:
+            self.fields['functional_role'].initial = roles[0]
+        else:
+            self.fields['functional_role'].initial = None
+            if len(roles) > 1:
+                self._functional_role_inconsistency = True
+
+    def full_clean(self):
+        super().full_clean()
+        # Unbound change forms short-circuit validation; still surface multi-role
+        # inconsistency so the admin can repair it on the next valid POST.
+        if (
+            not self.is_bound
+            and getattr(self, '_functional_role_inconsistency', False)
+        ):
+            # Unbound full_clean never builds cleaned_data; seed it so add_error works.
+            self.cleaned_data = {}
+            self.add_error(None, MULTI_ROLE_INCONSISTENCY)
+
+    def clean_functional_role(self):
+        """
+        PRE: functional_role is empty or a Group from the functional queryset.
+        POST: returns None or a canonical role group.
+        """
+        role = self.cleaned_data.get('functional_role')
+        if role is None:
+            return None
+        if role.name not in operation_role_names():
+            raise ValidationError(
+                _('El rol seleccionado no es un rol funcional SIGEDON canónico.')
+            )
+        return role
+
+    def clean_groups(self):
+        """
+        PRE: groups contains submitted technical group selections.
+        POST: rejects any canonical functional role smuggled into the field.
+        """
+        groups = list(self.cleaned_data.get('groups') or [])
+        canonical = set(operation_role_names())
+        illicit = [group.name for group in groups if group.name in canonical]
+        if illicit:
+            raise ValidationError(
+                _(
+                    'Los roles funcionales SIGEDON no pueden asignarse como '
+                    'grupos técnicos: %(roles)s.'
+                )
+                % {'roles': ', '.join(illicit)}
+            )
+        return groups
+
+    def clean(self):
+        """
+        PRE: field-level cleaning has run.
+        POST: at most one functional role is represented by the form payload.
+        """
+        cleaned_data = super().clean()
+        role = cleaned_data.get('functional_role')
+        technical = cleaned_data.get('groups') or []
+        functional_from_technical = [
+            group for group in technical if group.name in operation_role_names()
+        ]
+        represented = ([role] if role else []) + functional_from_technical
+        if len(represented) > 1:
+            raise ValidationError(
+                _('Solo se permite un rol funcional SIGEDON por usuario.')
+            )
+        return cleaned_data
+
+    def _save_m2m(self):
+        """
+        Stock ModelForm._save_m2m would call groups.set(technical_only) and wipe
+        the functional SIGEDON role that is excluded from the groups queryset.
+        Persist direct permissions and technical groups explicitly, then apply
+        the selected functional role once via set_user_functional_role.
+        """
+        cleaned_data = self.cleaned_data
+        with transaction.atomic():
+            if 'user_permissions' in cleaned_data:
+                self.instance.user_permissions.set(cleaned_data['user_permissions'])
+
+            # Authoritative for non-functional groups only; deselect removes.
+            submitted_technical = list(cleaned_data.get('groups') or [])
+            existing_technical = list(
+                self.instance.groups.exclude(name__in=operation_role_names())
+            )
+            if existing_technical:
+                self.instance.groups.remove(*existing_technical)
+            if submitted_technical:
+                self.instance.groups.add(*submitted_technical)
+
+            set_user_functional_role(
+                self.instance,
+                cleaned_data.get('functional_role'),
+            )
+
+
+class SigedonUserChangeForm(SigedonUserRoleFormMixin, UserChangeForm):
+    functional_role = forms.ModelChoiceField(
+        label=_('Rol funcional SIGEDON'),
+        queryset=Group.objects.none(),
+        required=False,
+        empty_label=_('Ninguno'),
+        help_text=FUNCTIONAL_ROLE_HELP,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._configure_role_fields()
+        self._set_functional_role_initial()
+
+
+class SigedonAdminUserCreationForm(SigedonUserRoleFormMixin, AdminUserCreationForm):
+    functional_role = forms.ModelChoiceField(
+        label=_('Rol funcional SIGEDON'),
+        queryset=Group.objects.none(),
+        required=False,
+        empty_label=_('Ninguno'),
+        help_text=FUNCTIONAL_ROLE_HELP,
+    )
+    groups = forms.ModelMultipleChoiceField(
+        label=_('Grupos técnicos adicionales'),
+        queryset=Group.objects.none(),
+        required=False,
+        help_text=TECHNICAL_GROUPS_HELP,
+        widget=FilteredSelectMultiple(_('Grupos técnicos adicionales'), is_stacked=False),
+    )
+    user_permissions = forms.ModelMultipleChoiceField(
+        label=_('Permisos de usuario'),
+        queryset=Permission.objects.all(),
+        required=False,
+        widget=FilteredSelectMultiple(_('Permisos de usuario'), is_stacked=False),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['user_permissions'].queryset = (
+            Permission.objects.select_related('content_type').order_by(
+                'content_type__app_label',
+                'content_type__model',
+                'codename',
+            )
+        )
+        self._configure_role_fields()
+        self.fields['functional_role'].initial = None

@@ -1,4 +1,8 @@
-from django.contrib.auth.models import Group, Permission
+from __future__ import annotations
+
+from django.contrib.auth.models import Group, Permission, User
+from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from .roles import (
     ROLE_EXTERNAL_AUDITOR,
@@ -101,3 +105,62 @@ def operation_role_names():
         ROLE_EXTERNAL_AUDITOR,
         ROLE_PROJECT_COMMITTEE,
     ]
+
+
+def functional_role_groups():
+    """
+    PRE: canonical SIGEDON role groups may or may not exist in the database.
+    POST: returns those groups ordered deterministically by name.
+    """
+    return Group.objects.filter(name__in=operation_role_names()).order_by('name')
+
+
+def get_user_functional_roles(user: User):
+    """
+    PRE: user is a Django auth user (saved or unsaved).
+    POST: returns the user's memberships in canonical functional role groups.
+    """
+    return user.groups.filter(name__in=operation_role_names()).order_by('name')
+
+
+def get_user_functional_role(user: User) -> Group | None:
+    """
+    PRE: user has zero or one canonical functional role membership.
+    POST: returns that Group, None when absent, or raises ValidationError if more than one.
+    """
+    roles = list(get_user_functional_roles(user))
+    if len(roles) > 1:
+        raise ValidationError(
+            'El usuario tiene más de un rol funcional SIGEDON asignado.'
+        )
+    return roles[0] if roles else None
+
+
+def set_user_functional_role(user: User, role: Group | None) -> None:
+    """
+    PRE: user is persisted; role is None or a canonical functional Group.
+    POST: user retains exactly that functional role (or none); non-functional
+          groups and direct user permissions are unchanged. Idempotent.
+    """
+    if user.pk is None:
+        raise ValueError(
+            'No se puede asignar un rol funcional a un usuario sin guardar.'
+        )
+    if role is not None:
+        if not isinstance(role, Group):
+            raise ValidationError(
+                'El rol funcional debe ser un grupo Django o None.'
+            )
+        if role.name not in operation_role_names():
+            raise ValidationError(
+                f'{role.name!r} no es un rol funcional SIGEDON canónico.'
+            )
+
+    with transaction.atomic():
+        current_functional = list(
+            user.groups.filter(name__in=operation_role_names())
+        )
+        if current_functional:
+            user.groups.remove(*current_functional)
+        if role is not None:
+            user.groups.add(role)

@@ -1,9 +1,12 @@
 from django import forms
 from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
 from .choices import OPERATING_CURRENCY
+from .forms import SigedonAdminUserCreationForm, SigedonUserChangeForm
 from .models import (
     AuditLog, Donation, Expense, FundAllocation, Institution, Project,
     ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
@@ -20,6 +23,60 @@ from .services import (
     ensure_operational_entity_is_editable,
 )
 from .project_update_responsibles import eligible_project_update_reporters, validate_project_update_reporter
+
+
+class SigedonUserAdmin(DjangoUserAdmin):
+    """
+    User admin with a single optional SIGEDON functional role, separate from
+    technical groups. Functional roles are excluded from the groups widget so
+    stock groups.set() cannot leave a user with multiple canonical roles.
+    """
+
+    form = SigedonUserChangeForm
+    add_form = SigedonAdminUserCreationForm
+    filter_horizontal = ('groups', 'user_permissions')
+
+    fieldsets = (
+        (None, {'fields': ('username', 'password')}),
+        (_('Información personal'), {'fields': ('first_name', 'last_name', 'email')}),
+        (
+            _('Permisos'),
+            {
+                'fields': (
+                    'is_active',
+                    'is_staff',
+                    'is_superuser',
+                    'functional_role',
+                    'groups',
+                    'user_permissions',
+                ),
+            },
+        ),
+        (_('Fechas importantes'), {'fields': ('last_login', 'date_joined')}),
+    )
+    add_fieldsets = (
+        (
+            None,
+            {
+                'classes': ('wide',),
+                'fields': ('username', 'usable_password', 'password1', 'password2'),
+            },
+        ),
+        (
+            _('Permisos'),
+            {
+                'fields': (
+                    'functional_role',
+                    'groups',
+                    'user_permissions',
+                ),
+            },
+        ),
+    )
+
+
+admin.site.unregister(User)
+admin.site.register(User, SigedonUserAdmin)
 
 
 class FundAllocationAdminForm(forms.ModelForm):
