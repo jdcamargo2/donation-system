@@ -33,6 +33,7 @@ AUDIT_ACTION_SEMANTIC_CLASSES = {
     AuditLog.Action.CLOSED: 'ops-audit-action-closed',
     AuditLog.Action.EXPENSE_CANCELLED: 'ops-audit-action-expense_cancelled',
     AuditLog.Action.PUBLISHED: 'ops-audit-action-published',
+    AuditLog.Action.UNPUBLISHED: 'ops-audit-action-unpublished',
     AuditLog.Action.COMPLETED: 'ops-audit-action-completed',
     AuditLog.Action.REOPENED: 'ops-audit-action-reopened',
     AuditLog.Action.REORDERED: 'ops-audit-action-reordered',

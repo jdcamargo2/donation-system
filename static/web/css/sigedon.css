@@ -2466,7 +2466,8 @@ input[type="number"] {
 }
 
 .ops-audit-action-executed,
-.ops-audit-action-closed {
+.ops-audit-action-closed,
+.ops-audit-action-unpublished {
     background: #fff6e5;
     border-color: #f0d5a0;
     color: #9a6700;

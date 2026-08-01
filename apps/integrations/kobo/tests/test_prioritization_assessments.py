@@ -33,7 +33,13 @@ from apps.integrations.kobo.models import (
     KoboTerritorialIdentityConflict,
 )
 from apps.integrations.kobo.services import import_kobo_submission
-from apps.operations.models import Donation, Expense, FundAllocation, Project
+from apps.operations.models import (
+    Donation,
+    Expense,
+    FundAllocation,
+    Project,
+    ProjectDeletionForbiddenError,
+)
 
 
 def canonical_assessment_payload(code="NV-ASSESSMENT", **changes):
@@ -204,8 +210,20 @@ class KoboPrioritizationAssessmentTests(
             duplicate.full_clean()
         for protected_object in (identity, self.project, submission, self.importer):
             with self.subTest(protected_object=protected_object):
-                with self.assertRaises(ProtectedError):
-                    protected_object.delete()
+                if isinstance(protected_object, Project):
+                    with self.assertRaises(ProjectDeletionForbiddenError):
+                        protected_object.delete()
+                    self.assertTrue(
+                        Project.objects.filter(pk=protected_object.pk).exists()
+                    )
+                    self.assertTrue(
+                        KoboPrioritizationAssessment.objects.filter(
+                            pk=assessment.pk
+                        ).exists()
+                    )
+                else:
+                    with self.assertRaises(ProtectedError):
+                        protected_object.delete()
         assessment.final_priority = "critical"
         with self.assertRaises(ValidationError):
             assessment.save()

@@ -134,7 +134,10 @@ class ProjectMilestoneViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'cerrados o anulados no admiten cambios')
+        self.assertContains(
+            response,
+            'Los proyectos cerrados no admiten cambios en sus hitos.',
+        )
         self.assertFalse(self.project.milestones.filter(title='No permitido').exists())
 
     def test_edit_get_prepopulates_title_and_description(self):
@@ -229,7 +232,7 @@ class ProjectMilestoneViewTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertContains(
             response,
-            'cerrados o anulados no admiten cambios',
+            'Los proyectos cerrados no admiten cambios en sus hitos.',
             status_code=403,
         )
         self.first.refresh_from_db()
@@ -300,7 +303,10 @@ class ProjectMilestoneViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'cerrados o anulados no admiten cambios')
+        self.assertContains(
+            response,
+            'Los proyectos cerrados no admiten cambios en sus hitos.',
+        )
         self.second.refresh_from_db()
         self.assertTrue(self.second.is_completed)
 

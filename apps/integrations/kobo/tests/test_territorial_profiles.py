@@ -22,7 +22,7 @@ from apps.integrations.kobo.models import (
     KoboTerritorialProfile,
 )
 from apps.integrations.kobo.services import import_kobo_submission
-from apps.operations.models import AuditLog, Project
+from apps.operations.models import AuditLog, Project, ProjectDeletionForbiddenError
 
 
 class KoboTerritorialProfileTests(TestCase):
@@ -236,8 +236,18 @@ class KoboTerritorialProfileTests(TestCase):
 
         for protected_object in (submission, identity, self.project, self.importer):
             with self.subTest(protected_object=protected_object):
-                with self.assertRaises(ProtectedError):
-                    protected_object.delete()
+                if isinstance(protected_object, Project):
+                    with self.assertRaises(ProjectDeletionForbiddenError):
+                        protected_object.delete()
+                    self.assertTrue(
+                        Project.objects.filter(pk=protected_object.pk).exists()
+                    )
+                    self.assertTrue(
+                        KoboTerritorialProfile.objects.filter(pk=profile.pk).exists()
+                    )
+                else:
+                    with self.assertRaises(ProtectedError):
+                        protected_object.delete()
         profile.general_notes = "Mutación no permitida"
         with self.assertRaises(ValidationError):
             profile.save()

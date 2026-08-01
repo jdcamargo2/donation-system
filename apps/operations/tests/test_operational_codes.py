@@ -130,14 +130,15 @@ class OperationalCodeTests(TestCase):
         project = Project.objects.create(name='Proyecto posterior al rollback')
         self.assertEqual(project.code, f'PRJ-{before:06d}')
 
-    def test_post_commit_deletion_does_not_reuse_a_project_code(self):
-        first = Project.objects.create(name='Proyecto eliminado después de confirmar')
+    def test_consecutive_project_codes_are_monotonic_and_unique(self):
+        first = Project.objects.create(name='Proyecto primero')
         first_number = int(first.code.removeprefix('PRJ-'))
-        first.delete()
 
-        second = Project.objects.create(name='Proyecto posterior a eliminación')
+        second = Project.objects.create(name='Proyecto posterior consecutivo')
 
+        self.assertNotEqual(first.code, second.code)
         self.assertEqual(second.code, f'PRJ-{first_number + 1:06d}')
+        self.assertTrue(Project.objects.filter(pk=first.pk).exists())
 
     def test_six_digit_padding_is_not_a_code_limit(self):
         sequence = OperationalCodeSequence.objects.get(namespace='project')
