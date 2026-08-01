@@ -78,6 +78,7 @@ class OperationRoleTests(TestCase):
             'add_projectupdatereviewdecision', 'change_projectupdatereviewdecision',
             'delete_projectupdatereviewdecision', 'review_projectupdate', 'decide_projectupdate',
             'resolve_projectupdateremediation',
+            'delete_project',
         }
 
         for permission in operations_permissions:

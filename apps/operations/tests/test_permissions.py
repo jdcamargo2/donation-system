@@ -125,14 +125,12 @@ class OperationsPermissionTests(TestCase):
                     'delete_project', 'delete_institution',
                 ),
                 (
-                    reverse('project_delete', args=[self.project.pk]),
                     reverse('institution_delete', args=[self.institution.pk]),
                 ),
             ),
         )
         action_urls = (
             reverse('project_update', args=[self.project.pk]),
-            reverse('project_delete', args=[self.project.pk]),
             reverse('institution_update', args=[self.institution.pk]),
             reverse('institution_delete', args=[self.institution.pk]),
         )
@@ -157,6 +155,8 @@ class OperationsPermissionTests(TestCase):
                     reverse('institution_detail', args=[self.institution.pk]),
                     combined_html,
                 )
+                self.assertNotIn(f'/projects/{self.project.pk}/delete/', combined_html)
+                self.assertNotIn('>Eliminar</a>', responses[0].content.decode())
                 for action_url in action_urls:
                     assertion = self.assertIn if action_url in expected_urls else self.assertNotIn
                     assertion(action_url, combined_html)
@@ -164,41 +164,40 @@ class OperationsPermissionTests(TestCase):
                     self.assertIn('data-bs-boundary="viewport"', combined_html)
                     self.assertIn('dropdown-menu dropdown-menu-end', combined_html)
 
-    def test_project_and_institution_delete_links_keep_post_confirmation_and_csrf(self):
+    def test_institution_delete_links_keep_post_confirmation_and_csrf(self):
         user = create_user_with_permissions(
             'compact-delete-confirmation',
-            'view_project', 'view_institution', 'delete_project', 'delete_institution',
+            'view_institution', 'delete_institution',
         )
         self.client.force_login(user)
 
-        cases = (
-            (
-                reverse('project_list'),
-                reverse('project_delete', args=[self.project.pk]),
-                self.project,
-            ),
-            (
-                reverse('institution_list'),
-                reverse('institution_delete', args=[self.institution.pk]),
-                self.institution,
-            ),
-        )
-        for list_url, delete_url, instance in cases:
-            with self.subTest(delete_url=delete_url):
-                list_response = self.client.get(list_url)
-                confirmation_response = self.client.get(delete_url)
+        list_url = reverse('institution_list')
+        delete_url = reverse('institution_delete', args=[self.institution.pk])
+        list_response = self.client.get(list_url)
+        confirmation_response = self.client.get(delete_url)
 
-                self.assertContains(list_response, delete_url)
-                self.assertContains(confirmation_response, '<form method="post">')
-                self.assertContains(confirmation_response, 'name="csrfmiddlewaretoken"')
-                self.assertTrue(type(instance).objects.filter(pk=instance.pk).exists())
+        self.assertContains(list_response, delete_url)
+        self.assertContains(confirmation_response, '<form method="post">')
+        self.assertContains(confirmation_response, 'name="csrfmiddlewaretoken"')
+        self.assertTrue(type(self.institution).objects.filter(pk=self.institution.pk).exists())
 
         csrf_client = Client(enforce_csrf_checks=True)
         csrf_client.force_login(user)
-        for _, delete_url, instance in cases:
-            with self.subTest(csrf_delete_url=delete_url):
-                self.assertEqual(csrf_client.post(delete_url).status_code, 403)
-                self.assertTrue(type(instance).objects.filter(pk=instance.pk).exists())
+        self.assertEqual(csrf_client.post(delete_url).status_code, 403)
+        self.assertTrue(type(self.institution).objects.filter(pk=self.institution.pk).exists())
+
+    def test_project_list_never_exposes_delete_even_with_builtin_permission(self):
+        user = create_user_with_permissions(
+            'project-builtin-delete-perm',
+            'view_project', 'delete_project', 'change_project',
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse('project_list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse('project_update', args=[self.project.pk]))
+        self.assertNotContains(response, f'/projects/{self.project.pk}/delete/')
+        self.assertNotContains(response, '>Eliminar</a>')
 
     def test_donation_secondary_actions_follow_permissions(self):
         edit_url = reverse('donation_update', args=[self.donation.pk])

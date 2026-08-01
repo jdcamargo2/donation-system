@@ -19,7 +19,7 @@ EXPECTED_VIEW_MODULES = (
     'projects',
     'supporting_documents',
 )
-EXPECTED_ROUTE_COUNT = 76
+EXPECTED_ROUTE_COUNT = 75
 INCIDENTAL_NAMES_MUST_STAY_PRIVATE = (
     'Donation',
     'CreateView',

@@ -110,6 +110,21 @@ class Institution(models.Model):
         return self.name
 
 
+class ProjectDeletionForbiddenError(ValidationError):
+    """Raised when application code attempts to delete a project."""
+
+
+class ProjectQuerySet(models.QuerySet):
+    """Query operations that permanently reject Project deletion."""
+
+    def delete(self):
+        """
+        PRE: queryset targets persisted projects.
+        POST: always rejects bulk deletion without changing project rows.
+        """
+        raise ProjectDeletionForbiddenError(_('Los proyectos no pueden eliminarse.'))
+
+
 class Project(models.Model):
     class Status(models.TextChoices):
         ACTIVE = 'active', _('Activo')
@@ -138,6 +153,7 @@ class Project(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = ProjectQuerySet.as_manager()
 
     class Meta:
         ordering = ['code']
@@ -168,6 +184,13 @@ class Project(models.Model):
         with transaction.atomic():
             self.code = reserve_operational_code(namespace='project', prefix='PRJ')
             return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """
+        PRE: self is a project targeted for instance deletion.
+        POST: always rejects deletion and preserves the project.
+        """
+        raise ProjectDeletionForbiddenError(_('Los proyectos no pueden eliminarse.'))
 
     def clean(self):
         errors = {}

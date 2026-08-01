@@ -24,7 +24,6 @@ urlpatterns = [
         name='project_update_chunk',
     ),
     path('projects/<int:pk>/edit/', views.ProjectUpdateView.as_view(), name='project_update'),
-    path('projects/<int:pk>/delete/', views.ProjectDeleteView.as_view(), name='project_delete'),
     path('projects/<int:pk>/finish/', views.ProjectFinishView.as_view(), name='project_finish'),
     path('projects/<int:pk>/publish/', views.ProjectPublishView.as_view(), name='project_publish'),
     path(

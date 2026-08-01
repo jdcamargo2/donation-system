@@ -36,17 +36,20 @@ class CriticalAuditTests(TestCase):
         allocation.project.save(update_fields=('status', 'updated_at'))
         return create_expense(allocation=allocation, **kwargs)
 
-    def test_project_delete_generates_audit_log(self):
-        project = create_project(code='PRJ-DEL-001', name='Proyecto eliminable')
+    def test_rejected_project_deletion_creates_no_audit_log(self):
+        from apps.operations.models import ProjectDeletionForbiddenError
 
-        response = self.client.post(reverse('project_delete', args=[project.pk]))
+        project = create_project(code='PRJ-DEL-001', name='Proyecto no eliminable')
+        audit_count = AuditLog.objects.count()
 
-        self.assertRedirects(response, reverse('project_list'))
-        self.assertTrue(
+        with self.assertRaises(ProjectDeletionForbiddenError):
+            project.delete()
+
+        self.assertEqual(AuditLog.objects.count(), audit_count)
+        self.assertTrue(Project.objects.filter(pk=project.pk).exists())
+        self.assertFalse(
             AuditLog.objects.filter(
                 action=AuditLog.Action.ANNULLED,
-                model_name='Proyecto',
-                entity_label='PRJ-DEL-001 - Proyecto eliminable',
                 summary='Proyecto eliminado.',
             ).exists()
         )

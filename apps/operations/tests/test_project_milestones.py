@@ -167,14 +167,18 @@ class ProjectMilestoneModelTests(TestCase):
             [first_at_position_one, second_at_position_one, later_position],
         )
 
-    def test_deleting_project_cascades_to_milestones(self):
+    def test_deleting_project_is_blocked_and_preserves_milestones(self):
+        from apps.operations.models import ProjectDeletionForbiddenError
+
         milestone = ProjectMilestone.objects.create(
             project=self.project, title='Hito eliminable', position=1
         )
 
-        self.project.delete()
+        with self.assertRaises(ProjectDeletionForbiddenError):
+            self.project.delete()
 
-        self.assertFalse(ProjectMilestone.objects.filter(pk=milestone.pk).exists())
+        self.assertTrue(Project.objects.filter(pk=self.project.pk).exists())
+        self.assertTrue(ProjectMilestone.objects.filter(pk=milestone.pk).exists())
 
     def test_deleting_creator_sets_created_by_to_null(self):
         milestone = ProjectMilestone.objects.create(

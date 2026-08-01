@@ -4,13 +4,12 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.operations.models import AuditLog, Expense, FundAllocation, ProjectUpdate
+from apps.operations.models import AuditLog, Expense, FundAllocation
 from apps.operations.tests.helpers import (
     create_allocation,
     create_donation,
     create_expense,
     create_institution,
-    create_project,
 )
 
 
@@ -70,18 +69,6 @@ class ProtectedDeleteViewTests(TestCase):
         )
         self.assertTrue(FundAllocation.objects.filter(pk=allocation.pk).exists())
 
-    def test_project_with_allocation_is_preserved(self):
-        project = create_project(code='PRJ-PROTECTED', name='Proyecto protegido')
-        allocation = create_allocation(project=project)
-
-        self.assert_protected_delete(
-            url=reverse('project_delete', args=[project.pk]),
-            model=type(project),
-            pk=project.pk,
-            expected_texts=('Proyecto protegido', '1 asignación asociada'),
-        )
-        self.assertTrue(FundAllocation.objects.filter(pk=allocation.pk).exists())
-
     def test_institution_with_donation_is_preserved(self):
         institution = create_institution(name='Institución protegida')
         donation = create_donation(code='DON-PROTECTED', donor=institution)
@@ -94,49 +81,43 @@ class ProtectedDeleteViewTests(TestCase):
         )
         self.assertTrue(type(donation).objects.filter(pk=donation.pk).exists())
 
-    def test_valid_delete_succeeds_and_creates_exactly_one_audit_event(self):
-        project = create_project(code='PRJ-FREE', name='Proyecto eliminable')
+    def test_valid_institution_delete_succeeds_and_creates_exactly_one_audit_event(self):
+        institution = create_institution(name='Institución eliminable')
 
-        response = self.client.post(reverse('project_delete', args=[project.pk]), follow=True)
+        response = self.client.post(
+            reverse('institution_delete', args=[institution.pk]),
+            follow=True,
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(type(project).objects.filter(pk=project.pk).exists())
-        self.assertContains(response, 'Proyecto eliminado.')
+        self.assertFalse(type(institution).objects.filter(pk=institution.pk).exists())
+        self.assertContains(response, 'Institución eliminada.')
         self.assertEqual(
             AuditLog.objects.filter(
                 action=AuditLog.Action.ANNULLED,
-                entity_label='PRJ-FREE - Proyecto eliminable',
+                entity_label='Institución eliminable',
             ).count(),
             1,
         )
 
-    def test_project_confirmation_reports_cascade_without_calling_it_protected(self):
-        project = create_project(code='PRJ-CASCADE', name='Proyecto con avance')
-        update = ProjectUpdate.objects.create(
-            project=project,
-            title='Avance que se eliminará',
-            description='Consecuencia conocida.',
+    def test_get_never_deletes_institution_and_security_responses_are_preserved(self):
+        institution = create_institution(name='Institución segura')
+
+        self.assertEqual(
+            self.client.get(reverse('institution_delete', args=[institution.pk])).status_code,
+            200,
         )
-
-        response = self.client.get(reverse('project_delete', args=[project.pk]))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '1 avance de proyecto')
-        self.assertContains(response, 'Esta eliminación también eliminará')
-        self.assertTrue(ProjectUpdate.objects.filter(pk=update.pk).exists())
-
-    def test_get_never_deletes_and_security_responses_are_preserved(self):
-        project = create_project(code='PRJ-SECURE', name='Proyecto seguro')
-
-        self.assertEqual(self.client.get(reverse('project_delete', args=[project.pk])).status_code, 200)
-        self.assertTrue(type(project).objects.filter(pk=project.pk).exists())
+        self.assertTrue(type(institution).objects.filter(pk=institution.pk).exists())
 
         limited_user = get_user_model().objects.create_user('no-delete-permission', password='pass-12345')
         self.client.force_login(limited_user)
-        self.assertEqual(self.client.post(reverse('project_delete', args=[project.pk])).status_code, 403)
+        self.assertEqual(
+            self.client.post(reverse('institution_delete', args=[institution.pk])).status_code,
+            403,
+        )
 
         self.client.force_login(self.user)
-        self.assertEqual(self.client.post(reverse('project_delete', args=[999999])).status_code, 404)
+        self.assertEqual(self.client.post(reverse('institution_delete', args=[999999])).status_code, 404)
 
     def test_admin_protected_delete_returns_confirmation_instead_of_traceback(self):
         donation = create_donation(amount=Decimal('100.00'))

@@ -72,7 +72,6 @@ from .project_updates import (
 )
 from .projects import (
     ProjectCreateView,
-    ProjectDeleteView,
     ProjectDetailView,
     ProjectDocumentCreateView,
     ProjectDocumentDeleteView,
@@ -133,7 +132,6 @@ __all__ = [
     'InstitutionUpdateView',
     'ProjectCreateView',
     'ProjectCsvExportView',
-    'ProjectDeleteView',
     'ProjectDetailView',
     'ProjectDocumentCreateView',
     'ProjectDocumentDeleteView',

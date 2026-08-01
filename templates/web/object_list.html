@@ -33,9 +33,7 @@
                             {% elif update_url_name == 'project_update_update' and perms.operations.change_projectupdate %}
                                 <a class="btn btn-sm btn-outline-secondary" href="{% url update_url_name object.pk %}">Editar</a>
                             {% endif %}
-                            {% if delete_url_name == 'project_delete' and perms.operations.delete_project %}
-                                <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
-                            {% elif delete_url_name == 'project_update_delete' and perms.operations.delete_projectupdate %}
+                            {% if delete_url_name == 'project_update_delete' and perms.operations.delete_projectupdate %}
                                 <a class="btn btn-sm btn-outline-danger" href="{% url delete_url_name object.pk %}">Eliminar</a>
                             {% endif %}
                         </td>

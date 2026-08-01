@@ -53,7 +53,6 @@ from ..services import (
 
 from .common import (
     AuditMixin,
-    DeleteAuditMixin,
     DetailMetricsMixin,
     FilteredListContextMixin,
     OperationsPermissionRequiredMixin,
@@ -293,16 +292,6 @@ class ProjectUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCont
             except OperationalEntityFinalizedError as exc:
                 raise PermissionDenied(exc.messages[0]) from exc
         return super().dispatch(request, *args, **kwargs)
-
-
-class ProjectDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, RouteContextMixin, DeleteView):
-    permission_required = 'operations.delete_project'
-    model = Project
-    template_name = 'web/object_confirm_delete.html'
-    success_url = reverse_lazy('project_list')
-    route_prefix = 'project'
-    page_title = _('Eliminar proyecto')
-    audit_summary = _('Proyecto eliminado.')
 
 
 class ProjectDocumentCreateView(OperationsPermissionRequiredMixin, CreateView):

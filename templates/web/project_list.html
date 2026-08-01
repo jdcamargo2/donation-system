@@ -53,7 +53,7 @@
                             <span class="small text-muted d-block">Cierre: {{ project.end_date|default:"-" }}</span>
                         </td>
                         <td class="text-end">
-                            {% if perms.operations.change_project or perms.operations.delete_project %}
+                            {% if perms.operations.change_project %}
                                 <div class="dropdown">
                                     <button
                                         class="btn btn-sm btn-outline-secondary dropdown-toggle"
@@ -67,12 +67,7 @@
                                         Más
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="project-actions-{{ project.pk }}">
-                                        {% if perms.operations.change_project %}
-                                            <li><a class="dropdown-item" href="{% url update_url_name project.pk %}">Editar</a></li>
-                                        {% endif %}
-                                        {% if perms.operations.delete_project %}
-                                            <li><a class="dropdown-item text-danger" href="{% url delete_url_name project.pk %}">Eliminar</a></li>
-                                        {% endif %}
+                                        <li><a class="dropdown-item" href="{% url update_url_name project.pk %}">Editar</a></li>
                                     </ul>
                                 </div>
                             {% endif %}

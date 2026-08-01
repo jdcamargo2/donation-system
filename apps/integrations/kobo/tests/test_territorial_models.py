@@ -6,7 +6,7 @@ from apps.integrations.kobo.models import KoboPastoralZoneProjectMapping
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.models import KoboTerritorialIdentity
 from apps.integrations.kobo.models import KoboTerritorialIdentityConflict
-from apps.operations.models import Project
+from apps.operations.models import Project, ProjectDeletionForbiddenError
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
@@ -134,10 +134,11 @@ class KoboTerritorialModelsTests(TestCase):
         self.assertIn("source_submission", context.exception.message_dict)
 
         persisted = self.create_identity()
-        with self.assertRaises(ProtectedError):
+        with self.assertRaises(ProjectDeletionForbiddenError):
             persisted.project.delete()
         with self.assertRaises(ProtectedError):
             persisted.source_submission.delete()
+        self.assertTrue(Project.objects.filter(pk=persisted.project_id).exists())
 
     def test_active_zone_mapping_is_explicit_unique_and_protects_project(self):
         mapping = KoboPastoralZoneProjectMapping.objects.create(
@@ -155,8 +156,9 @@ class KoboTerritorialModelsTests(TestCase):
                 pastoral_zone="centro",
                 project=self.other_project,
             )
-        with self.assertRaises(ProtectedError):
+        with self.assertRaises(ProjectDeletionForbiddenError):
             self.project.delete()
+        self.assertTrue(Project.objects.filter(pk=self.project.pk).exists())
 
     def test_conflict_is_idempotent_and_does_not_change_identity(self):
         identity = self.create_identity()

@@ -99,6 +99,22 @@ class ProjectAdmin(admin.ModelAdmin):
             readonly.update(field.name for field in self.model._meta.concrete_fields)
         return tuple(readonly)
 
+    def has_delete_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional Project admin object.
+        POST: always denies deletion, including for superusers.
+        """
+        return False
+
+    def get_actions(self, request):
+        """
+        PRE: request targets the Project admin changelist.
+        POST: removes the bulk delete action while leaving other actions unchanged.
+        """
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
+
     def save_model(self, request, obj, form, change):
         """
         PRE: obj is new or an existing project submitted through admin.
