@@ -12,6 +12,7 @@
     </div>
 </div>
 
+{% if show_financial_quick_actions %}
 <div class="card border-0 mb-4 ops-action-panel">
     <div class="card-body">
         <h2 class="h5 mb-3">Accesos rápidos</h2>
@@ -61,6 +62,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 {% if can_view_donations or can_view_allocations or can_view_expenses %}
     <div class="row g-3 mb-4 ops-metric-grid">

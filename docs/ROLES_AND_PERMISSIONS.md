@@ -226,6 +226,13 @@ No puede:
 * ejecutar acciones terminales;
 * revisar, decidir ni resolver remediaciones.
 
+### Presentación del Panel financiero
+
+El Auditor externo mantiene acceso a las consultas financieras y de auditoría
+mediante el menú lateral y las vistas autorizadas. El bloque de accesos rápidos
+del Panel financiero no se muestra para este rol. Esto no revoca permisos ni
+cambia rutas ni la navegación lateral.
+
 ## 4. Comité de proyectos
 
 Comité de proyectos es **un único rol funcional**. La revisión, la decisión y la
@@ -519,6 +526,11 @@ view_auditlog
 view_donation + view_fundallocation
 → saldo global disponible
 ```
+
+Además, el bloque de accesos rápidos (`show_financial_quick_actions`) se oculta
+únicamente para el rol funcional `Auditor externo`. Los demás roles y usuarios
+sin rol canónico siguen viendo el bloque; los botones internos siguen filtrados
+por permisos efectivos. Ocultar el bloque no revoca permisos.
 
 ### Regla de seguridad
 

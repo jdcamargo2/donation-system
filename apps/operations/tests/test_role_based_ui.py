@@ -101,19 +101,69 @@ class RoleBasedUITests(TestCase):
         self.assertNotContains(response, reverse('expense_create'))
 
     def test_external_auditor_sees_audit_navigation(self):
+        # Sidebar/navigation only — dashboard Accesos rápidos is hidden for Auditor.
         self.client.force_login(self.create_user_for_role('ui-auditor-audit', ROLE_EXTERNAL_AUDITOR))
 
         response = self.client.get(reverse('dashboard'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Auditoría')
+        self.assertContains(response, 'title="Auditoría"')
         self.assertContains(response, reverse('audit_log_list'))
+
+    def test_external_auditor_dashboard_hides_quick_actions(self):
+        self.client.force_login(
+            self.create_user_for_role('ui-auditor-quick-actions', ROLE_EXTERNAL_AUDITOR)
+        )
+
+        response = self.client.get(reverse('dashboard'))
+        html = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context['show_financial_quick_actions'])
+        self.assertNotContains(response, 'Accesos rápidos')
+        self.assertNotContains(response, 'ops-action-panel')
+        self.assertNotIn('ops-action-group-title', html)
+        self.assertNotContains(response, 'Ver proyectos')
+        self.assertNotContains(response, 'Consultar donaciones')
+        self.assertNotContains(response, 'Consultar gastos')
+        self.assertNotContains(response, 'Ver auditoría')
+
+        self.assertContains(response, 'ops-metric-grid')
+        self.assertContains(response, 'Donaciones recibidas USD')
+        self.assertContains(response, 'Ingresos')
+        self.assertContains(response, 'Gastos recientes')
+        self.assertContains(response, 'Acciones recientes de auditoría')
+
+        self.assertContains(response, 'title="Proyectos"')
+        self.assertContains(response, 'title="Auditoría"')
+        self.assertContains(response, reverse('project_list'))
+        self.assertContains(response, reverse('donation_list'))
+        self.assertContains(response, reverse('expense_list'))
+        self.assertContains(response, reverse('audit_log_list'))
+
+    def test_external_auditor_can_open_financial_list_routes(self):
+        self.client.force_login(
+            self.create_user_for_role('ui-auditor-direct-routes', ROLE_EXTERNAL_AUDITOR)
+        )
+
+        for url_name in (
+            'project_list',
+            'donation_list',
+            'expense_list',
+            'audit_log_list',
+        ):
+            with self.subTest(url_name=url_name):
+                response = self.client.get(reverse(url_name))
+                self.assertEqual(response.status_code, 200)
 
     def test_field_operator_dashboard_focuses_on_projects_and_updates(self):
         self.client.force_login(self.create_user_for_role('ui-field-dashboard', ROLE_FIELD_OPERATOR))
 
         response = self.client.get(reverse('dashboard'))
 
+        self.assertTrue(response.context['show_financial_quick_actions'])
+        self.assertContains(response, 'ops-action-panel')
+        self.assertContains(response, 'Accesos rápidos')
         self.assertContains(response, 'Ver proyectos')
         self.assertContains(response, 'Registrar avances')
         self.assertNotContains(response, 'Crear donación')
@@ -370,11 +420,58 @@ class RoleBasedUITests(TestCase):
         project_response = self.client.get(reverse('project_list'))
         expense_response = self.client.get(reverse('expense_list'))
 
+        self.assertTrue(dashboard_response.context['show_financial_quick_actions'])
+        self.assertContains(dashboard_response, 'Accesos rápidos')
+        self.assertContains(dashboard_response, 'ops-action-panel')
         self.assertContains(dashboard_response, 'Crear proyecto')
         self.assertContains(dashboard_response, 'Crear gasto')
         self.assertContains(dashboard_response, 'Ver auditoría')
         self.assertContains(project_response, reverse('project_create'))
         self.assertContains(expense_response, reverse('expense_create'))
+
+    def test_committee_dashboard_keeps_quick_actions_container(self):
+        self.client.force_login(
+            self.create_user_for_role('ui-committee-dashboard', ROLE_PROJECT_COMMITTEE)
+        )
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['show_financial_quick_actions'])
+        self.assertContains(response, 'Accesos rápidos')
+        self.assertContains(response, 'ops-action-panel')
+
+    def test_direct_permission_user_sees_quick_actions(self):
+        user = create_user_with_permissions(
+            'ui-direct-quick-actions',
+            'view_project',
+            'view_donation',
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['show_financial_quick_actions'])
+        self.assertContains(response, 'Accesos rápidos')
+        self.assertContains(response, 'ops-action-panel')
+        self.assertContains(response, 'Ver proyectos')
+        self.assertContains(response, 'Consultar donaciones')
+
+    def test_superuser_dashboard_keeps_quick_actions(self):
+        user = get_user_model().objects.create_superuser(
+            username='ui-superuser-dashboard',
+            email='ui-superuser@example.com',
+            password='pass-12345',
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['show_financial_quick_actions'])
+        self.assertContains(response, 'Accesos rápidos')
+        self.assertContains(response, 'ops-action-panel')
 
     def test_forbidden_actions_are_hidden_even_when_routes_remain_protected(self):
         field_user = self.create_user_for_role('ui-field-routes', ROLE_FIELD_OPERATOR)
