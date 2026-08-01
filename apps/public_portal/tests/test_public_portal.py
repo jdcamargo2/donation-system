@@ -206,7 +206,6 @@ class PublicPortalTests(TestCase):
         self.project.start_date = date(2026, 1, 15)
         self.project.end_date = date(2026, 6, 30)
         self.project.objective = 'Fortalecer la respuesta comunitaria.'
-        self.project.responsible_unit = 'Unidad interna no publicada'
         self.project.save()
 
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
@@ -231,7 +230,6 @@ class PublicPortalTests(TestCase):
         self.assertIn('public-project-information', content)
         self.assertIn('public-project-updates', content)
         self.assertIn('public-methodology-note', content)
-        self.assertNotIn('Unidad interna no publicada', content)
         self.assertNotIn('>Activo<', content)
         self.assertNotIn('Presupuesto estimado', content)
         self.assertNotIn('public-notice-inline', content)

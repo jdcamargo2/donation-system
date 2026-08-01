@@ -49,7 +49,6 @@ class EndToEndMVPFlowTests(TestCase):
                 'name': 'Atención integral E2E',
                 'description': 'Proyecto visible para trazabilidad pública.',
                 'objective': 'Atender necesidades humanitarias prioritarias.',
-                'responsible_unit': 'Pastoral Social',
                 'location': 'Caracas',
                 'estimated_budget': '1000.00',
                 'start_date': TEST_DATE,

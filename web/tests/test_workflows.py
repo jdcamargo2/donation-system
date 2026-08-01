@@ -59,7 +59,6 @@ class MvpWorkflowRegressionTests(TestCase):
                 'name': 'Workflow Project',
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': 'Caracas',
                 'estimated_budget': '500.00',
                 'start_date': '',

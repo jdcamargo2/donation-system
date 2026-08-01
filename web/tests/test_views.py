@@ -375,7 +375,6 @@ class CrudFlowTests(TestCase):
                 'name': 'New Project',
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': '',
                 'estimated_budget': '1000.00',
                 'start_date': '',

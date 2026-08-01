@@ -134,7 +134,6 @@ class Project(models.Model):
     name = models.CharField(max_length=180)
     description = models.TextField(blank=True)
     objective = models.TextField(blank=True)
-    responsible_unit = models.CharField(max_length=120, blank=True)
     location = models.CharField(max_length=160, blank=True)
     estimated_budget = models.DecimalField(max_digits=14, decimal_places=2, default=ZERO_MONEY)
     start_date = models.DateField(null=True, blank=True)

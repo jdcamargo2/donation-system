@@ -21,12 +21,11 @@ class InternalExperienceTemplateTests(TestCase):
         self.institution = create_institution(name='Fundación Operativa')
         self.project = create_project(code='PRJ-OPS-001', name='Proyecto operativo')
         self.project.location = 'Zona central'
-        self.project.responsible_unit = 'Unidad de proyectos'
         self.project.objective = 'Mejorar la atención comunitaria.'
         self.project.description = 'Intervención operativa priorizada.'
         self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=(
-            'location', 'responsible_unit', 'objective', 'description',
+            'location', 'objective', 'description',
             'status', 'updated_at',
         ))
         self.donation = create_donation(code='DON-OPS-001', donor=self.institution)
@@ -486,7 +485,6 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(response, self.project.code, count=1)
         self.assertContains(response, self.project.get_status_display(), count=1)
         self.assertContains(response, self.project.location, count=2)
-        self.assertContains(response, self.project.responsible_unit, count=2)
         self.assertContains(response, 'Información general')
         self.assertContains(response, self.project.objective)
         self.assertContains(response, self.project.description)

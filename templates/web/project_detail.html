@@ -18,10 +18,9 @@
                 <span class="badge text-bg-secondary" aria-label="Visibilidad del proyecto: Privado">Privado</span>
             {% endif %}
         </div>
-        {% if object.location or object.responsible_unit %}
+        {% if object.location %}
         <div class="ops-project-detail-secondary-meta">
-            {% if object.location %}<span><strong>Ubicación:</strong> {{ object.location }}</span>{% endif %}
-            {% if object.responsible_unit %}<span><strong>Unidad responsable:</strong> {{ object.responsible_unit }}</span>{% endif %}
+            <span><strong>Ubicación:</strong> {{ object.location }}</span>
         </div>
         {% endif %}
     </div>
@@ -133,7 +132,7 @@
         <section class="card border-0 h-100 ops-detail-card ops-project-general-info" aria-labelledby="project-general-info-title">
             <div class="card-body">
                 <h2 id="project-general-info-title" class="h5 mb-3">Información general</h2>
-                {% if object.start_date or object.end_date or object.location or object.responsible_unit %}
+                {% if object.start_date or object.end_date or object.location %}
                 <dl class="ops-project-general-grid">
                     {% if object.start_date or object.end_date %}
                     <div>
@@ -145,12 +144,6 @@
                     <div>
                         <dt>Ubicación</dt>
                         <dd>{{ object.location }}</dd>
-                    </div>
-                    {% endif %}
-                    {% if object.responsible_unit %}
-                    <div>
-                        <dt>Unidad responsable</dt>
-                        <dd>{{ object.responsible_unit }}</dd>
                     </div>
                     {% endif %}
                 </dl>

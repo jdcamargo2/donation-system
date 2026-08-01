@@ -103,7 +103,6 @@ class LocalizedMoneyFormTests(TestCase):
             'name': project.name,
             'description': '',
             'objective': '',
-            'responsible_unit': '',
             'location': '',
             'estimated_budget': '10.000.000,00',
             'start_date': '',

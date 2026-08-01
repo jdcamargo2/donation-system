@@ -210,7 +210,6 @@ Representa un proyecto institucional.
 | `name`             | `CharField`     | Obligatorio                        |
 | `description`      | `TextField`     | Opcional                           |
 | `objective`        | `TextField`     | Opcional                           |
-| `responsible_unit` | `CharField`     | Opcional                           |
 | `location`         | `CharField`     | Opcional                           |
 | `estimated_budget` | `DecimalField`  | Mayor o igual a cero               |
 | `start_date`       | `DateField`     | Opcional                           |

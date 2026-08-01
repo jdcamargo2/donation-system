@@ -65,6 +65,7 @@ class FormTests(TestCase):
 
         self.assertNotIn('code', donation_form.fields)
         self.assertNotIn('code', project_form.fields)
+        self.assertNotIn('responsible_unit', project_form.fields)
         self.assertEqual(donation_form.fields['donation_type'].widget.__class__.__name__, 'Select')
         self.assertNotIn('currency', donation_form.fields)
         self.assertEqual(OPERATING_CURRENCY_CHOICES, (('USD', 'USD'),))
@@ -148,7 +149,6 @@ class FormTests(TestCase):
                 'name': 'Health support',
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': '',
                 'estimated_budget': '500.00',
                 'start_date': '',
@@ -214,7 +214,6 @@ class FormTests(TestCase):
                 'name': 'Budget format',
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': '',
                 'estimated_budget': '1.500,00',
                 'start_date': '',
@@ -283,7 +282,6 @@ class FormTests(TestCase):
                 'name': 'Visual dates',
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': '',
                 'estimated_budget': '0.00',
                 'start_date': '09/07/2026',
@@ -457,7 +455,6 @@ class FormTests(TestCase):
                 'name': 'Negative budget',
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': '',
                 'estimated_budget': '-1.00',
                 'start_date': '',
@@ -475,7 +472,6 @@ class FormTests(TestCase):
                 'name': 'Invalid dates',
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': '',
                 'estimated_budget': '0.00',
                 'start_date': '2026-07-08',

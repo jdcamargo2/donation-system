@@ -300,7 +300,6 @@ class Command(BaseCommand):
                         "Fortalecer la respuesta comunitaria y la gestión "
                         "transparente de recursos."
                     ),
-                    "responsible_unit": "Coordinación territorial SIGEDON",
                     "location": location,
                     "estimated_budget": budget,
                     "start_date": today - timedelta(days=30),
