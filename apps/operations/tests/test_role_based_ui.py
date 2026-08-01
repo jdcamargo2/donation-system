@@ -424,10 +424,15 @@ class RoleBasedUITests(TestCase):
         self.assertContains(dashboard_response, 'Accesos rápidos')
         self.assertContains(dashboard_response, 'ops-action-panel')
         self.assertContains(dashboard_response, 'Crear proyecto')
-        self.assertContains(dashboard_response, 'Crear gasto')
+        self.assertContains(dashboard_response, 'Ver solicitudes')
+        self.assertContains(dashboard_response, 'Pendientes de registrar gasto')
+        self.assertNotContains(dashboard_response, 'Crear gasto')
+        self.assertNotContains(dashboard_response, reverse('expense_create'))
         self.assertContains(dashboard_response, 'Ver auditoría')
         self.assertContains(project_response, reverse('project_create'))
-        self.assertContains(expense_response, reverse('expense_create'))
+        self.assertNotContains(expense_response, reverse('expense_create'))
+        self.assertNotContains(expense_response, 'Nuevo gasto')
+        self.assertContains(expense_response, 'Ver solicitudes de gasto')
 
     def test_committee_dashboard_keeps_quick_actions_container(self):
         self.client.force_login(

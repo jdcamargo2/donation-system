@@ -32,10 +32,11 @@ DECISION_LABELS = (
 )
 
 FULFILL_ATTACHMENT_LABELS = (
-    'Registrar gasto',
     'Agregar adjunto',
     'Eliminar adjunto',
 )
+
+FULFILL_ACTION_LABEL = 'Registrar gasto'
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
@@ -64,7 +65,13 @@ class ExpenseRequestUITests(TestCase):
         html = response.content.decode()
         for label in FULFILL_ATTACHMENT_LABELS:
             self.assertNotIn(label, html)
+        self.assertNotIn(FULFILL_ACTION_LABEL, html)
         self.assertNotIn('expense_request_fulfill', html)
+
+    def _assert_no_attachment_mutation_controls(self, response):
+        html = response.content.decode()
+        for label in FULFILL_ATTACHMENT_LABELS:
+            self.assertNotIn(label, html)
 
     def _assert_no_annul_controls(self, response):
         html = response.content.decode()
@@ -177,6 +184,7 @@ class ExpenseRequestUITests(TestCase):
         self.assertFalse(response.context['can_approve_expense_request'])
         self.assertFalse(response.context['can_deny_expense_request'])
         self.assertTrue(response.context['can_annul_expense_request'])
+        self.assertFalse(response.context['can_fulfill_expense_request'])
         self.assertContains(response, 'Anular solicitud')
         self.assertContains(
             response,
@@ -296,5 +304,7 @@ class ExpenseRequestUITests(TestCase):
         self.assertFalse(response.context['can_approve_expense_request'])
         self.assertFalse(response.context['can_deny_expense_request'])
         self.assertFalse(response.context['can_annul_expense_request'])
+        self.assertFalse(response.context.get('can_fulfill_expense_request', False))
         self._assert_no_decision_controls(response)
         self._assert_no_annul_controls(response)
+        self._assert_no_attachment_mutation_controls(response)

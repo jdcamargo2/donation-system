@@ -188,6 +188,11 @@ urlpatterns = [
         views.ExpenseRequestAnnulView.as_view(),
         name='expense_request_annul',
     ),
+    path(
+        'expense-requests/<int:pk>/fulfill/',
+        views.ExpenseRequestFulfillView.as_view(),
+        name='expense_request_fulfill',
+    ),
     path('expenses/', views.ExpenseListView.as_view(), name='expense_list'),
     path('expenses/export.csv', views.ExpenseCsvExportView.as_view(), name='expense_export_csv'),
     path('expenses/new/', views.ExpenseCreateView.as_view(), name='expense_create'),

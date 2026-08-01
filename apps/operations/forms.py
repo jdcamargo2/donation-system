@@ -11,7 +11,11 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
-from .choices import OPERATING_CURRENCY
+from .choices import (
+    EXPENSE_CATEGORY_CHOICES,
+    OPERATING_CURRENCY,
+    PAYMENT_METHOD_CHOICES,
+)
 from .models import (
     Donation, Expense, FundAllocation, Institution, Project, ProjectDocument,
     ProjectMilestone,
@@ -772,6 +776,125 @@ class ExpenseRequestApproveForm(BootstrapFormMixin, forms.Form):
             'La aprobación reservará el monto solicitado en la asignación seleccionada.'
         ),
     )
+
+
+class ExpenseRequestFulfillmentForm(BootstrapFormMixin, forms.Form):
+    """
+    Administrator fulfillment form: converts an APPROVED_RESERVED request into an Expense.
+
+    Allocation, request identity, reserved amount, currency, and status come from the
+    persisted request and fulfill_expense_request; this form never accepts them from POST.
+    """
+
+    expense_date = forms.DateField(
+        label=_('Fecha del gasto'),
+        help_text=_('Formato: dd/mm/aaaa.'),
+        widget=build_date_widget(),
+        input_formats=DATE_INPUT_FORMATS,
+    )
+    amount = MoneyDecimalField(
+        label=_('Monto'),
+        min_value=Decimal('0.01'),
+    )
+    category = forms.ChoiceField(
+        label=_('Categoría'),
+        choices=EXPENSE_CATEGORY_CHOICES,
+    )
+    reason = forms.CharField(
+        label=_('Motivo'),
+        max_length=220,
+        strip=True,
+    )
+    provider_or_recipient = forms.CharField(
+        label=_('Proveedor o destinatario'),
+        max_length=160,
+        strip=True,
+    )
+    payment_method = forms.ChoiceField(
+        label=_('Método de pago'),
+        choices=PAYMENT_METHOD_CHOICES,
+    )
+    description = forms.CharField(
+        label=_('Descripción'),
+        required=False,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+    observations = forms.CharField(
+        label=_('Observaciones'),
+        required=False,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 2}),
+    )
+    support_file = forms.FileField(
+        label=_('Documento soporte'),
+        widget=forms.FileInput(
+            attrs={
+                'data-file-upload-preview': 'true',
+            }
+        ),
+        help_text=_(
+            'Obligatorio. Adjunte el archivo que permite verificar la operación.'
+        ),
+    )
+    support_title = forms.CharField(
+        required=False,
+        max_length=160,
+        label=_('Referencia o título del soporte'),
+        help_text=_(
+            'Indique la referencia, número o título que identifica el soporte.'
+        ),
+    )
+    support_notes = forms.CharField(
+        label=_('Notas del soporte'),
+        required=False,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 2}),
+        help_text=_('Opcional. Use este campo para aclaraciones internas sobre el soporte.'),
+    )
+
+    def __init__(self, *args, reserved_amount=None, **kwargs):
+        # PRE: reserved_amount is the persisted request reservation (authoritative max).
+        # POST: caps amount validation and help text; never trusts POST for the ceiling.
+        super().__init__(*args, **kwargs)
+        self.reserved_amount = reserved_amount
+        if reserved_amount is not None:
+            self.fields['amount'].max_value = reserved_amount
+            self.fields['amount'].help_text = _(
+                'Máximo según la reserva: %(max)s. El saldo no utilizado se liberará '
+                'automáticamente.'
+            ) % {'max': format_usd_amount(reserved_amount)}
+        else:
+            self.fields['amount'].help_text = _(
+                'El monto no puede superar la reserva de la solicitud. Ejemplo: 1.500,00.'
+            )
+
+    def clean_reason(self):
+        reason = self.cleaned_data['reason'].strip()
+        if not reason:
+            raise ValidationError(_('El motivo del gasto es obligatorio.'))
+        return reason
+
+    def clean_provider_or_recipient(self):
+        provider = self.cleaned_data['provider_or_recipient'].strip()
+        if not provider:
+            raise ValidationError(_('El proveedor o destinatario es obligatorio.'))
+        return provider
+
+    def clean_amount(self):
+        # PRE: amount passed MoneyDecimalField parsing and min_value.
+        # POST: rejects non-positive or above-reservation values; service remains authoritative.
+        amount = self.cleaned_data['amount']
+        if amount is None:
+            return amount
+        if amount <= 0:
+            raise ValidationError(_('El monto del gasto debe ser mayor que cero.'))
+        if self.reserved_amount is not None and amount > self.reserved_amount:
+            raise ValidationError(
+                _('El monto no puede superar la reserva de %(max)s.')
+                % {'max': format_usd_amount(self.reserved_amount)}
+            )
+        return amount
 
 
 class ExpenseRequestForm(BootstrapFormMixin, forms.Form):

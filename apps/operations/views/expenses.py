@@ -17,12 +17,12 @@ from django.urls import (
 from django.utils.translation import gettext_lazy as _
 
 from django.views.generic import (
-    CreateView,
     DeleteView,
     DetailView,
     FormView,
     ListView,
     UpdateView,
+    View,
 )
 
 from ..forms import (
@@ -33,6 +33,7 @@ from ..forms import (
 from ..models import (
     AuditLog,
     Expense,
+    ExpenseRequest,
 )
 
 from ..file_access import build_protected_file_actions
@@ -40,7 +41,6 @@ from ..file_access import build_protected_file_actions
 from ..selectors import with_expense_list_support
 
 from ..services import (
-    create_expense,
     annul_expense,
     ensure_expense_is_deletable,
     ensure_expense_is_editable,
@@ -134,38 +134,33 @@ class ExpenseDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
         return context
 
 
-class ExpenseCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):
-    permission_required = 'operations.add_expense'
-    model = Expense
-    form_class = ExpenseForm
-    template_name = 'web/object_form.html'
-    success_url = reverse_lazy('expense_list')
-    route_prefix = 'expense'
-    page_title = _('Nuevo gasto')
-    audit_action = AuditLog.Action.EXECUTED
-    audit_summary = _('Gasto registrado.')
+class ExpenseCreateView(OperationsPermissionRequiredMixin, View):
+    """
+    Legacy bookmark route for ordinary Expense creation.
 
-    def form_valid(self, form):
-        try:
-            self.object = create_expense(
-                allocation=form.cleaned_data['allocation'],
-                expense_date=form.cleaned_data['expense_date'],
-                category=form.cleaned_data['category'],
-                amount=form.cleaned_data['amount'],
-                reason=form.cleaned_data['reason'],
-                provider_or_recipient=form.cleaned_data['provider_or_recipient'],
-                payment_method=form.cleaned_data['payment_method'],
-                description=form.cleaned_data.get('description', ''),
-                observations=form.cleaned_data.get('observations', ''),
-                actor=self.request.user,
-                support_title=form.cleaned_data.get('support_title', ''),
-                support_file=form.cleaned_data.get('support_file'),
-            )
-        except ValidationError as error:
-            add_service_errors_to_form(form, error)
-            return self.form_invalid(form)
-        messages.success(self.request, self.audit_summary)
-        return HttpResponseRedirect(self.get_success_url())
+    Direct Expense creation is retired: every new Expense must originate from an
+    approved Expense Request via fulfill_expense_request. GET and POST redirect
+    without rendering a form or accepting submissions.
+    """
+
+    permission_required = 'operations.add_expense'
+
+    def _redirect_to_fulfillment_queue(self):
+        messages.info(
+            self.request,
+            _('El gasto debe registrarse desde una solicitud de gasto aprobada.'),
+        )
+        target = (
+            f"{reverse('expense_request_list')}"
+            f"?status={ExpenseRequest.Status.APPROVED_RESERVED}"
+        )
+        return HttpResponseRedirect(target)
+
+    def get(self, request, *args, **kwargs):
+        return self._redirect_to_fulfillment_queue()
+
+    def post(self, request, *args, **kwargs):
+        return self._redirect_to_fulfillment_queue()
 
 
 class ExpenseUpdateView(OperationsPermissionRequiredMixin, RouteContextMixin, UpdateView):

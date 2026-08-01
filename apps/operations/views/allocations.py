@@ -28,6 +28,7 @@ from ..forms import FundAllocationForm
 from ..models import (
     AuditLog,
     FundAllocation,
+    Project,
 )
 
 from ..selectors import with_allocation_list_metrics
@@ -139,13 +140,14 @@ class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermission
         context['recent_allocation_expenses'] = recent_expenses
         context['allocation_expense_count'] = expense_count
         context['has_more_allocation_expenses'] = expense_count > len(recent_expenses)
-        context['can_create_expense'] = (
-            self.request.user.has_perm('operations.add_expense')
+        context['can_create_expense_request'] = (
+            self.request.user.has_perm('operations.add_expenserequest')
             and self.object.status == FundAllocation.Status.ACTIVE
+            and self.object.project.status == Project.Status.ACTIVE
             and financial_summary['available_amount'] > 0
         )
         context['show_edit_in_more'] = (
-            context['can_create_expense']
+            context['can_create_expense_request']
             and self.request.user.has_perm('operations.change_fundallocation')
             and self.object.status not in (
                 FundAllocation.Status.FINISHED,

@@ -332,8 +332,17 @@ rechazo.
   * exige motivo obligatorio; el mensaje de éxito distingue pendiente vs
     reserva liberada según el estado previo a la mutación;
   * estado no anulable en GET → 404; fallos de evento/auditoría se muestran en
-    el formulario con rollback completo;
-  * aún no hay UI de cumplimiento ni mutación de adjuntos protegidos.
+    el formulario con rollback completo.
+* ER5 añade la UI de cumplimiento (Administrador):
+  * solo `fulfill_expenserequest` registra el gasto final (`expense_request_fulfill`);
+  * admite únicamente `APPROVED_RESERVED` sin `Expense` enlazado;
+  * exige documento soporte obligatorio; monto `0 < amount <= reserved_amount`;
+  * cumplimiento exacto no altera el saldo disponible; parcial libera la diferencia;
+  * la UI ordinaria de creación directa de `Expense` queda retirada (listado,
+    dashboard, detalle de asignación y ruta `expense_create` redirigen o apuntan
+    a solicitudes); listado/detalle de gastos históricos permanecen;
+  * aún no hay mutación de adjuntos de solicitud ni preview/download protegido;
+  * aún no hay contadores nuevos en el dashboard.
 
 ---
 

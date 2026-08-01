@@ -119,6 +119,9 @@ con estados de aprobación y permite trazabilidad financiera explícita.
 * ER2D–ER2E implementan cumplimiento (`FULFILLED` → `Expense`), anulación
   administrativa de solicitudes, integración de anulación del gasto enlazado y
   retiro del `create_expense()` público como camino ordinario.
+* ER5 completa la UI de cumplimiento y retira los puntos de entrada ordinarios
+  de creación directa de `Expense` (la ruta legacy redirige a solicitudes
+  aprobadas-reservadas).
 
 ---
 

@@ -199,10 +199,11 @@ Cobertura focalizada:
 
 `test_expense_request_concurrency` se omite bajo SQLite (`skipUnless`).
 
-### Solicitudes de gasto — UI de listado/detalle (ER3A), solicitante (ER3B), decisión del Comité (ER4A) y anulación administrativa (ER4B)
+### Solicitudes de gasto — UI de listado/detalle (ER3A), solicitante (ER3B), decisión del Comité (ER4A), anulación administrativa (ER4B) y cumplimiento (ER5)
 
 ```bash
 python manage.py test \
+  apps.operations.tests.test_expense_request_fulfillment_ui \
   apps.operations.tests.test_expense_request_admin_annul_ui \
   apps.operations.tests.test_expense_request_committee_ui \
   apps.operations.tests.test_expense_request_requester_ui \
@@ -210,11 +211,13 @@ python manage.py test \
   apps.operations.tests.test_expense_request_views \
   apps.operations.tests.test_expense_request_ui \
   apps.operations.tests.test_expense_request_permissions \
-  apps.operations.tests.test_expense_request_annulment \
+  apps.operations.tests.test_expense_request_fulfillment \
   apps.operations.tests.test_expense_request_services \
   apps.operations.tests.test_expense_request_balances \
+  apps.operations.tests.test_expense_lifecycle \
   apps.operations.tests.test_role_based_ui \
   apps.operations.tests.test_permissions \
+  web.tests.test_dashboard \
   --noinput
 ```
 
@@ -231,10 +234,13 @@ Cobertura focalizada:
 * anulación administrativa (Admin) de pendientes y aprobadas-reservadas;
 * motivo obligatorio; liberación de reserva; preservación del historial de decisión;
 * saldo/estado obsoleto y fallos de evento/auditoría sin escrituras parciales;
+* cumplimiento UI (Admin): exacto/parcial, soporte obligatorio, rollbacks;
+* retiro de CTAs de creación directa de `Expense` y redirección de `expense_create`;
 * ítem de sidebar entre Asignaciones y Gastos;
 * regresión de navegación, permisos y panel.
 
-ER4B no cubre cumplir ni adjuntos protegidos.
+ER5 no cubre mutación/preview protegido de adjuntos de solicitud ni contadores
+nuevos en el dashboard.
 
 ### Concurrencia
 

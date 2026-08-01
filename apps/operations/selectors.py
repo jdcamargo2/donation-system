@@ -430,3 +430,21 @@ def annullable_expense_requests_for_user(user):
             ExpenseRequest.Status.APPROVED_RESERVED,
         ),
     )
+
+
+def fulfillable_expense_requests_for_user(user):
+    """
+    PRE: caller enforces fulfill_expenserequest at the view layer when loading routes.
+    POST: returns visible APPROVED_RESERVED rows without a linked Expense for fulfillment.
+
+    Empty when the user lacks fulfill_expenserequest. Does not check role names.
+    Stale/terminal rows are excluded so GET action pages resolve as 404.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return ExpenseRequest.objects.none()
+    if not user.has_perm('operations.fulfill_expenserequest'):
+        return ExpenseRequest.objects.none()
+    return visible_expense_requests_for_user(user).filter(
+        status=ExpenseRequest.Status.APPROVED_RESERVED,
+        expense__isnull=True,
+    )

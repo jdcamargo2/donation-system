@@ -14,6 +14,7 @@ from ..expense_request_services import (
     approve_expense_request,
     create_expense_request,
     deny_expense_request,
+    fulfill_expense_request,
     update_expense_request,
     withdraw_expense_request,
 )
@@ -21,12 +22,14 @@ from ..forms import (
     ExpenseRequestApproveForm,
     ExpenseRequestForProjectForm,
     ExpenseRequestForm,
+    ExpenseRequestFulfillmentForm,
 )
 from ..models import ExpenseRequest, Project, ZERO_MONEY
 from ..selectors import (
     annullable_expense_requests_for_user,
     attachment_display_filename,
     decidable_pending_expense_requests_for_user,
+    fulfillable_expense_requests_for_user,
     get_expense_request_financial_display,
     mutable_own_pending_expense_requests_for_user,
     user_can_create_global_expense_request,
@@ -127,6 +130,21 @@ def _annul_action_flags(*, user, expense_request):
     )
     return {
         'can_annul_expense_request': can_annul,
+    }
+
+
+def _fulfill_action_flags(*, user, expense_request):
+    """
+    PRE: expense_request is visible to user; permissions are effective, not role names.
+    POST: returns fulfill flag for APPROVED_RESERVED rows without a linked Expense.
+    """
+    can_fulfill = (
+        expense_request.status == ExpenseRequest.Status.APPROVED_RESERVED
+        and expense_request.expense_id is None
+        and user.has_perm('operations.fulfill_expenserequest')
+    )
+    return {
+        'can_fulfill_expense_request': can_fulfill,
     }
 
 
@@ -324,6 +342,9 @@ class ExpenseRequestDetailView(
         )
         context.update(
             _annul_action_flags(user=user, expense_request=expense_request)
+        )
+        context.update(
+            _fulfill_action_flags(user=user, expense_request=expense_request)
         )
         if context['can_approve_expense_request']:
             context.update(_approval_preview_context(expense_request))
@@ -790,3 +811,115 @@ class ExpenseRequestDenyView(TerminalActionView):
             return self.form_invalid(form)
         messages.success(self.request, self.success_message)
         return HttpResponseRedirect(self.get_success_url())
+
+
+class ExpenseRequestFulfillView(
+    OperationsPermissionRequiredMixin,
+    RouteContextMixin,
+    FormView,
+):
+    permission_required = 'operations.fulfill_expenserequest'
+    form_class = ExpenseRequestFulfillmentForm
+    template_name = 'web/expense_request_fulfillment_form.html'
+    route_prefix = 'expense_request'
+    page_title = _('Registrar gasto desde solicitud')
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: fulfill route targets a visible APPROVED_RESERVED request without Expense.
+        # POST: loads fulfillable row or 404; no mutation on GET.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.object = get_object_or_404(
+                fulfillable_expense_requests_for_user(request.user).select_related(
+                    'fund_allocation',
+                    'fund_allocation__project',
+                    'requested_by',
+                ),
+                pk=kwargs['pk'],
+            )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        reserved = self.object.reserved_amount
+        kwargs['reserved_amount'] = reserved
+        if 'data' not in kwargs and 'files' not in kwargs:
+            kwargs['initial'] = {
+                'amount': reserved,
+                'reason': self.object.purpose,
+            }
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        # PRE: self.object is a fulfillable APPROVED_RESERVED request.
+        # POST: provides read-only summary context; no mutation.
+        context = super().get_context_data(**kwargs)
+        expense_request = self.object
+        reserved = (
+            expense_request.reserved_amount
+            if expense_request.reserved_amount is not None
+            else ZERO_MONEY
+        )
+        context.update(
+            {
+                'expense_request': expense_request,
+                'fulfill_requested_amount': expense_request.requested_amount,
+                'fulfill_reserved_amount': reserved,
+                'fulfill_available_balance': (
+                    expense_request.fund_allocation.available_balance
+                ),
+                'requested_by_display': _user_display_name(expense_request.requested_by),
+                'cancel_url': reverse(
+                    'expense_request_detail', args=[expense_request.pk]
+                ),
+                'submit_label': _('Registrar gasto'),
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        # PRE: form fields validated; actor has fulfill_expenserequest; object was fulfillable at GET.
+        # POST: fulfills via service or redisplays domain errors without partial writes.
+        try:
+            self.object = fulfill_expense_request(
+                self.object,
+                expense_date=form.cleaned_data['expense_date'],
+                amount=form.cleaned_data['amount'],
+                category=form.cleaned_data['category'],
+                reason=form.cleaned_data['reason'],
+                provider_or_recipient=form.cleaned_data['provider_or_recipient'],
+                payment_method=form.cleaned_data['payment_method'],
+                description=form.cleaned_data.get('description') or '',
+                observations=form.cleaned_data.get('observations') or '',
+                support_file=form.cleaned_data['support_file'],
+                support_title=form.cleaned_data.get('support_title') or '',
+                support_notes=form.cleaned_data.get('support_notes') or '',
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        except PermissionDenied:
+            raise
+        except Exception:
+            form.add_error(None, EXPENSE_REQUEST_DECISION_FAILURE_MESSAGE)
+            return self.form_invalid(form)
+
+        reserved = self.object.reserved_amount or ZERO_MONEY
+        executed = self.object.expense.amount
+        if executed < reserved:
+            messages.success(
+                self.request,
+                _(
+                    'Gasto registrado desde la solicitud. '
+                    'La reserva no utilizada fue liberada.'
+                ),
+            )
+        else:
+            messages.success(
+                self.request,
+                _('Gasto registrado desde la solicitud.'),
+            )
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse('expense_request_detail', args=[self.object.pk])

@@ -26,7 +26,7 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if can_create_expense %}<a class="btn btn-primary" href="{% url 'expense_create' %}">Nuevo gasto</a>{% endif %}
+        {% if can_create_expense_request %}<a class="btn btn-primary" href="{% url 'expense_request_create_for_project' object.project.pk %}">Solicitar gasto</a>{% endif %}
         {% if perms.operations.change_fundallocation and object.status != 'finished' and object.status != 'annulled' %}
             {% if not show_edit_in_more %}<a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>{% endif %}
         {% endif %}

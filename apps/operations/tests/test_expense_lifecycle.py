@@ -76,50 +76,38 @@ class ExpenseLifecycleTests(TestCase):
         self.assertIn('data-file-upload-preview="true"', rendered)
         self.assertNotIn('multiple', rendered)
 
-    def test_expense_create_and_update_pages_render_file_upload_preview_contract(self):
+    def test_expense_update_page_renders_file_upload_preview_contract(self):
         expense = self.create_registered_expense()
         self.client.force_login(self.user)
 
-        for url_name, args in (
-            ('expense_create', ()),
-            ('expense_update', (expense.pk,)),
-        ):
-            with self.subTest(url_name=url_name):
-                response = self.client.get(reverse(url_name, args=args))
-                content = response.content.decode()
-
-                self.assertEqual(response.status_code, 200)
-                self.assertContains(response, 'data-file-upload-preview')
-                self.assertContains(response, 'class="ops-file-upload"')
-                self.assertContains(response, 'data-file-upload-list')
-                self.assertContains(response, 'data-file-upload-summary')
-                self.assertContains(response, 'enctype="multipart/form-data"')
-                self.assertContains(response, 'csrfmiddlewaretoken')
-                self.assertContains(response, 'type="submit"')
-                self.assertContains(response, 'Cancelar')
-                self.assertEqual(content.count('type="file"'), 1)
-                self.assertNotIn('multiple', content.split('type="file"')[1].split('>')[0])
-                self.assertNotIn('name="title" data-file-upload-preview', content)
-                self.assertNotIn('name="support_title" data-file-upload-preview', content)
-
-    def test_expense_create_validation_redisplay_keeps_preview_mounts(self):
-        self.client.force_login(self.user)
-        response = self.client.post(reverse('expense_create'), data=self.expense_data())
+        response = self.client.get(reverse('expense_update', args=[expense.pk]))
         content = response.content.decode()
 
         self.assertEqual(response.status_code, 200)
-        self.assertFormError(
-            response.context['form'],
-            'support_file',
-            'Falta el documento soporte obligatorio para verificar el gasto.',
-        )
-        self.assertContains(response, 'role="alert"')
         self.assertContains(response, 'data-file-upload-preview')
+        self.assertContains(response, 'class="ops-file-upload"')
         self.assertContains(response, 'data-file-upload-list')
         self.assertContains(response, 'data-file-upload-summary')
+        self.assertContains(response, 'enctype="multipart/form-data"')
+        self.assertContains(response, 'csrfmiddlewaretoken')
+        self.assertContains(response, 'type="submit"')
+        self.assertContains(response, 'Cancelar')
         self.assertEqual(content.count('type="file"'), 1)
         self.assertNotIn('multiple', content.split('type="file"')[1].split('>')[0])
+        self.assertNotIn('name="title" data-file-upload-preview', content)
+        self.assertNotIn('name="support_title" data-file-upload-preview', content)
 
+    def test_direct_expense_create_route_redirects_without_creating(self):
+        self.client.force_login(self.user)
+        expenses_before = Expense.objects.count()
+        response = self.client.get(reverse('expense_create'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), response['Location'])
+        self.assertIn('status=approved_reserved', response['Location'])
+
+        post = self.client.post(reverse('expense_create'), data=self.expense_data())
+        self.assertEqual(post.status_code, 302)
+        self.assertEqual(Expense.objects.count(), expenses_before)
     def test_create_counts_immediately_and_creates_support_and_audit(self):
         expense = self.create_registered_expense()
         self.assertEqual(expense.status, Expense.Status.REGISTERED)

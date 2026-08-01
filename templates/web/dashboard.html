@@ -40,8 +40,11 @@
                     {% if perms.operations.add_project %}
                         <a class="btn btn-outline-primary" href="{% url 'project_create' %}">Crear proyecto</a>
                     {% endif %}
-                    {% if perms.operations.add_expense %}
-                        <a class="btn btn-outline-primary" href="{% url 'expense_create' %}">Crear gasto</a>
+                    {% if perms.operations.view_expenserequest %}
+                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}">Ver solicitudes</a>
+                    {% endif %}
+                    {% if perms.operations.fulfill_expenserequest %}
+                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}?status=approved_reserved">Pendientes de registrar gasto</a>
                     {% endif %}
                 </div>
             </div>

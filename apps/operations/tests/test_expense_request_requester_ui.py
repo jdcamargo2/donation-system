@@ -575,7 +575,7 @@ class ExpenseRequestRequesterUITests(TestCase):
                 self.assertNotIn('expense_request_approve', html)
                 self.assertNotIn('expense_request_deny', html)
 
-    def test_no_fulfill_attachment_actions_yet(self):
+    def test_no_fulfill_or_attachment_actions_for_pending_non_admin_roles(self):
         request_obj = self._create_via_service(self.operator)
         for user in (self.operator, self.committee, self.auditor):
             with self.subTest(user=user.username):
@@ -601,6 +601,7 @@ class ExpenseRequestRequesterUITests(TestCase):
         admin_html = admin_response.content.decode()
         self.assertIn('Anular solicitud', admin_html)
         self.assertIn(reverse('expense_request_annul', args=[request_obj.pk]), admin_html)
+        self.assertFalse(admin_response.context['can_fulfill_expense_request'])
         for label in ('Registrar gasto', 'Agregar adjunto', 'Eliminar adjunto'):
             self.assertNotIn(label, admin_html)
         self.assertNotIn('expense_request_fulfill', admin_html)

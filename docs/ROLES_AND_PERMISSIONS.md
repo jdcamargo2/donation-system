@@ -143,6 +143,9 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
   `APPROVED_RESERVED` desde `expense_request_annul` (motivo obligatorio; sin
   efecto financiero si pendiente; libera la reserva completa si estaba
   aprobada). No ve «Aprobar»/«Denegar».
+* En ER5 registra el gasto final desde `APPROVED_RESERVED`
+  (`expense_request_fulfill`; soporte obligatorio; exacto o parcial). Los CTAs
+  ordinarios de creación directa de gasto quedan retirados.
 * No recibe `delete_expenserequest` ni permisos de mutación de `ExpenseRequestEvent`.
 * No recibe automáticamente permisos técnicos generales de Kobo distintos de los cinco territoriales.
 
@@ -330,7 +333,8 @@ por defecto el filtro `pending_decision` (sobreescribible). En ER4A el Comité a
 o deniega solicitudes pendientes desde páginas dedicadas (`expense_request_approve` /
 `expense_request_deny`); la aprobación reserva fondos de forma atómica y la denegación
 exige motivo. No ve CTAs de creación/edición/retiro del solicitante; tampoco ve
-«Anular solicitud» (ER4B; la ruta responde 403). Aún no hay UI de cumplimiento.
+«Anular solicitud» (ER4B; la ruta responde 403). No ve «Registrar gasto» (ER5;
+la ruta de cumplimiento responde 403). Aún no hay mutación de adjuntos protegidos.
 
 ### No recibe
 

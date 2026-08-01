@@ -117,8 +117,12 @@ pendientes). ER4A añade la UI de decisión del Comité (aprobar con reserva
 atómica; denegar con motivo obligatorio). ER4B añade la UI de anulación
 administrativa (Admin anula pendientes o aprobadas-reservadas con motivo
 obligatorio; la reserva se libera cuando aplica; el historial de decisión se
-preserva). Aún no hay UI de cumplimiento ni adjuntos protegidos. ER1 estableció
-modelos, permisos, evidencias y eventos inmutables.
+preserva). ER5 añade la UI de cumplimiento: el Administrador registra el gasto
+final desde una solicitud `APPROVED_RESERVED` (soporte obligatorio; conversión
+exacta o parcial con liberación del remanente). La UI ordinaria de creación
+directa de `Expense` queda retirada; el listado/detalle de gastos históricos
+permanecen. Aún no hay adjuntos de solicitud protegidos ni contadores nuevos en
+el dashboard. ER1 estableció modelos, permisos, evidencias y eventos inmutables.
 
 Estados:
 
@@ -194,7 +198,9 @@ La ejecución parcial o completa se calcula automáticamente.
 Un gasto representa una ejecución monetaria previamente autorizada fuera del sistema.
 En la cadena gobernada, todo gasto futuro debe proceder de una `ExpenseRequest`
 aprobada y reservada. `create_expense()` público rechaza la creación directa;
-el camino canónico es `fulfill_expense_request`. `Expense` conserva únicamente:
+el camino canónico es `fulfill_expense_request` (UI ER5: `expense_request_fulfill`).
+La UI ordinaria de creación directa de gasto está retirada; listado y detalle de
+gastos históricos permanecen. `Expense` conserva únicamente:
 
 ```text
 REGISTERED
