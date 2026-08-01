@@ -109,6 +109,10 @@ La protección de las operaciones financieras incluye:
 * Los gastos no anulados no pueden superar el monto disponible de una asignación.
 * Las operaciones concurrentes deben protegerse mediante bloqueos de filas.
 * Los registros anulados no participan en métricas ni saldos.
+* `FundAllocation` es solo inspección en Django Admin (incluido para
+  superusuarios). Las mutaciones de asignación deben pasar por los flujos
+  operativos con servicios de dominio, transacciones, bloqueos de fila y
+  `AuditLog` de aplicación.
 
 ## 6. Archivos privados
 

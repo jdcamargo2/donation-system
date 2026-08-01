@@ -67,6 +67,11 @@ Contiene:
 
 Toda mutación financiera crítica debe ejecutarse mediante servicios de dominio.
 
+`FundAllocation` es solo inspección en Django Admin. Toda mutación de
+asignaciones debe usar los flujos operativos de la aplicación respaldados por
+servicios de dominio, transacciones, bloqueos de fila y `AuditLog` de
+aplicación. No hay bypass por superusuario en Admin.
+
 ### 2.3. `apps.public_portal`
 
 Publica información previamente autorizada y sanitizada.

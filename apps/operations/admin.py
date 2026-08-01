@@ -29,7 +29,11 @@ class FundAllocationAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['donation'].queryset = Donation.objects.filter(currency=OPERATING_CURRENCY)
+        # Read-only Admin inspection excludes mutable fields from the form.
+        if 'donation' in self.fields:
+            self.fields['donation'].queryset = Donation.objects.filter(
+                currency=OPERATING_CURRENCY
+            )
 
     def clean_donation(self):
         donation = self.cleaned_data['donation']
@@ -376,6 +380,36 @@ class FundAllocationAdmin(admin.ModelAdmin):
     search_fields = ('code', 'donation__code', 'project__code', 'project__name', 'budget_category')
     list_filter = ('status', 'allocation_date')
     readonly_fields = ('code', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
+
+    def has_add_permission(self, request):
+        """
+        PRE: request targets the FundAllocation admin.
+        POST: always denies creation, including for superusers.
+        """
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional FundAllocation admin object.
+        POST: always denies modification, including for superusers.
+        """
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional FundAllocation admin object.
+        POST: always denies deletion, including for superusers.
+        """
+        return False
+
+    def get_actions(self, request):
+        """
+        PRE: request targets the FundAllocation admin changelist.
+        POST: removes the bulk delete action while leaving other actions unchanged.
+        """
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
 
     def get_readonly_fields(self, request, obj=None):
         # PRE: obj is an optional allocation shown in admin.
