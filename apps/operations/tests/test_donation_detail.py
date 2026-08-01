@@ -8,7 +8,7 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
-from apps.operations.models import Donation, FundAllocation
+from apps.operations.models import AuditLog, Donation, FundAllocation
 from apps.operations.tests.helpers import create_donation, create_institution, create_project
 
 
@@ -44,6 +44,22 @@ class DonationDetailTests(TestCase):
             allocation_date=date(2026, 7, 8),
         )
 
+    def create_registered_donation(self, *, code):
+        donation = create_donation(code=code, donor=self.donor, status=Donation.Status.REGISTERED)
+        donation.received_date = date(2026, 7, 9)
+        donation.save(update_fields=('received_date', 'updated_at'))
+        return donation
+
+    def header_actions_html(self, content):
+        return content.split('class="ops-header-actions"', 1)[1].split(
+            'ops-donation-financial-summary', 1,
+        )[0]
+
+    def dropdown_menu_html(self, content):
+        marker = 'ops-donation-detail-action-menu'
+        self.assertIn(marker, content)
+        return content.split(marker, 1)[1].split('</ul>', 1)[0]
+
     def test_header_shows_identity_once_and_links_donor_when_allowed(self):
         response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
         content = response.content.decode()
@@ -75,19 +91,19 @@ class DonationDetailTests(TestCase):
         self.assertContains(response, 'data-confirm-title="¿Eliminar esta donación?"')
         self.assertContains(response, 'web/js/confirm_actions.js')
 
-        registered = create_donation(
-            code='DON-DETAIL-REGISTERED', donor=self.donor,
-            status=Donation.Status.REGISTERED,
-        )
-        registered.received_date = date(2026, 7, 9)
-        registered.save(update_fields=('received_date', 'updated_at'))
+        registered = self.create_registered_donation(code='DON-DETAIL-REGISTERED')
         transition_url = reverse(
             'donation_status_transition', args=[registered.pk, Donation.Status.RECEIVED],
         )
         transition_response = self.client.get(
             reverse('donation_detail', args=[registered.pk])
         )
-        self.assertContains(transition_response, f'<form method="post" action="{transition_url}">')
+        self.assertContains(
+            transition_response,
+            f'id="donation-receive-form-{registered.pk}"',
+        )
+        self.assertContains(transition_response, 'method="post"')
+        self.assertContains(transition_response, f'action="{transition_url}"')
         self.assertContains(transition_response, 'Cambiar a Recibida')
 
         annulled = create_donation(code='DON-DETAIL-ANNULLED', donor=self.donor)
@@ -96,6 +112,159 @@ class DonationDetailTests(TestCase):
         response = self.client.get(reverse('donation_detail', args=[annulled.pk]))
         self.assertNotContains(response, reverse('allocation_create'))
         self.assertNotContains(response, reverse('donation_update', args=[annulled.pk]))
+        self.assertNotContains(response, 'Cambiar a Recibida')
+        self.assertNotContains(response, f'id="donation-receive-form-{annulled.pk}"')
+
+    def test_registered_receive_action_is_visible_outside_dropdown_with_confirmation(self):
+        registered = self.create_registered_donation(code='DON-DETAIL-RECEIVE-UI')
+        editor = self.create_user_with_permissions(
+            'donation-receive-editor',
+            'view_donation',
+            'change_donation',
+            'add_fundallocation',
+        )
+        self.client.force_login(editor)
+
+        response = self.client.get(reverse('donation_detail', args=[registered.pk]))
+        content = response.content.decode()
+        header_actions = self.header_actions_html(content)
+        dropdown_menu = self.dropdown_menu_html(content)
+        transition_url = reverse(
+            'donation_status_transition', args=[registered.pk, Donation.Status.RECEIVED],
+        )
+        form_id = f'donation-receive-form-{registered.pk}'
+        receive_button_start = header_actions.index('Cambiar a Recibida')
+        button_markup = header_actions[
+            header_actions.rindex('<button', 0, receive_button_start):
+            header_actions.index('</button>', receive_button_start) + len('</button>')
+        ]
+        form_markup = header_actions[
+            header_actions.index(f'id="{form_id}"'):
+            header_actions.index('</form>', header_actions.index(f'id="{form_id}"')) + len('</form>')
+        ]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(content.count('Cambiar a Recibida'), 1)
+        self.assertIn(form_id, header_actions)
+        self.assertLess(
+            header_actions.index(f'id="{form_id}"'),
+            header_actions.index('class="dropdown"'),
+        )
+        self.assertNotIn('Cambiar a Recibida', dropdown_menu)
+        self.assertIn('method="post"', form_markup)
+        self.assertIn(f'action="{transition_url}"', form_markup)
+        self.assertIn('name="csrfmiddlewaretoken"', form_markup)
+        self.assertIn('btn', button_markup)
+        self.assertIn('btn-outline-primary', button_markup)
+        self.assertNotIn('dropdown-item', button_markup)
+        self.assertIn('data-confirm-action', button_markup)
+        self.assertIn(f'data-confirm-form="{form_id}"', button_markup)
+        self.assertIn(
+            'data-confirm-title="¿Marcar esta donación como recibida?"',
+            button_markup,
+        )
+        self.assertIn(
+            'data-confirm-text="La donación quedará disponible para su gestión y asignación. '
+            'No podrá volver al estado Registrada; solo podrá anularse si no tiene asignaciones activas."',
+            button_markup,
+        )
+        self.assertIn(
+            'data-confirm-confirm-label="Sí, marcar como recibida"',
+            button_markup,
+        )
+        self.assertIn('data-confirm-variant="warning"', button_markup)
+        self.assertContains(response, 'web/js/confirm_actions.js')
+
+    def test_receive_action_order_is_volver_receive_nueva_asignacion_mas(self):
+        registered = self.create_registered_donation(code='DON-DETAIL-RECEIVE-ORDER')
+        editor = self.create_user_with_permissions(
+            'donation-receive-order',
+            'view_donation',
+            'change_donation',
+            'add_fundallocation',
+            'delete_donation',
+        )
+        self.client.force_login(editor)
+
+        response = self.client.get(reverse('donation_detail', args=[registered.pk]))
+        header_actions = self.header_actions_html(response.content.decode())
+
+        volver_pos = header_actions.index('>Volver</a>')
+        receive_pos = header_actions.index('Cambiar a Recibida')
+        nueva_pos = header_actions.index('Nueva asignación')
+        mas_pos = header_actions.index('>Más</button>')
+
+        self.assertLess(volver_pos, receive_pos)
+        self.assertLess(receive_pos, nueva_pos)
+        self.assertLess(nueva_pos, mas_pos)
+
+    def test_received_donation_hides_receive_action(self):
+        response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
+        content = response.content.decode()
+
+        self.assertNotContains(response, 'Cambiar a Recibida')
+        self.assertNotContains(response, f'id="donation-receive-form-{self.donation.pk}"')
+        self.assertContains(response, reverse('allocation_create'))
+        self.assertContains(response, 'aria-label="Más acciones para DON-DETAIL-001"')
+        self.assertContains(response, reverse('donation_update', args=[self.donation.pk]))
+        self.assertContains(response, reverse('donation_annul', args=[self.donation.pk]))
+        self.assertContains(response, reverse('donation_delete', args=[self.donation.pk]))
+        self.assertNotIn('Cambiar a Recibida', self.dropdown_menu_html(content))
+
+    def test_unauthorized_user_does_not_see_receive_action(self):
+        registered = self.create_registered_donation(code='DON-DETAIL-RECEIVE-DENIED')
+        viewer = self.create_user_with_permissions(
+            'donation-receive-viewer',
+            'view_donation',
+        )
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse('donation_detail', args=[registered.pk]))
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Cambiar a Recibida')
+        self.assertNotContains(response, f'id="donation-receive-form-{registered.pk}"')
+        self.assertNotContains(
+            response,
+            'data-confirm-title="¿Marcar esta donación como recibida?"',
+        )
+        self.assertNotContains(response, 'web/js/confirm_actions.js')
+        self.assertNotIn('ops-donation-detail-action-menu', content)
+
+    def test_unauthorized_post_receive_transition_is_forbidden(self):
+        registered = self.create_registered_donation(code='DON-DETAIL-RECEIVE-POST-403')
+        viewer = self.create_user_with_permissions(
+            'donation-receive-post-viewer',
+            'view_donation',
+        )
+        self.client.force_login(viewer)
+        audit_count = AuditLog.objects.count()
+        transition_url = reverse(
+            'donation_status_transition', args=[registered.pk, Donation.Status.RECEIVED],
+        )
+
+        response = self.client.post(transition_url)
+
+        registered.refresh_from_db()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(registered.status, Donation.Status.REGISTERED)
+        self.assertEqual(AuditLog.objects.count(), audit_count)
+
+    def test_receive_without_delete_still_loads_confirm_script(self):
+        registered = self.create_registered_donation(code='DON-DETAIL-RECEIVE-SCRIPT')
+        editor = self.create_user_with_permissions(
+            'donation-receive-no-delete',
+            'view_donation',
+            'change_donation',
+        )
+        self.client.force_login(editor)
+
+        response = self.client.get(reverse('donation_detail', args=[registered.pk]))
+
+        self.assertContains(response, 'Cambiar a Recibida')
+        self.assertContains(response, 'web/js/confirm_actions.js')
+        self.assertNotContains(response, 'donation-delete-form')
 
     def test_detail_limits_allocations_in_stable_order_and_uses_existing_filter(self):
         allocations = []
