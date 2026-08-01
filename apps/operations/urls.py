@@ -143,6 +143,16 @@ urlpatterns = [
     path('allocations/<int:pk>/delete/', views.FundAllocationDeleteView.as_view(), name='allocation_delete'),
     path('allocations/<int:pk>/annul/', views.FundAllocationAnnulView.as_view(), name='allocation_annul'),
     path('allocations/<int:pk>/status/<str:target_status>/', views.FundAllocationStatusTransitionView.as_view(), name='allocation_status_transition'),
+    path(
+        'expense-requests/',
+        views.ExpenseRequestListView.as_view(),
+        name='expense_request_list',
+    ),
+    path(
+        'expense-requests/<int:pk>/',
+        views.ExpenseRequestDetailView.as_view(),
+        name='expense_request_detail',
+    ),
     path('expenses/', views.ExpenseListView.as_view(), name='expense_list'),
     path('expenses/export.csv', views.ExpenseCsvExportView.as_view(), name='expense_export_csv'),
     path('expenses/new/', views.ExpenseCreateView.as_view(), name='expense_create'),

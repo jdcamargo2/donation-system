@@ -199,6 +199,31 @@ Cobertura focalizada:
 
 `test_expense_request_concurrency` se omite bajo SQLite (`skipUnless`).
 
+### Solicitudes de gasto — UI de solo lectura (ER3A)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_expense_request_views \
+  apps.operations.tests.test_expense_request_ui \
+  apps.operations.tests.test_expense_request_permissions \
+  apps.operations.tests.test_role_based_ui \
+  apps.operations.tests.test_permissions \
+  apps.operations.tests.test_financial_detail_links \
+  web.tests.test_dashboard \
+  --noinput
+```
+
+Cobertura focalizada:
+
+* selector de visibilidad por permisos (no por nombre de rol);
+* listado compartido con filtros/paginación y default pendiente del Comité;
+* detalle de solo lectura con resumen financiero y timeline;
+* ausencia de controles de mutación;
+* ítem de sidebar entre Asignaciones y Gastos;
+* regresión de navegación, permisos y panel.
+
+ER3A no cubre crear/editar/retirar/decidir/cumplir/anular ni adjuntos protegidos.
+
 ### Concurrencia
 
 ```bash

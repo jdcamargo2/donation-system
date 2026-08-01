@@ -1,0 +1,27 @@
+<section class="ops-expense-detail-section" aria-labelledby="expense-request-attachments-title">
+    <h2 id="expense-request-attachments-title" class="h5">Adjuntos</h2>
+    <div class="ops-expense-document-list">
+        {% for attachment in detail_attachments %}
+            <div class="ops-expense-document-item">
+                <div class="ops-expense-document-name">
+                    <i class="bi bi-file-earmark" aria-hidden="true"></i>
+                    <div>
+                        <strong>{{ attachment.title }}</strong>
+                        <div class="small text-muted">
+                            {% if attachment.uploaded_by_display %}{{ attachment.uploaded_by_display }} · {% endif %}
+                            Cargado el {{ attachment.uploaded_at }}
+                        </div>
+                        {% if attachment.filename %}
+                            <div class="small text-muted">{{ attachment.filename }}</div>
+                        {% endif %}
+                        {% if attachment.notes %}
+                            <div class="small mt-1">{{ attachment.notes }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        {% empty %}
+            <p class="text-muted mb-0">Esta solicitud no tiene adjuntos.</p>
+        {% endfor %}
+    </div>
+</section>

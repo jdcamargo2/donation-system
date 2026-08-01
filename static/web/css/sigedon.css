@@ -1633,6 +1633,16 @@ input[type="number"] {
     line-height: 1.2;
 }
 
+.ops-expense-request-financial-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 991.98px) {
+    .ops-expense-request-financial-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 .ops-allocation-detail-body {
     background: var(--ops-surface);
     border: 1px solid var(--ops-border);

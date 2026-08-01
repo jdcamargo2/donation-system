@@ -110,9 +110,9 @@ Donation
 
 Todo gasto futuro debe originarse en una solicitud aprobada con fondos
 reservados. ER2A–ER2E completan reserva, cumplimiento, anulación administrativa
-e integración de anulación del gasto enlazado. La UI ordinaria de solicitudes
-queda para checkpoints posteriores; ER1 estableció modelos, permisos, evidencias
-y eventos inmutables.
+e integración de anulación del gasto enlazado. ER3A añade listado/detalle de
+solo lectura (sin mutación, sin adjuntos protegidos ni UI de decisión/cumplimiento).
+ER1 estableció modelos, permisos, evidencias y eventos inmutables.
 
 Estados:
 

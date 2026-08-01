@@ -135,6 +135,8 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
   `PENDING_DECISION`; la aprobación/reserva es exclusiva del Comité.
 * Puede cumplir solicitudes aprobadas (`fulfill_expenserequest`) y anular
   administrativamente pendientes o reservadas (`annul_expenserequest`).
+* En ER3A consulta todas las solicitudes en listado/detalle de solo lectura
+  (sin controles de mutación todavía).
 * No recibe `delete_expenserequest` ni permisos de mutación de `ExpenseRequestEvent`.
 * No recibe automáticamente permisos técnicos generales de Kobo distintos de los cinco territoriales.
 
@@ -181,6 +183,10 @@ operations.view_expenserequestevent
 * gestionar remediaciones propias (crear, editar, adjuntar, enviar);
 * crear solicitudes de gasto;
 * editar y retirar **solo** solicitudes propias en `PENDING_DECISION`.
+
+En la UI de solo lectura (ER3A), el listado/detalle de solicitudes se limita a
+las creadas por el mismo usuario (`requested_by`); no ve solicitudes de otros
+Operadores.
 
 Al registrar un avance, el usuario autenticado se asigna automáticamente como
 persona responsable. El campo se muestra en modo no editable.
@@ -240,6 +246,10 @@ Puede consultar:
 * avances;
 * auditoría;
 * hub territorial (lectura).
+
+En ER3A el Auditor ve **todas** las solicitudes visibles en listado/detalle
+(read-only global), con el ítem de sidebar «Solicitudes de gasto»; el ocultamiento
+de accesos rápidos del panel no afecta esa navegación.
 
 ### Restricciones
 
@@ -301,6 +311,10 @@ kobo.view_territorial_administration
 * aprobar o denegar solicitudes de gasto (`decide_expenserequest`);
   la aprobación reserva atómicamente el monto solicitado sobre la asignación;
 * consultar el hub territorial en modo lectura.
+
+En ER3A el Comité ve todas las solicitudes; la primera visita al listado aplica
+por defecto el filtro `pending_decision` (sobreescribible). La UI de decisión
+aún no está en este checkpoint.
 
 ### No recibe
 

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% load operations_format %}
+
+{% block title %}{{ expense_request.code }} - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row ops-expense-detail-header">
+    <div class="ops-expense-detail-identity">
+        <div class="ops-kicker">Solicitudes de gasto</div>
+        <h1>{{ expense_request.code }}</h1>
+        <div class="ops-expense-detail-primary-meta">
+            <span class="badge ops-status-badge">{{ expense_request.get_status_display }}</span>
+            <span>Fecha de solicitud: {{ expense_request.requested_date }}</span>
+            <span>Solicitante: {{ requested_by_display }}</span>
+        </div>
+        <div class="ops-expense-detail-context">
+            <span><strong>Proyecto:</strong>
+                {% if can_view_project %}
+                    <a href="{% url 'project_detail' expense_request.fund_allocation.project.pk %}">
+                        {{ expense_request.fund_allocation.project.code }} · {{ expense_request.fund_allocation.project.name }}
+                    </a>
+                {% else %}
+                    {{ expense_request.fund_allocation.project.code }} · {{ expense_request.fund_allocation.project.name }}
+                {% endif %}
+            </span>
+            <span><strong>Categoría presupuestaria:</strong> {{ expense_request.fund_allocation.get_budget_category_display }}</span>
+            {% if can_view_fundallocation %}
+                <span><strong>Asignación:</strong>
+                    <a href="{% url 'allocation_detail' expense_request.fund_allocation.pk %}">{{ expense_request.fund_allocation.code }}</a>
+                </span>
+            {% endif %}
+            {% if financial_summary.has_linked_expense and can_view_expense %}
+                <span><strong>Gasto enlazado:</strong>
+                    <a href="{% url 'expense_detail' expense_request.expense.pk %}">{{ expense_request.expense.code }}</a>
+                </span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="ops-header-actions">
+        <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+    </div>
+</div>
+
+{% include "web/expense_request/_financial_summary.html" %}
+
+<article class="ops-expense-detail-body">
+    <section class="ops-expense-detail-section" aria-labelledby="expense-request-purpose-title">
+        <h2 id="expense-request-purpose-title" class="h5">Propósito</h2>
+        <div class="ops-expense-information-text">
+            <p>{{ expense_request.purpose }}</p>
+        </div>
+    </section>
+
+    <section class="ops-expense-detail-section" aria-labelledby="expense-request-decision-title">
+        <h2 id="expense-request-decision-title" class="h5">Decisión del Comité</h2>
+        {% if expense_request.status == 'pending_decision' %}
+            <p class="mb-0">Pendiente de decisión del Comité.</p>
+        {% elif has_decision_metadata %}
+            <div class="ops-expense-metadata-grid">
+                <div><span class="ops-detail-label">Estado</span><span>{{ expense_request.get_status_display }}</span></div>
+                {% if decided_by_display %}
+                    <div><span class="ops-detail-label">Decidido por</span><span>{{ decided_by_display }}</span></div>
+                {% endif %}
+                {% if expense_request.decided_at %}
+                    <div><span class="ops-detail-label">Fecha de decisión</span><span>{{ expense_request.decided_at }}</span></div>
+                {% endif %}
+                {% if expense_request.decision_note %}
+                    <div><span class="ops-detail-label">Nota</span><span>{{ expense_request.decision_note }}</span></div>
+                {% endif %}
+            </div>
+        {% else %}
+            <p class="text-muted mb-0">Sin metadatos de decisión.</p>
+        {% endif %}
+    </section>
+
+    {% if show_terminal_card %}
+        <section class="ops-expense-detail-section" aria-labelledby="expense-request-terminal-title">
+            <h2 id="expense-request-terminal-title" class="h5">
+                {% if expense_request.status == 'withdrawn' %}Retiro{% else %}Anulación{% endif %}
+            </h2>
+            <div class="ops-expense-metadata-grid">
+                {% if terminal_by_display %}
+                    <div><span class="ops-detail-label">Procesado por</span><span>{{ terminal_by_display }}</span></div>
+                {% endif %}
+                {% if expense_request.terminal_at %}
+                    <div><span class="ops-detail-label">Fecha</span><span>{{ expense_request.terminal_at }}</span></div>
+                {% endif %}
+                {% if expense_request.terminal_reason %}
+                    <div><span class="ops-detail-label">Motivo</span><span>{{ expense_request.terminal_reason }}</span></div>
+                {% endif %}
+            </div>
+        </section>
+    {% endif %}
+
+    <section class="ops-expense-detail-section" aria-labelledby="expense-request-linked-expense-title">
+        <h2 id="expense-request-linked-expense-title" class="h5">Gasto enlazado</h2>
+        {% if financial_summary.has_linked_expense %}
+            <div class="ops-expense-metadata-grid">
+                <div>
+                    <span class="ops-detail-label">Código</span>
+                    {% if can_view_expense %}
+                        <a href="{% url 'expense_detail' expense_request.expense.pk %}">{{ expense_request.expense.code }}</a>
+                    {% else %}
+                        <span>{{ expense_request.expense.code }}</span>
+                    {% endif %}
+                </div>
+                <div><span class="ops-detail-label">Estado</span><span>{{ expense_request.expense.get_status_display }}</span></div>
+                <div><span class="ops-detail-label">Monto</span><span class="ops-money text-nowrap">{{ expense_request.expense.amount|money_es }} {{ expense_request.expense.currency }}</span></div>
+            </div>
+        {% elif expense_request.status == 'approved_reserved' %}
+            <p class="mb-0">La solicitud está aprobada y pendiente de registrar el gasto.</p>
+        {% else %}
+            <p class="text-muted mb-0">Sin gasto enlazado.</p>
+        {% endif %}
+    </section>
+
+    {% if can_view_attachments %}
+        {% include "web/expense_request/_attachment_list.html" %}
+    {% endif %}
+
+    {% if can_view_events %}
+        {% include "web/expense_request/_event_timeline.html" %}
+    {% endif %}
+</article>
+{% endblock %}

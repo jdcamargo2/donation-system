@@ -1,0 +1,68 @@
+{% load operations_format %}
+<section class="ops-expense-detail-section" aria-labelledby="expense-request-events-title">
+    <h2 id="expense-request-events-title" class="h5">Historial de eventos</h2>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 ops-audit-table">
+            <thead>
+                <tr>
+                    <th>Fecha y hora</th>
+                    <th>Actor</th>
+                    <th>Evento</th>
+                    <th>Detalle</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in detail_events %}
+                    <tr>
+                        <td class="ops-audit-datetime">
+                            <span class="ops-audit-date">{{ event.created_at|date:"d/m/Y" }}</span>
+                            <span class="ops-audit-time">{{ event.created_at|date:"H:i" }}</span>
+                        </td>
+                        <td>
+                            <span class="ops-audit-user">{{ event.actor_display }}</span>
+                        </td>
+                        <td>
+                            <span class="badge ops-status-badge">{{ event.event_label }}</span>
+                            {% if event.from_status_label or event.to_status_label %}
+                                <div class="small text-muted mt-1">
+                                    {% if event.from_status_label %}{{ event.from_status_label }}{% else %}—{% endif %}
+                                    →
+                                    {% if event.to_status_label %}{{ event.to_status_label }}{% else %}—{% endif %}
+                                </div>
+                            {% endif %}
+                        </td>
+                        <td class="ops-audit-detail">
+                            {% if event.reason %}
+                                <div>{{ event.reason }}</div>
+                            {% endif %}
+                            {% if event.linked_expense_code %}
+                                <div class="small">
+                                    Gasto:
+                                    {% if event.linked_expense_pk %}
+                                        <a href="{% url 'expense_detail' event.linked_expense_pk %}">{{ event.linked_expense_code }}</a>
+                                    {% else %}
+                                        {{ event.linked_expense_code }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                            {% if event.financial_rows %}
+                                <details class="small mt-1">
+                                    <summary>Detalle financiero</summary>
+                                    <ul class="mb-0 ps-3">
+                                        {% for row in event.financial_rows %}
+                                            <li>{{ row.label }}: <span class="ops-money">{{ row.amount|money_es }}</span></li>
+                                        {% endfor %}
+                                    </ul>
+                                </details>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-muted">No hay eventos registrados para esta solicitud.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>

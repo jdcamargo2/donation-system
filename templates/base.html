@@ -72,8 +72,14 @@
                         <span class="sigedon-nav-label">Asignaciones</span>
                     </a>
                 {% endif %}
+                {% if perms.operations.view_expenserequest %}
+                    <a class="sigedon-nav-link {% if 'expense_request_' in current_url %}active{% endif %}" href="{% url 'expense_request_list' %}" title="Solicitudes de gasto" {% if 'expense_request_' in current_url %}aria-current="page"{% endif %}>
+                        <i class="bi bi-file-earmark-text sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Solicitudes de gasto</span>
+                    </a>
+                {% endif %}
                 {% if perms.operations.view_expense %}
-                    <a class="sigedon-nav-link {% if 'expense_' in current_url %}active{% endif %}" href="{% url 'expense_list' %}" title="Gastos" {% if 'expense_' in current_url %}aria-current="page"{% endif %}>
+                    <a class="sigedon-nav-link {% if 'expense_' in current_url and 'expense_request_' not in current_url %}active{% endif %}" href="{% url 'expense_list' %}" title="Gastos" {% if 'expense_' in current_url and 'expense_request_' not in current_url %}aria-current="page"{% endif %}>
                         <i class="bi bi-receipt sigedon-nav-icon" aria-hidden="true"></i>
                         <span class="sigedon-nav-label">Gastos</span>
                     </a>

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% load operations_format %}
+
+{% block title %}Solicitudes de gasto - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Solicitudes de gasto</div>
+        <h1>Solicitudes de gasto</h1>
+        <p>Consulte las solicitudes, sus decisiones y su estado de ejecución.</p>
+    </div>
+</div>
+{% include "web/includes/list_filters.html" %}
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 ops-expense-table">
+            <thead>
+                <tr>
+                    <th>Solicitud</th>
+                    <th>Proyecto</th>
+                    <th>Monto solicitado</th>
+                    <th>Estado</th>
+                    <th>Solicitante</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for request_object in expense_requests %}
+                    <tr{% if request_object.status == 'denied' or request_object.status == 'withdrawn' or request_object.status == 'annulled' %} class="text-muted"{% endif %}>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url 'expense_request_detail' request_object.pk %}">
+                                {{ request_object.code }}
+                            </a>
+                            <span class="ops-expense-secondary d-block">{{ request_object.purpose|truncatechars:80 }}</span>
+                            <span class="small text-muted ops-expense-secondary d-block">{{ request_object.requested_date }}</span>
+                        </td>
+                        <td>
+                            {% if perms.operations.view_project %}
+                                <a class="text-decoration-none" href="{% url 'project_detail' request_object.fund_allocation.project.pk %}">
+                                    {{ request_object.fund_allocation.project.name }}
+                                </a>
+                            {% else %}
+                                {{ request_object.fund_allocation.project.name }}
+                            {% endif %}
+                            <span class="small text-muted ops-expense-secondary d-block">{{ request_object.fund_allocation.project.code }}</span>
+                        </td>
+                        <td class="ops-money text-nowrap">{{ request_object.requested_amount|money_es }} {{ request_object.currency }}</td>
+                        <td><span class="badge ops-status-badge">{{ request_object.get_status_display }}</span></td>
+                        <td>
+                            {% firstof request_object.requested_by.get_full_name request_object.requested_by.get_username %}
+                        </td>
+                        <td class="text-end">
+                            <div class="dropdown">
+                                <button
+                                    class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                                    type="button"
+                                    id="expense-request-actions-{{ request_object.pk }}"
+                                    data-bs-toggle="dropdown"
+                                    data-bs-boundary="viewport"
+                                    aria-expanded="false"
+                                    aria-label="Acciones para {{ request_object.code }}"
+                                >
+                                    Más
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="expense-request-actions-{{ request_object.pk }}">
+                                    <li>
+                                        <a class="dropdown-item" href="{% url 'expense_request_detail' request_object.pk %}">Ver detalle</a>
+                                    </li>
+                                </ul>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-muted">
+                            {% if filters_active %}
+                                No se encontraron solicitudes con los filtros seleccionados.
+                            {% else %}
+                                No hay solicitudes de gasto registradas.
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include "web/includes/pagination.html" %}
+{% endblock %}

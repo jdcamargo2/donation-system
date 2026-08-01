@@ -17,11 +17,11 @@
                     type="button"
                     data-bs-toggle="collapse"
                     data-bs-target="#list-advanced-filters"
-                    aria-expanded="{% if request.GET.status or request.GET.institution or request.GET.project or request.GET.date_from or request.GET.date_to %}true{% else %}false{% endif %}"
+                    aria-expanded="{% if request.GET.status or request.GET.institution or request.GET.project or request.GET.requester or request.GET.category or request.GET.date_from or request.GET.date_to %}true{% else %}false{% endif %}"
                     aria-controls="list-advanced-filters"
                 >
                     Filtros
-                    {% if request.GET.status or request.GET.institution or request.GET.project or request.GET.date_from or request.GET.date_to %}
+                    {% if request.GET.status or request.GET.institution or request.GET.project or request.GET.requester or request.GET.category or request.GET.date_from or request.GET.date_to %}
                         <span class="badge text-bg-primary">Activos</span>
                     {% endif %}
                 </button>
@@ -41,7 +41,7 @@
         </noscript>
 
         <div
-            class="collapse ops-list-filter-panel{% if request.GET.status or request.GET.institution or request.GET.project or request.GET.date_from or request.GET.date_to %} show{% endif %}"
+            class="collapse ops-list-filter-panel{% if request.GET.status or request.GET.institution or request.GET.project or request.GET.requester or request.GET.category or request.GET.date_from or request.GET.date_to %} show{% endif %}"
             id="list-advanced-filters"
         >
             <div class="row g-3">
@@ -74,6 +74,30 @@
                             <option value="">Todos</option>
                             {% for item in filter_projects %}
                                 <option value="{{ item.pk }}"{% if request.GET.project == item.pk|stringformat:"s" %} selected{% endif %}>{{ item.code }} - {{ item.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                {% endif %}
+                {% if filter_requesters %}
+                    <div class="col-sm-6 col-lg-3">
+                        <label class="form-label" for="filter-requester">Solicitante</label>
+                        <select class="form-select" id="filter-requester" name="requester">
+                            <option value="">Todos</option>
+                            {% for item in filter_requesters %}
+                                <option value="{{ item.pk }}"{% if request.GET.requester == item.pk|stringformat:"s" %} selected{% endif %}>
+                                    {% firstof item.get_full_name item.get_username %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                {% endif %}
+                {% if filter_categories %}
+                    <div class="col-sm-6 col-lg-3">
+                        <label class="form-label" for="filter-category">Categoría</label>
+                        <select class="form-select" id="filter-category" name="category">
+                            <option value="">Todas</option>
+                            {% for value, label in filter_categories %}
+                                <option value="{{ value }}"{% if request.GET.category == value %} selected{% endif %}>{{ label }}</option>
                             {% endfor %}
                         </select>
                     </div>

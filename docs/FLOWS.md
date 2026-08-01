@@ -303,7 +303,11 @@ rechazo.
 
 * Solo `APPROVED_RESERVED` reduce el saldo disponible por reserva.
 * `FULFILLED` convierte reserva en ejecución (exacta o parcial).
-* No hay UI ordinaria de solicitud en este checkpoint.
+* ER3A expone listado y detalle de solo lectura (`expense_request_list` /
+  `expense_request_detail`) con selector de visibilidad por permisos efectivos:
+  Operador ve solo las propias; Admin/Comité/Auditor ven todas. El Comité entra
+  por defecto en `pending_decision`. No hay botones de mutación, adjuntos
+  protegidos ni atajos de panel en este checkpoint.
 
 ---
 
