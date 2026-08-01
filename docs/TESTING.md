@@ -170,6 +170,29 @@ Los tests de trigger PostgreSQL y concurrencia de códigos `SGS` se omiten de
 forma limpia bajo SQLite (`skipUnless`); deben ejecutarse contra una base
 PostgreSQL desechable para validar la defensa append-only.
 
+### Solicitudes de gasto — reservas y servicios (ER2A–ER2C)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_expense_request_services \
+  apps.operations.tests.test_expense_request_balances \
+  apps.operations.tests.test_expense_request_concurrency \
+  apps.operations.tests.test_expense_lifecycle \
+  apps.operations.tests.test_roles \
+  apps.operations.tests.test_concurrency \
+  --noinput
+```
+
+Cobertura focalizada:
+
+* saldos reservation-aware y selectores sin multiplicación por join;
+* create / update / withdraw / deny / approve;
+* concurrencia PostgreSQL de aprobaciones, gasto directo vs reserva, y
+  update vs approve;
+* regresión de ciclo de vida de `Expense` y roles.
+
+`test_expense_request_concurrency` se omite bajo SQLite (`skipUnless`).
+
 ### Concurrencia
 
 ```bash

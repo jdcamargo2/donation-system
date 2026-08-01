@@ -208,8 +208,66 @@ rechazo.
 
 * El gasto queda registrado en estado `REGISTERED`.
 * El gasto conserva un código único e inmutable.
-* El saldo de la asignación refleja únicamente gastos no anulados.
+* El saldo de la asignación refleja gastos no anulados **y** reservas activas
+  (`APPROVED_RESERVED`); un gasto directo no puede consumir fondos reservados.
 * El gasto puede anularse posteriormente cuando el dominio lo permita.
+
+---
+
+## 4a. Flujo de solicitud de gasto (ER2A–ER2C)
+
+### Actores
+
+* Creación / edición / retiro: Administrador SIGEDON u Operador de campo (sobre
+  solicitudes propias).
+* Decisión (aprobar / denegar): Comité de proyectos (`decide_expenserequest`).
+
+### PRE (creación)
+
+* Asignación, donación y proyecto operativos.
+* Monto solicitado positivo; propósito no vacío.
+* El actor posee `add_expenserequest`.
+* No se exige saldo suficiente en la creación.
+
+### Pasos (creación)
+
+1. El actor registra asignación, monto, propósito y fecha.
+2. El sistema bloquea `Donation → FundAllocation → Project`.
+3. Valida entidades operativas y monto positivo.
+4. Reserva código `SGS-######` y crea la solicitud en `PENDING_DECISION`.
+5. Escribe `ExpenseRequestEvent.CREATED` y `AuditLog`.
+6. Confirma la transacción. **No hay reserva financiera.**
+
+### PRE (aprobación)
+
+* Solicitud en `PENDING_DECISION`.
+* Actor con `decide_expenserequest`.
+* Saldo disponible de la asignación ≥ `requested_amount`
+  (`amount − ejecutado − otras reservas activas`).
+
+### Pasos (aprobación)
+
+1. Bloqueo canónico: `Donation → FundAllocation → ExpenseRequest`.
+2. Recalcula ejecutado y reservas (excluyendo la solicitud actual).
+3. Si el saldo es insuficiente: falla sin mutar, sin eventos ni auditoría.
+4. Si alcanza: fija `APPROVED_RESERVED`, `reserved_amount = requested_amount`,
+   metadatos de decisión/reserva.
+5. Escribe `ExpenseRequestEvent.APPROVED` y `RESERVATION_CREATED`.
+6. Escribe un `AuditLog` de aprobación/reserva.
+7. Todo o nada en una sola transacción.
+
+### Retiro y denegación
+
+* Retiro: solo solicitante original, solo pendiente, motivo terminal obligatorio;
+  `PENDING_DECISION → WITHDRAWN`; sin efecto financiero.
+* Denegación: solo Comité, motivo obligatorio; `PENDING_DECISION → DENIED`;
+  sin efecto financiero.
+
+### POST
+
+* Solo `APPROVED_RESERVED` reduce el saldo disponible de la asignación.
+* Cumplimiento (`FULFILLED`) y creación del `Expense` final: pendientes ER2D.
+* No hay UI ordinaria de solicitud en este checkpoint.
 
 ---
 

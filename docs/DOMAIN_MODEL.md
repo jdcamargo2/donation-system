@@ -159,6 +159,9 @@ ANNULLED
 * No puede superar el saldo disponible de la donación.
 * No puede utilizar una donación anulada.
 * Los gastos no anulados no pueden superar el monto asignado.
+* El saldo disponible resta gastos efectivos **y** reservas activas
+  (`ExpenseRequest.APPROVED_RESERVED`); la ejecución (`executed_amount`) y la
+  reserva permanecen conceptos distintos.
 * Una asignación anulada no participa en métricas ni saldos.
 * La ejecución parcial o completa se deriva de los gastos asociados.
 * Una asignación no debe interpretarse como un gasto.
@@ -192,8 +195,15 @@ PENDING_DECISION / APPROVED_RESERVED
 * Los adjuntos (`ExpenseRequestAttachment`) son opcionales y mutables solo en
   `PENDING_DECISION`.
 * `ExpenseRequestEvent` es append-only y complementa `AuditLog`.
-* Las mutaciones de ciclo de vida (reserva, decisión, cumplimiento) pertenecen a
-  servicios ER2; el modelo ER1 no expone métodos de transición.
+* Servicios ER2A–ER2C (`apps/operations/expense_request_services.py`):
+  * creación → `PENDING_DECISION` (sin reserva);
+  * edición / retiro → solo solicitante original y solo pendiente;
+  * denegación / aprobación → solo `decide_expenserequest` (Comité);
+  * aprobación reserva atómicamente `requested_amount`.
+* El cumplimiento (`FULFILLED`) y la creación del `Expense` enlazado quedan
+  pendientes en ER2D.
+* Agregación autoritativa de reservas: `get_allocation_reserved_amount()` en
+  `apps/operations/financials.py` (solo `APPROVED_RESERVED`).
 
 ## 5. `Expense`
 
@@ -210,13 +220,15 @@ ANNULLED
 
 * El monto debe ser positivo.
 * Debe pertenecer a una asignación operativa.
-* No puede superar el saldo disponible de la asignación.
+* No puede superar el saldo disponible de la asignación (ejecutado + reservas
+  activas).
 * Debe contar con soporte documental obligatorio.
 * La anulación requiere una justificación.
 * El código operativo es único e inmutable.
 * Los gastos anulados no participan en saldos ni métricas.
 * Todo gasto futuro debe originarse en una `ExpenseRequest` aprobada y reservada
-  (enforcement completo en ER2/UI).
+  (enforcement completo de creación ordinaria en ER2D/UI; la validación de saldo
+  ya resta reservas activas).
 
 ## 6. `SupportingDocument`
 

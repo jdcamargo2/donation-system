@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from apps.operations.models import Donation, Expense, ExpenseRequest, FundAllocation, Institution, Project
 
@@ -87,4 +88,36 @@ def create_expense_request(
         requested_date=requested_date,
         status=status,
         **extra_fields,
+    )
+
+
+def create_approved_reserved_request(
+    *,
+    fund_allocation=None,
+    requested_by=None,
+    decided_by=None,
+    requested_amount=Decimal('15.00'),
+    reserved_amount=None,
+    purpose='Solicitud aprobada de prueba',
+    code='',
+):
+    """
+    PRE: callers supply operational parents when sharing an allocation across fixtures.
+    POST: returns one APPROVED_RESERVED request satisfying ER1 constraints.
+    """
+    actor = requested_by or create_user(username='reserved-requester')
+    decider = decided_by or create_user(username='reserved-decider')
+    now = timezone.now()
+    reserved = reserved_amount if reserved_amount is not None else requested_amount
+    return create_expense_request(
+        fund_allocation=fund_allocation,
+        requested_by=actor,
+        requested_amount=requested_amount,
+        purpose=purpose,
+        status=ExpenseRequest.Status.APPROVED_RESERVED,
+        code=code,
+        decided_by=decider,
+        decided_at=now,
+        reserved_amount=reserved,
+        reserved_at=now,
     )

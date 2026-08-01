@@ -97,10 +97,10 @@ El prefijo operativo es `SGS` (`namespace=expense_request`). Los adjuntos de
 solicitud se congelan al salir de `PENDING_DECISION`. La trazabilidad combina
 eventos estructurados e inmutables (`ExpenseRequestEvent`) con `AuditLog`.
 Administrador SIGEDON puede crear solicitudes pero no decidirlas
-(`decide_expenserequest` exclusividad del Comité). La edición queda limitada al
-creador mientras la solicitud esté pendiente (enforcement de ownership en ER2).
-La entrada directa ordinaria de gastos se retira progresivamente como parte del
-flujo gobernado.
+(`decide_expenserequest` exclusividad del Comité). La edición y el retiro quedan
+limitados al creador original mientras la solicitud esté `PENDING_DECISION`
+(enforcement de ownership en servicios ER2B). La entrada directa ordinaria de
+gastos se retira progresivamente como parte del flujo gobernado.
 
 ### Motivo
 
@@ -112,9 +112,45 @@ con estados de aprobación y permite trazabilidad financiera explícita.
 * Cadena: Donation → FundAllocation → ExpenseRequest → Expense.
 * `Expense` conserva solo `REGISTERED` / `ANNULLED`.
 * ER1 entrega modelos, constraints, permisos, secuencia `SGS` y trigger
-  append-only; ER2 implementará reservas y servicios de ciclo de vida.
+  append-only.
+* ER2A–ER2C implementan agregación de reservas, saldo disponible
+  reservation-aware, y servicios de creación/edición/retiro/denegación/aprobación
+  con reserva atómica. El cumplimiento (`FULFILLED`) y la creación del
+  `Expense` final quedan para ER2D.
 
 ---
+
+## 2026-08-01 — Reserva financiera en aprobación de solicitud
+
+### Decisión
+
+La creación de una `ExpenseRequest` no reserva fondos ni altera saldos. Solo la
+aprobación del Comité (`decide_expenserequest`) transiciona
+`PENDING_DECISION → APPROVED_RESERVED`, fija `reserved_amount = requested_amount`
+y reduce el saldo disponible de la asignación.
+
+El saldo disponible de `FundAllocation` es:
+
+```text
+amount − executed_amount − active_reservations
+```
+
+donde `active_reservations` suma `reserved_amount` de solicitudes en
+`APPROVED_RESERVED`. No se almacena un total de reserva en `FundAllocation`.
+
+### Motivo
+
+Separar la solicitud informativa de la reserva financiera permite al Comité
+actuar como única puerta de capacidad, sin bloquear fondos en borradores
+pendientes, y evita doble conteo entre ejecución y reserva.
+
+### Consecuencias
+
+* Pendiente, denegada, retirada, anulada o cumplida no cuentan como reserva.
+* La creación directa de `Expense` no puede consumir fondos ya reservados.
+* Aprobación, eventos (`APPROVED`, `RESERVATION_CREATED`) y `AuditLog` son
+  atómicos bajo bloqueo `Donation → FundAllocation → ExpenseRequest`.
+* El cumplimiento (consumo de reserva → `Expense`) permanece pendiente en ER2D.
 
 ## 2026-07-11 — Códigos operativos transaccionales
 
@@ -162,6 +198,8 @@ Mantener estados manuales de progreso duplicaría información y permitiría inc
 
 * El progreso de una donación se deriva de sus asignaciones no anuladas.
 * El progreso de una asignación se deriva de sus gastos no anulados.
+* El saldo disponible de una asignación resta además las reservas activas
+  (`ExpenseRequest` en `APPROVED_RESERVED`).
 * Los saldos se calculan dinámicamente.
 * Los registros anulados no participan en los cálculos.
 * La interfaz no puede modificar manualmente el nivel de progreso financiero.

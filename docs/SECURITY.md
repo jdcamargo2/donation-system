@@ -87,7 +87,12 @@ de mutación de eventos. Complementa `AuditLog`; no lo sustituye.
 
 Los adjuntos de solicitud (`ExpenseRequestAttachment`) son evidencia privada del
 panel interno: mutables solo en `PENDING_DECISION` y sin ruta pública de media
-en ER1.
+en ER1/ER2C (rutas protegidas de adjunto pendientes de UI).
+
+Los servicios de ciclo de vida (ER2B–ER2C) escriben `ExpenseRequestEvent` y
+`AuditLog` en la misma transacción que la mutación. El fallo de evento o
+auditoría revierte la solicitud/reserva. No se exponen filas de
+`ExpenseRequest` en el portal público.
 
 Las acciones críticas deben registrar, como mínimo:
 
@@ -107,6 +112,10 @@ La protección de las operaciones financieras incluye:
 * `transaction.atomic()`;
 * `select_for_update()`;
 * constraints de base de datos;
+* validación de saldos con reservas activas (`APPROVED_RESERVED`);
+* orden de bloqueo canónico `Donation → FundAllocation → ExpenseRequest` en
+  aprobación;
+* exclusión de registros anulados de los totales;
 * validación de montos;
 * exclusión de registros anulados;
 * generación transaccional de códigos;

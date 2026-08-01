@@ -878,8 +878,16 @@ def _validate_allocation_balance(donation, amount, exclude_pk=None):
 
 
 # PRE: allocation is locked for update and amount is the complete proposed expense amount.
-# POST: raises ValidationError unless amount is positive and fits the allocation balance excluding exclude_pk.
-def _validate_expense_balance(allocation, amount, exclude_pk=None):
+# POST: raises ValidationError unless amount fits unreserved capacity (executed + reservations - credit).
+def _validate_expense_balance(
+    allocation,
+    amount,
+    *,
+    exclude_pk=None,
+    reservation_credit=ZERO_MONEY,
+):
+    from .financials import get_allocation_reserved_amount
+
     if amount <= ZERO_MONEY:
         raise ValidationError({'amount': _('El monto del gasto debe ser positivo.')})
     expenses = allocation.expenses.exclude(
@@ -888,7 +896,9 @@ def _validate_expense_balance(allocation, amount, exclude_pk=None):
     if exclude_pk is not None:
         expenses = expenses.exclude(pk=exclude_pk)
     executed_amount = expenses.aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
-    if amount > allocation.amount - executed_amount:
+    reserved_amount = get_allocation_reserved_amount(allocation)
+    available = allocation.amount - executed_amount - reserved_amount + reservation_credit
+    if amount > available:
         raise ValidationError({'amount': _('El monto del gasto excede el saldo disponible de la asignación.')})
 
 
@@ -1308,11 +1318,12 @@ def get_donation_financial_summary(donation: Donation) -> dict:
 def get_allocation_financial_summary(allocation: FundAllocation) -> dict:
     """
     PRE: allocation debe ser una instancia válida de FundAllocation.
-    POST: Retorna un resumen financiero de la asignación con asignado, ejecutado y disponible.
+    POST: Retorna un resumen financiero con asignado, ejecutado, reservado y disponible.
     """
     return {
         'allocated_amount': allocation.amount,
         'executed_amount': allocation.executed_amount,
+        'reserved_amount': allocation.reserved_amount,
         'available_amount': allocation.available_balance,
     }
 

@@ -947,10 +947,21 @@ class FundAllocation(models.Model):
         ).aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
 
     @property
+    def reserved_amount(self):
+        # PRE: this allocation may carry list annotations or require an authoritative aggregation.
+        # POST: returns active APPROVED_RESERVED reserved total; never None.
+        if hasattr(self, 'annotated_reserved_amount'):
+            annotated = self.annotated_reserved_amount
+            return annotated if annotated is not None else ZERO_MONEY
+        from .financials import get_allocation_reserved_amount
+
+        return get_allocation_reserved_amount(self)
+
+    @property
     def available_balance(self):
         if hasattr(self, 'annotated_available_balance'):
             return self.annotated_available_balance
-        balance = self.amount - self.executed_amount
+        balance = self.amount - self.executed_amount - self.reserved_amount
         return max(balance, ZERO_MONEY)
 
     @property

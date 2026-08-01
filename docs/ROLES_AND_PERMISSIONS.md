@@ -131,6 +131,8 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
 * No puede eliminar un proyecto.
 * No recibe permisos de revisión, decisión ni resolución de remediaciones del Comité.
 * No recibe `decide_expenserequest` (solo el Comité decide solicitudes de gasto).
+* Puede crear, editar y retirar solicitudes de gasto **propias** en
+  `PENDING_DECISION`; la aprobación/reserva es exclusiva del Comité.
 * No recibe `delete_expenserequest` ni permisos de mutación de `ExpenseRequestEvent`.
 * No recibe automáticamente permisos técnicos generales de Kobo distintos de los cinco territoriales.
 
@@ -174,7 +176,9 @@ operations.view_expenserequestevent
 * consultar soportes autorizados (incluido un listado de proyecto sin montos ni
   datos financieros del gasto);
 * registrar soportes permitidos;
-* gestionar remediaciones propias (crear, editar, adjuntar, enviar).
+* gestionar remediaciones propias (crear, editar, adjuntar, enviar);
+* crear solicitudes de gasto;
+* editar y retirar **solo** solicitudes propias en `PENDING_DECISION`.
 
 Al registrar un avance, el usuario autenticado se asigna automáticamente como
 persona responsable. El campo se muestra en modo no editable.
@@ -293,6 +297,7 @@ kobo.view_territorial_administration
 * resolver remediaciones (`resolve_projectupdateremediation`);
 * consultar solicitudes de gasto y su evidencia;
 * aprobar o denegar solicitudes de gasto (`decide_expenserequest`);
+  la aprobación reserva atómicamente el monto solicitado sobre la asignación;
 * consultar el hub territorial en modo lectura.
 
 ### No recibe

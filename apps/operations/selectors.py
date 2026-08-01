@@ -1,8 +1,8 @@
-from django.db.models import Count, DecimalField, Exists, F, OuterRef, Q, Sum, Value
+from django.db.models import Count, DecimalField, Exists, F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce, Greatest
 
 from .choices import OPERATING_CURRENCY
-from .models import Donation, Expense, FundAllocation, SupportingDocument, ZERO_MONEY
+from .models import Donation, Expense, ExpenseRequest, FundAllocation, SupportingDocument, ZERO_MONEY
 
 
 MONEY_OUTPUT_FIELD = DecimalField(max_digits=14, decimal_places=2)
@@ -37,10 +37,31 @@ def with_donation_list_metrics(queryset):
     )
 
 
+def _reserved_amount_subquery():
+    """
+    PRE: outer query rows are FundAllocation instances.
+    POST: returns an independent subquery summing APPROVED_RESERVED reserved_amount only.
+    """
+    return Coalesce(
+        Subquery(
+            ExpenseRequest.objects.filter(
+                fund_allocation_id=OuterRef('pk'),
+                status=ExpenseRequest.Status.APPROVED_RESERVED,
+            )
+            .values('fund_allocation_id')
+            .annotate(total=Sum('reserved_amount'))
+            .values('total')[:1],
+            output_field=MONEY_OUTPUT_FIELD,
+        ),
+        _zero_money_value(),
+        output_field=MONEY_OUTPUT_FIELD,
+    )
+
+
 def with_allocation_list_metrics(queryset):
     """
     PRE: queryset selects FundAllocation rows for an operational listing.
-    POST: returns it with effective USD expense totals and clamped balances annotated once.
+    POST: returns it with executed, reserved, and clamped available balances without join multiplication.
     """
     effective_expenses = (
         Q(expenses__currency=OPERATING_CURRENCY)
@@ -51,11 +72,12 @@ def with_allocation_list_metrics(queryset):
             Sum('expenses__amount', filter=effective_expenses),
             _zero_money_value(),
             output_field=MONEY_OUTPUT_FIELD,
-        )
+        ),
+        annotated_reserved_amount=_reserved_amount_subquery(),
     )
     return queryset.annotate(
         annotated_available_balance=Greatest(
-            F('amount') - F('annotated_executed_amount'),
+            F('amount') - F('annotated_executed_amount') - F('annotated_reserved_amount'),
             _zero_money_value(),
             output_field=MONEY_OUTPUT_FIELD,
         )

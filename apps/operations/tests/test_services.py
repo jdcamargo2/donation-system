@@ -140,6 +140,7 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(summary['allocated_amount'], Decimal('90.00'))
         self.assertEqual(summary['executed_amount'], Decimal('30.00'))
+        self.assertEqual(summary['reserved_amount'], Decimal('0.00'))
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
 
     def test_get_project_financial_summary_calculates_balances(self):
