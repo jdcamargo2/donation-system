@@ -661,12 +661,27 @@ class TerritorialAdministrationPermissionTests(TerritorialAdministrationFixtureM
             users[role_name] = user
 
         self.assertTrue(
+            users[ROLE_SIGEDON_ADMIN].has_perm("kobo.view_territorial_administration")
+        )
+        self.assertTrue(
             users[ROLE_SIGEDON_ADMIN].has_perm("kobo.manage_pastoral_zone_mappings")
         )
         self.assertTrue(
             users[ROLE_SIGEDON_ADMIN].has_perm("kobo.resolve_territorial_conflicts")
         )
-        for role_name in (ROLE_FIELD_OPERATOR, ROLE_EXTERNAL_AUDITOR, ROLE_PROJECT_COMMITTEE):
+        self.assertTrue(
+            users[ROLE_SIGEDON_ADMIN].has_perm("kobo.change_territorial_identity_status")
+        )
+        self.assertTrue(
+            users[ROLE_SIGEDON_ADMIN].has_perm("kobo.run_territorial_reconciliation")
+        )
+        self.assertFalse(
+            users[ROLE_FIELD_OPERATOR].has_perm("kobo.view_territorial_administration")
+        )
+        self.assertFalse(
+            users[ROLE_FIELD_OPERATOR].has_perm("kobo.manage_pastoral_zone_mappings")
+        )
+        for role_name in (ROLE_EXTERNAL_AUDITOR, ROLE_PROJECT_COMMITTEE):
             with self.subTest(role=role_name):
                 self.assertTrue(
                     users[role_name].has_perm("kobo.view_territorial_administration")

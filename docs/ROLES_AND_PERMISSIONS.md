@@ -142,7 +142,6 @@ operations.change_projectupdateremediation
 operations.add_projectupdateremediationattachment
 operations.delete_projectupdateremediationattachment
 operations.submit_projectupdateremediation
-kobo.view_territorial_administration
 ```
 
 ### Puede
@@ -153,8 +152,11 @@ kobo.view_territorial_administration
 * cargar uno o varios adjuntos durante el registro;
 * consultar soportes autorizados;
 * registrar soportes permitidos;
-* gestionar remediaciones propias (crear, editar, adjuntar, enviar);
-* consultar el hub territorial en modo lectura.
+* gestionar remediaciones propias (crear, editar, adjuntar, enviar).
+
+Los datos de Kobo ya integrados en un proyecto pueden seguir siendo visibles
+cuando el acceso se gobierna por `operations.view_project`; eso no implica
+acceso al panel de administración territorial.
 
 ### No puede
 
@@ -165,8 +167,12 @@ kobo.view_territorial_administration
 * revisar ni decidir avances en nombre del Comité;
 * resolver remediaciones;
 * publicar avances;
+* acceder al panel KoboToolBox ni a la administración territorial;
 * configurar mappings territoriales, resolver conflictos, cambiar estados de
   identidad ni ejecutar reconciliación.
+
+Operador de campo no puede acceder al panel KoboToolBox ni a la administración
+territorial.
 
 ## 3. Auditor externo
 
@@ -381,8 +387,9 @@ run_territorial_reconciliation
 Asignación automática vía sincronización:
 
 * `Administrador SIGEDON` → los cinco permisos;
-* Operador de campo, Auditor externo y Comité → únicamente
-  `view_territorial_administration`.
+* Auditor externo y Comité de proyectos → únicamente
+  `view_territorial_administration`;
+* Operador de campo → ninguno de los permisos territoriales.
 
 Ninguna acción territorial se concede por poseer solamente `change_kobosubmission`.
 

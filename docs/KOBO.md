@@ -760,6 +760,11 @@ asignación de zonas, núcleos registrados y casos por revisar. Sus mutaciones u
 POST, CSRF y los servicios administrativos existentes. Cuando Kobo está
 deshabilitado, el enlace y las rutas del panel no están disponibles.
 
+El panel de administración territorial está disponible solo para roles
+autorizados. Operador de campo queda explícitamente excluido. La ingestión por
+webhook y las importaciones en backend no dependen del acceso del Operador al
+panel.
+
 El lenguaje visible del panel prioriza términos operativos:
 
 * Asignación de zonas (configuración zona pastoral → proyecto)

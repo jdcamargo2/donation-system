@@ -176,6 +176,7 @@ class OperationRoleTests(TestCase):
         self.assert_lacks_perm(user, 'review_projectupdate')
         self.assert_lacks_perm(user, 'decide_projectupdate')
         self.assert_lacks_perm(user, 'manage_project_publication')
+        self.assertFalse(user.has_perm('kobo.view_territorial_administration'))
 
     def test_external_auditor_permission_matrix(self):
         user = self.create_user_for_role('auditor-role', ROLE_EXTERNAL_AUDITOR)
@@ -360,7 +361,6 @@ class OperationRoleTests(TestCase):
                 'add_projectupdateremediationattachment',
                 'delete_projectupdateremediationattachment',
                 'submit_projectupdateremediation',
-                'view_territorial_administration',
             },
             ROLE_EXTERNAL_AUDITOR: {
                 'view_institution',
@@ -382,6 +382,33 @@ class OperationRoleTests(TestCase):
                     Group.objects.get(name=role_name).permissions.values_list('codename', flat=True)
                 )
                 self.assertEqual(actual_codenames, codenames)
+        self.assertFalse(
+            Group.objects.get(name=ROLE_FIELD_OPERATOR).permissions.filter(
+                codename='view_territorial_administration'
+            ).exists()
+        )
+        admin_kobo_codenames = set(
+            Group.objects.get(name=ROLE_SIGEDON_ADMIN).permissions.filter(
+                content_type__app_label='kobo',
+                codename__in={
+                    'view_territorial_administration',
+                    'manage_pastoral_zone_mappings',
+                    'resolve_territorial_conflicts',
+                    'change_territorial_identity_status',
+                    'run_territorial_reconciliation',
+                },
+            ).values_list('codename', flat=True)
+        )
+        self.assertEqual(
+            admin_kobo_codenames,
+            {
+                'view_territorial_administration',
+                'manage_pastoral_zone_mappings',
+                'resolve_territorial_conflicts',
+                'change_territorial_identity_status',
+                'run_territorial_reconciliation',
+            },
+        )
 
     def test_sync_operation_roles_is_idempotent(self):
         first_snapshot = {

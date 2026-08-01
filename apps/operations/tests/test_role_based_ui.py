@@ -2,7 +2,7 @@ from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from apps.operations.models import AuditLog, Project
@@ -186,6 +186,50 @@ class RoleBasedUITests(TestCase):
         self.assertContains(response, 'title="Proyectos"')
         self.assertContains(response, reverse('project_update_list'))
         self.assertContains(response, 'title="Avances"')
+
+    @override_settings(KOBO_ENABLED=True)
+    def test_field_operator_does_not_see_kobo_toolbox_sidebar(self):
+        self.client.force_login(self.create_user_for_role('ui-field-kobo-nav', ROLE_FIELD_OPERATOR))
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'KoboToolbox')
+        self.assertNotContains(response, reverse('kobo:hub'))
+
+    @override_settings(KOBO_ENABLED=True)
+    def test_external_auditor_sees_kobo_toolbox_sidebar(self):
+        self.client.force_login(self.create_user_for_role('ui-auditor-kobo-nav', ROLE_EXTERNAL_AUDITOR))
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'KoboToolbox')
+        self.assertContains(response, reverse('kobo:hub'))
+
+    @override_settings(KOBO_ENABLED=True)
+    def test_field_operator_does_not_see_project_kobo_administration_card(self):
+        # Administration card (kobo_hub_project_url) is distinct from project-local
+        # Kobo sections governed by operations.view_project.
+        self.client.force_login(self.create_user_for_role('ui-field-kobo-card', ROLE_FIELD_OPERATOR))
+
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Administrar integración')
+        self.assertNotContains(response, f"{reverse('kobo:hub')}?project={self.project.pk}")
+        self.assertNotContains(response, 'id="project-kobo-title"')
+
+    @override_settings(KOBO_ENABLED=True)
+    def test_external_auditor_sees_project_kobo_administration_card(self):
+        self.client.force_login(self.create_user_for_role('ui-auditor-kobo-card', ROLE_EXTERNAL_AUDITOR))
+
+        response = self.client.get(reverse('project_detail', args=[self.project.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'KoboToolbox')
+        self.assertContains(response, 'Administrar integración')
+        self.assertContains(response, f"{reverse('kobo:hub')}?project={self.project.pk}")
 
     def test_project_committee_sees_navigation_without_mutation_actions(self):
         self.client.force_login(self.create_user_for_role('ui-project-committee', ROLE_PROJECT_COMMITTEE))

@@ -154,6 +154,10 @@ python manage.py shell -c "from django.contrib.auth.models import Group; g=Group
   protegidos como solo lectura y, en cualquier caso, `sync_sigedon_roles`
   sobrescribe esas matrices.
 * El comando no asigna ni quita usuarios de grupos.
+* Operador de campo no forma parte de la audiencia de administración
+  territorial Kobo. Tras un despliegue que corrija la matriz canónica,
+  `sync_sigedon_roles` retira `kobo.view_territorial_administration` del
+  grupo Operador; las membresías de usuarios permanecen intactas.
 
 ## 4. Operación inicial de KoboToolbox
 
@@ -598,3 +602,5 @@ necesario pulsar sincronizar durante la operación normal: las Fichas 1, 10 y 11
 llegan por webhook, el panel se actualiza por polling cada 15 segundos y la
 intervención humana ocurre sólo ante incidencias.
 Compruebe que los permisos Kobo se asignaron antes de habilitar acceso operativo.
+Operador de campo queda fuera de esa audiencia territorial; el webhook y el
+procesamiento de importación en backend no dependen de su acceso al panel.

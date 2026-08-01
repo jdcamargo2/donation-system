@@ -83,7 +83,6 @@ def sync_operation_roles():
         group, _ = Group.objects.get_or_create(name=role_name)
         group.permissions.set([permissions_by_codename[codename] for codename in sorted(codenames)])
         if role_name in {
-            ROLE_FIELD_OPERATOR,
             ROLE_EXTERNAL_AUDITOR,
             ROLE_PROJECT_COMMITTEE,
         }:

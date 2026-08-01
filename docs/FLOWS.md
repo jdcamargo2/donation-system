@@ -70,9 +70,10 @@ por `route_normalized_submission()` y un formulario no soportado queda con
 `UNSUPPORTED_FORM`, sin fallback genérico. El Hub territorial es la superficie
 operativa para mappings e identidades.
 
-El Hub exige `kobo.view_territorial_administration`. Los cambios de mappings,
-estado y conflictos exigen POST con motivo; la reconciliación opera un lote y
-nunca aprueba ni importa submissions.
+El Hub exige `kobo.view_territorial_administration`. Operador de campo queda
+excluido de ese acceso. Los cambios de mappings, estado y conflictos exigen
+POST con motivo; la reconciliación opera un lote y nunca aprueba ni importa
+submissions.
 
 La interfaz HTTP mantiene las mutaciones en la capa de servicios y exige el
 permiso específico del hito junto con `operations.view_project`:
