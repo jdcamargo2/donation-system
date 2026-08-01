@@ -7,14 +7,14 @@
     <div>
         <div class="ops-kicker">Formulario operativo</div>
         <h1>{{ title }}</h1>
-        <p>{% if form_subtitle %}{{ form_subtitle }}{% else %}Complete los datos requeridos. Los campos marcados con asterisco son obligatorios.{% endif %}</p>
+        <p>{{ project.code }} - {{ project.name }}</p>
     </div>
-    <a class="btn btn-outline-secondary" href="{% if cancel_object_pk %}{% url list_url_name cancel_object_pk %}{% else %}{% url list_url_name %}{% endif %}">Cancelar</a>
+    <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Cancelar</a>
 </div>
 
 <div class="card border-0 ops-form-card">
     <div class="card-body">
-        <form method="post" enctype="multipart/form-data" novalidate>
+        <form method="post" novalidate>
             {% csrf_token %}
             {% if form.non_field_errors %}
                 <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
@@ -40,8 +40,8 @@
                 </div>
             </div>
             <div class="ops-form-actions">
-                <a class="btn btn-outline-secondary" href="{% if cancel_object_pk %}{% url list_url_name cancel_object_pk %}{% else %}{% url list_url_name %}{% endif %}">Cancelar</a>
-                <button type="submit" class="btn btn-primary">{{ submit_label|default:"Guardar" }}</button>
+                <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Cancelar</a>
+                <button type="submit" class="btn btn-primary">{{ submit_label|default:"Registrar solicitud" }}</button>
             </div>
         </form>
     </div>

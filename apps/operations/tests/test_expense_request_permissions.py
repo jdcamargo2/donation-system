@@ -16,6 +16,7 @@ from apps.operations.roles import (
     ROLE_SIGEDON_ADMIN,
 )
 from apps.operations.selectors import (
+    user_can_create_global_expense_request,
     user_has_global_expense_request_visibility,
     user_has_ownership_scoped_expense_requests,
     visible_expense_requests_for_user,
@@ -105,3 +106,28 @@ class ExpenseRequestPermissionTests(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse('expense_request_list'))
         self.assertEqual(response.status_code, 403)
+
+    def test_global_create_permission_flag(self):
+        self.assertTrue(user_can_create_global_expense_request(self.admin))
+        self.assertFalse(user_can_create_global_expense_request(self.operator))
+        self.assertFalse(user_can_create_global_expense_request(self.committee))
+        self.assertFalse(user_can_create_global_expense_request(self.auditor))
+
+    def test_update_and_withdraw_routes_enforce_ownership(self):
+        self.client.force_login(self.other_operator)
+        self.assertEqual(
+            self.client.get(
+                reverse('expense_request_update', args=[self.own_request.pk])
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse('expense_request_withdraw', args=[self.own_request.pk])
+            ).status_code,
+            404,
+        )
+
+    def test_operator_with_add_cannot_open_global_create(self):
+        self.client.force_login(self.operator)
+        self.assertEqual(self.client.get(reverse('expense_request_create')).status_code, 403)

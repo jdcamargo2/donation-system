@@ -1,15 +1,28 @@
+from django.contrib import messages
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db.models import Case, IntegerField, Value, When
 from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
-from django.views.generic import DetailView, ListView
+from django.views.generic import DetailView, FormView, ListView
 
 from ..choices import BUDGET_CATEGORY_CHOICES
+from ..expense_request_services import (
+    create_expense_request,
+    update_expense_request,
+    withdraw_expense_request,
+)
+from ..forms import ExpenseRequestForProjectForm, ExpenseRequestForm
 from ..models import ExpenseRequest, Project, ZERO_MONEY
 from ..selectors import (
     attachment_display_filename,
     get_expense_request_financial_display,
+    mutable_own_pending_expense_requests_for_user,
+    user_can_create_global_expense_request,
     user_has_global_expense_request_visibility,
+    user_may_use_global_expense_request_allocations,
     visible_expense_requests_for_user,
     with_expense_request_detail_data,
     with_expense_request_list_data,
@@ -19,6 +32,8 @@ from .common import (
     OperationsPermissionRequiredMixin,
     PaginatedListMixin,
     RouteContextMixin,
+    TerminalActionView,
+    add_service_errors_to_form,
     apply_list_filters,
 )
 
@@ -45,6 +60,27 @@ def _status_label(status_value):
     if not status_value:
         return ''
     return dict(ExpenseRequest.Status.choices).get(status_value, status_value)
+
+
+def _requester_action_flags(*, user, expense_request):
+    """
+    PRE: expense_request is visible to user; permissions are effective, not role names.
+    POST: returns edit/withdraw flags for PENDING_DECISION rows owned by the actor.
+    """
+    is_owner = expense_request.requested_by_id == user.id
+    is_pending = expense_request.status == ExpenseRequest.Status.PENDING_DECISION
+    return {
+        'can_edit_expense_request': (
+            is_owner
+            and is_pending
+            and user.has_perm('operations.change_expenserequest')
+        ),
+        'can_withdraw_expense_request': (
+            is_owner
+            and is_pending
+            and user.has_perm('operations.withdraw_expenserequest')
+        ),
+    }
 
 
 class ExpenseRequestListView(
@@ -143,13 +179,20 @@ class ExpenseRequestListView(
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        user = self.request.user
         has_global = self._has_global_visibility()
         context['has_global_expense_request_visibility'] = has_global
+        context['can_create_global_expense_request'] = user_can_create_global_expense_request(
+            user
+        )
+        context['can_create_expense_request'] = user.has_perm(
+            'operations.add_expenserequest'
+        )
         context['filters_active'] = any(
             (self.request.GET.get(key) or '').strip()
             for key in EXPENSE_REQUEST_LIST_FILTER_KEYS
         )
-        visible_base = visible_expense_requests_for_user(self.request.user)
+        visible_base = visible_expense_requests_for_user(user)
         if has_global:
             project_ids = (
                 visible_base.values_list('fund_allocation__project_id', flat=True)
@@ -208,6 +251,9 @@ class ExpenseRequestDetailView(
             'operations.view_expenserequestattachment'
         )
         context['can_view_events'] = user.has_perm('operations.view_expenserequestevent')
+        context.update(
+            _requester_action_flags(user=user, expense_request=expense_request)
+        )
 
         attachments = []
         if context['can_view_attachments']:
@@ -279,3 +325,216 @@ class ExpenseRequestDetailView(
             'linked_expense_pk': linked_expense_pk,
             'financial_rows': financial_rows,
         }
+
+
+class ExpenseRequestCreateForProjectView(
+    OperationsPermissionRequiredMixin,
+    RouteContextMixin,
+    FormView,
+):
+    permission_required = 'operations.add_expenserequest'
+    form_class = ExpenseRequestForProjectForm
+    template_name = 'web/expense_request_form.html'
+    route_prefix = 'expense_request'
+    page_title = _('Solicitar gasto')
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: project_pk identifies a project the actor may view.
+        # POST: loads an ACTIVE project or 404; mutations remain service-owned.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.project = get_object_or_404(
+                Project.objects.filter(status=Project.Status.ACTIVE),
+                pk=kwargs['project_pk'],
+            )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['project'] = self.project
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['project'] = self.project
+        context['cancel_url'] = reverse('project_detail', args=[self.project.pk])
+        context['submit_label'] = _('Registrar solicitud')
+        return context
+
+    def form_valid(self, form):
+        try:
+            self.object = create_expense_request(
+                fund_allocation=form.cleaned_data['fund_allocation'],
+                requested_amount=form.cleaned_data['requested_amount'],
+                purpose=form.cleaned_data['purpose'],
+                requested_date=form.cleaned_data['requested_date'],
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        messages.success(self.request, _('Solicitud de gasto registrada.'))
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse('expense_request_detail', args=[self.object.pk])
+
+
+class ExpenseRequestCreateView(
+    OperationsPermissionRequiredMixin,
+    RouteContextMixin,
+    FormView,
+):
+    permission_required = 'operations.add_expenserequest'
+    form_class = ExpenseRequestForm
+    template_name = 'web/object_form.html'
+    route_prefix = 'expense_request'
+    page_title = _('Nueva solicitud de gasto')
+
+    def has_permission(self):
+        # PRE: PermissionRequiredMixin already authenticated the user when applicable.
+        # POST: requires add_expenserequest plus Admin-style global create powers.
+        return (
+            super().has_permission()
+            and user_can_create_global_expense_request(self.request.user)
+        )
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['include_project_in_label'] = True
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = self.page_title
+        context['form_subtitle'] = _(
+            'Registre una solicitud para evaluación del Comité de proyectos.'
+        )
+        context['submit_label'] = _('Registrar solicitud')
+        return context
+
+    def form_valid(self, form):
+        try:
+            self.object = create_expense_request(
+                fund_allocation=form.cleaned_data['fund_allocation'],
+                requested_amount=form.cleaned_data['requested_amount'],
+                purpose=form.cleaned_data['purpose'],
+                requested_date=form.cleaned_data['requested_date'],
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        messages.success(self.request, _('Solicitud de gasto registrada.'))
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse('expense_request_detail', args=[self.object.pk])
+
+
+class ExpenseRequestUpdateView(
+    OperationsPermissionRequiredMixin,
+    RouteContextMixin,
+    FormView,
+):
+    permission_required = 'operations.change_expenserequest'
+    form_class = ExpenseRequestForm
+    template_name = 'web/object_form.html'
+    route_prefix = 'expense_request'
+    page_title = _('Editar solicitud de gasto')
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: route targets an editable own pending request under visibility rules.
+        # POST: loads the owned PENDING_DECISION row or 404; foreign rows stay hidden.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.object = get_object_or_404(
+                mutable_own_pending_expense_requests_for_user(request.user).select_related(
+                    'fund_allocation',
+                    'fund_allocation__project',
+                ),
+                pk=kwargs['pk'],
+            )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        use_global = user_may_use_global_expense_request_allocations(self.request.user)
+        kwargs['include_project_in_label'] = use_global
+        kwargs['include_allocation_id'] = self.object.fund_allocation_id
+        if not use_global:
+            kwargs['project'] = self.object.fund_allocation.project
+        if 'data' not in kwargs and 'files' not in kwargs:
+            kwargs['initial'] = {
+                'fund_allocation': self.object.fund_allocation_id,
+                'requested_amount': self.object.requested_amount,
+                'purpose': self.object.purpose,
+                'requested_date': self.object.requested_date,
+            }
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = self.page_title
+        context['submit_label'] = _('Guardar cambios')
+        context['cancel_object_pk'] = self.object.pk
+        context['list_url_name'] = 'expense_request_detail'
+        return context
+
+    def form_valid(self, form):
+        try:
+            self.object = update_expense_request(
+                self.object,
+                fund_allocation=form.cleaned_data['fund_allocation'],
+                requested_amount=form.cleaned_data['requested_amount'],
+                purpose=form.cleaned_data['purpose'],
+                requested_date=form.cleaned_data['requested_date'],
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        messages.success(self.request, _('Solicitud de gasto actualizada.'))
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse('expense_request_detail', args=[self.object.pk])
+
+
+class ExpenseRequestWithdrawView(TerminalActionView):
+    permission_required = 'operations.withdraw_expenserequest'
+    model = ExpenseRequest
+    detail_url_name = 'expense_request_detail'
+    action_title = _('Retirar solicitud de gasto')
+    consequence = _(
+        'La solicitud quedará cerrada y no podrá ser evaluada por el Comité.'
+    )
+    submit_label = _('Retirar solicitud')
+    success_message = _('Solicitud de gasto retirada.')
+    is_destructive = True
+    requires_reason = True
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: withdraw route must not leak foreign or non-pending rows.
+        # POST: loads owned PENDING_DECISION request or 404 before form handling.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.object = get_object_or_404(
+                mutable_own_pending_expense_requests_for_user(request.user),
+                pk=kwargs['pk'],
+            )
+            # Skip TerminalActionView.dispatch object load (unscoped model queryset).
+            return FormView.dispatch(self, request, *args, **kwargs)
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        # PRE: confirmation reason is valid and actor owns the pending request.
+        # POST: withdraws through the domain service or redisplays service errors.
+        try:
+            self.object = withdraw_expense_request(
+                self.object,
+                reason=form.cleaned_data['reason'],
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        messages.success(self.request, self.success_message)
+        return HttpResponseRedirect(self.get_success_url())

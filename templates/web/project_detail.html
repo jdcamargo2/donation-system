@@ -26,6 +26,9 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+        {% if can_create_expense_request %}
+            <a class="btn btn-primary" href="{% url 'expense_request_create_for_project' object.pk %}">Solicitar gasto</a>
+        {% endif %}
         {% if perms.operations.change_project and object.status != 'closed' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}

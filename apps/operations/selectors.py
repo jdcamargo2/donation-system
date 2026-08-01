@@ -5,6 +5,7 @@ from django.db.models.functions import Coalesce, Greatest
 from django.shortcuts import get_object_or_404
 
 from .choices import OPERATING_CURRENCY
+from .choices import OPERATING_CURRENCY
 from .models import (
     Donation,
     Expense,
@@ -12,6 +13,7 @@ from .models import (
     ExpenseRequestAttachment,
     ExpenseRequestEvent,
     FundAllocation,
+    Project,
     SupportingDocument,
     ZERO_MONEY,
 )
@@ -22,6 +24,11 @@ MONEY_OUTPUT_FIELD = DecimalField(max_digits=14, decimal_places=2)
 # Elevated workflow permissions grant global Expense Request visibility.
 EXPENSE_REQUEST_GLOBAL_WORKFLOW_PERMISSIONS = (
     'operations.decide_expenserequest',
+    'operations.fulfill_expenserequest',
+    'operations.annul_expenserequest',
+)
+# Admin-style global create (allocation browser) without role-name checks.
+EXPENSE_REQUEST_GLOBAL_CREATE_PERMISSIONS = (
     'operations.fulfill_expenserequest',
     'operations.annul_expenserequest',
 )
@@ -321,3 +328,68 @@ def attachment_display_filename(attachment):
     if not name:
         return ''
     return PurePosixPath(name).name
+
+
+def user_can_create_global_expense_request(user):
+    """
+    PRE: user may be anonymous or authenticated.
+    POST: True when add_expenserequest combines with Admin-style global workflow perms.
+
+    Operator has add_expenserequest but lacks fulfill/annul, so global create stays closed.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return False
+    if not user.has_perm('operations.add_expenserequest'):
+        return False
+    return any(
+        user.has_perm(permission)
+        for permission in EXPENSE_REQUEST_GLOBAL_CREATE_PERMISSIONS
+    )
+
+
+def user_may_use_global_expense_request_allocations(user):
+    """
+    PRE: user may be anonymous or authenticated.
+    POST: True when update/create allocation choices may span all projects (Admin-style).
+    """
+    return user_can_create_global_expense_request(user)
+
+
+def expense_request_allocation_choices(*, project=None, include_allocation_id=None):
+    """
+    PRE: optional project scopes choices; include_allocation_id keeps the current edit row.
+    POST: returns annotated ACTIVE allocations on ACTIVE projects with RECEIVED USD donations,
+          reservation-aware balance > 0 (or the included id), ordered for stable selects.
+    """
+    queryset = with_allocation_list_metrics(
+        FundAllocation.objects.filter(
+            status=FundAllocation.Status.ACTIVE,
+            project__status=Project.Status.ACTIVE,
+            donation__status=Donation.Status.RECEIVED,
+            donation__currency=OPERATING_CURRENCY,
+        ).select_related('project', 'donation')
+    )
+    if project is not None:
+        queryset = queryset.filter(project_id=project.pk)
+    balance_filter = Q(annotated_available_balance__gt=0)
+    if include_allocation_id is not None:
+        balance_filter |= Q(pk=include_allocation_id)
+    return queryset.filter(balance_filter).order_by(
+        'project__code',
+        'budget_category',
+        'code',
+        'pk',
+    )
+
+
+def mutable_own_pending_expense_requests_for_user(user):
+    """
+    PRE: caller enforces change/withdraw permission at the view layer.
+    POST: returns visible PENDING_DECISION requests owned by the actor (404-safe scope).
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return ExpenseRequest.objects.none()
+    return visible_expense_requests_for_user(user).filter(
+        requested_by=user,
+        status=ExpenseRequest.Status.PENDING_DECISION,
+    )

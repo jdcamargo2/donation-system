@@ -25,8 +25,12 @@ from .donations import (
     DonationUpdateView,
 )
 from .expense_requests import (
+    ExpenseRequestCreateForProjectView,
+    ExpenseRequestCreateView,
     ExpenseRequestDetailView,
     ExpenseRequestListView,
+    ExpenseRequestUpdateView,
+    ExpenseRequestWithdrawView,
 )
 from .expenses import (
     ExpenseAnnulView,
@@ -128,8 +132,12 @@ __all__ = [
     'ExpenseDeleteView',
     'ExpenseDetailView',
     'ExpenseListView',
+    'ExpenseRequestCreateForProjectView',
+    'ExpenseRequestCreateView',
     'ExpenseRequestDetailView',
     'ExpenseRequestListView',
+    'ExpenseRequestUpdateView',
+    'ExpenseRequestWithdrawView',
     'ExpenseUpdateView',
     'FundAllocationAnnulView',
     'FundAllocationCreateView',

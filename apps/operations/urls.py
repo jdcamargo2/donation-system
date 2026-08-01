@@ -149,9 +149,29 @@ urlpatterns = [
         name='expense_request_list',
     ),
     path(
+        'expense-requests/new/',
+        views.ExpenseRequestCreateView.as_view(),
+        name='expense_request_create',
+    ),
+    path(
+        'projects/<int:project_pk>/expense-requests/new/',
+        views.ExpenseRequestCreateForProjectView.as_view(),
+        name='expense_request_create_for_project',
+    ),
+    path(
         'expense-requests/<int:pk>/',
         views.ExpenseRequestDetailView.as_view(),
         name='expense_request_detail',
+    ),
+    path(
+        'expense-requests/<int:pk>/edit/',
+        views.ExpenseRequestUpdateView.as_view(),
+        name='expense_request_update',
+    ),
+    path(
+        'expense-requests/<int:pk>/withdraw/',
+        views.ExpenseRequestWithdrawView.as_view(),
+        name='expense_request_withdraw',
     ),
     path('expenses/', views.ExpenseListView.as_view(), name='expense_list'),
     path('expenses/export.csv', views.ExpenseCsvExportView.as_view(), name='expense_export_csv'),

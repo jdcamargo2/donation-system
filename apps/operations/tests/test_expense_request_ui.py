@@ -1,4 +1,4 @@
-"""Expense Request read-only UI and sidebar tests (ER3A)."""
+"""Expense Request read-only UI regressions and ER3B visibility (ER3A+ER3B)."""
 
 import tempfile
 from decimal import Decimal
@@ -26,10 +26,7 @@ from apps.operations.tests.helpers import TEST_DATE, create_allocation
 from apps.operations.tests.test_permissions import create_user_with_permissions
 
 
-MUTATION_LABELS = (
-    'Nueva solicitud',
-    'Editar',
-    'Retirar',
+DECISION_FULFILL_LABELS = (
     'Aprobar',
     'Denegar',
     'Anular solicitud',
@@ -61,34 +58,67 @@ class ExpenseRequestUITests(TestCase):
         user.groups.add(Group.objects.get(name=role_name))
         return user
 
-    def _assert_read_only(self, response):
+    def _assert_no_decision_fulfill_controls(self, response):
         html = response.content.decode()
-        for label in MUTATION_LABELS:
+        for label in DECISION_FULFILL_LABELS:
             self.assertNotIn(label, html)
-        self.assertNotIn('expense_request_create', html)
-        self.assertNotIn('expense_request_update', html)
-        self.assertNotIn('expense_request_withdraw', html)
         self.assertNotIn('expense_request_approve', html)
         self.assertNotIn('expense_request_deny', html)
         self.assertNotIn('expense_request_annul', html)
         self.assertNotIn('expense_request_fulfill', html)
 
-    def test_list_and_detail_are_read_only_for_all_roles(self):
-        roles = (self.admin, self.operator, self.committee, self.auditor)
-        for user in roles:
+    def test_committee_and_auditor_detail_remain_read_only(self):
+        for user in (self.committee, self.auditor):
             with self.subTest(user=user.username):
                 self.client.force_login(user)
                 list_response = self.client.get(reverse('expense_request_list'))
                 if list_response.status_code == 302:
                     list_response = self.client.get(list_response['Location'])
                 self.assertEqual(list_response.status_code, 200)
-                self._assert_read_only(list_response)
+                self.assertNotContains(list_response, 'Nueva solicitud')
+                self._assert_no_decision_fulfill_controls(list_response)
 
                 detail_response = self.client.get(
                     reverse('expense_request_detail', args=[self.request_obj.pk])
                 )
                 self.assertEqual(detail_response.status_code, 200)
-                self._assert_read_only(detail_response)
+                self.assertFalse(detail_response.context['can_edit_expense_request'])
+                self.assertFalse(detail_response.context['can_withdraw_expense_request'])
+                self.assertNotContains(
+                    detail_response,
+                    reverse('expense_request_update', args=[self.request_obj.pk]),
+                )
+                self.assertNotContains(
+                    detail_response,
+                    reverse('expense_request_withdraw', args=[self.request_obj.pk]),
+                )
+                self._assert_no_decision_fulfill_controls(detail_response)
+
+    def test_pending_owner_sees_edit_and_withdraw(self):
+        self.client.force_login(self.operator)
+        response = self.client.get(
+            reverse('expense_request_detail', args=[self.request_obj.pk])
+        )
+        self.assertTrue(response.context['can_edit_expense_request'])
+        self.assertTrue(response.context['can_withdraw_expense_request'])
+        self.assertContains(response, 'Editar')
+        self.assertContains(response, 'Retirar')
+
+    def test_pending_non_owner_admin_does_not_see_requester_actions(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(
+            reverse('expense_request_detail', args=[self.request_obj.pk])
+        )
+        self.assertFalse(response.context['can_edit_expense_request'])
+        self.assertFalse(response.context['can_withdraw_expense_request'])
+        self.assertNotContains(
+            response,
+            reverse('expense_request_update', args=[self.request_obj.pk]),
+        )
+        self.assertNotContains(
+            response,
+            reverse('expense_request_withdraw', args=[self.request_obj.pk]),
+        )
 
     def test_attachments_render_metadata_without_file_url(self):
         attachment = ExpenseRequestAttachment.objects.create(
@@ -168,7 +198,7 @@ class ExpenseRequestUITests(TestCase):
         self.assertContains(response, 'title="Solicitudes de gasto"')
         self.assertContains(response, reverse('expense_request_list'))
 
-    def test_fulfilled_detail_helper_text_and_no_mutation_controls(self):
+    def test_fulfilled_detail_helper_text_and_no_requester_mutation_controls(self):
         approved = approve_expense_request(self.request_obj, actor=self.committee)
         fulfilled = fulfill_expense_request(
             approved,
@@ -183,9 +213,11 @@ class ExpenseRequestUITests(TestCase):
             category='food',
             actor=self.admin,
         )
-        self.client.force_login(self.admin)
+        self.client.force_login(self.operator)
         response = self.client.get(
             reverse('expense_request_detail', args=[fulfilled.pk])
         )
         self.assertContains(response, 'La reserva fue convertida en gasto.')
-        self._assert_read_only(response)
+        self.assertFalse(response.context['can_edit_expense_request'])
+        self.assertFalse(response.context['can_withdraw_expense_request'])
+        self._assert_no_decision_fulfill_controls(response)

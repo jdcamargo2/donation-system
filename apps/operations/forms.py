@@ -733,6 +733,106 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
         return expense
 
 
+class ExpenseRequestAllocationChoiceField(forms.ModelChoiceField):
+    """Allocation picker for Expense Request forms with safe Operator-facing labels."""
+
+    include_project_in_label = False
+
+    def label_from_instance(self, allocation):
+        # PRE: allocation belongs to the annotated operational queryset.
+        # POST: returns category + available balance; never donor/donation code/__str__.
+        label = _('%(category)s · Disponible: %(available)s') % {
+            'category': allocation.get_budget_category_display(),
+            'available': format_usd_amount(allocation.available_balance),
+        }
+        if self.include_project_in_label:
+            project = allocation.project
+            label = _('%(label)s · %(project_code)s · %(project_name)s') % {
+                'label': label,
+                'project_code': project.code,
+                'project_name': project.name,
+            }
+        return label
+
+
+class ExpenseRequestForm(BootstrapFormMixin, forms.Form):
+    """
+    Global or project-scoped Expense Request create/update form.
+
+    Does not call ModelForm.save(); views must invoke expense_request_services.
+    """
+
+    fund_allocation = ExpenseRequestAllocationChoiceField(
+        queryset=FundAllocation.objects.none(),
+        label=_('Asignación'),
+        help_text=_(
+            'La solicitud no reserva fondos hasta que sea aprobada por el Comité.'
+        ),
+        error_messages={
+            'invalid_choice': _(
+                'La asignación seleccionada no está disponible para esta solicitud.'
+            ),
+        },
+    )
+    requested_amount = MoneyDecimalField(
+        label=_('Monto solicitado'),
+        min_value=Decimal('0.01'),
+        help_text=_(
+            'El monto será validado nuevamente al momento de la aprobación. Ejemplo: 1.500,00.'
+        ),
+    )
+    purpose = forms.CharField(
+        label=_('Propósito'),
+        max_length=220,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+    requested_date = forms.DateField(
+        label=_('Fecha de solicitud'),
+        help_text=_('Formato: dd/mm/aaaa.'),
+        widget=build_date_widget(),
+    )
+
+    def __init__(
+        self,
+        *args,
+        project=None,
+        include_project_in_label=False,
+        include_allocation_id=None,
+        **kwargs,
+    ):
+        # PRE: optional project scopes allocation choices; include_allocation_id keeps edit row.
+        # POST: binds annotated queryset and label policy without mutating domain state.
+        from .selectors import expense_request_allocation_choices
+
+        super().__init__(*args, **kwargs)
+        self.project = project
+        self.fields['fund_allocation'].include_project_in_label = include_project_in_label
+        self.fields['fund_allocation'].queryset = expense_request_allocation_choices(
+            project=project,
+            include_allocation_id=include_allocation_id,
+        )
+
+    def clean_purpose(self):
+        purpose = self.cleaned_data['purpose'].strip()
+        if not purpose:
+            raise ValidationError(_('El propósito de la solicitud es obligatorio.'))
+        return purpose
+
+
+class ExpenseRequestForProjectForm(ExpenseRequestForm):
+    """Project-context create form: allocations limited to the URL project."""
+
+    def __init__(self, *args, project, **kwargs):
+        # PRE: project is the authorized parent from the create-for-project route.
+        # POST: scopes allocation choices to that project without a mutable project input.
+        if project is None:
+            raise ValueError('ExpenseRequestForProjectForm requires a project.')
+        kwargs.setdefault('include_project_in_label', False)
+        kwargs['project'] = project
+        super().__init__(*args, **kwargs)
+
+
 class ExpenseAnnulmentForm(BootstrapFormMixin, forms.Form):
     reason = forms.CharField(
         label=_('Razón de anulación'),

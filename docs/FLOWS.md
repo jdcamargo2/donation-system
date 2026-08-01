@@ -303,11 +303,19 @@ rechazo.
 
 * Solo `APPROVED_RESERVED` reduce el saldo disponible por reserva.
 * `FULFILLED` convierte reserva en ejecución (exacta o parcial).
-* ER3A expone listado y detalle de solo lectura (`expense_request_list` /
+* ER3A expone listado y detalle (`expense_request_list` /
   `expense_request_detail`) con selector de visibilidad por permisos efectivos:
   Operador ve solo las propias; Admin/Comité/Auditor ven todas. El Comité entra
-  por defecto en `pending_decision`. No hay botones de mutación, adjuntos
-  protegidos ni atajos de panel en este checkpoint.
+  por defecto en `pending_decision`.
+* ER3B añade el flujo del solicitante:
+  * Operador crea desde el detalle del proyecto (`expense_request_create_for_project`);
+  * Administrador crea desde proyecto o desde el listado global
+    (`expense_request_create`);
+  * solo el solicitante original edita o retira su solicitud en
+    `PENDING_DECISION` (`expense_request_update` / `expense_request_withdraw`);
+  * la creación no reserva fondos; el Comité sigue siendo la puerta de reserva;
+  * adjuntos permanecen de solo lectura; no hay UI de decisión, anulación
+    administrativa ni cumplimiento todavía.
 
 ---
 

@@ -186,6 +186,10 @@ class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
             self.request.user.has_perm('operations.change_project')
             and self.object.status == Project.Status.ACTIVE
         )
+        context['can_create_expense_request'] = (
+            self.request.user.has_perm('operations.add_expenserequest')
+            and self.object.status == Project.Status.ACTIVE
+        )
         context['can_manage_publication'] = self.request.user.has_perm(
             'operations.manage_project_publication'
         )

@@ -9,7 +9,13 @@
         <div class="ops-kicker">Solicitudes de gasto</div>
         <h1>Solicitudes de gasto</h1>
         <p>Consulte las solicitudes, sus decisiones y su estado de ejecución.</p>
+        {% if can_create_expense_request and not can_create_global_expense_request %}
+            <p class="text-muted mb-0">Cree una solicitud desde el detalle de un proyecto.</p>
+        {% endif %}
     </div>
+    {% if can_create_global_expense_request %}
+        <a class="btn btn-primary" href="{% url 'expense_request_create' %}">Nueva solicitud</a>
+    {% endif %}
 </div>
 {% include "web/includes/list_filters.html" %}
 

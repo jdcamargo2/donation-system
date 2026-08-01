@@ -135,8 +135,9 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
   `PENDING_DECISION`; la aprobación/reserva es exclusiva del Comité.
 * Puede cumplir solicitudes aprobadas (`fulfill_expenserequest`) y anular
   administrativamente pendientes o reservadas (`annul_expenserequest`).
-* En ER3A consulta todas las solicitudes en listado/detalle de solo lectura
-  (sin controles de mutación todavía).
+* En ER3A consulta todas las solicitudes en listado/detalle.
+* En ER3B puede crear solicitudes (global y desde proyecto), y editar/retirar
+  solo las propias en `PENDING_DECISION`.
 * No recibe `delete_expenserequest` ni permisos de mutación de `ExpenseRequestEvent`.
 * No recibe automáticamente permisos técnicos generales de Kobo distintos de los cinco territoriales.
 
@@ -181,12 +182,14 @@ operations.view_expenserequestevent
   datos financieros del gasto);
 * registrar soportes permitidos;
 * gestionar remediaciones propias (crear, editar, adjuntar, enviar);
-* crear solicitudes de gasto;
+* crear solicitudes de gasto desde el detalle de un proyecto (no desde el
+  listado global);
 * editar y retirar **solo** solicitudes propias en `PENDING_DECISION`.
 
-En la UI de solo lectura (ER3A), el listado/detalle de solicitudes se limita a
+En la UI (ER3A+ER3B), el listado/detalle de solicitudes se limita a
 las creadas por el mismo usuario (`requested_by`); no ve solicitudes de otros
-Operadores.
+Operadores. El listado no muestra «Nueva solicitud» global; el CTA es
+«Solicitar gasto» en el detalle del proyecto.
 
 Al registrar un avance, el usuario autenticado se asigna automáticamente como
 persona responsable. El campo se muestra en modo no editable.
@@ -247,9 +250,10 @@ Puede consultar:
 * auditoría;
 * hub territorial (lectura).
 
-En ER3A el Auditor ve **todas** las solicitudes visibles en listado/detalle
+En ER3A/ER3B el Auditor ve **todas** las solicitudes visibles en listado/detalle
 (read-only global), con el ítem de sidebar «Solicitudes de gasto»; el ocultamiento
-de accesos rápidos del panel no afecta esa navegación.
+de accesos rápidos del panel no afecta esa navegación. No ve «Solicitar gasto»,
+«Editar» ni «Retirar».
 
 ### Restricciones
 
@@ -312,9 +316,10 @@ kobo.view_territorial_administration
   la aprobación reserva atómicamente el monto solicitado sobre la asignación;
 * consultar el hub territorial en modo lectura.
 
-En ER3A el Comité ve todas las solicitudes; la primera visita al listado aplica
+En ER3A/ER3B el Comité ve todas las solicitudes; la primera visita al listado aplica
 por defecto el filtro `pending_decision` (sobreescribible). La UI de decisión
-aún no está en este checkpoint.
+aún no está en este checkpoint; tampoco ve CTAs de creación/edición/retiro del
+solicitante.
 
 ### No recibe
 
