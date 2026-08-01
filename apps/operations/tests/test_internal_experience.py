@@ -3,15 +3,41 @@ from decimal import Decimal
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group, Permission
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
-from apps.operations.models import Donation, Expense, FundAllocation, Project, ProjectUpdate, SupportingDocument
+from apps.operations.expense_request_services import (
+    approve_expense_request,
+    create_expense_request,
+)
+from apps.operations.models import (
+    Donation,
+    Expense,
+    FundAllocation,
+    Project,
+    ProjectUpdate,
+    SupportingDocument,
+)
+from apps.operations.role_services import sync_operation_roles
+from apps.operations.roles import (
+    ROLE_FIELD_OPERATOR,
+    ROLE_PROJECT_COMMITTEE,
+    ROLE_SIGEDON_ADMIN,
+)
+from apps.operations.services import create_expense as create_expense_public
 from apps.operations.services import register_advance
-from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project
+from apps.operations.tests.helpers import (
+    TEST_DATE,
+    create_allocation,
+    create_donation,
+    create_expense,
+    create_institution,
+    create_project,
+    create_support_upload,
+)
 
 
 class InternalExperienceTemplateTests(TestCase):
@@ -176,8 +202,17 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(response, 'Distribución financiera')
         self.assertContains(response, f'<h1>{self.allocation.code}</h1>', count=1, html=True)
         self.assertContains(response, self.allocation.get_status_display(), count=1)
-        self.assertContains(response, 'Nuevo gasto')
-        self.assertContains(response, reverse('expense_create'))
+        self.assertContains(response, 'Solicitar gasto')
+        self.assertContains(
+            response,
+            reverse(
+                'expense_request_create_for_project',
+                args=[self.allocation.project.pk],
+            ),
+        )
+        self.assertNotContains(response, 'Nuevo gasto')
+        self.assertNotContains(response, reverse('expense_create'))
+        self.assertTrue(response.context['can_create_expense_request'])
         self.assertContains(response, 'Más')
         self.assertIn(f'href="{delete_url}"', content)
         self.assertIn(
@@ -705,3 +740,121 @@ class InternalExperienceTemplateTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse('login'), response['Location'])
+
+    def test_expense_list_and_dashboard_retire_direct_expense_creation_ctas(self):
+        expense_list = self.client.get(reverse('expense_list'))
+        dashboard = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(expense_list.status_code, 200)
+        self.assertNotContains(expense_list, 'Nuevo gasto')
+        self.assertNotContains(expense_list, reverse('expense_create'))
+        self.assertContains(expense_list, 'Ver solicitudes de gasto')
+        self.assertContains(expense_list, reverse('expense_request_list'))
+        self.assertContains(
+            expense_list,
+            reverse('expense_detail', args=[self.expense.pk]),
+        )
+
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertNotContains(dashboard, 'Crear gasto')
+        self.assertNotContains(dashboard, reverse('expense_create'))
+        self.assertContains(dashboard, 'Ver solicitudes')
+        self.assertContains(dashboard, 'Pendientes de registrar gasto')
+        self.assertContains(dashboard, 'status=approved_reserved')
+
+    def test_approved_request_detail_shows_registrar_gasto_for_administrator(self):
+        sync_operation_roles()
+        admin = get_user_model().objects.create_user(
+            username='ie-admin', password='pass-12345',
+        )
+        operator = get_user_model().objects.create_user(
+            username='ie-operator', password='pass-12345',
+        )
+        committee = get_user_model().objects.create_user(
+            username='ie-committee', password='pass-12345',
+        )
+        admin.groups.add(Group.objects.get(name=ROLE_SIGEDON_ADMIN))
+        operator.groups.add(Group.objects.get(name=ROLE_FIELD_OPERATOR))
+        committee.groups.add(Group.objects.get(name=ROLE_PROJECT_COMMITTEE))
+
+        request_allocation = create_allocation(
+            donation=create_donation(code='DON-IE-FULFILL', amount=Decimal('100.00')),
+            project=create_project(code='PRJ-IE-FULFILL'),
+            amount=Decimal('80.00'),
+        )
+        request_allocation.project.status = Project.Status.ACTIVE
+        request_allocation.project.save(update_fields=('status', 'updated_at'))
+        pending = create_expense_request(
+            fund_allocation=request_allocation,
+            requested_amount=Decimal('25.00'),
+            purpose='Solicitud para CTA de cumplimiento interno',
+            requested_date=TEST_DATE,
+            actor=operator,
+        )
+        approved = approve_expense_request(pending, actor=committee)
+
+        self.client.force_login(admin)
+        response = self.client.get(
+            reverse('expense_request_detail', args=[approved.pk]),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['can_fulfill_expense_request'])
+        self.assertContains(response, 'Registrar gasto')
+        self.assertContains(
+            response,
+            reverse('expense_request_fulfill', args=[approved.pk]),
+        )
+
+    def test_legacy_expense_create_get_and_post_redirect_without_creating(self):
+        expenses_before = Expense.objects.count()
+        docs_before = SupportingDocument.objects.count()
+
+        get_response = self.client.get(reverse('expense_create'))
+        self.assertEqual(get_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), get_response['Location'])
+        self.assertIn('status=approved_reserved', get_response['Location'])
+
+        post_response = self.client.post(
+            reverse('expense_create'),
+            {
+                'allocation': self.allocation.pk,
+                'expense_date': TEST_DATE.isoformat(),
+                'category': 'food',
+                'amount': '10.00',
+                'reason': 'Intento directo desde experiencia interna',
+                'provider_or_recipient': 'Proveedor',
+                'payment_method': 'bank_transfer',
+                'support_title': 'Soporte inválido',
+                'support_file': create_support_upload('direct-ie.pdf'),
+            },
+        )
+        self.assertEqual(post_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), post_response['Location'])
+        self.assertEqual(Expense.objects.count(), expenses_before)
+        self.assertEqual(SupportingDocument.objects.count(), docs_before)
+
+        follow = self.client.get(get_response['Location'], follow=True)
+        self.assertContains(
+            follow,
+            'El gasto debe registrarse desde una solicitud de gasto aprobada.',
+        )
+
+    def test_public_create_expense_service_remains_rejected(self):
+        with self.assertRaisesMessage(
+            Exception,
+            'El gasto debe registrarse desde una solicitud de gasto aprobada.',
+        ):
+            create_expense_public(
+                allocation=self.allocation,
+                expense_date=TEST_DATE,
+                category='food',
+                amount=Decimal('10.00'),
+                reason='Directo desde experiencia interna',
+                provider_or_recipient='Proveedor',
+                payment_method='cash',
+                description='',
+                observations='',
+                actor=self.user,
+                support_title='x',
+                support_file=create_support_upload('svc-ie.pdf'),
+            )

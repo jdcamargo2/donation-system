@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 
 from apps.operations.models import Donation, Expense, ExpenseRequest, FundAllocation, Institution, Project
@@ -121,3 +122,72 @@ def create_approved_reserved_request(
         reserved_amount=reserved,
         reserved_at=now,
     )
+
+
+def create_support_upload(name='soporte.pdf', content=b'%PDF-1.4 soporte prueba'):
+    """
+    PRE: name/content identify an in-memory upload suitable for fulfillment tests.
+    POST: returns a SimpleUploadedFile that never touches repository media paths.
+    """
+    return SimpleUploadedFile(name, content, content_type='application/pdf')
+
+
+def create_fulfilled_expense_request(
+    *,
+    allocation,
+    requester,
+    committee_actor,
+    admin_actor,
+    requested_amount,
+    expense_amount=None,
+    requested_date=None,
+    expense_date=None,
+    purpose='Solicitud cumplida de prueba',
+    support_file=None,
+    **expense_fields,
+):
+    """
+    PRE: actors hold create/decide/fulfill permissions; allocation admits the ER5 chain.
+    POST: returns (FULFILLED ExpenseRequest, Expense, SupportingDocument) via domain services.
+    """
+    from apps.operations.expense_request_services import (
+        approve_expense_request as approve_request_service,
+        create_expense_request as create_request_service,
+        fulfill_expense_request as fulfill_request_service,
+    )
+
+    req_date = requested_date if requested_date is not None else TEST_DATE
+    exp_date = expense_date if expense_date is not None else req_date
+    executed = expense_amount if expense_amount is not None else requested_amount
+    upload = support_file if support_file is not None else create_support_upload()
+
+    pending = create_request_service(
+        fund_allocation=allocation,
+        requested_amount=requested_amount,
+        purpose=purpose,
+        requested_date=req_date,
+        actor=requester,
+    )
+    approved = approve_request_service(pending, actor=committee_actor)
+    fulfilled = fulfill_request_service(
+        approved,
+        expense_date=exp_date,
+        amount=executed,
+        reason=expense_fields.pop('reason', purpose),
+        provider_or_recipient=expense_fields.pop(
+            'provider_or_recipient',
+            'Proveedor de prueba',
+        ),
+        payment_method=expense_fields.pop('payment_method', 'bank_transfer'),
+        description=expense_fields.pop('description', ''),
+        support_file=upload,
+        support_title=expense_fields.pop('support_title', 'Soporte de prueba'),
+        category=expense_fields.pop('category', 'food'),
+        support_notes=expense_fields.pop('support_notes', ''),
+        observations=expense_fields.pop('observations', ''),
+        actor=admin_actor,
+        **expense_fields,
+    )
+    expense = fulfilled.expense
+    document = expense.supporting_documents.get()
+    return fulfilled, expense, document

@@ -1,18 +1,33 @@
+import shutil
+import tempfile
 from datetime import date
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.contrib.messages import get_messages
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from apps.operations.expense_request_services import (
+    approve_expense_request,
+    create_expense_request,
+)
 from apps.operations.forms import DonationForm, ExpenseForm, FundAllocationForm, ProjectForm
-from apps.operations.models import Donation, Expense, FundAllocation, Project
+from apps.operations.models import Donation, Expense, ExpenseRequest, FundAllocation, Project, SupportingDocument
+from apps.operations.role_services import sync_operation_roles
+from apps.operations.roles import (
+    ROLE_FIELD_OPERATOR,
+    ROLE_PROJECT_COMMITTEE,
+    ROLE_SIGEDON_ADMIN,
+)
 from apps.operations.tests.helpers import (
     create_allocation,
     create_donation,
     create_institution,
     create_project,
+    create_support_upload,
     create_user,
 )
 
@@ -129,6 +144,10 @@ class DateFormContractTests(TestCase):
 
 class DatePersistenceViewTests(TestCase):
     def setUp(self):
+        self.temp_media = tempfile.mkdtemp()
+        self.media_override = override_settings(MEDIA_ROOT=self.temp_media)
+        self.media_override.enable()
+        sync_operation_roles()
         self.user = create_user(username='date-operator')
         self.client.force_login(self.user)
         self.donor = create_institution()
@@ -141,6 +160,18 @@ class DatePersistenceViewTests(TestCase):
             project=self.project,
             amount=Decimal('100.00'),
         )
+        self.admin = self._role_user('date-admin', ROLE_SIGEDON_ADMIN)
+        self.requester = self._role_user('date-requester', ROLE_FIELD_OPERATOR)
+        self.committee = self._role_user('date-committee', ROLE_PROJECT_COMMITTEE)
+
+    def tearDown(self):
+        self.media_override.disable()
+        shutil.rmtree(self.temp_media, ignore_errors=True)
+
+    def _role_user(self, username, role_name):
+        user = get_user_model().objects.create_user(username=username, password='pass-12345')
+        user.groups.add(Group.objects.get(name=role_name))
+        return user
 
     def test_project_create_update_and_edit_render_persist_dates(self):
         response = self.client.post(reverse('project_create'), self._project_data(INITIAL_DATE, UPDATED_DATE))
@@ -194,21 +225,75 @@ class DatePersistenceViewTests(TestCase):
         self.assertEqual(invalid_response.status_code, 200)
         self.assertFormError(invalid_response.context['form'], 'allocation_date', 'Este campo es obligatorio.')
 
-    def test_expense_create_update_and_missing_date_behave_correctly(self):
-        response = self.client.post(reverse('expense_create'), self._expense_data(INITIAL_DATE))
-        self.assertRedirects(response, reverse('expense_list'))
-        expense = Expense.objects.get(reason='Gasto con fechas')
-        self.assertEqual(expense.expense_date, INITIAL_DATE)
+    def test_expense_fulfill_update_and_missing_date_behave_correctly(self):
+        pending = create_expense_request(
+            fund_allocation=self.allocation,
+            requested_amount=Decimal('10.00'),
+            purpose='Solicitud con fechas de gasto',
+            requested_date=INITIAL_DATE,
+            actor=self.requester,
+        )
+        approved = approve_expense_request(pending, actor=self.committee)
+        reserved_before = approved.reserved_amount
+        expenses_before = Expense.objects.count()
+        docs_before = SupportingDocument.objects.count()
 
-        response = self.client.post(reverse('expense_update', args=[expense.pk]), self._expense_data(UPDATED_DATE))
+        self.client.force_login(self.admin)
+        fulfill_url = reverse('expense_request_fulfill', args=[approved.pk])
+        response = self.client.post(fulfill_url, self._fulfill_data(INITIAL_DATE))
+        self.assertRedirects(
+            response,
+            reverse('expense_request_detail', args=[approved.pk]),
+        )
+        approved.refresh_from_db()
+        self.assertEqual(approved.status, ExpenseRequest.Status.FULFILLED)
+        self.assertEqual(approved.requested_date, INITIAL_DATE)
+        expense = Expense.objects.get(pk=approved.expense_id)
+        self.assertEqual(expense.expense_date, INITIAL_DATE)
+        self.assertEqual(expense.reason, 'Gasto con fechas')
+        self.assertEqual(SupportingDocument.objects.filter(expense=expense).count(), 1)
+
+        response = self.client.post(
+            reverse('expense_update', args=[expense.pk]),
+            self._expense_update_data(UPDATED_DATE),
+        )
         self.assertRedirects(response, reverse('expense_list'))
         expense.refresh_from_db()
+        approved.refresh_from_db()
         self.assertEqual(expense.expense_date, UPDATED_DATE)
         self.assertEqual(expense.currency, 'USD')
+        self.assertEqual(approved.requested_date, INITIAL_DATE)
 
-        invalid_response = self.client.post(reverse('expense_create'), self._expense_data(''))
+        second_pending = create_expense_request(
+            fund_allocation=self.allocation,
+            requested_amount=Decimal('10.00'),
+            purpose='Segunda solicitud con fecha inválida',
+            requested_date=INITIAL_DATE,
+            actor=self.requester,
+        )
+        second_approved = approve_expense_request(second_pending, actor=self.committee)
+        expenses_before_invalid = Expense.objects.count()
+        docs_before_invalid = SupportingDocument.objects.count()
+        invalid_response = self.client.post(
+            reverse('expense_request_fulfill', args=[second_approved.pk]),
+            self._fulfill_data(''),
+        )
         self.assertEqual(invalid_response.status_code, 200)
-        self.assertFormError(invalid_response.context['form'], 'expense_date', 'Este campo es obligatorio.')
+        self.assertFormError(
+            invalid_response.context['form'],
+            'expense_date',
+            'Este campo es obligatorio.',
+        )
+        self.assertEqual(invalid_response.context['form']['expense_date'].value(), '')
+        second_approved.refresh_from_db()
+        self.assertEqual(second_approved.status, ExpenseRequest.Status.APPROVED_RESERVED)
+        self.assertEqual(second_approved.requested_date, INITIAL_DATE)
+        self.assertEqual(second_approved.reserved_amount, reserved_before)
+        self.assertIsNone(second_approved.expense_id)
+        self.assertEqual(Expense.objects.count(), expenses_before_invalid)
+        self.assertEqual(SupportingDocument.objects.count(), docs_before_invalid)
+        self.assertEqual(expenses_before + 1, expenses_before_invalid)
+        self.assertEqual(docs_before + 1, docs_before_invalid)
 
     def _project_data(self, start_date, end_date):
         return {
@@ -245,7 +330,22 @@ class DatePersistenceViewTests(TestCase):
             'notes': '',
         }
 
-    def _expense_data(self, expense_date):
+    def _fulfill_data(self, expense_date):
+        return {
+            'expense_date': expense_date,
+            'amount': '10.00',
+            'category': 'food',
+            'reason': 'Gasto con fechas',
+            'provider_or_recipient': 'Proveedor',
+            'payment_method': 'bank_transfer',
+            'description': '',
+            'observations': '',
+            'support_title': 'Soporte de fecha',
+            'support_notes': '',
+            'support_file': create_support_upload('fecha.pdf'),
+        }
+
+    def _expense_update_data(self, expense_date):
         return {
             'allocation': self.allocation.pk,
             'expense_date': expense_date,
@@ -257,6 +357,5 @@ class DatePersistenceViewTests(TestCase):
             'description': '',
             'observations': '',
             'support_title': 'Soporte de fecha',
-            'support_file': SimpleUploadedFile('fecha.pdf', b'%PDF soporte'),
             'currency': 'EUR',
         }
