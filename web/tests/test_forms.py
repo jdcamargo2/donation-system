@@ -440,6 +440,106 @@ class FormTests(TestCase):
 
         self.assertNotIn(self.donation, form.fields['donation'].queryset)
 
+    def test_allocation_form_includes_eligible_received_donation(self):
+        self.assertEqual(self.donation.status, Donation.Status.RECEIVED)
+        self.assertEqual(self.donation.currency, 'USD')
+        self.assertGreater(self.donation.available_balance, 0)
+
+        form = FundAllocationForm()
+
+        self.assertIn(self.donation, form.fields['donation'].queryset)
+
+    def test_allocation_form_excludes_registered_donation(self):
+        registered = create_donation(
+            code='DON-REG',
+            donor=self.donor,
+            amount=Decimal('100.00'),
+            status=Donation.Status.REGISTERED,
+        )
+        self.assertGreater(registered.available_balance, 0)
+
+        form = FundAllocationForm()
+
+        self.assertNotIn(registered, form.fields['donation'].queryset)
+
+    def test_allocation_form_excludes_annulled_donation(self):
+        annulled = create_donation(
+            code='DON-ANN',
+            donor=self.donor,
+            amount=Decimal('100.00'),
+            status=Donation.Status.ANNULLED,
+        )
+        self.assertGreater(annulled.amount, 0)
+
+        form = FundAllocationForm()
+
+        self.assertNotIn(annulled, form.fields['donation'].queryset)
+
+    def test_allocation_form_excludes_zero_balance_received_donation_on_create(self):
+        create_allocation(donation=self.donation, project=self.project, amount=self.donation.amount)
+        self.assertEqual(self.donation.status, Donation.Status.RECEIVED)
+        self.assertEqual(self.donation.available_balance, Decimal('0.00'))
+
+        form = FundAllocationForm()
+
+        self.assertNotIn(self.donation, form.fields['donation'].queryset)
+
+    def test_allocation_form_preserves_current_received_donation_with_zero_external_balance_on_edit(self):
+        allocation = create_allocation(
+            donation=self.donation,
+            project=self.project,
+            amount=self.donation.amount,
+        )
+        self.assertEqual(self.donation.status, Donation.Status.RECEIVED)
+        self.assertEqual(self.donation.available_balance, Decimal('0.00'))
+        registered = create_donation(
+            code='DON-REG-EDIT',
+            donor=self.donor,
+            amount=Decimal('50.00'),
+            status=Donation.Status.REGISTERED,
+        )
+        annulled = create_donation(
+            code='DON-ANN-EDIT',
+            donor=self.donor,
+            amount=Decimal('50.00'),
+            status=Donation.Status.ANNULLED,
+        )
+
+        form = FundAllocationForm(instance=allocation)
+
+        self.assertIn(self.donation, form.fields['donation'].queryset)
+        self.assertEqual(form.initial.get('donation'), self.donation.pk)
+        self.assertEqual(form.instance.donation_id, self.donation.pk)
+        self.assertNotIn(registered, form.fields['donation'].queryset)
+        self.assertNotIn(annulled, form.fields['donation'].queryset)
+
+    def test_allocation_form_rejects_forged_registered_donation_post(self):
+        registered = create_donation(
+            code='DON-FORGED',
+            donor=self.donor,
+            amount=Decimal('100.00'),
+            status=Donation.Status.REGISTERED,
+        )
+        form = FundAllocationForm(
+            data={
+                'donation': registered.pk,
+                'project': self.project.pk,
+                'budget_category': 'health_psychosocial',
+                'amount': '10.00',
+                'responsible_person': 'Coordinator',
+                'allocation_date': TEST_DATE,
+                'notes': '',
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('donation', form.errors)
+        self.assertEqual(
+            form.errors['donation'],
+            ['La donación no está operativa o no tiene saldo disponible.'],
+        )
+        self.assertFalse(FundAllocation.objects.filter(donation=registered).exists())
+
     def test_allocation_form_excludes_terminal_project(self):
         self.project.status = Project.Status.CLOSED
         self.project.save(update_fields=('status',))

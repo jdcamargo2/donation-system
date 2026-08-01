@@ -511,8 +511,9 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         current_donation_id = self.instance.donation_id if self.instance.pk else None
-        donations = Donation.objects.filter(currency=OPERATING_CURRENCY).exclude(
-            status=Donation.Status.ANNULLED
+        donations = Donation.objects.filter(
+            currency=OPERATING_CURRENCY,
+            status=Donation.Status.RECEIVED,
         )
         eligible_donation_ids = [
             donation.pk for donation in donations
