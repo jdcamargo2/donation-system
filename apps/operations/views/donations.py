@@ -128,8 +128,8 @@ class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequir
         context['has_more_donation_allocations'] = allocation_count > len(recent_allocations)
         context['can_create_allocation'] = (
             self.request.user.has_perm('operations.add_fundallocation')
+            and self.object.status == Donation.Status.RECEIVED
             and financial_summary['available_amount'] > 0
-            and self.object.status != Donation.Status.ANNULLED
         )
         context['show_edit_in_more'] = (
             context['can_create_allocation']

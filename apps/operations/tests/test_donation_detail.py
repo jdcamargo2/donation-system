@@ -175,7 +175,7 @@ class DonationDetailTests(TestCase):
         self.assertIn('data-confirm-variant="warning"', button_markup)
         self.assertContains(response, 'web/js/confirm_actions.js')
 
-    def test_receive_action_order_is_volver_receive_nueva_asignacion_mas(self):
+    def test_receive_action_order_is_volver_receive_editar_mas(self):
         registered = self.create_registered_donation(code='DON-DETAIL-RECEIVE-ORDER')
         editor = self.create_user_with_permissions(
             'donation-receive-order',
@@ -187,29 +187,112 @@ class DonationDetailTests(TestCase):
         self.client.force_login(editor)
 
         response = self.client.get(reverse('donation_detail', args=[registered.pk]))
-        header_actions = self.header_actions_html(response.content.decode())
+        content = response.content.decode()
+        header_actions = self.header_actions_html(content)
+        update_url = reverse('donation_update', args=[registered.pk])
 
         volver_pos = header_actions.index('>Volver</a>')
         receive_pos = header_actions.index('Cambiar a Recibida')
-        nueva_pos = header_actions.index('Nueva asignación')
+        edit_pos = header_actions.index(f'href="{update_url}"')
         mas_pos = header_actions.index('>Más</button>')
 
         self.assertLess(volver_pos, receive_pos)
-        self.assertLess(receive_pos, nueva_pos)
-        self.assertLess(nueva_pos, mas_pos)
+        self.assertLess(receive_pos, edit_pos)
+        self.assertLess(edit_pos, mas_pos)
+        self.assertNotContains(response, 'Nueva asignación')
+        self.assertNotContains(response, reverse('allocation_create'))
+        self.assertFalse(response.context['can_create_allocation'])
+        self.assertNotIn('Editar', self.dropdown_menu_html(content))
+
+    def test_registered_donation_hides_nueva_asignacion_and_shows_header_edit(self):
+        registered = self.create_registered_donation(code='DON-DETAIL-REG-ALLOC')
+        editor = self.create_user_with_permissions(
+            'donation-reg-alloc',
+            'view_donation',
+            'change_donation',
+            'add_fundallocation',
+        )
+        self.client.force_login(editor)
+
+        response = self.client.get(reverse('donation_detail', args=[registered.pk]))
+        content = response.content.decode()
+        header_actions = self.header_actions_html(content)
+        update_url = reverse('donation_update', args=[registered.pk])
+
+        self.assertContains(response, 'Cambiar a Recibida')
+        self.assertNotContains(response, 'Nueva asignación')
+        self.assertNotContains(response, reverse('allocation_create'))
+        self.assertFalse(response.context['can_create_allocation'])
+        self.assertIn(f'href="{update_url}"', header_actions)
+        self.assertLess(
+            header_actions.index(f'href="{update_url}"'),
+            header_actions.index('class="dropdown"'),
+        )
+        self.assertNotIn('Editar', self.dropdown_menu_html(content))
 
     def test_received_donation_hides_receive_action(self):
         response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
         content = response.content.decode()
+        header_actions = self.header_actions_html(content)
+        update_url = reverse('donation_update', args=[self.donation.pk])
 
         self.assertNotContains(response, 'Cambiar a Recibida')
         self.assertNotContains(response, f'id="donation-receive-form-{self.donation.pk}"')
+        self.assertContains(response, 'Nueva asignación')
         self.assertContains(response, reverse('allocation_create'))
+        self.assertTrue(response.context['can_create_allocation'])
         self.assertContains(response, 'aria-label="Más acciones para DON-DETAIL-001"')
         self.assertContains(response, reverse('donation_update', args=[self.donation.pk]))
+        self.assertIn(f'href="{update_url}"', self.dropdown_menu_html(content))
+        self.assertNotIn(f'href="{update_url}"', header_actions.split('class="dropdown"', 1)[0])
         self.assertContains(response, reverse('donation_annul', args=[self.donation.pk]))
         self.assertContains(response, reverse('donation_delete', args=[self.donation.pk]))
         self.assertNotIn('Cambiar a Recibida', self.dropdown_menu_html(content))
+
+    def test_received_donation_with_zero_balance_hides_nueva_asignacion(self):
+        donation = create_donation(
+            code='DON-DETAIL-ZERO-BAL',
+            donor=self.donor,
+            amount=Decimal('10.00'),
+        )
+        self.create_allocation(
+            code='ASG-DON-ZERO-BAL',
+            donation=donation,
+            project=create_project(code='PRJ-DON-ZERO-BAL'),
+        )
+        editor = self.create_user_with_permissions(
+            'donation-zero-bal',
+            'view_donation',
+            'change_donation',
+            'add_fundallocation',
+        )
+        self.client.force_login(editor)
+
+        response = self.client.get(reverse('donation_detail', args=[donation.pk]))
+        content = response.content.decode()
+        header_actions = self.header_actions_html(content)
+        update_url = reverse('donation_update', args=[donation.pk])
+
+        self.assertNotContains(response, 'Nueva asignación')
+        self.assertNotContains(response, reverse('allocation_create'))
+        self.assertFalse(response.context['can_create_allocation'])
+        self.assertIn(f'href="{update_url}"', header_actions)
+        self.assertIn('>Editar</a>', header_actions)
+        self.assertNotIn('ops-donation-detail-action-menu', content)
+
+    def test_received_donation_without_add_fundallocation_hides_nueva_asignacion(self):
+        editor = self.create_user_with_permissions(
+            'donation-no-alloc-perm',
+            'view_donation',
+            'change_donation',
+        )
+        self.client.force_login(editor)
+
+        response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
+
+        self.assertNotContains(response, 'Nueva asignación')
+        self.assertNotContains(response, reverse('allocation_create'))
+        self.assertFalse(response.context['can_create_allocation'])
 
     def test_unauthorized_user_does_not_see_receive_action(self):
         registered = self.create_registered_donation(code='DON-DETAIL-RECEIVE-DENIED')
