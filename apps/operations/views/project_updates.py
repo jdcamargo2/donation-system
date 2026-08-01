@@ -65,7 +65,7 @@ from ..services import (
     ProjectUpdateReviewError,
     ProjectUpdateReviewDecisionError,
     ProjectUpdateRemediationError,
-    add_project_update_attachment,
+    _create_project_update_attachments,
     register_advance,
     publish_project_update,
     delete_project_update_attachment,
@@ -466,9 +466,8 @@ class ProjectUpdatePublishView(OperationsPermissionRequiredMixin, View):
         return HttpResponseRedirect(reverse('project_update_detail', args=[project_update.pk]))
 
 
-class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, CreateView):
+class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, FormView):
     permission_required = 'operations.add_projectupdateattachment'
-    model = ProjectUpdateAttachment
     form_class = ProjectUpdateAttachmentForm
     template_name = 'web/project_update_attachment_form.html'
 
@@ -482,12 +481,13 @@ class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, Creat
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
+        # PRE: form.cleaned_data['files'] is a validated non-empty upload list; parent update is DRAFT.
+        # POST: persists one attachment per file via the domain helper, then redirects once to detail.
         try:
-            add_project_update_attachment(
-                update_id=self.project_update.pk,
-                file=form.cleaned_data['file'],
-                title=form.cleaned_data.get('title', ''),
-                actor=self.request.user,
+            _create_project_update_attachments(
+                self.project_update,
+                form.cleaned_data['files'],
+                self.request.user,
             )
         except ValidationError as exc:
             add_service_errors_to_form(form, exc)

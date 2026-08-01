@@ -99,7 +99,7 @@ class ProjectDocumentTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.post(
             reverse('project_update_attachment_create', args=[update.pk]),
-            data={'title': 'Tardío', 'file': SimpleUploadedFile('late.pdf', b'late')},
+            data={'files': SimpleUploadedFile('late.pdf', b'late')},
         )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(update.attachments.exists())

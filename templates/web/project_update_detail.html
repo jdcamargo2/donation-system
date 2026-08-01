@@ -42,7 +42,7 @@
             </button>
             <div class="dropdown-menu dropdown-menu-end ops-project-update-detail-action-menu">
                 {% if perms.operations.change_projectupdate %}<a class="dropdown-item" href="{% url update_url_name object.pk %}">Editar</a>{% endif %}
-                {% if perms.operations.add_projectupdateattachment %}<a class="dropdown-item" href="{% url 'project_update_attachment_create' object.pk %}">Agregar adjunto</a>{% endif %}
+                {% if perms.operations.add_projectupdateattachment %}<a class="dropdown-item" href="{% url 'project_update_attachment_create' object.pk %}">Agregar adjuntos</a>{% endif %}
                 {% if perms.operations.delete_projectupdate %}
                     <a
                         class="dropdown-item text-danger"

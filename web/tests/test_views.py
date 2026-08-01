@@ -332,6 +332,7 @@ class OperationalDetailViewTests(TestCase):
         self.assertIn('min-height: 130px;', source)
         self.assertIn('max-height: 240px;', source)
         self.assertIn('.ops-field:has(.ops-textarea)', source)
+        self.assertIn('.ops-form-grid .ops-field:has(input[type="file"])', source)
         self.assertIn('grid-column: 1 / -1;', source)
         self.assertIn('input[type="number"]::-webkit-inner-spin-button', source)
         self.assertIn('-moz-appearance: textfield;', source)

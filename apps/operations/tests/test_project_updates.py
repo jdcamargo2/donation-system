@@ -102,6 +102,22 @@ class ProjectUpdateTests(TestCase):
                 self.assertNotIn('created_by', form.fields)
                 self.assertNotIn('progress_percentage', form.fields)
 
+    def test_project_update_forms_expose_multiple_attachments_contract(self):
+        from apps.operations.forms import MultipleFileField
+
+        help_text = 'Puede seleccionar varios archivos a la vez.'
+        for form_class in (ProjectUpdateForm, ProjectUpdateForProjectForm):
+            with self.subTest(form_class=form_class.__name__):
+                form = form_class()
+                field = form.fields['attachments']
+
+                self.assertIsInstance(field, MultipleFileField)
+                self.assertFalse(field.required)
+                self.assertEqual(str(field.help_text), help_text)
+                self.assertTrue(field.widget.allow_multiple_selected)
+                self.assertIn('multiple', str(field.widget.render('attachments', None)))
+                self.assertIn(help_text, form.as_p())
+
     def test_create_for_project_view_keeps_creator_and_reporter_separate(self):
         self.client.force_login(self.user)
 
@@ -451,6 +467,18 @@ class ProjectUpdateDetailTests(TestCase):
         self.assertNotContains(published_response, delete_url)
         self.assertNotContains(published_response, publish_url)
         self.assertNotContains(published_response, 'Más acciones del avance')
+        self.assertNotContains(published_response, 'Agregar adjuntos')
+
+    def test_draft_detail_shows_plural_add_attachments_action(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))
+
+        self.assertContains(response, 'Agregar adjuntos')
+        self.assertNotContains(response, 'Agregar adjunto</a>')
+        self.assertContains(
+            response,
+            reverse('project_update_attachment_create', args=[self.project_update.pk]),
+        )
 
     def test_detail_body_uses_one_surface_with_four_integrated_sections(self):
         response = self.client.get(reverse('project_update_detail', args=[self.project_update.pk]))

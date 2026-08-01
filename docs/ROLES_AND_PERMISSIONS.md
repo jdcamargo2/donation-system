@@ -79,7 +79,7 @@ add_supportingdocument
 * consultar proyectos;
 * consultar avances;
 * registrar avances;
-* cargar adjuntos durante el registro;
+* cargar uno o varios adjuntos durante el registro;
 * consultar soportes autorizados;
 * registrar soportes permitidos.
 

@@ -10,7 +10,7 @@ from .choices import OPERATING_CURRENCY
 from .models import (
     Donation, Expense, FundAllocation, Institution, Project, ProjectDocument,
     ProjectMilestone,
-    ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
+    ProjectUpdate, ProjectUpdateReview, ProjectUpdateReviewDecision,
     ProjectUpdateRemediation, SupportingDocument,
 )
 from .project_update_responsibles import eligible_project_update_reporters
@@ -37,9 +37,15 @@ class MultipleFileInput(forms.ClearableFileInput):
 class MultipleFileField(forms.FileField):
     def clean(self, data, initial=None):
         # PRE: data contiene cero o más archivos enviados por el navegador.
-        # POST: devuelve una lista cuyos archivos fueron validados individualmente.
+        # POST: devuelve una lista cuyos archivos fueron validados individualmente;
+        #       si required=True y no hay archivos, propaga el ValidationError de FileField.
         files = data if isinstance(data, (list, tuple)) else [data]
-        return [super(MultipleFileField, self).clean(item, initial) for item in files if item]
+        cleaned = [super(MultipleFileField, self).clean(item, initial) for item in files if item]
+        if cleaned:
+            return cleaned
+        if self.required:
+            super(MultipleFileField, self).clean(None, initial)
+        return []
 
 
 # PRE: value is a submitted monetary value or an empty value accepted by the field.
@@ -269,7 +275,8 @@ class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, f
     attachments = MultipleFileField(
         label=_('Adjuntos'),
         required=False,
-        widget=MultipleFileInput,
+        help_text=_('Puede seleccionar varios archivos a la vez.'),
+        widget=MultipleFileInput(attrs={'data-file-upload': 'multiple'}),
     )
 
     class Meta:
@@ -304,7 +311,8 @@ class ProjectUpdateForProjectForm(ProjectUpdateResponsibleFormMixin, BootstrapFo
     attachments = MultipleFileField(
         label=_('Adjuntos'),
         required=False,
-        widget=MultipleFileInput,
+        help_text=_('Puede seleccionar varios archivos a la vez.'),
+        widget=MultipleFileInput(attrs={'data-file-upload': 'multiple'}),
     )
 
     class Meta:
@@ -353,11 +361,12 @@ class ProjectDocumentForm(BootstrapFormMixin, forms.ModelForm):
         }
 
 
-class ProjectUpdateAttachmentForm(BootstrapFormMixin, forms.ModelForm):
-    class Meta:
-        model = ProjectUpdateAttachment
-        fields = ('title', 'file')
-        labels = {'title': _('Título'), 'file': _('Archivo')}
+class ProjectUpdateAttachmentForm(BootstrapFormMixin, forms.Form):
+    files = MultipleFileField(
+        label=_('Archivos'),
+        help_text=_('Puede seleccionar varios archivos a la vez.'),
+        widget=MultipleFileInput(attrs={'data-file-upload': 'multiple'}),
+    )
 
 
 def format_usd_amount(value: Decimal) -> str:

@@ -284,7 +284,10 @@ Las pruebas de archivos privados deben comprobar:
 * protección frente a URLs directas;
 * separación entre archivos públicos y privados;
 * privacidad de adjuntos Kobo;
-* comportamiento de archivos asociados a entidades anuladas o no publicadas.
+* comportamiento de archivos asociados a entidades anuladas o no publicadas;
+* carga múltiple de adjuntos de avance en registro/edición y en la ruta independiente del detalle;
+* un evento de auditoría `CREATED` por cada adjunto persistido;
+* rechazo de altas o bajas de adjuntos cuando el avance ya está `PUBLISHED`.
 
 ## 13. Pruebas de auditoría
 

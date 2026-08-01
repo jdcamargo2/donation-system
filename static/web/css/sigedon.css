@@ -810,6 +810,7 @@ body.sidebar-collapsed .sigedon-collapse-button i {
 }
 
 .ops-field:has(.ops-textarea),
+.ops-form-grid .ops-field:has(input[type="file"]),
 .ops-field-full {
     grid-column: 1 / -1;
 }

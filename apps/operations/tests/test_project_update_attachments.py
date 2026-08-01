@@ -82,7 +82,7 @@ class ProjectUpdateAttachmentImmutabilityTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.post(
             reverse('project_update_attachment_create', args=[update.pk]),
-            {'title': 'Adjunto tardío', 'file': SimpleUploadedFile('late.pdf', b'late-data')},
+            {'files': SimpleUploadedFile('late.pdf', b'late-data')},
         )
 
         self.assertEqual(response.status_code, 403)
@@ -170,3 +170,79 @@ class ProjectUpdateAttachmentImmutabilityTests(TestCase):
             model_admin.delete_queryset(request, ProjectUpdateAttachment.objects.filter(pk=attachment.pk))
 
         self.assertTrue(ProjectUpdateAttachment.objects.filter(pk=attachment.pk).exists())
+
+
+class ProjectUpdateAttachmentMultiUploadTests(TestCase):
+    def setUp(self):
+        self.media = TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        self.settings_override = override_settings(MEDIA_ROOT=self.media.name)
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.user = create_user('attachment-multi-user')
+        self.project = create_project(code='PRJ-ATTACHMENT-MULTI')
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
+        self.update = register_advance(
+            project_id=self.project.pk,
+            title='Avance para adjuntos múltiples',
+            description='Borrador con carga independiente de evidencias.',
+            created_by=self.user,
+            reported_by=self.user,
+        )
+
+    def test_standalone_form_uses_plural_files_without_shared_title(self):
+        from apps.operations.forms import MultipleFileField, ProjectUpdateAttachmentForm
+
+        form = ProjectUpdateAttachmentForm()
+        field = form.fields['files']
+
+        self.assertIsInstance(field, MultipleFileField)
+        self.assertNotIn('title', form.fields)
+        self.assertNotIn('file', form.fields)
+        self.assertEqual(field.label, 'Archivos')
+        self.assertEqual(str(field.help_text), 'Puede seleccionar varios archivos a la vez.')
+        self.assertTrue(field.widget.allow_multiple_selected)
+        self.assertIn('multiple', str(field.widget.render('files', None)))
+
+    def test_standalone_route_accepts_multiple_files_with_one_audit_each(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('project_update_attachment_create', args=[self.update.pk]),
+            {
+                'files': [
+                    SimpleUploadedFile('evidencia-a.pdf', b'aaa'),
+                    SimpleUploadedFile('evidencia-b.pdf', b'bbb'),
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('project_update_detail', args=[self.update.pk]))
+        attachments = list(self.update.attachments.order_by('pk'))
+        self.assertEqual(len(attachments), 2)
+        self.assertTrue(attachments[0].file.name.endswith('evidencia-a.pdf'))
+        self.assertTrue(attachments[1].file.name.endswith('evidencia-b.pdf'))
+        self.assertEqual(attachments[0].title, '')
+        self.assertEqual(attachments[1].title, '')
+        created_audits = AuditLog.objects.filter(
+            action=AuditLog.Action.CREATED,
+            summary='Adjunto de avance agregado.',
+        )
+        self.assertEqual(created_audits.count(), 2)
+        self.assertEqual(
+            set(created_audits.values_list('entity_id', flat=True)),
+            {str(attachments[0].pk), str(attachments[1].pk)},
+        )
+
+    def test_standalone_form_template_uses_plural_copy_and_help_text(self):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse('project_update_attachment_create', args=[self.update.pk]),
+        )
+
+        self.assertContains(response, 'Agregar adjuntos', count=3)
+        self.assertContains(response, 'Puede seleccionar varios archivos a la vez.')
+        self.assertContains(response, 'multiple')
+        self.assertNotContains(response, 'name="title"')
+        self.assertNotContains(response, 'Agregar adjunto - SIGEDON')

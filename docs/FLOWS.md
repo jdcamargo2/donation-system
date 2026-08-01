@@ -230,15 +230,18 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
    * descripción;
    * fecha real;
    * persona responsable del avance.
-2. El usuario puede adjuntar evidencias durante el registro.
-3. `created_by` se asigna automáticamente desde el usuario autenticado.
-4. `reported_by` conserva la persona responsable del contenido del avance.
-5. El avance se guarda en estado `DRAFT`.
-6. Un usuario con el permiso `change_projectupdate` puede iniciar la publicación.
-7. El sistema valida nuevamente las condiciones de publicación.
-8. El avance pasa a estado `PUBLISHED`.
-9. Se registra la auditoría correspondiente.
-10. El avance queda bloqueado contra edición y eliminación.
+2. El usuario puede adjuntar una o varias evidencias durante el registro o la edición en borrador.
+3. Desde el detalle de un avance en `DRAFT`, un usuario con `add_projectupdateattachment` puede agregar varios adjuntos en una sola carga.
+4. Cada archivo persistido genera su propio evento de auditoría de creación.
+5. `created_by` se asigna automáticamente desde el usuario autenticado.
+6. `reported_by` conserva la persona responsable del contenido del avance.
+7. El avance se guarda en estado `DRAFT`.
+8. Un usuario con el permiso `change_projectupdate` puede iniciar la publicación.
+9. El sistema valida nuevamente las condiciones de publicación.
+10. El avance pasa a estado `PUBLISHED`.
+11. Se registra la auditoría correspondiente.
+12. El avance queda bloqueado contra edición y eliminación.
+13. Los adjuntos permanecen privados y solo pueden agregarse o eliminarse mientras el avance esté en `DRAFT`; el avance publicado y sus adjuntos son inmutables.
 
 ### POST
 
@@ -247,6 +250,7 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 * El avance puede ser revisado institucionalmente.
 * El avance puede aparecer en el portal público cuando cumpla las reglas de publicación.
 * El progreso operativo del proyecto no se captura en el avance; permanece derivado de hitos.
+* Los adjuntos no se exponen en el portal público por el solo hecho de publicar el avance.
 
 ---
 
