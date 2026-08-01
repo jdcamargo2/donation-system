@@ -1,3 +1,36 @@
 {% extends "base.html" %}
 {% block title %}Adjunto de remediación - SIGEDON{% endblock %}
-{% block content %}<h1>Agregar adjunto</h1><form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Agregar</button></form>{% endblock %}
+{% block content %}
+<h1>Agregar adjunto</h1>
+<form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+        <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
+    {% endif %}
+    <div class="ops-form-section">
+        <div class="ops-form-grid">
+    {% for field in form %}
+        {% if field.is_hidden %}
+            {{ field }}
+        {% else %}
+        <div class="ops-form-field ops-field">
+            <label class="form-label" for="{{ field.id_for_label }}">
+                {{ field.label }}
+                {% if field.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
+            {% include "web/includes/ops_form_field_control.html" with field=field %}
+            {% if field.help_text %}
+                <div class="form-text">{{ field.help_text }}</div>
+            {% endif %}
+            {% if field.errors %}
+                <div id="{{ field.id_for_label }}_error" class="text-danger small" role="alert">{{ field.errors|striptags }}</div>
+            {% endif %}
+        </div>
+        {% endif %}
+    {% endfor %}
+        </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Agregar</button>
+    <a class="btn btn-outline-secondary" href="{% url 'project_update_remediation_detail' view.remediation.pk %}">Cancelar</a>
+</form>
+{% endblock %}

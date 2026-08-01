@@ -222,7 +222,7 @@ Los archivos privados:
 
 La visibilidad de cada archivo debe definirse explícitamente según su naturaleza y contexto.
 
-### 5.1. Vista previa local de selección (adjuntos de avance, documento de proyecto, soportes de gasto y documento legal de institución)
+### 5.1. Vista previa local de selección (adjuntos de avance, documento de proyecto, soportes de gasto, documento legal de institución y adjuntos de remediación)
 
 Los formularios de carga de archivos operativos pueden activar una vista previa
 client-side mediante el atributo explícito `data-file-upload-preview`.
@@ -236,16 +236,22 @@ En la fase actual, el opt-in aplica a:
 * `ExpenseForm.support_file` (entrada de un solo archivo, campo solo de formulario);
 * `SupportingDocumentForm.document` (entrada de un solo archivo);
 * `InstitutionForm.legal_document` (entrada de un solo archivo; primer superficie
-  `ClearableFileInput`).
+  `ClearableFileInput`);
+* `ProjectUpdateRemediationAttachmentForm.file` (entrada de un solo archivo;
+  superficie solo de alta).
 
 Comportamiento:
 
 * la vista previa es local al navegador y no sube archivos hasta el envío del formulario;
 * el `input[type=file]` nativo permanece visible y es la fuente autoritativa de la selección;
-* en `ProjectDocumentForm.file`, `ExpenseForm.support_file` y `SupportingDocumentForm.document`
+* en `ProjectDocumentForm.file`, `ExpenseForm.support_file`, `SupportingDocumentForm.document`
+  y `ProjectUpdateRemediationAttachmentForm.file`
   solo se previsualiza la selección pendiente local; al elegir otro archivo se reemplaza esa
   selección; los documentos ya persistidos siguen gestionándose solo con las acciones de
   servidor (detalle, descarga, eliminación);
+* en `ProjectUpdateRemediationAttachmentForm.file`, los adjuntos de remediación ya persistidos
+  siguen gestionados en el detalle de la remediación; las reglas de borrador las imponen las
+  capas de dominio/servicio;
 * en `InstitutionForm.legal_document`, el enlace al archivo persistido y la casilla de limpiar
   siguen gestionados por Django (`ClearableFileInput`); la vista previa cubre únicamente la
   selección pendiente de reemplazo; quitar esa selección pendiente no limpia el archivo

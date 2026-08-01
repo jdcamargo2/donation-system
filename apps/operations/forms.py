@@ -178,7 +178,13 @@ class ProjectUpdateRemediationResolveForm(BootstrapFormMixin, forms.Form):
 
 class ProjectUpdateRemediationAttachmentForm(BootstrapFormMixin, forms.Form):
     title = forms.CharField(required=False, max_length=200)
-    file = forms.FileField()
+    file = forms.FileField(
+        widget=forms.FileInput(
+            attrs={
+                'data-file-upload-preview': 'true',
+            }
+        ),
+    )
 
 
 class InstitutionForm(BootstrapFormMixin, forms.ModelForm):

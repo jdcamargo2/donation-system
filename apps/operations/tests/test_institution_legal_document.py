@@ -7,10 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from apps.operations.forms import (
-    InstitutionForm,
-    ProjectUpdateRemediationAttachmentForm,
-)
+from apps.operations.forms import InstitutionForm
 from apps.operations.models import Institution
 from apps.operations.tests.helpers import create_institution, create_user
 
@@ -252,7 +249,6 @@ class InstitutionLegalDocumentPreviewTests(TestCase):
 
     def test_preview_opt_in_is_limited_to_institution_legal_document(self):
         institution_form = InstitutionForm()
-        remediation_form = ProjectUpdateRemediationAttachmentForm()
 
         self.assertEqual(
             institution_form.fields['legal_document'].widget.attrs.get(
@@ -267,7 +263,3 @@ class InstitutionLegalDocumentPreviewTests(TestCase):
                 'data-file-upload-preview',
                 institution_form.fields[field_name].widget.attrs,
             )
-        self.assertNotIn(
-            'data-file-upload-preview',
-            remediation_form.fields['file'].widget.attrs,
-        )
