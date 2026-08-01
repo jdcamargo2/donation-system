@@ -131,3 +131,33 @@ class ExpenseRequestPermissionTests(TestCase):
     def test_operator_with_add_cannot_open_global_create(self):
         self.client.force_login(self.operator)
         self.assertEqual(self.client.get(reverse('expense_request_create')).status_code, 403)
+
+    def test_decision_routes_require_decide_permission(self):
+        for user in (self.admin, self.operator, self.auditor):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                self.assertEqual(
+                    self.client.get(
+                        reverse('expense_request_approve', args=[self.own_request.pk])
+                    ).status_code,
+                    403,
+                )
+                self.assertEqual(
+                    self.client.get(
+                        reverse('expense_request_deny', args=[self.own_request.pk])
+                    ).status_code,
+                    403,
+                )
+        self.client.force_login(self.committee)
+        self.assertEqual(
+            self.client.get(
+                reverse('expense_request_approve', args=[self.own_request.pk])
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse('expense_request_deny', args=[self.own_request.pk])
+            ).status_code,
+            200,
+        )

@@ -74,6 +74,11 @@
                                     <li>
                                         <a class="dropdown-item" href="{% url 'expense_request_detail' request_object.pk %}">Ver detalle</a>
                                     </li>
+                                    {% if can_decide_expense_request and request_object.status == 'pending_decision' %}
+                                        <li>
+                                            <a class="dropdown-item" href="{% url 'expense_request_detail' request_object.pk %}">Revisar</a>
+                                        </li>
+                                    {% endif %}
                                 </ul>
                             </div>
                         </td>

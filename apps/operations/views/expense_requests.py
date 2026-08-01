@@ -1,6 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Case, IntegerField, Value, When
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
@@ -10,14 +10,21 @@ from django.views.generic import DetailView, FormView, ListView
 
 from ..choices import BUDGET_CATEGORY_CHOICES
 from ..expense_request_services import (
+    approve_expense_request,
     create_expense_request,
+    deny_expense_request,
     update_expense_request,
     withdraw_expense_request,
 )
-from ..forms import ExpenseRequestForProjectForm, ExpenseRequestForm
+from ..forms import (
+    ExpenseRequestApproveForm,
+    ExpenseRequestForProjectForm,
+    ExpenseRequestForm,
+)
 from ..models import ExpenseRequest, Project, ZERO_MONEY
 from ..selectors import (
     attachment_display_filename,
+    decidable_pending_expense_requests_for_user,
     get_expense_request_financial_display,
     mutable_own_pending_expense_requests_for_user,
     user_can_create_global_expense_request,
@@ -35,6 +42,11 @@ from .common import (
     TerminalActionView,
     add_service_errors_to_form,
     apply_list_filters,
+)
+
+
+EXPENSE_REQUEST_DECISION_FAILURE_MESSAGE = _(
+    'No se pudo completar la acción. Intente nuevamente.'
 )
 
 
@@ -80,6 +92,36 @@ def _requester_action_flags(*, user, expense_request):
             and is_pending
             and user.has_perm('operations.withdraw_expenserequest')
         ),
+    }
+
+
+def _decision_action_flags(*, user, expense_request):
+    """
+    PRE: expense_request is visible to user; permissions are effective, not role names.
+    POST: returns approve/deny flags only for PENDING_DECISION with decide_expenserequest.
+    """
+    can_decide = (
+        expense_request.status == ExpenseRequest.Status.PENDING_DECISION
+        and user.has_perm('operations.decide_expenserequest')
+    )
+    return {
+        'can_approve_expense_request': can_decide,
+        'can_deny_expense_request': can_decide,
+    }
+
+
+def _approval_preview_context(expense_request):
+    """
+    PRE: expense_request has fund_allocation loaded for display.
+    POST: returns display-only approval amounts; service remains authoritative on POST.
+    """
+    requested = expense_request.requested_amount
+    available = expense_request.fund_allocation.available_balance
+    return {
+        'approval_requested_amount': requested,
+        'approval_available_balance': available,
+        'approval_balance_after': available - requested,
+        'approval_balance_insufficient': available < requested,
     }
 
 
@@ -188,6 +230,9 @@ class ExpenseRequestListView(
         context['can_create_expense_request'] = user.has_perm(
             'operations.add_expenserequest'
         )
+        context['can_decide_expense_request'] = user.has_perm(
+            'operations.decide_expenserequest'
+        )
         context['filters_active'] = any(
             (self.request.GET.get(key) or '').strip()
             for key in EXPENSE_REQUEST_LIST_FILTER_KEYS
@@ -254,6 +299,11 @@ class ExpenseRequestDetailView(
         context.update(
             _requester_action_flags(user=user, expense_request=expense_request)
         )
+        context.update(
+            _decision_action_flags(user=user, expense_request=expense_request)
+        )
+        if context['can_approve_expense_request']:
+            context.update(_approval_preview_context(expense_request))
 
         attachments = []
         if context['can_view_attachments']:
@@ -535,6 +585,108 @@ class ExpenseRequestWithdrawView(TerminalActionView):
             )
         except ValidationError as error:
             add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        messages.success(self.request, self.success_message)
+        return HttpResponseRedirect(self.get_success_url())
+
+
+class ExpenseRequestApproveView(
+    OperationsPermissionRequiredMixin,
+    RouteContextMixin,
+    FormView,
+):
+    permission_required = 'operations.decide_expenserequest'
+    form_class = ExpenseRequestApproveForm
+    template_name = 'web/expense_request_approve.html'
+    route_prefix = 'expense_request'
+    page_title = _('Aprobar solicitud de gasto')
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: decide route targets a visible PENDING_DECISION request.
+        # POST: loads decidable pending row or 404; no mutation on GET.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.object = get_object_or_404(
+                decidable_pending_expense_requests_for_user(request.user).select_related(
+                    'fund_allocation',
+                    'fund_allocation__project',
+                ),
+                pk=kwargs['pk'],
+            )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['expense_request'] = self.object
+        context['cancel_url'] = reverse('expense_request_detail', args=[self.object.pk])
+        context['submit_label'] = _('Aprobar y reservar fondos')
+        context.update(_approval_preview_context(self.object))
+        return context
+
+    def form_valid(self, form):
+        # PRE: optional note validated; actor has decide_expenserequest; object was pending at GET.
+        # POST: approves via service or redisplays domain errors without partial writes.
+        try:
+            self.object = approve_expense_request(
+                self.object,
+                decision_note=form.cleaned_data.get('decision_note') or '',
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        except PermissionDenied:
+            raise
+        except Exception:
+            form.add_error(None, EXPENSE_REQUEST_DECISION_FAILURE_MESSAGE)
+            return self.form_invalid(form)
+        messages.success(self.request, _('Solicitud aprobada y fondos reservados.'))
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse('expense_request_detail', args=[self.object.pk])
+
+
+class ExpenseRequestDenyView(TerminalActionView):
+    permission_required = 'operations.decide_expenserequest'
+    model = ExpenseRequest
+    detail_url_name = 'expense_request_detail'
+    action_title = _('Denegar solicitud de gasto')
+    consequence = _(
+        'La solicitud quedará cerrada y no podrá registrarse un gasto a partir de ella.'
+    )
+    submit_label = _('Denegar solicitud')
+    success_message = _('Solicitud de gasto denegada.')
+    is_destructive = True
+    requires_reason = True
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: deny route must not leak non-visible or non-pending rows.
+        # POST: loads decidable PENDING_DECISION request or 404 before form handling.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.object = get_object_or_404(
+                decidable_pending_expense_requests_for_user(request.user),
+                pk=kwargs['pk'],
+            )
+            # Skip TerminalActionView.dispatch object load (unscoped model queryset).
+            return FormView.dispatch(self, request, *args, **kwargs)
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        # PRE: mandatory reason is valid and actor may decide the pending request.
+        # POST: denies through the domain service or redisplays service errors.
+        try:
+            self.object = deny_expense_request(
+                self.object,
+                decision_note=form.cleaned_data['reason'],
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        except PermissionDenied:
+            raise
+        except Exception:
+            form.add_error(None, EXPENSE_REQUEST_DECISION_FAILURE_MESSAGE)
             return self.form_invalid(form)
         messages.success(self.request, self.success_message)
         return HttpResponseRedirect(self.get_success_url())

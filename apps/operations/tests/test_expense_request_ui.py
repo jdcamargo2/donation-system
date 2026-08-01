@@ -26,9 +26,12 @@ from apps.operations.tests.helpers import TEST_DATE, create_allocation
 from apps.operations.tests.test_permissions import create_user_with_permissions
 
 
-DECISION_FULFILL_LABELS = (
+DECISION_LABELS = (
     'Aprobar',
     'Denegar',
+)
+
+FULFILL_ANNUL_ATTACHMENT_LABELS = (
     'Anular solicitud',
     'Registrar gasto',
     'Agregar adjunto',
@@ -58,41 +61,87 @@ class ExpenseRequestUITests(TestCase):
         user.groups.add(Group.objects.get(name=role_name))
         return user
 
-    def _assert_no_decision_fulfill_controls(self, response):
+    def _assert_no_fulfill_annul_attachment_controls(self, response):
         html = response.content.decode()
-        for label in DECISION_FULFILL_LABELS:
+        for label in FULFILL_ANNUL_ATTACHMENT_LABELS:
             self.assertNotIn(label, html)
-        self.assertNotIn('expense_request_approve', html)
-        self.assertNotIn('expense_request_deny', html)
         self.assertNotIn('expense_request_annul', html)
         self.assertNotIn('expense_request_fulfill', html)
 
-    def test_committee_and_auditor_detail_remain_read_only(self):
-        for user in (self.committee, self.auditor):
-            with self.subTest(user=user.username):
-                self.client.force_login(user)
-                list_response = self.client.get(reverse('expense_request_list'))
-                if list_response.status_code == 302:
-                    list_response = self.client.get(list_response['Location'])
-                self.assertEqual(list_response.status_code, 200)
-                self.assertNotContains(list_response, 'Nueva solicitud')
-                self._assert_no_decision_fulfill_controls(list_response)
+    def _assert_no_decision_controls(self, response):
+        html = response.content.decode()
+        for label in DECISION_LABELS:
+            self.assertNotIn(label, html)
+        self.assertNotIn('expense_request_approve', html)
+        self.assertNotIn('expense_request_deny', html)
+        self._assert_no_fulfill_annul_attachment_controls(response)
 
-                detail_response = self.client.get(
-                    reverse('expense_request_detail', args=[self.request_obj.pk])
-                )
-                self.assertEqual(detail_response.status_code, 200)
-                self.assertFalse(detail_response.context['can_edit_expense_request'])
-                self.assertFalse(detail_response.context['can_withdraw_expense_request'])
-                self.assertNotContains(
-                    detail_response,
-                    reverse('expense_request_update', args=[self.request_obj.pk]),
-                )
-                self.assertNotContains(
-                    detail_response,
-                    reverse('expense_request_withdraw', args=[self.request_obj.pk]),
-                )
-                self._assert_no_decision_fulfill_controls(detail_response)
+    def test_committee_detail_shows_decision_actions(self):
+        self.client.force_login(self.committee)
+        list_response = self.client.get(reverse('expense_request_list'))
+        if list_response.status_code == 302:
+            list_response = self.client.get(list_response['Location'])
+        self.assertEqual(list_response.status_code, 200)
+        self.assertNotContains(list_response, 'Nueva solicitud')
+        self.assertContains(list_response, 'Revisar')
+        self._assert_no_fulfill_annul_attachment_controls(list_response)
+        # List must not expose inline approve/deny action routes.
+        list_html = list_response.content.decode()
+        self.assertNotIn('expense_request_approve', list_html)
+        self.assertNotIn('expense_request_deny', list_html)
+
+        detail_response = self.client.get(
+            reverse('expense_request_detail', args=[self.request_obj.pk])
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertFalse(detail_response.context['can_edit_expense_request'])
+        self.assertFalse(detail_response.context['can_withdraw_expense_request'])
+        self.assertTrue(detail_response.context['can_approve_expense_request'])
+        self.assertTrue(detail_response.context['can_deny_expense_request'])
+        self.assertContains(detail_response, 'Aprobar')
+        self.assertContains(detail_response, 'Denegar')
+        self.assertContains(
+            detail_response,
+            reverse('expense_request_approve', args=[self.request_obj.pk]),
+        )
+        self.assertContains(
+            detail_response,
+            reverse('expense_request_deny', args=[self.request_obj.pk]),
+        )
+        self.assertNotContains(
+            detail_response,
+            reverse('expense_request_update', args=[self.request_obj.pk]),
+        )
+        self.assertNotContains(
+            detail_response,
+            reverse('expense_request_withdraw', args=[self.request_obj.pk]),
+        )
+        self._assert_no_fulfill_annul_attachment_controls(detail_response)
+
+    def test_auditor_detail_remains_read_only(self):
+        self.client.force_login(self.auditor)
+        list_response = self.client.get(reverse('expense_request_list'))
+        self.assertEqual(list_response.status_code, 200)
+        self.assertNotContains(list_response, 'Nueva solicitud')
+        self._assert_no_decision_controls(list_response)
+
+        detail_response = self.client.get(
+            reverse('expense_request_detail', args=[self.request_obj.pk])
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertFalse(detail_response.context['can_edit_expense_request'])
+        self.assertFalse(detail_response.context['can_withdraw_expense_request'])
+        self.assertFalse(detail_response.context['can_approve_expense_request'])
+        self.assertFalse(detail_response.context['can_deny_expense_request'])
+        self.assertNotContains(
+            detail_response,
+            reverse('expense_request_update', args=[self.request_obj.pk]),
+        )
+        self.assertNotContains(
+            detail_response,
+            reverse('expense_request_withdraw', args=[self.request_obj.pk]),
+        )
+        self._assert_no_decision_controls(detail_response)
 
     def test_pending_owner_sees_edit_and_withdraw(self):
         self.client.force_login(self.operator)
@@ -101,16 +150,21 @@ class ExpenseRequestUITests(TestCase):
         )
         self.assertTrue(response.context['can_edit_expense_request'])
         self.assertTrue(response.context['can_withdraw_expense_request'])
+        self.assertFalse(response.context['can_approve_expense_request'])
+        self.assertFalse(response.context['can_deny_expense_request'])
         self.assertContains(response, 'Editar')
         self.assertContains(response, 'Retirar')
+        self._assert_no_decision_controls(response)
 
-    def test_pending_non_owner_admin_does_not_see_requester_actions(self):
+    def test_pending_non_owner_admin_does_not_see_requester_or_decision_actions(self):
         self.client.force_login(self.admin)
         response = self.client.get(
             reverse('expense_request_detail', args=[self.request_obj.pk])
         )
         self.assertFalse(response.context['can_edit_expense_request'])
         self.assertFalse(response.context['can_withdraw_expense_request'])
+        self.assertFalse(response.context['can_approve_expense_request'])
+        self.assertFalse(response.context['can_deny_expense_request'])
         self.assertNotContains(
             response,
             reverse('expense_request_update', args=[self.request_obj.pk]),
@@ -119,6 +173,7 @@ class ExpenseRequestUITests(TestCase):
             response,
             reverse('expense_request_withdraw', args=[self.request_obj.pk]),
         )
+        self._assert_no_decision_controls(response)
 
     def test_attachments_render_metadata_without_file_url(self):
         attachment = ExpenseRequestAttachment.objects.create(
@@ -220,4 +275,6 @@ class ExpenseRequestUITests(TestCase):
         self.assertContains(response, 'La reserva fue convertida en gasto.')
         self.assertFalse(response.context['can_edit_expense_request'])
         self.assertFalse(response.context['can_withdraw_expense_request'])
-        self._assert_no_decision_fulfill_controls(response)
+        self.assertFalse(response.context['can_approve_expense_request'])
+        self.assertFalse(response.context['can_deny_expense_request'])
+        self._assert_no_decision_controls(response)

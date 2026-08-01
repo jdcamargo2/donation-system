@@ -755,6 +755,25 @@ class ExpenseRequestAllocationChoiceField(forms.ModelChoiceField):
         return label
 
 
+class ExpenseRequestApproveForm(BootstrapFormMixin, forms.Form):
+    """
+    Committee approval confirmation form.
+
+    Financial values and actor come from the persisted request and request.user;
+    this form never accepts amount, allocation, status, or actor from POST.
+    """
+
+    decision_note = forms.CharField(
+        label=_('Observación del Comité'),
+        required=False,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 3}),
+        help_text=_(
+            'La aprobación reservará el monto solicitado en la asignación seleccionada.'
+        ),
+    )
+
+
 class ExpenseRequestForm(BootstrapFormMixin, forms.Form):
     """
     Global or project-scoped Expense Request create/update form.

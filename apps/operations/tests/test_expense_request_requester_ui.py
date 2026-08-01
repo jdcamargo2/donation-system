@@ -549,8 +549,33 @@ class ExpenseRequestRequesterUITests(TestCase):
         )
         self.assertFalse(non_pending.context['can_edit_expense_request'])
         self.assertFalse(non_pending.context['can_withdraw_expense_request'])
+        self.assertFalse(non_pending.context['can_approve_expense_request'])
+        self.assertFalse(non_pending.context['can_deny_expense_request'])
 
-    def test_no_decision_fulfill_annul_actions_yet(self):
+    def test_decision_actions_visible_only_to_committee_on_pending(self):
+        request_obj = self._create_via_service(self.operator)
+        self.client.force_login(self.committee)
+        committee_detail = self.client.get(
+            reverse('expense_request_detail', args=[request_obj.pk])
+        )
+        self.assertTrue(committee_detail.context['can_approve_expense_request'])
+        self.assertTrue(committee_detail.context['can_deny_expense_request'])
+        self.assertContains(committee_detail, 'Aprobar')
+        self.assertContains(committee_detail, 'Denegar')
+
+        for user in (self.admin, self.operator, self.auditor):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                response = self.client.get(
+                    reverse('expense_request_detail', args=[request_obj.pk])
+                )
+                self.assertFalse(response.context['can_approve_expense_request'])
+                self.assertFalse(response.context['can_deny_expense_request'])
+                html = response.content.decode()
+                self.assertNotIn('expense_request_approve', html)
+                self.assertNotIn('expense_request_deny', html)
+
+    def test_no_fulfill_annul_attachment_actions_yet(self):
         request_obj = self._create_via_service(self.operator)
         for user in (self.admin, self.operator, self.committee, self.auditor):
             with self.subTest(user=user.username):
@@ -560,14 +585,11 @@ class ExpenseRequestRequesterUITests(TestCase):
                 )
                 html = response.content.decode()
                 for label in (
-                    'Aprobar',
-                    'Denegar',
                     'Anular solicitud',
                     'Registrar gasto',
                     'Agregar adjunto',
                     'Eliminar adjunto',
                 ):
                     self.assertNotIn(label, html)
-                self.assertNotIn('expense_request_approve', html)
                 self.assertNotIn('expense_request_fulfill', html)
                 self.assertNotIn('expense_request_annul', html)

@@ -173,6 +173,16 @@ urlpatterns = [
         views.ExpenseRequestWithdrawView.as_view(),
         name='expense_request_withdraw',
     ),
+    path(
+        'expense-requests/<int:pk>/approve/',
+        views.ExpenseRequestApproveView.as_view(),
+        name='expense_request_approve',
+    ),
+    path(
+        'expense-requests/<int:pk>/deny/',
+        views.ExpenseRequestDenyView.as_view(),
+        name='expense_request_deny',
+    ),
     path('expenses/', views.ExpenseListView.as_view(), name='expense_list'),
     path('expenses/export.csv', views.ExpenseCsvExportView.as_view(), name='expense_export_csv'),
     path('expenses/new/', views.ExpenseCreateView.as_view(), name='expense_create'),

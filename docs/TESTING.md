@@ -199,16 +199,18 @@ Cobertura focalizada:
 
 `test_expense_request_concurrency` se omite bajo SQLite (`skipUnless`).
 
-### Solicitudes de gasto — UI de listado/detalle (ER3A) y solicitante (ER3B)
+### Solicitudes de gasto — UI de listado/detalle (ER3A), solicitante (ER3B) y decisión del Comité (ER4A)
 
 ```bash
 python manage.py test \
+  apps.operations.tests.test_expense_request_committee_ui \
   apps.operations.tests.test_expense_request_requester_ui \
   apps.operations.tests.test_expense_request_forms \
   apps.operations.tests.test_expense_request_views \
   apps.operations.tests.test_expense_request_ui \
   apps.operations.tests.test_expense_request_permissions \
   apps.operations.tests.test_expense_request_services \
+  apps.operations.tests.test_expense_request_balances \
   apps.operations.tests.test_role_based_ui \
   apps.operations.tests.test_permissions \
   apps.operations.tests.test_internal_experience \
@@ -224,10 +226,13 @@ Cobertura focalizada:
 * creación global (Admin) y desde proyecto (Admin/Operador);
 * edición/retiro solo del solicitante original en `PENDING_DECISION`;
 * defensa de POST forzado (asignación ajena, requester/status/código);
+* aprobación/denegación del Comité con reserva atómica y motivo obligatorio;
+* exclusión de Admin/Operador/Auditor de las rutas de decisión;
+* saldo insuficiente y estado obsoleto sin escrituras parciales;
 * ítem de sidebar entre Asignaciones y Gastos;
 * regresión de navegación, permisos y panel.
 
-ER3B no cubre decidir/cumplir/anular administrativamente ni adjuntos protegidos.
+ER4A no cubre cumplir/anular administrativamente ni adjuntos protegidos.
 
 ### Concurrencia
 

@@ -428,3 +428,20 @@ class ExpenseRequestViewTests(TestCase):
             visible_expense_requests_for_user(self.auditor).values_list('pk', flat=True)
         )
         self.assertEqual(all_ids, {self.own_request.pk, self.other_request.pk})
+
+    def test_detail_exposes_decision_flags_for_committee_only(self):
+        self.client.force_login(self.committee)
+        committee = self.client.get(
+            reverse('expense_request_detail', args=[self.own_request.pk])
+        )
+        self.assertTrue(committee.context['can_approve_expense_request'])
+        self.assertTrue(committee.context['can_deny_expense_request'])
+        self.assertEqual(committee.context['approval_requested_amount'], Decimal('40.00'))
+
+        self.client.force_login(self.admin)
+        admin = self.client.get(
+            reverse('expense_request_detail', args=[self.own_request.pk])
+        )
+        self.assertFalse(admin.context['can_approve_expense_request'])
+        self.assertFalse(admin.context['can_deny_expense_request'])
+        self.assertNotIn('approval_requested_amount', admin.context)

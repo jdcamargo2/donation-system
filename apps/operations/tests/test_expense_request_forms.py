@@ -8,6 +8,7 @@ from django.test import TestCase
 
 from apps.operations.forms import (
     ExpenseRequestAllocationChoiceField,
+    ExpenseRequestApproveForm,
     ExpenseRequestForProjectForm,
     ExpenseRequestForm,
 )
@@ -149,3 +150,21 @@ class ExpenseRequestFormTests(TestCase):
             'decision_note',
         ):
             self.assertNotIn(forbidden, form.fields)
+
+    def test_approve_form_optional_note_without_financial_inputs(self):
+        empty = ExpenseRequestApproveForm(data={})
+        self.assertTrue(empty.is_valid())
+        self.assertEqual(empty.cleaned_data['decision_note'], '')
+
+        with_note = ExpenseRequestApproveForm(data={'decision_note': '  Nota  '})
+        self.assertTrue(with_note.is_valid())
+        self.assertEqual(with_note.cleaned_data['decision_note'], 'Nota')
+
+        for forbidden in (
+            'requested_amount',
+            'fund_allocation',
+            'status',
+            'actor',
+            'reserved_amount',
+        ):
+            self.assertNotIn(forbidden, ExpenseRequestApproveForm().fields)

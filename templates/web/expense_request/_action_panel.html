@@ -1,3 +1,11 @@
+{% if can_approve_expense_request or can_deny_expense_request %}
+    {% if can_approve_expense_request %}
+        <a class="btn btn-primary" href="{% url 'expense_request_approve' expense_request.pk %}">Aprobar</a>
+    {% endif %}
+    {% if can_deny_expense_request %}
+        <a class="btn btn-outline-danger" href="{% url 'expense_request_deny' expense_request.pk %}">Denegar</a>
+    {% endif %}
+{% endif %}
 {% if can_edit_expense_request or can_withdraw_expense_request %}
     {% if can_edit_expense_request %}
         <a class="btn btn-primary" href="{% url 'expense_request_update' expense_request.pk %}">Editar</a>

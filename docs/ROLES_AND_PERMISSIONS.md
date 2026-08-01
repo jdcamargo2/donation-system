@@ -138,6 +138,7 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
 * En ER3A consulta todas las solicitudes en listado/detalle.
 * En ER3B puede crear solicitudes (global y desde proyecto), y editar/retirar
   solo las propias en `PENDING_DECISION`.
+* En ER4A no ve acciones de aprobación/denegación; esas rutas responden 403.
 * No recibe `delete_expenserequest` ni permisos de mutación de `ExpenseRequestEvent`.
 * No recibe automáticamente permisos técnicos generales de Kobo distintos de los cinco territoriales.
 
@@ -189,7 +190,8 @@ operations.view_expenserequestevent
 En la UI (ER3A+ER3B), el listado/detalle de solicitudes se limita a
 las creadas por el mismo usuario (`requested_by`); no ve solicitudes de otros
 Operadores. El listado no muestra «Nueva solicitud» global; el CTA es
-«Solicitar gasto» en el detalle del proyecto.
+«Solicitar gasto» en el detalle del proyecto. En ER4A no ve «Aprobar» ni
+«Denegar»; esas rutas responden 403.
 
 Al registrar un avance, el usuario autenticado se asigna automáticamente como
 persona responsable. El campo se muestra en modo no editable.
@@ -253,7 +255,8 @@ Puede consultar:
 En ER3A/ER3B el Auditor ve **todas** las solicitudes visibles en listado/detalle
 (read-only global), con el ítem de sidebar «Solicitudes de gasto»; el ocultamiento
 de accesos rápidos del panel no afecta esa navegación. No ve «Solicitar gasto»,
-«Editar» ni «Retirar».
+«Editar», «Retirar», «Aprobar» ni «Denegar». En ER4A las rutas de decisión
+responden 403.
 
 ### Restricciones
 
@@ -317,9 +320,11 @@ kobo.view_territorial_administration
 * consultar el hub territorial en modo lectura.
 
 En ER3A/ER3B el Comité ve todas las solicitudes; la primera visita al listado aplica
-por defecto el filtro `pending_decision` (sobreescribible). La UI de decisión
-aún no está en este checkpoint; tampoco ve CTAs de creación/edición/retiro del
-solicitante.
+por defecto el filtro `pending_decision` (sobreescribible). En ER4A el Comité aprueba
+o deniega solicitudes pendientes desde páginas dedicadas (`expense_request_approve` /
+`expense_request_deny`); la aprobación reserva fondos de forma atómica y la denegación
+exige motivo. No ve CTAs de creación/edición/retiro del solicitante; tampoco hay UI de
+cumplimiento ni anulación administrativa todavía.
 
 ### No recibe
 

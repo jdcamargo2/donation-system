@@ -314,8 +314,17 @@ rechazo.
   * solo el solicitante original edita o retira su solicitud en
     `PENDING_DECISION` (`expense_request_update` / `expense_request_withdraw`);
   * la creación no reserva fondos; el Comité sigue siendo la puerta de reserva;
-  * adjuntos permanecen de solo lectura; no hay UI de decisión, anulación
-    administrativa ni cumplimiento todavía.
+  * adjuntos permanecen de solo lectura.
+* ER4A añade la UI de decisión del Comité:
+  * solo `decide_expenserequest` aprueba o deniega (`expense_request_approve` /
+    `expense_request_deny`); el Administrador no decide aunque haya creado la
+    solicitud;
+  * la aprobación reserva atómicamente `requested_amount` y deja la solicitud en
+    `APPROVED_RESERVED` sin registrar un `Expense`;
+  * la denegación es terminal, exige motivo y no crea reserva;
+  * estado no pendiente en GET de acción → 404; errores de servicio (saldo,
+    estado obsoleto) se muestran en el formulario sin escrituras parciales;
+  * aún no hay UI de anulación administrativa ni de cumplimiento.
 
 ---
 

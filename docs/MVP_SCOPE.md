@@ -113,9 +113,10 @@ reservados. ER2A–ER2E completan reserva, cumplimiento, anulación administrati
 e integración de anulación del gasto enlazado. ER3A añade listado/detalle con
 visibilidad por permisos efectivos. ER3B añade la UI del solicitante (crear
 desde proyecto; Admin también crea en global; editar/retirar solo propias
-pendientes). Aún no hay UI de decisión/cumplimiento/anulación administrativa ni
-adjuntos protegidos. ER1 estableció modelos, permisos, evidencias y eventos
-inmutables.
+pendientes). ER4A añade la UI de decisión del Comité (aprobar con reserva
+atómica; denegar con motivo obligatorio). Aún no hay UI de cumplimiento ni
+anulación administrativa, ni adjuntos protegidos. ER1 estableció modelos,
+permisos, evidencias y eventos inmutables.
 
 Estados:
 
