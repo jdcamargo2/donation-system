@@ -1,8 +1,8 @@
 from decimal import Decimal
 
 from django.conf import settings
-
-from django.core.exceptions import PermissionDenied
+from django.contrib import messages
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 
 from django.db.models import Prefetch
@@ -47,6 +47,8 @@ from ..services import (
     finish_project,
     log_create,
     log_delete,
+    publish_project,
+    unpublish_project,
 )
 
 from .common import (
@@ -93,6 +95,40 @@ class ProjectFinishView(TerminalActionView):
     success_message = _('Proyecto terminado.')
     is_destructive = False
     requires_reason = False
+
+
+class ProjectPublishView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.manage_project_publication'
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: the user holds manage_project_publication and pk identifies a Project.
+        POST: publishes via domain service or reports the domain error without mutating.
+        """
+        try:
+            project = publish_project(project_id=kwargs['pk'], actor=request.user)
+        except ValidationError as error:
+            messages.error(request, ' '.join(error.messages))
+            return HttpResponseRedirect(reverse('project_detail', args=[kwargs['pk']]))
+        messages.success(request, _('Proyecto publicado en el portal público.'))
+        return HttpResponseRedirect(reverse('project_detail', args=[project.pk]))
+
+
+class ProjectUnpublishView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.manage_project_publication'
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: the user holds manage_project_publication and pk identifies a Project.
+        POST: unpublishes via domain service or reports the domain error without mutating.
+        """
+        try:
+            project = unpublish_project(project_id=kwargs['pk'], actor=request.user)
+        except ValidationError as error:
+            messages.error(request, ' '.join(error.messages))
+            return HttpResponseRedirect(reverse('project_detail', args=[kwargs['pk']]))
+        messages.success(request, _('Proyecto retirado del portal público.'))
+        return HttpResponseRedirect(reverse('project_detail', args=[project.pk]))
 
 
 class ProjectListView(
@@ -149,6 +185,19 @@ class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
         context['can_finish'] = (
             self.request.user.has_perm('operations.change_project')
             and self.object.status == Project.Status.ACTIVE
+        )
+        context['can_manage_publication'] = self.request.user.has_perm(
+            'operations.manage_project_publication'
+        )
+        context['can_publish'] = (
+            context['can_manage_publication']
+            and self.object.status == Project.Status.ACTIVE
+            and not self.object.is_public
+        )
+        context['can_unpublish'] = (
+            context['can_manage_publication']
+            and self.object.status == Project.Status.ACTIVE
+            and self.object.is_public
         )
         visible_updates = get_visible_project_updates(self.object, self.request.user)
         update_paginator = Paginator(

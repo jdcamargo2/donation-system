@@ -512,6 +512,7 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(response, 'aria-label="Más acciones del proyecto"')
         self.assertContains(response, reverse('project_finish', args=[self.project.pk]))
         self.assertContains(response, 'Terminar proyecto')
+        self.assertContains(response, 'Privado')
         self.assertNotContains(response, 'Anular proyecto')
         self.assertIn('name="csrfmiddlewaretoken"', content)
 
@@ -655,27 +656,32 @@ class InternalExperienceTemplateTests(TestCase):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
         content = response.content.decode()
         finish_url = reverse('project_finish', args=[self.project.pk])
+        publish_url = reverse('project_publish', args=[self.project.pk])
         update_delete_url = reverse(
             'project_update_delete', args=[self.project_update.pk]
         )
 
         for url, form_id in (
+            (publish_url, 'project-publish-form'),
             (finish_url, 'project-finish-form'),
             (update_delete_url, f'project-update-delete-form-{self.project_update.pk}'),
         ):
             with self.subTest(url=url):
                 self.assertIn(f'href="{url}"', content)
                 self.assertIn(f'id="{form_id}" method="post" action="{url}"', content)
-        self.assertContains(response, 'data-confirm-action', count=2)
+        self.assertContains(response, 'data-confirm-action', count=3)
+        self.assertContains(response, 'data-confirm-title="¿Publicar este proyecto en el portal público?"')
         self.assertContains(response, 'data-confirm-title="¿Terminar este proyecto?"')
         self.assertContains(response, 'data-confirm-title="¿Eliminar este avance?"')
         self.assertContains(response, 'web/js/confirm_actions.js')
         self.assertGreaterEqual(content.count('name="csrfmiddlewaretoken"'), 2)
 
         self.assertEqual(self.client.get(finish_url).status_code, 200)
+        self.assertEqual(self.client.get(publish_url).status_code, 405)
         self.assertEqual(self.client.get(update_delete_url).status_code, 200)
         self.project.refresh_from_db()
         self.assertEqual(self.project.status, Project.Status.ACTIVE)
+        self.assertFalse(self.project.is_public)
         self.assertTrue(ProjectUpdate.objects.filter(pk=self.project_update.pk).exists())
 
         script = Path('static/web/js/confirm_actions.js').read_text()

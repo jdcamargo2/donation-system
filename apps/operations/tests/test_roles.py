@@ -88,8 +88,22 @@ class OperationRoleTests(TestCase):
                     self.assert_has_perm(user, permission.codename)
         self.assert_has_perm(user, 'view_auditlog')
         self.assert_has_perm(user, 'publish_projectupdate')
+        self.assert_has_perm(user, 'manage_project_publication')
 
-    def test_sigedon_admin_receives_all_milestone_permissions(self):
+    def test_non_admin_roles_do_not_receive_manage_project_publication(self):
+        for role_name in {
+            ROLE_FIELD_OPERATOR,
+            ROLE_EXTERNAL_AUDITOR,
+            ROLE_PROJECT_COMMITTEE,
+            ROLE_PROJECT_UPDATE_REVIEWER,
+            ROLE_PROJECT_UPDATE_DECIDER,
+        }:
+            with self.subTest(role=role_name):
+                self.assertFalse(
+                    Group.objects.get(name=role_name).permissions.filter(
+                        codename='manage_project_publication'
+                    ).exists()
+                )
         user = self.create_user_for_role('admin-milestones', ROLE_SIGEDON_ADMIN)
         milestone_codenames = {
             'view_projectmilestone',
@@ -149,6 +163,7 @@ class OperationRoleTests(TestCase):
         self.assert_lacks_perm(user, 'publish_projectupdate')
         self.assert_lacks_perm(user, 'review_projectupdate')
         self.assert_lacks_perm(user, 'decide_projectupdate')
+        self.assert_lacks_perm(user, 'manage_project_publication')
 
     def test_external_auditor_permission_matrix(self):
         user = self.create_user_for_role('auditor-role', ROLE_EXTERNAL_AUDITOR)
@@ -163,6 +178,7 @@ class OperationRoleTests(TestCase):
         self.assert_lacks_perm(user, 'publish_projectupdate')
         self.assert_lacks_perm(user, 'review_projectupdate')
         self.assert_lacks_perm(user, 'decide_projectupdate')
+        self.assert_lacks_perm(user, 'manage_project_publication')
 
     def test_legacy_project_committee_permission_matrix_is_read_only(self):
         user = self.create_user_for_role('committee-role', ROLE_PROJECT_COMMITTEE)
@@ -194,6 +210,7 @@ class OperationRoleTests(TestCase):
             'publish_projectupdate',
             'review_projectupdate',
             'decide_projectupdate',
+            'manage_project_publication',
             'add_auditlog',
             'change_auditlog',
             'delete_auditlog',

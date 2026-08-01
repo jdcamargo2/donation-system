@@ -41,6 +41,7 @@ class TerminalActionServiceTests(TestCase):
         finished = finish_project(project.pk, actor=self.actor)
 
         self.assertEqual(finished.status, Project.Status.CLOSED)
+        self.assertFalse(finished.is_public)
         self.assertEqual(finished.terminal_by, self.actor)
         self.assertIsNotNone(finished.terminal_at)
         self.assertEqual(finished.terminal_reason, 'Proyecto terminado.')
@@ -50,6 +51,28 @@ class TerminalActionServiceTests(TestCase):
                 entity_id=str(project.pk),
             ).count(),
             1,
+        )
+
+    def test_finish_public_project_forces_private_with_single_close_audit(self):
+        project = create_project(code='PRJ-FINISH-PUBLIC', name='Proyecto público a terminar')
+        project.is_public = True
+        project.save(update_fields=('is_public', 'updated_at'))
+
+        finished = finish_project(project.pk, actor=self.actor)
+
+        self.assertEqual(finished.status, Project.Status.CLOSED)
+        self.assertFalse(finished.is_public)
+        close_logs = AuditLog.objects.filter(
+            action=AuditLog.Action.CLOSED,
+            entity_id=str(project.pk),
+        )
+        self.assertEqual(close_logs.count(), 1)
+        self.assertIn('retirado del portal público', close_logs.get().summary)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action=AuditLog.Action.UNPUBLISHED,
+                entity_id=str(project.pk),
+            ).exists()
         )
 
     def test_finish_project_rejects_already_closed_project(self):

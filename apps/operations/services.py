@@ -29,6 +29,7 @@ from .models import (
     ZERO_MONEY,
 )
 from .project_update_responsibles import validate_project_update_reporter
+from .public_portal_cache import invalidate_public_portal_cache
 
 
 class ExpenseFinalizedError(ValidationError):
@@ -267,9 +268,12 @@ def _finalize_operational_entity(*, entity, target_status, actor, reason, action
 def finish_project(project_id: int, *, actor) -> Project:
     """
     PRE: actor is authenticated and project_id identifies an ACTIVE project.
-    POST: atomically closes it, persists terminal metadata, and creates one audit event.
+    POST: atomically closes it, forces is_public=False, persists terminal metadata,
+    creates one CLOSE audit event, and invalidates the public portal cache when it
+    was previously public.
     """
     _require_transition_actor(actor)
+    was_public = False
     with transaction.atomic():
         project = Project.objects.select_for_update().get(pk=project_id)
         validate_state_transition(
@@ -281,14 +285,93 @@ def finish_project(project_id: int, *, actor) -> Project:
             raise InvalidStateTransitionError(
                 {'end_date': _('No se puede cerrar un proyecto con fechas incoherentes.')}
             )
-        return _finalize_operational_entity(
-            entity=project,
-            target_status=Project.Status.CLOSED,
-            actor=actor,
-            reason=_('Proyecto terminado.'),
-            action=AuditLog.Action.CLOSED,
-            summary=_('Proyecto %(code)s terminado.') % {'code': project.code},
+        was_public = project.is_public
+        project.status = Project.Status.CLOSED
+        project.is_public = False
+        project.terminal_reason = _('Proyecto terminado.')
+        project.terminal_at = timezone.now()
+        project.terminal_by = actor
+        project.save(
+            update_fields=(
+                'status',
+                'is_public',
+                'terminal_reason',
+                'terminal_at',
+                'terminal_by',
+                'updated_at',
+            )
         )
+        if was_public:
+            summary = _(
+                'Proyecto %(code)s terminado y retirado del portal público.'
+            ) % {'code': project.code}
+        else:
+            summary = _('Proyecto %(code)s terminado.') % {'code': project.code}
+        log_action(actor, AuditLog.Action.CLOSED, project, summary)
+    if was_public:
+        invalidate_public_portal_cache()
+    return project
+
+
+def publish_project(*, project_id: int, actor) -> Project:
+    """
+    PRE: actor is authenticated and project_id identifies an ACTIVE private Project.
+    POST: atomically sets is_public=True, audits once, invalidates public portal cache.
+    """
+    _require_transition_actor(actor)
+    with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_id)
+        if project.status != Project.Status.ACTIVE:
+            raise InvalidStateTransitionError(
+                {'status': _('Solo un proyecto activo puede publicarse en el portal público.')}
+            )
+        if project.is_public:
+            raise InvalidStateTransitionError(
+                {'is_public': _('El proyecto ya está publicado en el portal público.')}
+            )
+        project.is_public = True
+        project.save(update_fields=('is_public', 'updated_at'))
+        log_action(
+            actor,
+            AuditLog.Action.PUBLISHED,
+            project,
+            _('Proyecto %(code)s publicado en el portal público.') % {'code': project.code},
+        )
+    invalidate_public_portal_cache()
+    return project
+
+
+def unpublish_project(*, project_id: int, actor) -> Project:
+    """
+    PRE: actor is authenticated and project_id identifies an ACTIVE public Project.
+    POST: atomically sets is_public=False, audits once, invalidates public portal cache.
+    """
+    _require_transition_actor(actor)
+    with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_id)
+        if project.status != Project.Status.ACTIVE:
+            raise InvalidStateTransitionError(
+                {
+                    'status': _(
+                        'Un proyecto cerrado no puede retirarse del portal; '
+                        'corrija la inconsistencia con una operación de dominio adecuada.'
+                    )
+                }
+            )
+        if not project.is_public:
+            raise InvalidStateTransitionError(
+                {'is_public': _('El proyecto no está publicado en el portal público.')}
+            )
+        project.is_public = False
+        project.save(update_fields=('is_public', 'updated_at'))
+        log_action(
+            actor,
+            AuditLog.Action.UNPUBLISHED,
+            project,
+            _('Proyecto %(code)s retirado del portal público.') % {'code': project.code},
+        )
+    invalidate_public_portal_cache()
+    return project
 
 
 def annul_donation(donation_id: int, *, actor, reason) -> Donation:

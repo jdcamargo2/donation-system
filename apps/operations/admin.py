@@ -79,9 +79,9 @@ class InstitutionAdmin(admin.ModelAdmin):
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
-    list_display = ('code', 'name', 'status', 'estimated_budget')
+    list_display = ('code', 'name', 'status', 'is_public', 'estimated_budget')
     search_fields = ('code', 'name')
-    list_filter = ('status',)
+    list_filter = ('status', 'is_public')
     readonly_fields = (
         'code',
         'status',

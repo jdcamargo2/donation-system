@@ -42,10 +42,25 @@ class ProjectCsvExportView(FilteredCsvExportView):
     permission_required = 'operations.view_project'
     list_view_class = ProjectListView
     filename = 'proyectos.csv'
-    headers = ('Código', 'Nombre', 'Estado', 'Presupuesto USD', 'Inicio', 'Cierre', 'Ubicación')
+    headers = (
+        'Código',
+        'Nombre',
+        'Estado',
+        'Visibilidad',
+        'Presupuesto USD',
+        'Inicio',
+        'Cierre',
+        'Ubicación',
+    )
     row_builder = staticmethod(lambda item: (
-        item.code, item.name, item.get_status_display(), str(item.estimated_budget),
-        item.start_date or '', item.end_date or '', item.location,
+        item.code,
+        item.name,
+        item.get_status_display(),
+        'Público' if item.is_public else 'Privado',
+        str(item.estimated_budget),
+        item.start_date or '',
+        item.end_date or '',
+        item.location,
     ))
 
 

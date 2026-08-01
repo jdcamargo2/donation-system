@@ -26,6 +26,12 @@ urlpatterns = [
     path('projects/<int:pk>/edit/', views.ProjectUpdateView.as_view(), name='project_update'),
     path('projects/<int:pk>/delete/', views.ProjectDeleteView.as_view(), name='project_delete'),
     path('projects/<int:pk>/finish/', views.ProjectFinishView.as_view(), name='project_finish'),
+    path('projects/<int:pk>/publish/', views.ProjectPublishView.as_view(), name='project_publish'),
+    path(
+        'projects/<int:pk>/unpublish/',
+        views.ProjectUnpublishView.as_view(),
+        name='project_unpublish',
+    ),
     path(
         'projects/<int:project_pk>/milestones/add/',
         views.ProjectMilestoneAddView.as_view(),

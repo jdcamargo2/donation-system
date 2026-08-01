@@ -7,7 +7,13 @@ from django.test import TestCase
 from django.urls import reverse
 
 from apps.operations.models import Project, ProjectUpdate
-from apps.operations.services import register_advance, publish_project_update
+from apps.operations.services import (
+    finish_project,
+    publish_project,
+    publish_project_update,
+    register_advance,
+    unpublish_project,
+)
 from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project, create_user
 
 
@@ -160,6 +166,30 @@ class PublicPortalTests(TestCase):
         response = self.client.get(reverse('public_portal:public_project_detail', args=[private_project.pk]))
 
         self.assertEqual(response.status_code, 404)
+
+    def test_publication_lifecycle_services_control_public_visibility_and_cache(self):
+        private_project = create_project(code='PRJ-LIFECYCLE-PUB', name='Ciclo de publicación')
+        detail_url = reverse('public_portal:public_project_detail', args=[private_project.pk])
+        list_url = reverse('public_portal:public_project_list')
+
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+        self.assertNotContains(self.client.get(list_url), private_project.name)
+
+        publish_project(project_id=private_project.pk, actor=self.user)
+        self.assertEqual(self.client.get(detail_url).status_code, 200)
+        self.assertContains(self.client.get(list_url), private_project.name)
+
+        unpublish_project(project_id=private_project.pk, actor=self.user)
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+        self.assertNotContains(self.client.get(list_url), private_project.name)
+
+        publish_project(project_id=private_project.pk, actor=self.user)
+        finish_project(private_project.pk, actor=self.user)
+        private_project.refresh_from_db()
+        self.assertEqual(private_project.status, Project.Status.CLOSED)
+        self.assertFalse(private_project.is_public)
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+        self.assertNotContains(self.client.get(list_url), private_project.name)
 
     def test_public_project_detail_returns_200_without_login(self):
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))

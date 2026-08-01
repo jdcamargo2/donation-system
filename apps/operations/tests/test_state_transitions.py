@@ -279,6 +279,7 @@ class StateTransitionBoundaryTests(TestCase):
 
         self.assertContains(response, reverse('project_finish', args=(self.project.pk,)))
         self.assertContains(response, 'Terminar proyecto')
+        self.assertContains(response, 'Privado')
         self.assertNotContains(response, 'aria-label="Cambiar estado del proyecto"')
         self.assertNotContains(response, 'Anular proyecto')
         self.assertContains(response, self.project.get_status_display())
@@ -286,7 +287,10 @@ class StateTransitionBoundaryTests(TestCase):
         finish_project(self.project.pk, actor=self.user)
         closed_response = self.client.get(reverse('project_detail', args=(self.project.pk,)))
         self.assertNotContains(closed_response, 'Terminar proyecto')
+        self.assertNotContains(closed_response, 'Publicar en portal')
+        self.assertNotContains(closed_response, 'Retirar del portal')
         self.assertContains(closed_response, 'Cerrado')
+        self.assertContains(closed_response, 'Privado')
 
     def test_admin_status_is_readonly_and_save_cannot_bypass(self):
         request = RequestFactory().post('/admin/')

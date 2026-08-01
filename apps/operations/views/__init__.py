@@ -79,6 +79,8 @@ from .projects import (
     ProjectDocumentDownloadView,
     ProjectFinishView,
     ProjectListView,
+    ProjectPublishView,
+    ProjectUnpublishView,
     ProjectUpdateChunkView,
     ProjectUpdateView,
 )
@@ -145,6 +147,8 @@ __all__ = [
     'ProjectMilestoneMoveDownView',
     'ProjectMilestoneMoveUpView',
     'ProjectMilestoneReopenView',
+    'ProjectPublishView',
+    'ProjectUnpublishView',
     'ProjectUpdateAttachmentCreateView',
     'ProjectUpdateAttachmentDeleteView',
     'ProjectUpdateAttachmentDownloadView',

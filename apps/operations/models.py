@@ -143,6 +143,12 @@ class Project(models.Model):
         ordering = ['code']
         verbose_name = _('proyecto')
         verbose_name_plural = _('proyectos')
+        permissions = [
+            (
+                'manage_project_publication',
+                _('Puede publicar y retirar proyectos del portal público'),
+            ),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(estimated_budget__gte=ZERO_MONEY),
@@ -1125,6 +1131,7 @@ class AuditLog(models.Model):
         CLOSED = 'closed', _('Cerrada')
         EXPENSE_CANCELLED = 'expense_cancelled', _('Gasto anulado')
         PUBLISHED = 'published', _('Publicada')
+        UNPUBLISHED = 'unpublished', _('Retirado del portal')
         COMPLETED = 'completed', _('Completada')
         REOPENED = 'reopened', _('Reabierta')
         REORDERED = 'reordered', _('Reordenada')

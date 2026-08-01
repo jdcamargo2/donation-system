@@ -39,7 +39,14 @@
                                 {{ project.code }}{% if project.location %} · {{ project.location }}{% endif %}
                             </span>
                         </td>
-                        <td><span class="badge ops-status-badge">{{ project.get_status_display }}</span></td>
+                        <td>
+                            <span class="badge ops-status-badge">{{ project.get_status_display }}</span>
+                            {% if project.is_public %}
+                                <span class="badge text-bg-success d-block mt-1" aria-label="Visibilidad: Público">Público</span>
+                            {% else %}
+                                <span class="badge text-bg-secondary d-block mt-1" aria-label="Visibilidad: Privado">Privado</span>
+                            {% endif %}
+                        </td>
                         <td class="ops-money text-nowrap">{{ project.estimated_budget|money_es }} USD</td>
                         <td>
                             <span>{{ project.start_date|default:"-" }}</span>

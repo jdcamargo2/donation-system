@@ -12,6 +12,11 @@
         <div class="ops-project-detail-primary-meta">
             <span class="ops-project-detail-code">{{ object.code }}</span>
             <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            {% if object.is_public %}
+                <span class="badge text-bg-success" aria-label="Visibilidad del proyecto: Público">Público</span>
+            {% else %}
+                <span class="badge text-bg-secondary" aria-label="Visibilidad del proyecto: Privado">Privado</span>
+            {% endif %}
         </div>
         {% if object.location or object.responsible_unit %}
         <div class="ops-project-detail-secondary-meta">
@@ -25,12 +30,37 @@
         {% if perms.operations.change_project and object.status != 'closed' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
-        {% if can_finish %}
+        {% if can_finish or can_publish or can_unpublish %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Más acciones del proyecto">
                 Más
             </button>
             <div class="dropdown-menu dropdown-menu-end ops-project-detail-action-menu">
+                {% if can_publish %}
+                <a
+                    class="dropdown-item"
+                    href="{% url 'project_publish' object.pk %}"
+                    data-confirm-action
+                    data-confirm-form="project-publish-form"
+                    data-confirm-title="¿Publicar este proyecto en el portal público?"
+                    data-confirm-text="El proyecto quedará visible en el portal público mientras permanezca activo y público."
+                    data-confirm-confirm-label="Sí, publicar"
+                    data-confirm-variant="primary"
+                >Publicar en portal</a>
+                {% endif %}
+                {% if can_unpublish %}
+                <a
+                    class="dropdown-item"
+                    href="{% url 'project_unpublish' object.pk %}"
+                    data-confirm-action
+                    data-confirm-form="project-unpublish-form"
+                    data-confirm-title="¿Retirar este proyecto del portal público?"
+                    data-confirm-text="El proyecto dejará de listarse en el portal público."
+                    data-confirm-confirm-label="Sí, retirar"
+                    data-confirm-variant="warning"
+                >Retirar del portal</a>
+                {% endif %}
+                {% if can_finish %}
                 <a
                     class="dropdown-item"
                     href="{% url 'project_finish' object.pk %}"
@@ -41,9 +71,22 @@
                     data-confirm-confirm-label="Sí, terminar"
                     data-confirm-variant="warning"
                 >Terminar proyecto</a>
+                {% endif %}
+                {% if can_publish %}
+                <form id="project-publish-form" method="post" action="{% url 'project_publish' object.pk %}">
+                    {% csrf_token %}
+                </form>
+                {% endif %}
+                {% if can_unpublish %}
+                <form id="project-unpublish-form" method="post" action="{% url 'project_unpublish' object.pk %}">
+                    {% csrf_token %}
+                </form>
+                {% endif %}
+                {% if can_finish %}
                 <form id="project-finish-form" method="post" action="{% url 'project_finish' object.pk %}">
                     {% csrf_token %}
                 </form>
+                {% endif %}
             </div>
         </div>
         {% endif %}

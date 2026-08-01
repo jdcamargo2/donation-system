@@ -83,7 +83,7 @@ class SearchAndExportTests(TestCase):
         content = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('Código,Nombre,Estado,Presupuesto USD', content)
+        self.assertIn('Código,Nombre,Estado,Visibilidad,Presupuesto USD', content)
         self.assertIn(self.active.code, content)
         self.assertNotIn(self.closed.code, content)
         self.assertIn(str(self.active.estimated_budget), content)
