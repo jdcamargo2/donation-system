@@ -158,6 +158,62 @@ class FormTests(TestCase):
         self.assertIn(('money', 'Dinero'), list(donation_form.fields['donation_type'].choices))
         self.assertNotIn(('mobile_payment', 'Pago móvil'), list(expense_form.fields['payment_method'].choices))
 
+    def test_donation_form_create_requires_explicit_donation_type_selection(self):
+        form = DonationForm()
+        choices = list(form.fields['donation_type'].choices)
+        empty_choices = [choice for choice in choices if choice[0] == '']
+        rendered = str(form['donation_type'])
+
+        self.assertTrue(form.fields['donation_type'].required)
+        self.assertIsNone(form.fields['donation_type'].initial)
+        self.assertEqual(choices[0], ('', 'Seleccione una opción'))
+        self.assertEqual(len(empty_choices), 1)
+        self.assertIsNone(form['donation_type'].value())
+        self.assertIn(('goods', 'Bienes'), choices)
+        self.assertIn('value="" selected', rendered)
+        self.assertNotIn('value="goods" selected', rendered)
+
+    def test_donation_form_create_rejects_missing_donation_type(self):
+        before_count = Donation.objects.count()
+        form = DonationForm(
+            data={
+                'donor': self.donor.pk,
+                'donation_type': '',
+                'amount': '250.00',
+                'objective': 'Apoyar atención de emergencia',
+                'restrictions': '',
+                'commitment_date': '',
+                'received_date': '',
+                'support_reference': '',
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('donation_type', form.errors)
+        self.assertEqual(form.errors['donation_type'], ['Este campo es obligatorio.'])
+        self.assertEqual(Donation.objects.count(), before_count)
+
+    def test_donation_form_edit_preserves_goods_donation_type(self):
+        donation = create_donation(code='DON-GOODS', donor=self.donor)
+        self.assertEqual(donation.donation_type, 'goods')
+        form = DonationForm(instance=donation)
+        rendered = str(form['donation_type'])
+
+        self.assertEqual(form['donation_type'].value(), 'goods')
+        self.assertIn('value="goods" selected', rendered)
+        self.assertNotIn('value="" selected', rendered)
+
+    def test_donation_form_edit_preserves_money_donation_type(self):
+        donation = create_donation(code='DON-MONEY', donor=self.donor)
+        donation.donation_type = 'money'
+        donation.save(update_fields=('donation_type',))
+        form = DonationForm(instance=donation)
+        rendered = str(form['donation_type'])
+
+        self.assertEqual(form['donation_type'].value(), 'money')
+        self.assertIn('value="money" selected', rendered)
+        self.assertNotIn('value="" selected', rendered)
+
     def test_project_form_saves_valid_data(self):
         form = ProjectForm(
             data={

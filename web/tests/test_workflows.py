@@ -98,6 +98,12 @@ class MvpWorkflowRegressionTests(TestCase):
         self.assertContains(donation_form, 'Dinero')
         self.assertContains(donation_form, 'Seleccione una opción')
         self.assertNotContains(donation_form, '---------')
+        donation_type_html = str(donation_form.context['form']['donation_type'])
+        self.assertIn('Seleccione una opción', donation_type_html)
+        self.assertIn('value="" selected', donation_type_html)
+        self.assertIn('value="goods"', donation_type_html)
+        self.assertNotIn('value="goods" selected', donation_type_html)
+        self.assertEqual(donation_type_html.count('value=""'), 1)
 
         donation_amount = Decimal('1234.56')
         donation_response = self.client.post(

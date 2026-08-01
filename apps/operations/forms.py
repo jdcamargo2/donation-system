@@ -463,6 +463,12 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
             'received_date': build_date_widget(),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.instance.pk:
+            self.fields['donation_type'].initial = None
+
+
 class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
     donation = DonationWithBalanceChoiceField(
         queryset=Donation.objects.none(),
