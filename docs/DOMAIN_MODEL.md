@@ -223,11 +223,11 @@ PUBLISHED
 ### Reglas
 
 * Solo puede crearse para proyectos activos.
-* El porcentaje de progreso debe estar entre 0 y 100.
 * La publicación constituye una transición explícita.
 * Un avance publicado es inmutable.
 * El creador técnico y la persona responsable del avance representan responsabilidades diferentes.
 * La revisión institucional no altera el estado del avance.
+* `ProjectUpdate` no almacena porcentaje de progreso; el progreso operativo del proyecto se deriva de hitos (`ProjectMilestone`).
 
 ## 8. `ProjectDocument`
 

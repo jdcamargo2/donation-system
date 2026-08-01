@@ -42,7 +42,6 @@ class ProjectDocumentTests(TestCase):
             'Avance con adjuntos',
             'Registro operativo.',
             update_date=date(2026, 7, 12),
-            progress_percentage=30,
             created_by=self.user,
             reported_by=self.user,
         )
@@ -84,7 +83,6 @@ class ProjectDocumentTests(TestCase):
                 'title': 'Avance múltiple',
                 'description': 'Incluye dos archivos.',
                 'update_date': '2026-07-12',
-                'progress_percentage': '45',
                 'reported_by': self.user.pk,
                 'attachments': [
                     SimpleUploadedFile('foto.jpg', b'photo'),

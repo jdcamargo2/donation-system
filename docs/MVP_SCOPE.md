@@ -194,13 +194,14 @@ Incluye:
 * título;
 * descripción;
 * fecha real;
-* porcentaje de progreso;
 * creador técnico;
 * persona responsable del contenido del avance;
 * evidencias;
 * publicación.
 
 Un avance publicado es inmutable.
+
+El progreso operativo del proyecto no se captura en el avance; se deriva de hitos verificables.
 
 ### 3.7. Revisión institucional
 

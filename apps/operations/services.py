@@ -1319,7 +1319,6 @@ def register_advance(
     title: str,
     description: str,
     update_date=None,
-    progress_percentage: int = 0,
     attachments=(),
     created_by=None,
     reported_by=None,
@@ -1337,7 +1336,6 @@ def register_advance(
             title=title,
             description=description,
             update_date=update_date or timezone.localdate(),
-            progress_percentage=progress_percentage,
             created_by=created_by,
             reported_by=reported_by,
             status=ProjectUpdate.Status.DRAFT,
@@ -1355,7 +1353,7 @@ def register_advance(
 
 def update_project_update(
     *, update_id: int, project, title: str, description: str, update_date,
-    progress_percentage: int, reported_by, actor, attachments=()
+    reported_by, actor, attachments=()
 ) -> ProjectUpdate:
     """
     PRE: update_id identifies a DRAFT advance and submitted values are validated form data.
@@ -1372,7 +1370,6 @@ def update_project_update(
         project_update.title = title
         project_update.description = description
         project_update.update_date = update_date
-        project_update.progress_percentage = progress_percentage
         project_update.reported_by = reported_by
         project_update.full_clean()
         project_update.save()

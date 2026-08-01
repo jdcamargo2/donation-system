@@ -469,20 +469,13 @@ Representa un avance de proyecto.
 | `title`               | `CharField`                 | Obligatorio                        |
 | `description`         | `TextField`                 | Obligatorio                        |
 | `update_date`         | `DateField`                 | Obligatorio                        |
-| `progress_percentage` | `PositiveSmallIntegerField` | Entre 0 y 100                      |
 | `status`              | `CharField`                 | Obligatorio                        |
 | `created_at`          | `DateTimeField`             | Automático                         |
 | `updated_at`          | `DateTimeField`             | Automático                         |
 | `created_by_id`       | `ForeignKey`                | Opcional, referencia a `auth_user` |
 | `reported_by_id`      | `ForeignKey`                | Opcional, referencia a `auth_user` |
 
-#### Restricción
-
-```text
-project_update_progress_between_0_and_100
-
-0 <= progress_percentage <= 100
-```
+`ProjectUpdate` no persiste porcentaje de progreso. El progreso operativo del proyecto se deriva de hitos (`ProjectMilestone`), no de esta tabla.
 
 #### Estados
 

@@ -279,7 +279,6 @@ class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, f
             'title',
             'description',
             'update_date',
-            'progress_percentage',
             'reported_by',
         ]
         labels = {
@@ -287,7 +286,6 @@ class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, f
             'title': _('Título'),
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
-            'progress_percentage': _('Porcentaje de progreso'),
             'reported_by': _('Persona responsable del avance'),
         }
         widgets = {'update_date': build_date_widget()}
@@ -315,14 +313,12 @@ class ProjectUpdateForProjectForm(ProjectUpdateResponsibleFormMixin, BootstrapFo
             'title',
             'description',
             'update_date',
-            'progress_percentage',
             'reported_by',
         ]
         labels = {
             'title': _('Título'),
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
-            'progress_percentage': _('Porcentaje de progreso'),
             'reported_by': _('Persona responsable del avance'),
         }
         widgets = {'update_date': build_date_widget()}

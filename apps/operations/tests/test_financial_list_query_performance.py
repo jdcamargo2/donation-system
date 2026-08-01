@@ -242,7 +242,6 @@ class FinancialListAnnotationTests(TestCase):
             title='Avance con conteo anotado',
             description='Descripción',
             update_date=date(2026, 7, 15),
-            progress_percentage=10,
             created_by=self.user,
             reported_by=self.user,
         )
@@ -319,7 +318,6 @@ class FinancialListQueryScalingTests(TestCase):
                 title=f'Query update {index}',
                 description='Query scaling',
                 update_date=date(2026, 7, 15),
-                progress_percentage=0,
                 created_by=cls.user,
                 reported_by=cls.user,
             )

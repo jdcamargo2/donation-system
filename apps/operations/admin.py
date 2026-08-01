@@ -135,7 +135,7 @@ class ProjectAdmin(admin.ModelAdmin):
 class ProjectUpdateAdmin(admin.ModelAdmin):
     form = ProjectUpdateAdminForm
     list_display = (
-        'project', 'title', 'reported_by', 'update_date', 'progress_percentage',
+        'project', 'title', 'reported_by', 'update_date',
         'status', 'created_at', 'created_by',
     )
     list_filter = ('status', 'update_date', 'created_at')
@@ -150,7 +150,7 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
         readonly = set(super().get_readonly_fields(request, obj))
         if obj and obj.status != ProjectUpdate.Status.DRAFT:
             readonly.update(
-                ('project', 'title', 'description', 'update_date', 'progress_percentage', 'reported_by')
+                ('project', 'title', 'description', 'update_date', 'reported_by')
             )
         return tuple(readonly)
 

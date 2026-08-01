@@ -32,15 +32,14 @@ class ProjectUpdateTests(TestCase):
         self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=('status',))
 
-    def create_draft(self, *, progress_percentage=25):
+    def create_draft(self):
         # PRE: self.project está activo y self.user puede ser atribuido en auditoría.
-        # POST: retorna un avance DRAFT persistido con fecha y progreso válidos.
+        # POST: retorna un avance DRAFT persistido con fecha válida.
         return register_advance(
             project_id=self.project.pk,
             title='Avance operativo',
             description='Trabajo ejecutado durante la jornada.',
             update_date=date(2026, 7, 12),
-            progress_percentage=progress_percentage,
             created_by=self.user,
             reported_by=self.reported_by,
         )
@@ -49,7 +48,6 @@ class ProjectUpdateTests(TestCase):
         update = self.create_draft()
 
         self.assertEqual(update.status, ProjectUpdate.Status.DRAFT)
-        self.assertEqual(update.progress_percentage, 25)
         self.assertTrue(AuditLog.objects.filter(
             entity_id=str(update.pk), action=AuditLog.Action.CREATED, user=self.user
         ).exists())
@@ -102,6 +100,7 @@ class ProjectUpdateTests(TestCase):
                 self.assertEqual(form.fields['reported_by'].label, 'Persona responsable del avance')
                 self.assertTrue(form.fields['reported_by'].required)
                 self.assertNotIn('created_by', form.fields)
+                self.assertNotIn('progress_percentage', form.fields)
 
     def test_create_for_project_view_keeps_creator_and_reporter_separate(self):
         self.client.force_login(self.user)
@@ -112,7 +111,6 @@ class ProjectUpdateTests(TestCase):
                 'title': 'Avance desde formulario',
                 'description': 'El formulario transmite el responsable seleccionado.',
                 'update_date': '2026-07-12',
-                'progress_percentage': '30',
                 'reported_by': self.reported_by.pk,
             },
         )
@@ -152,13 +150,11 @@ class ProjectUpdateTests(TestCase):
             title='Avance operativo corregido',
             description='Información operativa actualizada.',
             update_date=date(2026, 7, 11),
-            progress_percentage=40,
             reported_by=self.reported_by,
             actor=self.editor,
         )
 
         self.assertEqual(edited.title, 'Avance operativo corregido')
-        self.assertEqual(edited.progress_percentage, 40)
         self.assertEqual(edited.reported_by, self.reported_by)
         self.assertTrue(AuditLog.objects.filter(
             entity_id=str(update.pk), action=AuditLog.Action.UPDATED, user=self.editor
@@ -177,7 +173,6 @@ class ProjectUpdateTests(TestCase):
                 title='Reasignación no permitida',
                 description='No debe persistirse en un proyecto cerrado.',
                 update_date=date(2026, 7, 12),
-                progress_percentage=40,
                 reported_by=self.reported_by,
                 actor=self.editor,
             )
@@ -197,7 +192,6 @@ class ProjectUpdateTests(TestCase):
                 'title': update.title,
                 'description': update.description,
                 'update_date': update.update_date.isoformat(),
-                'progress_percentage': update.progress_percentage,
                 'reported_by': self.reported_by.pk,
             },
         )
@@ -284,7 +278,6 @@ class ProjectUpdateTests(TestCase):
             title=update.title,
             description=update.description,
             update_date=update.update_date,
-            progress_percentage=update.progress_percentage,
             reported_by=replacement,
             actor=self.editor,
         )
@@ -320,7 +313,6 @@ class ProjectUpdateTests(TestCase):
                 title='Edición prohibida',
                 description='No debe persistirse.',
                 update_date=date(2026, 7, 12),
-                progress_percentage=50,
                 reported_by=self.reported_by,
                 actor=self.user,
             )
@@ -333,10 +325,6 @@ class ProjectUpdateTests(TestCase):
             self.client.get(reverse('project_update_update', args=[update.pk])).status_code,
             403,
         )
-
-    def test_invalid_progress_percentage_is_rejected(self):
-        with self.assertRaises(ValidationError):
-            self.create_draft(progress_percentage=101)
 
     def test_admin_preserves_technical_creator_and_opens_published_update(self):
         model_admin = ProjectUpdateAdmin(ProjectUpdate, admin.site)
@@ -387,7 +375,6 @@ class ProjectUpdateDetailTests(TestCase):
             title='Avance compacto',
             description='Descripción completa para verificar la composición del detalle.',
             update_date=date(2026, 7, 17),
-            progress_percentage=73,
             created_by=self.user,
             reported_by=self.reported_by,
         )
@@ -416,7 +403,7 @@ class ProjectUpdateDetailTests(TestCase):
         self.assertContains(response, self.project_update.description)
         self.assertContains(response, 'Información de registro')
         self.assertNotContains(response, 'Progreso')
-        self.assertNotContains(response, f'>{self.project_update.progress_percentage}%<')
+        self.assertNotContains(response, 'Porcentaje de progreso')
         detail_template = Path('templates/web/project_update_detail.html').read_text()
         self.assertNotIn('progress_percentage', detail_template)
         self.assertEqual(detail_template.count('{{ object.title }}'), 1)

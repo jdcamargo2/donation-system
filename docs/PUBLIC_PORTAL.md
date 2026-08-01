@@ -112,12 +112,14 @@ El portal puede exponer, según el contexto:
 * ubicación general;
 * estado;
 * fechas relevantes;
-* porcentaje de progreso;
+* progreso del proyecto derivado de hitos (cuando se publique);
 * avances publicados;
 * métricas agregadas;
 * información institucional autorizada.
 
 La selección exacta debe realizarse mediante selectores públicos específicos.
+
+`ProjectUpdate` no expone un porcentaje de progreso propio; cualquier porcentaje de progreso de proyecto es independiente del contenido del avance.
 
 ## 7. Datos no publicados
 

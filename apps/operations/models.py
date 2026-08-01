@@ -2,7 +2,6 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -342,11 +341,6 @@ class ProjectUpdate(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField()
     update_date = models.DateField(_('fecha del avance'), default=timezone.localdate)
-    progress_percentage = models.PositiveSmallIntegerField(
-        _('porcentaje de progreso'),
-        default=0,
-        validators=[MinValueValidator(0), MaxValueValidator(100)],
-    )
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -372,12 +366,6 @@ class ProjectUpdate(models.Model):
         verbose_name_plural = _('avances de proyecto')
         permissions = [
             ('publish_projectupdate', _('Puede publicar avances de proyecto')),
-        ]
-        constraints = [
-            models.CheckConstraint(
-                condition=models.Q(progress_percentage__gte=0, progress_percentage__lte=100),
-                name='project_update_progress_between_0_and_100',
-            ),
         ]
 
     def __str__(self):

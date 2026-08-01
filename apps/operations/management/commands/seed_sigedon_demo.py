@@ -482,7 +482,6 @@ class Command(BaseCommand):
                     "identificación preliminar de comunidades."
                 ),
                 "status": ProjectUpdate.Status.PUBLISHED,
-                "progress_percentage": 35,
             },
             {
                 "project": projects["centro"],
@@ -492,7 +491,6 @@ class Command(BaseCommand):
                     "representantes parroquiales."
                 ),
                 "status": ProjectUpdate.Status.DRAFT,
-                "progress_percentage": 20,
             },
             {
                 "project": projects["este"],
@@ -502,7 +500,6 @@ class Command(BaseCommand):
                     "y levantamiento de información."
                 ),
                 "status": ProjectUpdate.Status.DRAFT,
-                "progress_percentage": 10,
             },
         ]
 
@@ -515,7 +512,6 @@ class Command(BaseCommand):
                 defaults={
                     "description": data["description"],
                     "update_date": date.today(),
-                    "progress_percentage": data["progress_percentage"],
                     "status": data["status"],
                     "created_by": operator,
                     "reported_by": reviewer,

@@ -468,10 +468,8 @@ class OperationsPermissionTests(TestCase):
 
         self.assertNotContains(response, '<th>Progreso</th>')
         self.assertNotContains(response, 'role="progressbar"')
-        self.assertNotContains(
-            response,
-            f'>{self.project_update.progress_percentage}%<',
-        )
+        self.assertNotContains(response, 'Porcentaje de progreso')
+        self.assertNotContains(response, 'progress_percentage')
 
     def test_project_update_secondary_actions_follow_permissions(self):
         detail_url = reverse('project_update_detail', args=[self.project_update.pk])
