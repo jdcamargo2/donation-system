@@ -292,6 +292,10 @@ Las pruebas de archivos privados deben comprobar:
 * contrato de opt-in de un solo archivo en `ProjectDocumentForm.file` (atributo de widget,
   wrapper/list/summary renderizados, ausencia de `multiple`, y remount tras redisplay por
   validación);
+* contrato de opt-in de un solo archivo en `ExpenseForm.support_file` y
+  `SupportingDocumentForm.document` (atributo de widget, wrapper/list/summary en create/edit
+  de gasto y alta standalone de soporte, ausencia de `multiple`, y remount tras redisplay por
+  validación);
 * inclusión única de `file_upload_preview.js` en `templates/base.html`;
 * un evento de auditoría `CREATED` por cada adjunto persistido;
 * rechazo de altas o bajas de adjuntos cuando el avance ya está `PUBLISHED`.
@@ -299,7 +303,8 @@ Las pruebas de archivos privados deben comprobar:
 La vista previa client-side de selección (fusión incremental o reemplazo de un solo archivo,
 miniaturas, `DataTransfer`, enfoque tras quitar y limpieza de object URLs) no está cubierta
 por el cliente HTTP de Django; debe validarse manualmente en navegador según la checklist
-del cambio correspondiente, incluyendo humo de reemplazo/remoción en `ProjectDocument`.
+del cambio correspondiente, incluyendo humo de reemplazo/remoción en `ProjectDocument`,
+`ExpenseForm.support_file` y `SupportingDocumentForm.document`.
 
 ## 13. Pruebas de auditoría
 

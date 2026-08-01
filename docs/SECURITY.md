@@ -133,8 +133,9 @@ La publicación de una entidad no implica automáticamente que todos sus archivo
 
 ### 6.1. Vista previa local de selección de archivos
 
-La vista previa de selección en formularios de adjuntos de avance y en la carga pendiente
-de `ProjectDocument`:
+La vista previa de selección en formularios de adjuntos de avance, en la carga pendiente
+de `ProjectDocument` y en la carga pendiente de soportes de gasto
+(`ExpenseForm.support_file`, `SupportingDocumentForm.document`):
 
 * opera solo en el cliente y no envía archivos hasta el submit del formulario;
 * no almacena nombres ni contenido en persistencia del navegador;

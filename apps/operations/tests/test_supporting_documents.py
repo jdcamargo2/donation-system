@@ -8,6 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from apps.operations.forms import SupportingDocumentForm
 from apps.operations.models import Expense, Project, SupportingDocument
 from apps.operations.services import create_supporting_document
 from apps.operations.role_services import sync_operation_roles
@@ -61,6 +62,57 @@ class SupportingDocumentWorkflowTests(TestCase):
         self.assertContains(response, 'name="document"')
         self.assertContains(response, 'name="notes"')
         self.assertNotContains(response, 'name="expense"')
+
+    def test_supporting_document_form_opts_into_single_file_upload_preview(self):
+        form = SupportingDocumentForm()
+        field = form.fields['document']
+
+        self.assertEqual(field.widget.attrs.get('data-file-upload-preview'), 'true')
+        self.assertFalse(field.widget.allow_multiple_selected)
+        rendered = str(field.widget.render('document', None))
+        self.assertIn('data-file-upload-preview="true"', rendered)
+        self.assertNotIn('multiple', rendered)
+
+    def test_supporting_document_create_page_renders_file_upload_preview_contract(self):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse('supporting_document_create_for_expense', args=[self.expense.pk])
+        )
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-file-upload-preview')
+        self.assertContains(response, 'class="ops-file-upload"')
+        self.assertContains(response, 'data-file-upload-list')
+        self.assertContains(response, 'data-file-upload-summary')
+        self.assertContains(response, 'enctype="multipart/form-data"')
+        self.assertContains(response, 'csrfmiddlewaretoken')
+        self.assertContains(response, 'type="submit"')
+        self.assertContains(response, 'Cancelar')
+        self.assertEqual(content.count('type="file"'), 1)
+        self.assertNotIn('multiple', content.split('type="file"')[1].split('>')[0])
+        self.assertNotIn('name="title" data-file-upload-preview', content)
+        self.assertNotIn('name="notes" data-file-upload-preview', content)
+
+    def test_supporting_document_validation_redisplay_keeps_preview_mounts(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('supporting_document_create_for_expense', args=[self.expense.pk]),
+            data={
+                'title': 'Sin archivo',
+                'notes': 'Falta el archivo requerido.',
+            },
+        )
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(response.context['form'], 'document', 'Este campo es obligatorio.')
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'data-file-upload-preview')
+        self.assertContains(response, 'data-file-upload-list')
+        self.assertContains(response, 'data-file-upload-summary')
+        self.assertEqual(content.count('type="file"'), 1)
+        self.assertNotIn('multiple', content.split('type="file"')[1].split('>')[0])
 
     def test_post_creates_supporting_document_for_the_expected_expense(self):
         self.client.force_login(self.user)

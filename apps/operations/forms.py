@@ -554,7 +554,15 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
         help_text=_('Ingrese el monto en USD. Ejemplo: 1.500,00'),
     )
     support_title = forms.CharField(required=False, max_length=160, label=_('Referencia o título del soporte'))
-    support_file = forms.FileField(required=False, label=_('Documento soporte'))
+    support_file = forms.FileField(
+        required=False,
+        label=_('Documento soporte'),
+        widget=forms.FileInput(
+            attrs={
+                'data-file-upload-preview': 'true',
+            }
+        ),
+    )
 
     class Meta:
         model = Expense
@@ -710,4 +718,11 @@ class SupportingDocumentForm(BootstrapFormMixin, forms.ModelForm):
         help_texts = {
             'document': _('Adjunte el comprobante, factura, recibo o evidencia documental del gasto.'),
             'notes': _('Opcional. Use este campo para aclaraciones internas sobre el soporte.'),
+        }
+        widgets = {
+            'document': forms.FileInput(
+                attrs={
+                    'data-file-upload-preview': 'true',
+                }
+            ),
         }

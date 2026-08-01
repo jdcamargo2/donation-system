@@ -222,7 +222,7 @@ Los archivos privados:
 
 La visibilidad de cada archivo debe definirse explícitamente según su naturaleza y contexto.
 
-### 5.1. Vista previa local de selección (adjuntos de avance y documento de proyecto)
+### 5.1. Vista previa local de selección (adjuntos de avance, documento de proyecto y soportes de gasto)
 
 Los formularios de carga de archivos operativos pueden activar una vista previa
 client-side mediante el atributo explícito `data-file-upload-preview`.
@@ -232,15 +232,20 @@ En la fase actual, el opt-in aplica a:
 * `ProjectUpdateForm.attachments`;
 * `ProjectUpdateForProjectForm.attachments`;
 * `ProjectUpdateAttachmentForm.files`;
-* `ProjectDocumentForm.file` (entrada de un solo archivo).
+* `ProjectDocumentForm.file` (entrada de un solo archivo);
+* `ExpenseForm.support_file` (entrada de un solo archivo, campo solo de formulario);
+* `SupportingDocumentForm.document` (entrada de un solo archivo).
 
 Comportamiento:
 
 * la vista previa es local al navegador y no sube archivos hasta el envío del formulario;
 * el `input[type=file]` nativo permanece visible y es la fuente autoritativa de la selección;
-* en `ProjectDocumentForm.file` solo se previsualiza la selección pendiente local; al elegir
-  otro archivo se reemplaza esa selección; los `ProjectDocument` ya persistidos siguen
-  gestionándose solo con las acciones de servidor (detalle, descarga, eliminación);
+* en `ProjectDocumentForm.file`, `ExpenseForm.support_file` y `SupportingDocumentForm.document`
+  solo se previsualiza la selección pendiente local; al elegir otro archivo se reemplaza esa
+  selección; los documentos ya persistidos siguen gestionándose solo con las acciones de
+  servidor (detalle, descarga, eliminación);
+* en `ExpenseForm.support_file`, un archivo enviado en edición crea un `SupportingDocument`
+  adicional y no sustituye soportes existentes;
 * en entradas múltiples, la selección pendiente puede construirse de forma incremental y
   permiten quitar archivos individuales antes del submit cuando el navegador soporta
   `DataTransfer`;

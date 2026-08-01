@@ -196,6 +196,9 @@ rechazo.
 6. El sistema reserva un código operativo con prefijo `GAS`.
 7. Se registra el gasto.
 8. Se guarda el soporte documental.
+   En los formularios de gasto y de soporte standalone con opt-in de vista previa, la
+   selección pendiente es local al cliente y no se sube hasta el submit; los soportes ya
+   persistidos no se gestionan desde esa vista previa.
 9. Se crea el registro de auditoría.
 10. El progreso de ejecución se recalcula de manera derivada.
 11. La transacción se confirma de forma atómica.
