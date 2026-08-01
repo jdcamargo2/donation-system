@@ -1,8 +1,8 @@
 from django import forms
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
-from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
+from django.contrib.auth.admin import GroupAdmin, UserAdmin as DjangoUserAdmin
+from django.contrib.auth.models import Group, User
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.utils.translation import gettext_lazy as _
 
 from .choices import OPERATING_CURRENCY
@@ -12,6 +12,7 @@ from .models import (
     ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
     ProjectUpdateRemediation, ProjectUpdateRemediationAttachment, SupportingDocument,
 )
+from .role_services import operation_role_names
 from .services import (
     ExpenseFinalizedError,
     ProjectUpdateImmutableError,
@@ -23,6 +24,38 @@ from .services import (
     ensure_operational_entity_is_editable,
 )
 from .project_update_responsibles import eligible_project_update_reporters, validate_project_update_reporter
+
+
+def _is_canonical_sigedon_group(group):
+    """
+    PRE: group is a Group instance or None.
+    POST: True iff group exists and its name is a canonical SIGEDON role.
+    """
+    return group is not None and group.name in operation_role_names()
+
+
+class SigedonGroupAdminForm(forms.ModelForm):
+    """Reject create/rename that would forge a canonical SIGEDON role name."""
+
+    class Meta:
+        model = Group
+        fields = '__all__'
+
+    def clean_name(self):
+        name = self.cleaned_data['name']
+        if name not in operation_role_names():
+            return name
+        if self.instance.pk is None:
+            raise ValidationError(
+                _('Los grupos funcionales SIGEDON no pueden crearse desde el admin.')
+            )
+        if _is_canonical_sigedon_group(self.instance):
+            raise ValidationError(
+                _('Los grupos funcionales SIGEDON son de solo lectura.')
+            )
+        raise ValidationError(
+            _('No se puede renombrar un grupo al nombre de un rol funcional SIGEDON.')
+        )
 
 
 class SigedonUserAdmin(DjangoUserAdmin):
@@ -77,6 +110,101 @@ class SigedonUserAdmin(DjangoUserAdmin):
 
 admin.site.unregister(User)
 admin.site.register(User, SigedonUserAdmin)
+
+
+class SigedonGroupAdmin(GroupAdmin):
+    """
+    Protects canonical SIGEDON functional role groups as read-only in admin,
+    including for superusers. Technical groups remain fully editable.
+    """
+
+    form = SigedonGroupAdminForm
+    list_display = ('name', 'sigedon_group_type', 'sigedon_management')
+    search_fields = ('name',)
+    ordering = ('name',)
+    filter_horizontal = ('permissions',)
+
+    @admin.display(description=_('Tipo'))
+    def sigedon_group_type(self, obj):
+        if _is_canonical_sigedon_group(obj):
+            return _('Grupo funcional SIGEDON')
+        return _('Grupo técnico')
+
+    @admin.display(description=_('Gestión'))
+    def sigedon_management(self, obj):
+        if _is_canonical_sigedon_group(obj):
+            return _('Sincronizado — solo lectura')
+        return _('Editable')
+
+    def get_readonly_fields(self, request, obj=None):
+        """
+        PRE: obj is an optional Group shown in admin.
+        POST: canonical groups expose name and permissions as readonly.
+        """
+        if _is_canonical_sigedon_group(obj):
+            return ('name', 'permissions')
+        return super().get_readonly_fields(request, obj)
+
+    def has_change_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional Group admin object.
+        POST: canonical groups are never changeable, including for superusers.
+        """
+        if _is_canonical_sigedon_group(obj):
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional Group admin object.
+        POST: canonical groups are never deletable, including for superusers.
+        """
+        if _is_canonical_sigedon_group(obj):
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def save_model(self, request, obj, form, change):
+        """
+        PRE: admin form targets a new or existing Group.
+        POST: rejects saves that mutate or forge canonical role groups.
+        """
+        if change:
+            persisted = Group.objects.get(pk=obj.pk)
+            if _is_canonical_sigedon_group(persisted):
+                raise PermissionDenied(
+                    _('Los grupos funcionales SIGEDON no pueden modificarse desde el admin.')
+                )
+        if obj.name in operation_role_names():
+            raise PermissionDenied(
+                _('No se pueden crear ni renombrar grupos con nombres de roles funcionales SIGEDON.')
+            )
+        super().save_model(request, obj, form, change)
+
+    def delete_model(self, request, obj):
+        """
+        PRE: obj is a Group selected for ordinary admin deletion.
+        POST: rejects deletion of canonical groups; deletes technical groups.
+        """
+        if _is_canonical_sigedon_group(obj):
+            raise PermissionDenied(
+                _('Los grupos funcionales SIGEDON no pueden eliminarse desde el admin.')
+            )
+        return super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        """
+        PRE: queryset contains groups selected by the admin bulk delete action.
+        POST: all-or-nothing — any canonical group denies the entire batch.
+        """
+        if any(_is_canonical_sigedon_group(group) for group in queryset):
+            raise PermissionDenied(
+                _('La selección incluye grupos funcionales SIGEDON y no puede eliminarse.')
+            )
+        return super().delete_queryset(request, queryset)
+
+
+admin.site.unregister(Group)
+admin.site.register(Group, SigedonGroupAdmin)
 
 
 class FundAllocationAdminForm(forms.ModelForm):
