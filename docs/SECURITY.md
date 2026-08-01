@@ -134,15 +134,20 @@ La publicación de una entidad no implica automáticamente que todos sus archivo
 ### 6.1. Vista previa local de selección de archivos
 
 La vista previa de selección en formularios de adjuntos de avance, en la carga pendiente
-de `ProjectDocument` y en la carga pendiente de soportes de gasto
-(`ExpenseForm.support_file`, `SupportingDocumentForm.document`):
+de `ProjectDocument`, en la carga pendiente de soportes de gasto
+(`ExpenseForm.support_file`, `SupportingDocumentForm.document`) y en la carga pendiente
+del documento legal de institución (`InstitutionForm.legal_document`):
 
 * opera solo en el cliente y no envía archivos hasta el submit del formulario;
 * no almacena nombres ni contenido en persistencia del navegador;
 * no sustituye la validación ni los controles de acceso del servidor;
 * no gestiona ni elimina adjuntos o documentos ya persistidos;
 * mantiene el input nativo como autoridad de la selección enviada;
-* no altera el perímetro de descarga privada ni la validación autoritativa del servidor.
+* no altera el perímetro de descarga privada ni la validación autoritativa del servidor;
+* en `InstitutionForm.legal_document`, el enlace al archivo actual y la casilla de limpiar
+  siguen siendo el widget `ClearableFileInput` de Django; la vista previa solo cubre la
+  selección pendiente de reemplazo; limpiar/reemplazar el archivo persistido sigue
+  validándose en el servidor; la vista previa no altera permisos.
 
 ## 7. Seguridad de KoboToolbox
 

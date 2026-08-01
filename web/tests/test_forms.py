@@ -5,6 +5,8 @@ from decimal import Decimal
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
+from django import forms
+
 from apps.operations.choices import OPERATING_CURRENCY_CHOICES
 from apps.operations.forms import DonationForm, ExpenseForm, FundAllocationForm, InstitutionForm, ProjectForm
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, SupportingDocument
@@ -56,6 +58,19 @@ class FormTests(TestCase):
         self.assertNotIn('city', form.fields)
         self.assertEqual(form.fields['country'].label, 'País')
         self.assertEqual(form.fields['institution_type'].widget.__class__.__name__, 'Select')
+
+    def test_institution_form_legal_document_opts_into_clearable_file_upload_preview(self):
+        form = InstitutionForm()
+        field = form.fields['legal_document']
+
+        self.assertIsInstance(field.widget, forms.ClearableFileInput)
+        self.assertEqual(field.widget.attrs.get('data-file-upload-preview'), 'true')
+        self.assertFalse(field.widget.allow_multiple_selected)
+        self.assertFalse(field.required)
+        self.assertIn('form-control', field.widget.attrs.get('class', ''))
+        rendered = str(field.widget.render('legal_document', None))
+        self.assertIn('data-file-upload-preview="true"', rendered)
+        self.assertNotIn('multiple', rendered)
 
     def test_money_fields_and_selects_are_configured_for_forms(self):
         donation_form = DonationForm()

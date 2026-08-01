@@ -296,6 +296,12 @@ Las pruebas de archivos privados deben comprobar:
   `SupportingDocumentForm.document` (atributo de widget, wrapper/list/summary en create/edit
   de gasto y alta standalone de soporte, ausencia de `multiple`, y remount tras redisplay por
   validación);
+* contrato de opt-in `ClearableFileInput` en `InstitutionForm.legal_document` (preservación
+  del widget, atributo de preview, wrapper/list/summary en create/edit, ausencia de
+  `multiple`, controles Django de archivo actual/limpiar en edición con documento, matriz
+  servidor preserve/replace/clear/contradiction, y remount tras redisplay por validación);
+* confirmación manual de que quitar la selección pendiente no marca ni desmarca
+  `legal_document-clear` y no limpia el archivo persistido;
 * inclusión única de `file_upload_preview.js` en `templates/base.html`;
 * un evento de auditoría `CREATED` por cada adjunto persistido;
 * rechazo de altas o bajas de adjuntos cuando el avance ya está `PUBLISHED`.
@@ -304,7 +310,8 @@ La vista previa client-side de selección (fusión incremental o reemplazo de un
 miniaturas, `DataTransfer`, enfoque tras quitar y limpieza de object URLs) no está cubierta
 por el cliente HTTP de Django; debe validarse manualmente en navegador según la checklist
 del cambio correspondiente, incluyendo humo de reemplazo/remoción en `ProjectDocument`,
-`ExpenseForm.support_file` y `SupportingDocumentForm.document`.
+`ExpenseForm.support_file`, `SupportingDocumentForm.document` e
+`InstitutionForm.legal_document`.
 
 ## 13. Pruebas de auditoría
 

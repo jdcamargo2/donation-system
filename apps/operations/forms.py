@@ -207,6 +207,12 @@ class InstitutionForm(BootstrapFormMixin, forms.ModelForm):
             'status': _('Estado'),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['legal_document'].widget.attrs[
+            'data-file-upload-preview'
+        ] = 'true'
+
 
 class ProjectForm(BootstrapFormMixin, forms.ModelForm):
     estimated_budget = MoneyDecimalField(

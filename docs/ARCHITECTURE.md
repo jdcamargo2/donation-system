@@ -222,7 +222,7 @@ Los archivos privados:
 
 La visibilidad de cada archivo debe definirse explícitamente según su naturaleza y contexto.
 
-### 5.1. Vista previa local de selección (adjuntos de avance, documento de proyecto y soportes de gasto)
+### 5.1. Vista previa local de selección (adjuntos de avance, documento de proyecto, soportes de gasto y documento legal de institución)
 
 Los formularios de carga de archivos operativos pueden activar una vista previa
 client-side mediante el atributo explícito `data-file-upload-preview`.
@@ -234,7 +234,9 @@ En la fase actual, el opt-in aplica a:
 * `ProjectUpdateAttachmentForm.files`;
 * `ProjectDocumentForm.file` (entrada de un solo archivo);
 * `ExpenseForm.support_file` (entrada de un solo archivo, campo solo de formulario);
-* `SupportingDocumentForm.document` (entrada de un solo archivo).
+* `SupportingDocumentForm.document` (entrada de un solo archivo);
+* `InstitutionForm.legal_document` (entrada de un solo archivo; primer superficie
+  `ClearableFileInput`).
 
 Comportamiento:
 
@@ -244,6 +246,10 @@ Comportamiento:
   solo se previsualiza la selección pendiente local; al elegir otro archivo se reemplaza esa
   selección; los documentos ya persistidos siguen gestionándose solo con las acciones de
   servidor (detalle, descarga, eliminación);
+* en `InstitutionForm.legal_document`, el enlace al archivo persistido y la casilla de limpiar
+  siguen gestionados por Django (`ClearableFileInput`); la vista previa cubre únicamente la
+  selección pendiente de reemplazo; quitar esa selección pendiente no limpia el archivo
+  persistido ni altera `legal_document-clear`;
 * en `ExpenseForm.support_file`, un archivo enviado en edición crea un `SupportingDocument`
   adicional y no sustituye soportes existentes;
 * en entradas múltiples, la selección pendiente puede construirse de forma incremental y
