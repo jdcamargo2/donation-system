@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from html.parser import HTMLParser
 from tempfile import TemporaryDirectory
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from apps.operations.models import Project, ProjectUpdateReviewDecision
+from apps.operations.models import ExpenseRequest, Project, ProjectUpdateReviewDecision
 from apps.operations.services import (
     create_project_update_remediation,
     create_project_update_review,
@@ -18,7 +19,13 @@ from apps.operations.services import (
     register_advance,
     submit_project_update_remediation,
 )
-from apps.operations.tests.helpers import create_expense, create_project, create_user
+from apps.operations.tests.helpers import (
+    create_allocation,
+    create_approved_reserved_request,
+    create_expense,
+    create_project,
+    create_user,
+)
 
 
 class _LabelInventory(HTMLParser):
@@ -433,12 +440,6 @@ class RequiredFieldIndicatorNegativeScopeTests(TestCase):
         labels = inventory_labels(response.content.decode())
         assert_optional_marker(self, labels, 'legal_document')
 
-    def test_expense_support_file_has_no_marker_when_not_field_required(self):
-        response = self.client.get(reverse('expense_create'))
-        self.assertEqual(response.status_code, 200)
-        labels = inventory_labels(response.content.decode())
-        assert_optional_marker(self, labels, 'support_file')
-
     def test_filter_search_forms_do_not_render_required_markers(self):
         response = self.client.get(reverse('project_list'))
         self.assertEqual(response.status_code, 200)
@@ -450,6 +451,101 @@ class RequiredFieldIndicatorNegativeScopeTests(TestCase):
         )
         self.assertIsNotNone(filter_match)
         self.assertNotIn('required-mark', filter_match.group(0))
+
+
+class RequiredFieldIndicatorExpenseRequestFulfillmentTests(TestCase):
+    def setUp(self):
+        self.media = TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        self.override = override_settings(MEDIA_ROOT=self.media.name)
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+        self.user = create_user('required-marker-fulfill')
+        self.project = create_project(code='PRJ-MARKER-FUL')
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
+        self.allocation = create_allocation(
+            project=self.project,
+            amount=Decimal('100.00'),
+        )
+        self.approved = create_approved_reserved_request(
+            fund_allocation=self.allocation,
+            requested_by=self.user,
+            decided_by=self.user,
+            requested_amount=Decimal('40.00'),
+            purpose='Solicitud para marcadores de cumplimiento',
+        )
+        self.client.force_login(self.user)
+
+    def test_fulfillment_form_required_and_optional_markers(self):
+        response = self.client.get(
+            reverse('expense_request_fulfill', args=[self.approved.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        labels = inventory_labels(html)
+
+        for field_name in (
+            'expense_date',
+            'amount',
+            'category',
+            'reason',
+            'provider_or_recipient',
+            'payment_method',
+            'support_file',
+        ):
+            with self.subTest(field=field_name):
+                assert_required_marker(self, labels, field_name)
+
+        assert_optional_marker(self, labels, 'description')
+        assert_optional_marker(self, labels, 'observations')
+        assert_optional_marker(self, labels, 'support_title')
+        assert_optional_marker(self, labels, 'support_notes')
+
+        for absent in (
+            'allocation',
+            'request',
+            'status',
+            'reserved_amount',
+            'actor',
+            'code',
+        ):
+            with self.subTest(absent=absent):
+                assert_no_field_label(self, labels, absent)
+
+        self.assertIn('class="ops-file-upload"', html)
+        self.assertIn('data-file-upload-preview', html)
+        self.assertIn('Obligatorio. Adjunte el archivo', html)
+
+    def test_fulfillment_validation_redisplay_preserves_markers(self):
+        response = self.client.post(
+            reverse('expense_request_fulfill', args=[self.approved.pk]),
+            data={
+                'expense_date': '',
+                'amount': '',
+                'category': '',
+                'reason': '',
+                'provider_or_recipient': '',
+                'payment_method': '',
+                'description': '',
+                'observations': '',
+                'support_title': '',
+                'support_notes': '',
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        labels = inventory_labels(response.content.decode())
+        assert_required_marker(self, labels, 'expense_date')
+        assert_required_marker(self, labels, 'amount')
+        assert_required_marker(self, labels, 'category')
+        assert_required_marker(self, labels, 'reason')
+        assert_required_marker(self, labels, 'provider_or_recipient')
+        assert_required_marker(self, labels, 'payment_method')
+        assert_required_marker(self, labels, 'support_file')
+        assert_optional_marker(self, labels, 'description')
+        self.assertContains(response, 'id_support_file_error')
+        self.approved.refresh_from_db()
+        self.assertEqual(self.approved.status, ExpenseRequest.Status.APPROVED_RESERVED)
 
 
 class RequiredFieldIndicatorSharedIncludeSourceTests(TestCase):

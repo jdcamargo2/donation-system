@@ -3,15 +3,35 @@ from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.test import TestCase
-from django.test import override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate
+from apps.operations.models import (
+    Donation,
+    Expense,
+    ExpenseRequest,
+    FundAllocation,
+    Institution,
+    Project,
+    SupportingDocument,
+)
 from apps.operations.services import publish_project_update, register_advance
-from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_expense, create_institution, create_project, create_user
+from apps.operations.tests.helpers import (
+    TEST_DATE,
+    create_allocation,
+    create_approved_reserved_request,
+    create_donation,
+    create_expense,
+    create_institution,
+    create_project,
+    create_user,
+)
 from web.tests.test_required_field_indicators import assert_required_marker, field_label, inventory_labels
+
+GOVERNANCE_EXPENSE_MESSAGE = (
+    'El gasto debe registrarse desde una solicitud de gasto aprobada.'
+)
 
 
 class AuthenticatedViewTests(TestCase):
@@ -19,8 +39,12 @@ class AuthenticatedViewTests(TestCase):
         self.user = create_user()
         self.donor = create_institution()
         self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
         self.donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
-        self.allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('50.00'))
+        self.allocation = create_allocation(
+            donation=self.donation, project=self.project, amount=Decimal('50.00')
+        )
         self.expense = create_expense(allocation=self.allocation, amount=Decimal('10.00'))
 
     def test_allocation_create_budget_category_label_is_categoria(self):
@@ -36,6 +60,7 @@ class AuthenticatedViewTests(TestCase):
         assert_required_marker(self, labels, 'budget_category')
 
     def test_anonymous_users_are_redirected_from_protected_views(self):
+        # LoginRequiredMixin runs before governance redirect on expense_create.
         protected_urls = [
             reverse('dashboard'),
             reverse('institution_list'),
@@ -52,6 +77,7 @@ class AuthenticatedViewTests(TestCase):
             reverse('allocation_update', args=[self.allocation.pk]),
             reverse('expense_list'),
             reverse('expense_create'),
+            reverse('expense_detail', args=[self.expense.pk]),
             reverse('expense_update', args=[self.expense.pk]),
             reverse('audit_log_list'),
         ]
@@ -79,7 +105,7 @@ class AuthenticatedViewTests(TestCase):
             reverse('allocation_create'),
             reverse('allocation_update', args=[self.allocation.pk]),
             reverse('expense_list'),
-            reverse('expense_create'),
+            reverse('expense_detail', args=[self.expense.pk]),
             reverse('expense_update', args=[self.expense.pk]),
             reverse('audit_log_list'),
         ]
@@ -87,6 +113,58 @@ class AuthenticatedViewTests(TestCase):
         for url in urls:
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_legacy_expense_create_get_and_post_redirect_without_creating(self):
+        self.client.force_login(self.user)
+        expenses_before = Expense.objects.count()
+        docs_before = SupportingDocument.objects.count()
+
+        get_response = self.client.get(reverse('expense_create'))
+        self.assertEqual(get_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), get_response['Location'])
+        self.assertIn('status=approved_reserved', get_response['Location'])
+        self.assertEqual(get_response.content, b'')
+
+        post_response = self.client.post(
+            reverse('expense_create'),
+            data={
+                'allocation': self.allocation.pk,
+                'expense_date': TEST_DATE,
+                'category': 'food',
+                'amount': '10.00',
+                'currency': 'USD',
+                'reason': 'Intento directo desde vistas',
+                'provider_or_recipient': 'Provider A',
+                'payment_method': 'bank_transfer',
+                'description': '',
+                'observations': '',
+                'support_file': SimpleUploadedFile('expense.pdf', b'%PDF soporte'),
+            },
+        )
+        self.assertEqual(post_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), post_response['Location'])
+        self.assertIn('status=approved_reserved', post_response['Location'])
+        self.assertEqual(Expense.objects.count(), expenses_before)
+        self.assertEqual(SupportingDocument.objects.count(), docs_before)
+
+        follow = self.client.get(get_response['Location'], follow=True)
+        self.assertContains(follow, GOVERNANCE_EXPENSE_MESSAGE)
+
+    def test_fulfillment_route_accessible_for_approved_reserved_admin(self):
+        approved = create_approved_reserved_request(
+            fund_allocation=self.allocation,
+            requested_by=self.user,
+            decided_by=self.user,
+            requested_amount=Decimal('15.00'),
+            purpose='Solicitud para acceso de cumplimiento',
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse('expense_request_fulfill', args=[approved.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, approved.code)
+        self.assertEqual(approved.status, ExpenseRequest.Status.APPROVED_RESERVED)
 
     def test_list_views_render_tables_inside_responsive_containers(self):
         self.client.force_login(self.user)
@@ -455,6 +533,8 @@ class CrudFlowTests(TestCase):
                 'notes': '',
             },
         )
+        expenses_before = Expense.objects.count()
+        docs_before = SupportingDocument.objects.count()
         expense_response = self.client.post(
             reverse('expense_create'),
             data={
@@ -476,7 +556,9 @@ class CrudFlowTests(TestCase):
         self.assertRedirects(project_response, reverse('project_list'))
         self.assertRedirects(donation_response, reverse('donation_list'))
         self.assertRedirects(allocation_response, reverse('allocation_list'))
-        self.assertRedirects(expense_response, reverse('expense_list'))
+        self.assertEqual(expense_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), expense_response['Location'])
+        self.assertIn('status=approved_reserved', expense_response['Location'])
         self.assertTrue(Institution.objects.filter(name='New Donor').exists())
         created_project = Project.objects.get(name='New Project')
         created_donation = Donation.objects.get(
@@ -490,8 +572,9 @@ class CrudFlowTests(TestCase):
         self.assertEqual(Donation.objects.filter(code=created_donation.code).count(), 1)
         self.assertEqual(created_donation.currency, 'USD')
         self.assertTrue(FundAllocation.objects.filter(budget_category='health_psychosocial').exists())
-        created_expense = Expense.objects.get(reason='Purchase')
-        self.assertEqual(created_expense.currency, 'USD')
+        self.assertEqual(Expense.objects.count(), expenses_before)
+        self.assertEqual(SupportingDocument.objects.count(), docs_before)
+        self.assertFalse(Expense.objects.filter(reason='Purchase').exists())
 
     def test_invalid_create_data_shows_errors_without_creating_invalid_object(self):
         response = self.client.post(
