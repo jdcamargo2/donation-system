@@ -255,6 +255,20 @@ class BackupScriptsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 4)
         self.assertIn('SIGEDON_MAINTENANCE_CONFIRMED', result.stderr)
 
+    def test_backup_rejects_relative_media_root(self):
+        env = self.env.copy()
+        env['SIGEDON_MEDIA_ROOT'] = 'relative/media'
+        result = _run(['bash', str(BACKUP_SCRIPT)], env=env)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('absoluta', result.stderr)
+
+    def test_backup_rejects_filesystem_root_media(self):
+        env = self.env.copy()
+        env['SIGEDON_MEDIA_ROOT'] = '/'
+        result = _run(['bash', str(BACKUP_SCRIPT)], env=env)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('raiz', result.stderr)
+
     def test_backup_creates_missing_backup_root_and_continues(self):
         alt = self.tmp / 'missing_root_case'
         alt.mkdir()

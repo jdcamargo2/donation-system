@@ -19,6 +19,7 @@ print(json.dumps({
     'allowed_hosts': settings.ALLOWED_HOSTS,
     'session_cookie_secure': settings.SESSION_COOKIE_SECURE,
     'csrf_cookie_secure': settings.CSRF_COOKIE_SECURE,
+    'media_root': str(settings.MEDIA_ROOT),
 }, default=str))
 """
 
@@ -41,6 +42,7 @@ class IsolatedSettingsTests(SimpleTestCase):
             'POSTGRES_HOST',
             'POSTGRES_PORT',
             'DATABASE_CONN_MAX_AGE',
+            'SIGEDON_MEDIA_ROOT',
         }
         for name in controlled_names:
             environment[name] = ''
@@ -53,6 +55,21 @@ class IsolatedSettingsTests(SimpleTestCase):
             capture_output=True,
             check=False,
         )
+
+    def production_env(self, **extra):
+        values = {
+            'DJANGO_DEBUG': 'False',
+            'DJANGO_SECRET_KEY': 'fictitious-secret',
+            'ALLOWED_HOSTS': 'sigedon.example.test',
+            'DATABASE_ENGINE': 'postgresql',
+            'POSTGRES_DB': 'sigedon_test',
+            'POSTGRES_USER': 'sigedon_test_user',
+            'POSTGRES_PASSWORD': 'fictitious-password',
+            'POSTGRES_HOST': 'db.example.test',
+            'SIGEDON_MEDIA_ROOT': '/var/lib/sigedon/media',
+        }
+        values.update(extra)
+        return values
 
     def assert_configuration_error(self, result, expected_message):
         """
@@ -83,17 +100,7 @@ class IsolatedSettingsTests(SimpleTestCase):
         self.assert_configuration_error(result, 'SQLite solo está permitido')
 
     def test_postgresql_configuration_is_built_without_exposing_password(self):
-        result = self.run_settings(
-            DJANGO_DEBUG='False',
-            DJANGO_SECRET_KEY='fictitious-secret',
-            ALLOWED_HOSTS='sigedon.example.test',
-            DATABASE_ENGINE='postgresql',
-            POSTGRES_DB='sigedon_test',
-            POSTGRES_USER='sigedon_test_user',
-            POSTGRES_PASSWORD='fictitious-password',
-            POSTGRES_HOST='db.example.test',
-            DATABASE_CONN_MAX_AGE='90',
-        )
+        result = self.run_settings(**self.production_env(DATABASE_CONN_MAX_AGE='90'))
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('fictitious-password', result.stdout)
@@ -105,6 +112,7 @@ class IsolatedSettingsTests(SimpleTestCase):
         self.assertTrue(database['CONN_HEALTH_CHECKS'])
         self.assertTrue(payload['session_cookie_secure'])
         self.assertTrue(payload['csrf_cookie_secure'])
+        self.assertEqual(payload['media_root'], '/var/lib/sigedon/media')
 
     def test_postgresql_requires_password(self):
         result = self.run_settings(
@@ -118,16 +126,7 @@ class IsolatedSettingsTests(SimpleTestCase):
         self.assert_configuration_error(result, 'POSTGRES_PASSWORD')
 
     def test_production_enables_secure_cookies(self):
-        result = self.run_settings(
-            DJANGO_DEBUG='False',
-            DJANGO_SECRET_KEY='fictitious-secret',
-            ALLOWED_HOSTS='sigedon.example.test',
-            DATABASE_ENGINE='postgresql',
-            POSTGRES_DB='sigedon_test',
-            POSTGRES_USER='sigedon_test_user',
-            POSTGRES_PASSWORD='fictitious-password',
-            POSTGRES_HOST='db.example.test',
-        )
+        result = self.run_settings(**self.production_env())
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -151,3 +150,8 @@ class IsolatedSettingsTests(SimpleTestCase):
         )
 
         self.assert_configuration_error(result, 'ALLOWED_HOSTS')
+
+    def test_production_requires_media_root(self):
+        result = self.run_settings(**self.production_env(SIGEDON_MEDIA_ROOT=''))
+
+        self.assert_configuration_error(result, 'SIGEDON_MEDIA_ROOT is required')

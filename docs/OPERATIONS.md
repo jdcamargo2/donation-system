@@ -301,14 +301,18 @@ Estos directorios no deben versionarse.
 ### Reglas de operación
 
 * `staticfiles/` contiene archivos estáticos recopilados.
-* `MEDIA_ROOT` (`media/` por defecto) almacena archivos operativos privados
-  (documentos, evidencias, soportes, adjuntos Kobo).
+* `MEDIA_ROOT` (`media/` por defecto en desarrollo; en producción
+  `SIGEDON_MEDIA_ROOT` absoluto a volumen persistente) almacena archivos
+  operativos privados (documentos, evidencias, soportes, adjuntos Kobo).
 * Los archivos privados **nunca** se montan con `static(MEDIA_URL, document_root=MEDIA_ROOT)`,
   ni siquiera con `DEBUG=True`.
 * El acceso en desarrollo y producción ocurre solo mediante endpoints protegidos
   de preview/download autenticados (`apps/operations/file_access.py`).
-* Producción debe utilizar permisos adecuados sobre el sistema de archivos o el almacenamiento externo.
-* Los respaldos de archivos deben tratarse como información sensible.
+* Producción exige `SIGEDON_MEDIA_ROOT` fuera del repositorio; el despliegue
+  monta el volumen antes del arranque y `check --deploy` verifica
+  existencia/permisos. Django no crea el directorio de producción.
+* Los respaldos de archivos deben tratarse como información sensible y usar el
+  mismo `SIGEDON_MEDIA_ROOT` que Django.
 * Debe verificarse el espacio disponible y la política de retención.
 * La documentación histórica que menciona `private_media/` como ruta montada
   separada describe la intención de aislamiento; el código actual usa `MEDIA_ROOT`

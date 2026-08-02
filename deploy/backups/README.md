@@ -34,7 +34,7 @@ solo que esos procesos estén detenidos.
 | Variable | Uso |
 |---|---|
 | `SIGEDON_BACKUP_ROOT` | Destino de backups (se crea con `0700` si no existe) |
-| `SIGEDON_MEDIA_ROOT` | Raíz de media a respaldar (debe existir; no se crea) |
+| `SIGEDON_MEDIA_ROOT` | Raíz de media a respaldar; **debe coincidir** con el `SIGEDON_MEDIA_ROOT` de Django en producción (ruta absoluta a volumen persistente; debe existir; no se crea; se rechazan `/`, rutas relativas y el `media/` del repositorio salvo `SIGEDON_ALLOW_REPO_MEDIA=YES` en pruebas locales intencionales) |
 | `POSTGRES_DB` | Base origen del dump |
 | `POSTGRES_USER` | Usuario del cliente PostgreSQL |
 | `POSTGRES_HOST` | Host |
@@ -61,7 +61,9 @@ export SIGEDON_MAINTENANCE_CONFIRMED=YES
 export SIGEDON_BACKUP_ROOT=/ruta/fuera/del/repo/backups
 # Si no existe, el script lo crea con permisos 0700 (no hace falta mkdir -p).
 export SIGEDON_MEDIA_ROOT=/ruta/absoluta/media
-# SIGEDON_MEDIA_ROOT debe existir; el script no lo crea.
+# Debe ser el mismo volumen persistente configurado en Django
+# (SIGEDON_MEDIA_ROOT). Debe existir; el script no lo crea.
+# No use <repo>/media en producción.
 export POSTGRES_DB=...
 export POSTGRES_USER=sigedon_owner   # o rol con privilegio de dump
 export POSTGRES_HOST=...
@@ -104,12 +106,28 @@ Con el entorno apuntando a la base y media restauradas (sin tocar `.env` de
 producción):
 
 ```bash
+export POSTGRES_DB=<SIGEDON_RESTORE_DB>
+export SIGEDON_MEDIA_ROOT=<SIGEDON_RESTORE_MEDIA_ROOT>
 python manage.py migrate --check
-python manage.py check
+python manage.py check --deploy
 python manage.py verify_postgres_security
 python manage.py reconcile_operational_code_sequences
 python manage.py verify_restored_data
 ```
+
+Secuencia esperada de restore:
+
+1. provisionar el volumen persistente de media (o un destino aislado de prueba);
+2. restaurar `media.tar.gz` en el destino aislado (`SIGEDON_RESTORE_MEDIA_ROOT`);
+3. restaurar PostgreSQL en la base aislada;
+4. configurar Django `SIGEDON_MEDIA_ROOT` al path restaurado;
+5. ejecutar verificación de migraciones/seguridad/datos;
+6. comprobar spot-check de archivos protegidos;
+7. abrir tráfico solo tras readiness exitoso.
+
+`verify_restored_data` comprueba existencia en storage de FileFields con nombre
+no vacío (incluye adjuntos Kobo `downloaded`). No valida checksums de blob ni
+contenido binario completo.
 
 `reconcile_operational_code_sequences` funciona en modo detect-only y es de
 solo lectura: no crea ni ajusta secuencias. El comando falla ante los estados

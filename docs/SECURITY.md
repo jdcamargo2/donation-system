@@ -151,6 +151,13 @@ Los documentos operativos privados:
 * separan explícitamente la información pública de la privada;
 * no se montan vía `static(MEDIA_URL, …)` ni siquiera en `DEBUG`.
 
+En producción (`DJANGO_DEBUG=False`) el directorio de media privada debe ser un
+volumen persistente explícito (`SIGEDON_MEDIA_ROOT` absoluto). Un `MEDIA_ROOT`
+implícito bajo el repositorio no es aceptable: los blobs privados sobrevivirían
+solo al ciclo de vida del contenedor/instancia. Los respaldos de base de datos
+no sustituyen la copia de esos archivos. El proxy no debe servir ese path;
+solo los endpoints autorizados de preview/download deben leer el storage.
+
 No debe utilizarse directamente:
 
 ```python

@@ -475,6 +475,7 @@ Las pruebas de archivos privados deben comprobar:
 * cabeceras `X-Content-Type-Options: nosniff` y `Cache-Control: private, no-store`;
 * respuesta ante un archivo inexistente (fila o almacenamiento);
 * protección frente a URLs directas y ausencia de montaje DEBUG de `MEDIA_ROOT`;
+* contrato de producción `SIGEDON_MEDIA_ROOT` (settings + `check --deploy`);
 * separación entre archivos públicos y privados;
 * privacidad de adjuntos Kobo (preview + download separados);
 * comportamiento de archivos asociados a entidades anuladas o no publicadas;

@@ -241,11 +241,79 @@ Solo debe contener archivos autorizados para exposición directa.
 * no deben exponerse directamente mediante el proxy;
 * deben descargarse mediante endpoints autorizados;
 * requieren autenticación y permisos cuando corresponda;
-* deben almacenarse de forma persistente;
+* deben almacenarse de forma persistente fuera del árbol efímero de la aplicación;
 * deben incluirse en la estrategia de respaldo.
 
-El proxy no debe mapear públicamente el directorio `private_media/`.
+El proxy no debe mapear públicamente el directorio de media privada
+(`SIGEDON_MEDIA_ROOT` / `MEDIA_ROOT`). La ruta histórica `private_media/`
+describe la intención de aislamiento; el código actual usa `MEDIA_ROOT` no
+público + endpoints autorizados.
 
+### Contrato de volumen persistente (`SIGEDON_MEDIA_ROOT`)
+
+Cuando `DJANGO_DEBUG=False`, Django exige la variable de entorno
+`SIGEDON_MEDIA_ROOT` con una ruta absoluta a un volumen de filesystem
+persistente. No se acepta el valor por defecto `BASE_DIR/media` ni rutas
+dentro del repositorio.
+
+Ejemplo genérico:
+
+```text
+Host/persistent volume:
+  /srv/sigedon/media
+
+Application path (mismo árbol montado):
+  /var/lib/sigedon/media
+
+Environment:
+  SIGEDON_MEDIA_ROOT=/var/lib/sigedon/media
+```
+
+Ejemplo con contenedor (si el despliegue usa contenedores):
+
+```text
+Volume mount:
+  host /srv/sigedon/media  →  container /var/lib/sigedon/media
+
+Environment inside the container:
+  SIGEDON_MEDIA_ROOT=/var/lib/sigedon/media
+```
+
+No se asume Docker ni un orquestador concreto: el requisito es un mount
+persistente con la misma ruta vista por Django y por los scripts de backup.
+
+#### Propiedad y permisos
+
+* la cuenta del proceso de aplicación debe poder leer y escribir el directorio;
+* el directorio no debe ser world-readable;
+* el reverse proxy no debe exponerlo;
+* la cuenta de backup necesita el mínimo acceso de lectura requerido;
+* los procedimientos de restore deben preservar una propiedad adecuada.
+
+No se fija un nombre de usuario concreto: depende de la plataforma.
+
+#### Puerta de despliegue
+
+Antes de abrir tráfico:
+
+```bash
+python manage.py check --deploy
+```
+
+debe pasar el chequeo de persistencia de media (`sigedon.E001`…`sigedon.E006`).
+La importación de settings valida solo la forma de la configuración; el
+despliegue debe crear/montar el directorio antes del arranque. Django no
+crea el volumen de producción.
+
+#### Smoke test de persistencia tras reinicio (staging)
+
+1. subir un documento desechable por un flujo autorizado de staging;
+2. verificar preview/download protegido;
+3. reiniciar o recrear el proceso/contenedor de la aplicación;
+4. verificar que el mismo archivo protegido sigue descargable;
+5. eliminar el registro de prueba por un método autorizado de staging.
+
+No realizar pruebas destructivas en producción.
 ## 9. Base de datos
 
 PostgreSQL es obligatorio en producción.
@@ -442,14 +510,20 @@ Restaurar solo a entornos aislados (`SIGEDON_RESTORE_DB` con prefijo `test_resto
 Después de restaurar un entorno aislado:
 
 ```bash
+export POSTGRES_DB=<SIGEDON_RESTORE_DB>
+export SIGEDON_MEDIA_ROOT=<SIGEDON_RESTORE_MEDIA_ROOT>
 python manage.py migrate --check
-python manage.py check
+python manage.py check --deploy
 python manage.py verify_postgres_security
 python manage.py reconcile_operational_code_sequences
 python manage.py verify_restored_data
 python manage.py sync_sigedon_roles
 ```
 
+Provisionar el volumen de media, restaurar el archivo `media.tar.gz`, restaurar
+PostgreSQL, apuntar `SIGEDON_MEDIA_ROOT` al árbol restaurado y solo entonces
+abrir tráfico. `verify_restored_data` valida correspondencia FileField↔blob por
+existencia en storage (no checksums de contenido).
 `reconcile_operational_code_sequences` funciona en modo detect-only y es de
 solo lectura: no crea ni ajusta secuencias. El comando falla ante una secuencia
 ausente (`MISSING_SEQUENCE`), atrasada (`LAGGING_SEQUENCE`) o inválida

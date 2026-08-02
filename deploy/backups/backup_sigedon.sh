@@ -120,9 +120,30 @@ require_cmd python3
 require_cmd mktemp
 
 BACKUP_ROOT="$(ensure_backup_root "${SIGEDON_BACKUP_ROOT}")"
+
+# Reject relative / blank / filesystem-root media paths before resolve_abs.
+case "${SIGEDON_MEDIA_ROOT}" in
+  ''|'/'|'//'|'///')
+    die 3 "SIGEDON_MEDIA_ROOT no puede estar vacio ni ser la raiz del sistema de archivos"
+    ;;
+esac
+if [[ "${SIGEDON_MEDIA_ROOT}" != /* ]]; then
+  die 3 "SIGEDON_MEDIA_ROOT debe ser una ruta absoluta al volumen persistente de media"
+fi
+
 MEDIA_ROOT="$(resolve_abs "${SIGEDON_MEDIA_ROOT}")"
 
 [[ -d "${MEDIA_ROOT}" ]] || die 3 "SIGEDON_MEDIA_ROOT no es un directorio: ${MEDIA_ROOT}"
+if [[ "${MEDIA_ROOT}" == "/" ]]; then
+  die 3 "SIGEDON_MEDIA_ROOT no puede ser la raiz del sistema de archivos"
+fi
+
+# Evitar archivar silenciosamente el media/ efimero del repositorio.
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_MEDIA="$(resolve_abs "${REPO_ROOT}/media" 2>/dev/null || true)"
+if [[ -n "${REPO_MEDIA}" && "${MEDIA_ROOT}" == "${REPO_MEDIA}" && "${SIGEDON_ALLOW_REPO_MEDIA:-}" != "YES" ]]; then
+  die 3 "SIGEDON_MEDIA_ROOT apunta al media/ del repositorio; use un volumen persistente (o SIGEDON_ALLOW_REPO_MEDIA=YES solo para pruebas locales intencionales)"
+fi
 
 BACKUP_ID="$(date -u +'%Y%m%dT%H%M%SZ')"
 FINAL_DIR="${BACKUP_ROOT}/${BACKUP_ID}"

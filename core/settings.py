@@ -15,6 +15,8 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
+from core.media_paths import resolve_media_root
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -137,6 +139,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django_countries',
+    'core.apps.CoreConfig',
     'apps.operations',
     'apps.public_portal',
     'apps.integrations.kobo',
@@ -267,7 +270,16 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 
 MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Private operational media uses Django's default filesystem storage.
+# Development defaults to BASE_DIR/media; production requires an absolute
+# persistent mount via SIGEDON_MEDIA_ROOT (validated at import time for shape;
+# existence/permissions are verified by check --deploy).
+MEDIA_ROOT = resolve_media_root(
+    debug=DEBUG,
+    media_root_raw=os.getenv('SIGEDON_MEDIA_ROOT', ''),
+    base_dir=BASE_DIR,
+    static_root=STATIC_ROOT,
+)
 
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'dashboard'
