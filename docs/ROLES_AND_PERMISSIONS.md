@@ -549,6 +549,11 @@ El superusuario:
   ni borrado): las mutaciones de donación deben pasar por `create_donation` /
   `update_donation` en la UI operativa, que aplican la invariante
   monto ≥ asignaciones no anuladas y la elegibilidad de instituciones activas.
+* Incluso como superusuario, `ExpenseAdmin` es solo inspección (sin alta, cambio
+  ni borrado, ni mutación de inlines de soporte): la creación ocurre únicamente
+  al cumplir una `ExpenseRequest` aprobada; anulación y demás mutaciones pasan
+  por los servicios/UI de SIGEDON. Los documentos soporte siguen el ciclo
+  protegido de la aplicación, no el Admin.
 
 ## 11. Usuario autenticado sin permisos
 

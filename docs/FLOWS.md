@@ -217,6 +217,11 @@ rechazo.
 * El saldo de la asignación refleja gastos no anulados **y** reservas activas
   (`APPROVED_RESERVED`); un gasto directo no puede consumir fondos reservados.
 * El gasto puede anularse posteriormente cuando el dominio lo permita.
+* Django Admin (`ExpenseAdmin`) es solo inspección: sin alta, cambio, borrado ni
+  mutación de inlines de soporte (incluido para superusuarios). La creación
+  ocurre solo al cumplir una `ExpenseRequest` aprobada; anulación y demás
+  mutaciones pasan por los servicios/UI de SIGEDON. Los documentos soporte
+  permanecen protegidos y gestionados por el flujo operativo.
 
 ---
 

@@ -2,7 +2,9 @@ from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import GroupAdmin, UserAdmin as DjangoUserAdmin
 from django.contrib.auth.models import Group, User
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
+from django.urls import reverse
+from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
 from .choices import OPERATING_CURRENCY
@@ -14,9 +16,7 @@ from .models import (
 )
 from .role_services import operation_role_names
 from .services import (
-    ExpenseFinalizedError,
     ProjectUpdateImmutableError,
-    ensure_expense_is_deletable,
     ensure_project_update_is_deletable,
     ensure_project_update_is_editable,
     log_create,
@@ -225,25 +225,6 @@ class FundAllocationAdminForm(forms.ModelForm):
         if donation.currency != OPERATING_CURRENCY:
             raise ValidationError(_('SIGEDON solo permite operaciones financieras en USD.'))
         return donation
-
-
-class ExpenseAdminForm(forms.ModelForm):
-    class Meta:
-        model = Expense
-        exclude = ('currency',)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields['allocation'].queryset = FundAllocation.objects.filter(
-            donation__currency=OPERATING_CURRENCY
-        )
-
-    def clean(self):
-        cleaned_data = super().clean()
-        allocation = cleaned_data.get('allocation')
-        if allocation and allocation.donation.currency != OPERATING_CURRENCY:
-            raise ValidationError(_('La asignación seleccionada no corresponde a una donación en USD.'))
-        return cleaned_data
 
 
 class ProjectUpdateAdminForm(forms.ModelForm):
@@ -653,76 +634,169 @@ class FundAllocationAdmin(admin.ModelAdmin):
 
 
 class SupportingDocumentInline(admin.TabularInline):
+    """Read-only inspection of support files; no add/change/delete via admin."""
+
     model = SupportingDocument
     extra = 0
+    can_delete = False
+    show_change_link = False
+    fields = ('title', 'document', 'uploaded_at', 'notes')
+    readonly_fields = ('title', 'document', 'uploaded_at', 'notes')
+
+    def has_add_permission(self, request, obj=None):
+        """
+        PRE: request targets the SupportingDocument inline on ExpenseAdmin.
+        POST: always denies creation, including for superusers.
+        """
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional SupportingDocument inline row.
+        POST: always denies modification, including for superusers.
+        """
+        return False
 
     def has_delete_permission(self, request, obj=None):
-        if obj and obj.status == Expense.Status.ANNULLED:
-            return False
-        return super().has_delete_permission(request, obj)
+        """
+        PRE: request targets an optional SupportingDocument inline row.
+        POST: always denies deletion, including for superusers.
+        """
+        return False
+
 
 @admin.register(Expense)
 class ExpenseAdmin(admin.ModelAdmin):
-    form = ExpenseAdminForm
     list_display = ('code', 'reason', 'allocation', 'amount', 'currency', 'status', 'expense_date')
     search_fields = ('code', 'reason', 'provider_or_recipient', 'allocation__project__name')
     list_filter = ('status', 'expense_date')
-    readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
     inlines = [SupportingDocumentInline]
+    fieldsets = (
+        (
+            _('Identificación'),
+            {
+                'fields': (
+                    'code',
+                    'allocation',
+                    'source_expense_request_display',
+                    'application_detail_link',
+                ),
+            },
+        ),
+        (
+            _('Información financiera'),
+            {
+                'fields': (
+                    'amount',
+                    'currency',
+                    'expense_date',
+                    'status',
+                    'category',
+                    'payment_method',
+                ),
+            },
+        ),
+        (
+            _('Registro y soporte'),
+            {
+                'fields': (
+                    'reason',
+                    'provider_or_recipient',
+                    'description',
+                    'observations',
+                    'supporting_documents_count',
+                ),
+            },
+        ),
+        (
+            _('Ciclo de vida y auditoría'),
+            {
+                'fields': (
+                    'terminal_reason',
+                    'terminal_at',
+                    'terminal_by',
+                    'created_at',
+                    'updated_at',
+                ),
+            },
+        ),
+    )
 
     def get_readonly_fields(self, request, obj=None):
-        # PRE: obj is the optional expense displayed by Django admin.
-        # POST: status/validation metadata are always readonly; finalized expenses
-        # expose every persisted field as readonly.
-        base_readonly = set(super().get_readonly_fields(request, obj))
-        if obj and obj.status == Expense.Status.ANNULLED:
-            base_readonly.update(
-                field.name for field in self.model._meta.concrete_fields
-            )
-        return tuple(base_readonly)
-
-    def has_delete_permission(self, request, obj=None):
-        # PRE: obj is an optional expense targeted by an admin delete operation.
-        # POST: finalized expenses cannot be deleted through ordinary admin paths.
-        if obj is not None:
-            try:
-                ensure_expense_is_deletable(obj)
-            except ExpenseFinalizedError:
-                return False
-        return super().has_delete_permission(request, obj)
-
-    def delete_model(self, request, obj):
-        # PRE: obj is an expense selected for ordinary admin deletion.
-        # POST: deletes only editable expenses; finalized expenses fail safely.
-        ensure_expense_is_deletable(obj)
-        return super().delete_model(request, obj)
-
-    def delete_queryset(self, request, queryset):
-        # PRE: queryset contains expenses selected by the admin bulk delete action.
-        # POST: deletes the batch only when every expense is ordinarily deletable.
-        for expense in queryset:
-            ensure_expense_is_deletable(expense)
-        return super().delete_queryset(request, queryset)
-
-    # PRE: form has passed admin validation and obj contains an ordinary editable state.
-    # POST: creates registered expenses or saves editable expenses without allowing
-    # manual status/validation metadata transitions.
-    def save_model(self, request, obj, form, change):
-        if change:
-            persisted = Expense.objects.get(pk=obj.pk)
-            if persisted.status == Expense.Status.ANNULLED:
-                raise ExpenseFinalizedError(
-                    _('Los gastos finalizados no admiten edición administrativa.')
-                )
-            obj.status = persisted.status
-        else:
-            obj.status = Expense.Status.REGISTERED
-        super().save_model(request, obj, form, change)
+        """
+        PRE: obj is an optional Expense shown in admin.
+        POST: every persisted field plus inspection helpers are readonly.
+        """
+        concrete = tuple(field.name for field in self.model._meta.concrete_fields)
+        return concrete + (
+            'source_expense_request_display',
+            'application_detail_link',
+            'supporting_documents_count',
+        )
 
     def has_add_permission(self, request):
-        # PRE: Django admin is evaluating direct Expense creation.
-        # POST: returns False because mandatory support is created atomically through the operational form.
+        """
+        PRE: request targets the Expense admin.
+        POST: always denies creation, including for superusers.
+        """
         return False
+
+    def has_change_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional Expense admin object.
+        POST: always denies modification, including for superusers.
+        """
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional Expense admin object.
+        POST: always denies deletion, including for superusers.
+        """
+        return False
+
+    def get_actions(self, request):
+        """
+        PRE: request targets the Expense admin changelist.
+        POST: removes the bulk delete action while leaving other actions unchanged.
+        """
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
+
+    @admin.display(description=_('Solicitud de origen'))
+    def source_expense_request_display(self, obj):
+        """
+        PRE: obj is a persisted Expense (or unsaved with no reverse link).
+        POST: returns the linked ExpenseRequest code or an empty marker.
+        """
+        if obj is None or obj.pk is None:
+            return '—'
+        try:
+            return obj.source_expense_request.code
+        except ObjectDoesNotExist:
+            return '—'
+
+    @admin.display(description=_('Documentos soporte'))
+    def supporting_documents_count(self, obj):
+        """
+        PRE: obj is a persisted Expense.
+        POST: returns the related SupportingDocument count for inspection.
+        """
+        if obj is None or obj.pk is None:
+            return 0
+        return obj.supporting_documents.count()
+
+    @admin.display(description=_('Aplicación'))
+    def application_detail_link(self, obj):
+        """
+        PRE: obj is a persisted Expense shown in admin inspection.
+        POST: returns a safe SIGEDON detail link when the expense exists.
+        """
+        if obj is None or obj.pk is None:
+            return '—'
+        url = reverse('expense_detail', args=[obj.pk])
+        return format_html('<a href="{}">{}</a>', url, _('Ver en SIGEDON'))
 
 
 @admin.register(SupportingDocument)
