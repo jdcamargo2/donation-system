@@ -469,11 +469,11 @@ def _presentation_item(
     label: str,
     value: str,
     *,
-    values: list[str] | None = None,
+    value_list: list[str] | None = None,
 ) -> dict[str, Any]:
     item: dict[str, Any] = {"label": label, "value": value}
-    if values is not None:
-        item["values"] = values
+    if value_list is not None:
+        item["value_list"] = value_list
     return item
 
 
@@ -482,7 +482,7 @@ def _compact_summary(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         item
         for item in items
         if item.get("value") not in (None, "", EMPTY_DISPLAY)
-        or item.get("values")
+        or item.get("value_list")
     ]
 
 
@@ -547,14 +547,14 @@ def format_linked_collection(
 ) -> dict[str, Any]:
     """
     PRE: value is a stored linked-microprojects snapshot of any supported shape.
-    POST: returns a presentation item payload: single text, multi values, or —.
+    POST: returns a presentation item payload: single text, multi value_list, or —.
     """
     items = _normalize_linked_items(value)
     if not items:
         return _presentation_item(label, EMPTY_DISPLAY)
     if len(items) == 1:
         return _presentation_item(label, items[0])
-    return _presentation_item(label, EMPTY_DISPLAY, values=items)
+    return _presentation_item(label, EMPTY_DISPLAY, value_list=items)
 
 
 def _format_coordinate_component(value) -> str:
@@ -665,8 +665,8 @@ def history_submission_detail_rows(submission) -> tuple[tuple[str, Any], ...]:
         )
         linked = format_linked_collection(payload.get("linked_microprojects"))
         linked_value = (
-            ", ".join(linked["values"])
-            if linked.get("values")
+            ", ".join(linked["value_list"])
+            if linked.get("value_list")
             else linked["value"]
         )
         return score_rows + (

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from datetime import date
 
@@ -28,6 +29,37 @@ from apps.integrations.kobo.submission_presentation import (
     present_imported_submission_summary,
 )
 from apps.operations.models import Project
+
+
+def _field_dd_markup(content: str, label: str) -> str:
+    """
+    PRE: content is rendered imported-detail HTML with matching <dt>/<dd> pairs.
+    POST: returns the first <dd> inner HTML whose preceding <dt> equals label.
+    """
+    pattern = (
+        rf'<dt[^>]*>\s*{re.escape(label)}\s*</dt>\s*'
+        rf'<dd[^>]*>(.*?)</dd>'
+    )
+    match = re.search(pattern, content, flags=re.DOTALL)
+    if match is None:
+        raise AssertionError(f"Imported-detail field not found: {label!r}")
+    return match.group(1)
+
+
+def _assert_plain_value_field(test_case: TestCase, content: str, label: str) -> str:
+    """
+    PRE: label is an ordinary imported-detail field rendered in content.
+    POST: asserts no list markup in the value column and returns the <dd> markup.
+    """
+    dd = _field_dd_markup(content, label)
+    test_case.assertNotIn("<ul", dd)
+    test_case.assertNotIn("<li", dd)
+    test_case.assertIn("<span", dd)
+    test_case.assertNotRegex(
+        dd,
+        rf"(?is)<li[^>]*>\s*{re.escape(label)}\s*</li>",
+    )
+    return dd
 
 
 @override_settings(KOBO_ENABLED=True)
@@ -301,6 +333,12 @@ class ImportedDetailPresentationUnitTests(TestCase):
         acceso = {field["label"]: field["value"] for field in sections[1]["fields"]}
         self.assertEqual(acceso["Dificultades de acceso"], "Sí")
         self.assertEqual(acceso["Notas de acceso"], "—")
+        for section in sections:
+            for field in section["fields"]:
+                self.assertNotIn("values", field)
+                self.assertNotIn("value_list", field)
+                self.assertIn("label", field)
+                self.assertIn("value", field)
 
     def test_ficha_10_builder_summary_and_sections(self):
         submission = KoboSubmission.objects.create(
@@ -381,6 +419,10 @@ class ImportedDetailPresentationUnitTests(TestCase):
             for field in presentation["sections"][1]["fields"]
         }
         self.assertEqual(poblacion["Grupo beneficiario"], "Jóvenes, Mujeres")
+        for section in presentation["sections"]:
+            for field in section["fields"]:
+                self.assertNotIn("values", field)
+                self.assertNotIn("value_list", field)
         self.assertEqual(submission.normalized_payload, original)
 
     def test_ficha_11_builder_summary_sections_and_linked(self):
@@ -453,14 +495,22 @@ class ImportedDetailPresentationUnitTests(TestCase):
         self.assertEqual(scores[0]["label"], "Nivel de daño físico")
         self.assertEqual(scores[0]["value"], "4")
         self.assertEqual(len(scores), 10)
+        for field in scores:
+            self.assertNotIn("values", field)
+            self.assertNotIn("value_list", field)
         decision = {
             field["label"]: field["value"]
             for field in presentation["sections"][1]["fields"]
         }
         self.assertEqual(decision["Semáforo sugerido"], "Rojo")
         self.assertEqual(decision["Semáforo final"], "Amarillo")
+        for field in presentation["sections"][1]["fields"]:
+            self.assertNotIn("values", field)
+            self.assertNotIn("value_list", field)
         linked = presentation["sections"][2]["fields"][0]
-        self.assertEqual(linked["values"], ["MP-01", "MP-02"])
+        self.assertEqual(linked["value_list"], ["MP-01", "MP-02"])
+        self.assertNotIn("values", linked)
+        self.assertEqual(linked["value"], "—")
         self.assertNotIn("[", linked.get("value", ""))
         self.assertEqual(submission.normalized_payload, original)
 
@@ -468,13 +518,17 @@ class ImportedDetailPresentationUnitTests(TestCase):
         empty = format_linked_collection("")
         self.assertEqual(empty["value"], "—")
         self.assertNotIn("values", empty)
+        self.assertNotIn("value_list", empty)
 
         single = format_linked_collection("MP-01")
         self.assertEqual(single["value"], "MP-01")
         self.assertNotIn("values", single)
+        self.assertNotIn("value_list", single)
 
         multi = format_linked_collection(["MP-01", "MP-02"])
-        self.assertEqual(multi["values"], ["MP-01", "MP-02"])
+        self.assertEqual(multi["value_list"], ["MP-01", "MP-02"])
+        self.assertNotIn("values", multi)
+        self.assertEqual(multi["value"], "—")
         self.assertNotIn("[", multi["value"])
 
         self.assertEqual(
@@ -752,6 +806,24 @@ class ImportedProjectDetailUITests(TestCase):
         self.assertIn("<dt", content)
         self.assertIn("<dd", content)
 
+        project_value = "PRJ-000001 - Proyecto piloto"
+        self.assertEqual(
+            len(re.findall(r"<dt[^>]*>\s*Proyecto\s*</dt>", content)),
+            1,
+        )
+        proyecto_dd = _assert_plain_value_field(self, content, "Proyecto")
+        self.assertEqual(proyecto_dd.count(project_value), 1)
+        for label in (
+            "Proyecto",
+            "Parroquia",
+            "Comunidad",
+            "Hogares estimados",
+            "Dificultades de acceso",
+        ):
+            _assert_plain_value_field(self, content, label)
+        # Ordinary Ficha 1 fields must not invent list markup from dict.values.
+        self.assertNotIn("list-unstyled", content)
+
     def test_valid_location_renders_privacy_conscious_map_link(self):
         url = reverse("kobo:project_submission_detail", args=(self.imported.pk,))
         self.client.force_login(self.viewer)
@@ -937,6 +1009,14 @@ class ImportedProjectDetailUITests(TestCase):
         self.assertNotContains(response, "ficha10-source")
         self.assertEqual(content.count("<h1"), 1)
         self.assertTrue(response.context["presentation"]["is_redesigned"])
+        for label in (
+            "Resumen del problema",
+            "Objetivo específico",
+            "Grupo beneficiario",
+            "Proyecto",
+        ):
+            _assert_plain_value_field(self, content, label)
+        self.assertNotIn("list-unstyled", content)
 
     def test_ficha_11_redesigned_detail(self):
         self.client.force_login(self.viewer)
@@ -979,6 +1059,62 @@ class ImportedProjectDetailUITests(TestCase):
         self.assertNotContains(response, "Ubicación")
         self.assertEqual(content.count("<h1"), 1)
         self.assertTrue(response.context["presentation"]["is_redesigned"])
+
+        for label in (
+            "Nivel de daño físico",
+            "Resumen de priorización",
+            "Semáforo sugerido",
+            "Semáforo final",
+            "Prioridad final",
+        ):
+            _assert_plain_value_field(self, content, label)
+        score_dd = _assert_plain_value_field(self, content, "Nivel de daño físico")
+        self.assertIn(">4<", score_dd)
+
+        linked_dd = _field_dd_markup(content, "Referencias")
+        self.assertIn('class="list-unstyled mb-0 d-grid gap-1"', linked_dd)
+        self.assertEqual(linked_dd.count("<ul"), 1)
+        self.assertEqual(linked_dd.count("<li"), 2)
+        self.assertIn("MP-01", linked_dd)
+        self.assertIn("MP-02", linked_dd)
+        self.assertNotIn("Referencias", linked_dd)
+        self.assertNotIn("Microproyectos vinculados", linked_dd)
+
+    def test_linked_microprojects_empty_and_single_render_without_list(self):
+        self.client.force_login(self.viewer)
+
+        empty_payload = deepcopy(self.prioritization_imported.normalized_payload)
+        empty_payload["linked_microprojects"] = ""
+        self.prioritization_imported.normalized_payload = empty_payload
+        self.prioritization_imported.save(update_fields=["normalized_payload"])
+        empty_response = self.client.get(
+            reverse(
+                "kobo:project_submission_detail",
+                args=(self.prioritization_imported.pk,),
+            )
+        )
+        empty_content = empty_response.content.decode()
+        empty_dd = _field_dd_markup(empty_content, "Referencias")
+        self.assertIn("—", empty_dd)
+        self.assertNotIn("<ul", empty_dd)
+        self.assertNotIn("<li", empty_dd)
+
+        single_payload = deepcopy(empty_payload)
+        single_payload["linked_microprojects"] = "MP-01"
+        self.prioritization_imported.normalized_payload = single_payload
+        self.prioritization_imported.save(update_fields=["normalized_payload"])
+        single_response = self.client.get(
+            reverse(
+                "kobo:project_submission_detail",
+                args=(self.prioritization_imported.pk,),
+            )
+        )
+        single_content = single_response.content.decode()
+        single_dd = _field_dd_markup(single_content, "Referencias")
+        self.assertIn("MP-01", single_dd)
+        self.assertNotIn("<ul", single_dd)
+        self.assertNotIn("<li", single_dd)
+        self.assertIn("<span", single_dd)
 
     def test_common_shell_across_forms(self):
         self.client.force_login(self.viewer)
