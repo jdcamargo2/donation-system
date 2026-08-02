@@ -1,6 +1,7 @@
 import base64
 import binascii
 import json
+import logging
 import secrets
 
 from django.conf import settings
@@ -78,6 +79,7 @@ from apps.integrations.kobo.submission_presentation import (
 
 
 WEBHOOK_BASIC_REALM = "SIGEDON Kobo Webhook"
+logger = logging.getLogger("sigedon.kobo.webhook")
 
 
 def _has_valid_webhook_credentials(request) -> bool:
@@ -148,34 +150,55 @@ def webhook_submission(request):
     # PRE: Kobo POSTs JSON with configured Basic credentials or legacy secret.
     # POST: safely stages and processes one configured asset submission idempotently.
     if not settings.KOBO_ENABLED:
+        logger.info("Kobo webhook rejected: integration disabled")
         raise Http404
     if not _has_valid_webhook_credentials(request):
+        # Fixed message only; never log credentials, headers, or body content.
+        logger.warning("Kobo webhook authentication failed")
         return _webhook_unauthorized_response()
     if request.content_type.split(";", 1)[0].lower() != "application/json":
+        logger.warning("Kobo webhook rejected: invalid content type")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     if _declared_webhook_payload_exceeds_limit(request):
+        logger.warning(
+            "Kobo webhook rejected: body exceeds limit max_bytes=%s",
+            settings.KOBO_WEBHOOK_MAX_BYTES,
+        )
         return _webhook_payload_too_large_response()
     try:
         body = request.body
     except RequestDataTooBig:
+        logger.warning(
+            "Kobo webhook rejected: body exceeds limit max_bytes=%s",
+            settings.KOBO_WEBHOOK_MAX_BYTES,
+        )
         return _webhook_payload_too_large_response()
     except ValueError:
+        logger.warning("Kobo webhook rejected: unreadable body")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     if len(body) > settings.KOBO_WEBHOOK_MAX_BYTES:
+        logger.warning(
+            "Kobo webhook rejected: body exceeds limit max_bytes=%s",
+            settings.KOBO_WEBHOOK_MAX_BYTES,
+        )
         return _webhook_payload_too_large_response()
     try:
         raw_payload = json.loads(body)
     except (TypeError, ValueError, UnicodeDecodeError):
+        logger.warning("Kobo webhook rejected: malformed JSON")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     if not isinstance(raw_payload, dict):
+        logger.warning("Kobo webhook rejected: JSON root is not an object")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     asset_uid = raw_payload.get("_xform_id_string")
     if not isinstance(asset_uid, str) or not asset_uid:
+        logger.warning("Kobo webhook rejected: missing required asset identifier")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     try:
         asset = KoboAsset.objects.select_related("form_definition").get(asset_uid=asset_uid)
         submission, created = receive_webhook_submission(asset=asset, raw_payload=raw_payload)
     except (KoboAsset.DoesNotExist, KoboPayloadError):
+        logger.warning("Kobo webhook rejected: invalid submission or unknown asset")
         return JsonResponse({"ok": False, "error": "invalid_submission"}, status=400)
     try:
         convergence = converge_webhook_submission(
@@ -183,6 +206,10 @@ def webhook_submission(request):
             default_timezone=timezone.get_current_timezone(),
         )
     except Exception:
+        logger.exception(
+            "Kobo webhook unexpected failure submission_id=%s",
+            submission.pk,
+        )
         return JsonResponse({"ok": False, "error": "internal_error"}, status=500)
     durable_statuses = {
         KoboSubmission.Status.READY_FOR_REVIEW,
@@ -195,6 +222,12 @@ def webhook_submission(request):
         KoboSubmission.Status.PARTIALLY_IMPORTED,
     }
     if convergence.completed or convergence.final_status in durable_statuses:
+        logger.info(
+            "Kobo webhook staged submission_id=%s created=%s status=%s",
+            convergence.submission_id,
+            created,
+            convergence.final_status,
+        )
         return JsonResponse(
             {
                 "ok": True,
@@ -205,6 +238,11 @@ def webhook_submission(request):
             status=201 if created else 200,
         )
     # Still incomplete (e.g. RECEIVED/NORMALIZED): ask Kobo to retry.
+    logger.warning(
+        "Kobo webhook processing incomplete submission_id=%s status=%s",
+        convergence.submission_id,
+        convergence.final_status,
+    )
     return JsonResponse(
         {
             "ok": False,

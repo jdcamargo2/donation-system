@@ -57,4 +57,10 @@ preload_app = _settings['preload_app']
 
 # Explicit production defaults: no PID file, no daemon, no auto-reload, no preload.
 # preload_app remains False unless proven safe for process-local state.
+# Logging contract (OPS-LOGGING-OBSERVABILITY):
+#   - Gunicorn accesslog → stdout; errorlog → stderr; capture_output=True
+#   - Django owns application/request-error logs with X-Request-ID correlation
+#   - django.request is WARNING+ to avoid duplicating ordinary access lines
+#   - Generated request IDs appear in Django logs and response headers;
+#     inbound trusted-proxy IDs may appear in both layers when valid
 pidfile = None

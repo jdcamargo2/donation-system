@@ -41,6 +41,7 @@ debe actualizarse cuando el total cambie de forma estable.
 * Django 6.0.6
 * PostgreSQL mediante Psycopg 3
 * Gunicorn (WSGI) como servidor de aplicación en producción
+* Logging de runtime a stdout/stderr con correlación `X-Request-ID` (sin SaaS)
 * SQLite únicamente para desarrollo local con `DEBUG=True`
 * Django Templates
 * Bootstrap 5

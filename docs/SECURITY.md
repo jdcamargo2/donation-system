@@ -291,6 +291,10 @@ deben cumplirse las siguientes condiciones:
   ([DEPLOYMENT.md §6](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn));
   `runserver` no es aceptable en producción; los workers no ejecutan
   migraciones ni `collectstatic`.
+* los logs de runtime van a stdout/stderr con correlación `X-Request-ID`; no
+  deben contener secretos, cabeceras sensibles, cookies, cuerpos de petición ni
+  payloads Kobo; la retención y el acceso a logs son controlados por la
+  plataforma, no por la aplicación.
 
 Según el entorno de despliegue, deben configurarse:
 

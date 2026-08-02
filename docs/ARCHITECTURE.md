@@ -47,7 +47,11 @@ Contiene la configuración central del proyecto:
 * archivos multimedia;
 * carga de variables de entorno;
 * contrato de arranque WSGI de producción (`core.wsgi:application` vía Gunicorn;
-  detalle en [DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn)).
+  detalle en [DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn));
+* logging de runtime a stdout/stderr con middleware de correlación
+  `X-Request-ID` (`core.request_ids.RequestIdMiddleware`) y filtros de
+  redacción defensiva; distinto de `AuditLog` / `KoboProcessingEvent`
+  (trazabilidad de negocio vs diagnóstico operativo).
 
 ### 2.2. `apps.operations`
 

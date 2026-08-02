@@ -9,6 +9,7 @@ https://docs.djangoproject.com/en/6.0/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
+import logging
 import os
 from pathlib import Path
 
@@ -65,6 +66,29 @@ def env_list(name):
     POST: returns its non-empty trimmed entries without logging the source value.
     """
     return [item.strip() for item in os.getenv(name, '').split(',') if item.strip()]
+
+
+VALID_LOG_LEVELS = frozenset({'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'})
+
+
+def env_log_level(name, default='INFO'):
+    """
+    PRE: name identifies an optional log-level variable; default is a valid level.
+    POST: returns an uppercase level name or raises ImproperlyConfigured on typos.
+    """
+    if default not in VALID_LOG_LEVELS:
+        raise ImproperlyConfigured(
+            f'Default de nivel de log inválido para {name}.'
+        )
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    normalized = raw_value.strip().upper()
+    if normalized not in VALID_LOG_LEVELS:
+        raise ImproperlyConfigured(
+            f'{name} debe ser uno de: {", ".join(sorted(VALID_LOG_LEVELS))}.'
+        )
+    return normalized
 
 
 def require_env(*names):
@@ -148,6 +172,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'core.request_ids.RequestIdMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -284,3 +309,94 @@ MEDIA_ROOT = resolve_media_root(
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'login'
+
+# ---------------------------------------------------------------------------
+# Runtime logging (stdout/stderr). No file handlers, no external SaaS.
+# Gunicorn owns access lines; django.request stays at WARNING+ to avoid
+# duplicating ordinary request access noise. See docs/OPERATIONS.md.
+# ---------------------------------------------------------------------------
+DJANGO_LOG_LEVEL = env_log_level(
+    'DJANGO_LOG_LEVEL',
+    'INFO' if not DEBUG else 'WARNING',
+)
+SIGEDON_LOG_LEVEL = env_log_level('SIGEDON_LOG_LEVEL', 'INFO')
+KOBO_LOG_LEVEL = env_log_level('KOBO_LOG_LEVEL', 'INFO')
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'request_id': {
+            '()': 'core.logging_filters.RequestIdFilter',
+        },
+        'redact_sensitive': {
+            '()': 'core.logging_filters.SensitiveDataRedactionFilter',
+        },
+        'stdout_only': {
+            '()': 'core.logging_filters.MaxLevelFilter',
+            'max_level': logging.INFO,
+        },
+    },
+    'formatters': {
+        'sigedon': {
+            '()': 'core.logging_filters.SigedonFormatter',
+            'format': (
+                '{asctime} {levelname} {name} request_id={request_id} {message}'
+            ),
+            'style': '{',
+            'datefmt': '%Y-%m-%dT%H:%M:%S%z',
+        },
+    },
+    'handlers': {
+        'stdout': {
+            'class': 'logging.StreamHandler',
+            'stream': 'ext://sys.stdout',
+            'level': 'DEBUG',
+            'filters': ['request_id', 'redact_sensitive', 'stdout_only'],
+            'formatter': 'sigedon',
+        },
+        'stderr': {
+            'class': 'logging.StreamHandler',
+            'stream': 'ext://sys.stderr',
+            'level': 'WARNING',
+            'filters': ['request_id', 'redact_sensitive'],
+            'formatter': 'sigedon',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['stdout', 'stderr'],
+            'level': DJANGO_LOG_LEVEL,
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['stdout', 'stderr'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.security': {
+            'handlers': ['stdout', 'stderr'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.db.backends': {
+            'handlers': ['stdout', 'stderr'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'sigedon': {
+            'handlers': ['stdout', 'stderr'],
+            'level': SIGEDON_LOG_LEVEL,
+            'propagate': False,
+        },
+        'sigedon.kobo': {
+            'handlers': ['stdout', 'stderr'],
+            'level': KOBO_LOG_LEVEL,
+            'propagate': False,
+        },
+    },
+    'root': {
+        'handlers': ['stdout', 'stderr'],
+        'level': 'WARNING',
+    },
+}

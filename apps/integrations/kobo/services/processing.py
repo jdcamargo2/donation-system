@@ -1,8 +1,12 @@
+import logging
+
 from apps.integrations.kobo.services.common import ProcessingBatchResult
 from apps.integrations.kobo.errors import KoboConfigurationError
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.processors import PROCESSABLE_STATUSES, process_submission
 from apps.integrations.kobo.services.territorial_routing import route_normalized_submission
+
+logger = logging.getLogger("sigedon.kobo.processing")
 
 
 def process_pending_submissions(
@@ -37,6 +41,10 @@ def process_pending_submissions(
                 default_timezone=default_timezone,
             )
         except Exception:
+            logger.exception(
+                "Kobo batch processing unexpected failure submission_id=%s",
+                submission.pk,
+            )
             processing_failed_count += 1
             continue
         processed_count += int(outcome.processed)

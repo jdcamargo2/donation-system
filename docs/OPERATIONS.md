@@ -86,6 +86,34 @@ python manage.py sync_sigedon_roles
 python manage.py runserver
 ```
 
+## 1.8. Logging operativo y correlación de peticiones
+
+SIGEDON emite logs de runtime a **stdout/stderr**. La recolección, retención,
+rotación, control de acceso y alertas son responsabilidad de la plataforma.
+
+* Cabecera de correlación: `X-Request-ID`.
+* IDs inbound inválidos, malformados o demasiado largos se reemplazan; el valor
+  inválido no se registra ni se refleja.
+* Ante un error 500, el usuario/operador puede aportar el `X-Request-ID` de la
+  respuesta para diagnóstico.
+* No se registran cuerpos, query strings completas, cookies, Authorization,
+  secretos, payloads Kobo crudos ni datos personales/financieros privados.
+* Los logs Kobo usan identificadores internos seguros (`submission_id`, stage,
+  status, clase de excepción).
+* Retención: política de plataforma; no retener indefinidamente; no pegar logs
+  crudos en trackers públicos.
+
+### Separación AuditLog vs logs de runtime
+
+| Fuente | Uso |
+| --- | --- |
+| Runtime logs (stdout/stderr) | ciclo de vida del proceso, fallos de petición, fallos de integración, diagnóstico operativo, despliegue |
+| `AuditLog` / `ExpenseRequestEvent` / `KoboProcessingEvent` | eventos de negocio durables, historial actor/acción, transiciones de dominio, historial de procesamiento |
+
+No duplicar cada fila de `AuditLog` en logs de runtime. No usar logs de runtime
+como evidencia de una mutación financiera exitosa. Este checkpoint no añade
+`request_id` al esquema de auditoría en base de datos.
+
 ## 2. Datos de demostración
 
 `seed_sigedon_demo` genera datos locales para explorar la interfaz, realizar

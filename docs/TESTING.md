@@ -594,6 +594,18 @@ Los tests de contrato de runtime viven en `core.tests.test_runtime_startup`
 Gunicorn no es necesario para el resto de la suite unitaria. Detalle operativo:
 [DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn).
 
+### Logging y correlación (`X-Request-ID`)
+
+Pruebas focalizadas:
+
+* `core.tests.test_request_ids`
+* `core.tests.test_logging_config`
+* `core.tests.test_log_redaction`
+* `apps.integrations.kobo.tests.test_logging`
+
+Verifican generación/validación de `X-Request-ID`, configuración `LOGGING`,
+redacción defensiva y logs Kobo seguros (sin payloads/secretos).
+
 ## 18. Criterio de aceptación
 
 Un cambio se considera listo cuando:

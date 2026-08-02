@@ -219,6 +219,42 @@ Configuración: `deploy/gunicorn.conf.py` (overrides por entorno; ver
 | access / error log | stdout / stderr (`-`) |
 | daemon / reload / preload | desactivados |
 
+### Logging runtime y correlación
+
+Los logs de proceso van a **stdout/stderr**. La plataforma es responsable de
+recolección, retención, rotación y alertas. No hay FileHandler ni cliente SaaS
+de logging en la aplicación.
+
+Variables consumidas:
+
+| Variable | Default | Uso |
+| --- | --- | --- |
+| `DJANGO_LOG_LEVEL` | `INFO` (prod) / `WARNING` (DEBUG) | logger `django` |
+| `SIGEDON_LOG_LEVEL` | `INFO` | logger `sigedon` |
+| `KOBO_LOG_LEVEL` | `INFO` | logger `sigedon.kobo` |
+
+Contrato con Gunicorn:
+
+* access log de Gunicorn: una línea por petición (stdout);
+* `django.request`: solo WARNING/ERROR (evita duplicar acceso ordinario);
+* logs de aplicación: ciclo de vida, integraciones y fallos;
+* cabecera de respuesta `X-Request-ID` en todas las respuestas HTTP;
+* IDs inbound válidos (8–64, `[A-Za-z0-9._-]`) se aceptan; el resto se reemplaza;
+* IDs generados están garantizados en logs Django y en la cabecera de respuesta;
+* Gunicorn no enriquece el access log con el ID generado por middleware en este
+  checkpoint; un proxy futuro puede propagar el mismo `X-Request-ID`.
+
+Al arrancar, verificar en logs (sin volcar entorno):
+
+* versión/arranque de Gunicorn;
+* bind address;
+* arranque de workers;
+* fallos de arranque de Django;
+* fallos de preflight en logs de release.
+
+Nunca registrar: `SECRET_KEY`, URI completa de BD, tokens Kobo, dumps de entorno,
+cuerpos de petición, payloads Kobo crudos ni cabeceras sensibles.
+
 ### Capacidad de workers y PostgreSQL
 
 ```text

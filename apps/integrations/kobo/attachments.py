@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from apps.integrations.kobo.errors import (
 )
 from apps.integrations.kobo.models import KoboAttachment, KoboSubmission
 
+logger = logging.getLogger("sigedon.kobo.processing")
 
 ALLOWED_MIME_TYPES = {
     "image/jpeg": ("jpg", b"\xff\xd8\xff"),
@@ -357,6 +359,10 @@ def download_and_store_attachment(
             error_message="Attachment content or metadata is invalid.",
         )
     except Exception:
+        logger.exception(
+            "Kobo attachment processing failed attachment_id=%s",
+            claim.attachment_id,
+        )
         return _finalize_claimed_failure(
             claim,
             final_status=KoboAttachment.Status.FAILED,

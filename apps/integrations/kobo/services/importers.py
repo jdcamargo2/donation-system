@@ -1,4 +1,5 @@
 from typing import Mapping
+import logging
 
 from django.db import transaction
 from django.utils import timezone
@@ -25,6 +26,8 @@ from apps.integrations.kobo.models import (
     KoboSubmission,
 )
 from apps.integrations.kobo.services.common import FORM_DEFINITION_ROLES
+
+logger = logging.getLogger("sigedon.kobo.import")
 
 
 def _operational_import_failure(
@@ -399,6 +402,11 @@ def _import_kobo_submission_with_handlers(
             warnings=exc.warnings,
         )
     except Exception:
+        logger.exception(
+            "Kobo import unexpected failure submission_id=%s stage=%s",
+            submission.pk,
+            "operational_import",
+        )
         return _record_failed_import(submission.pk)
 
     submission.status = KoboSubmission.Status.IMPORTED

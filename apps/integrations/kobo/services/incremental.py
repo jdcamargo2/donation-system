@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 import json
+import logging
 
 from django.conf import settings
 from django.db import transaction
@@ -14,6 +15,7 @@ from apps.integrations.kobo.models import KoboAsset, KoboProcessingEvent, KoboSu
 from apps.integrations.kobo.processors import process_submission
 from apps.integrations.kobo.services.territorial_routing import route_normalized_submission
 
+logger = logging.getLogger("sigedon.kobo.sync")
 
 REMOTE_WATERMARK_FIELD = "_last_edited"
 REMOTE_MINIMUM_TIMESTAMP = datetime(1970, 1, 1, tzinfo=UTC)
@@ -278,8 +280,18 @@ def sync_asset_submissions(*, asset, client, actor=None, full=False, max_pages=N
             candidate = max(filter(None, (candidate, remote_at)))
     except KoboIntegrationError:
         partial, error_code, safe_error = True, "REMOTE_SYNC_FAILED", "Remote synchronization did not complete."
+        logger.warning(
+            "Kobo remote sync failed asset_id=%s code=%s",
+            asset.pk,
+            error_code,
+        )
     except Exception:
         error_code, safe_error = "SYNC_FAILED", "Synchronization failed safely."
+        logger.exception(
+            "Kobo sync unexpected failure asset_id=%s stage=%s",
+            asset.pk,
+            "incremental",
+        )
     run = _finish_run(run=run, candidate_watermark=candidate, partial=partial, error_code=error_code, safe_error_message=safe_error, counters=(created, updated, unchanged, detected, failed))
     return AssetSyncResult(
         run.status,
