@@ -25,6 +25,7 @@ from apps.operations.roles import (
 from apps.operations.tests.helpers import (
     create_allocation,
     create_donation,
+    create_expense,
     create_institution,
     create_project,
     create_support_upload,
@@ -46,11 +47,22 @@ class DateFormContractTests(TestCase):
         self.allocation = create_allocation(donation=self.donation, project=self.project)
 
     def test_all_operations_dates_render_iso_and_accept_both_contract_formats(self):
+        expense = create_expense(
+            allocation=self.allocation,
+            amount=Decimal('10.00'),
+        )
+        expense.expense_date = INITIAL_DATE
+        expense.save(update_fields=('expense_date',))
+        SupportingDocument.objects.create(
+            expense=expense,
+            title='Soporte fecha',
+            document=SimpleUploadedFile('fecha.pdf', b'%PDF soporte'),
+        )
         instances_and_fields = (
             (ProjectForm(instance=Project(start_date=INITIAL_DATE)), 'start_date'),
             (DonationForm(instance=Donation(commitment_date=INITIAL_DATE)), 'commitment_date'),
             (FundAllocationForm(instance=FundAllocation(allocation_date=INITIAL_DATE)), 'allocation_date'),
-            (ExpenseForm(instance=Expense(expense_date=INITIAL_DATE)), 'expense_date'),
+            (ExpenseForm(instance=expense), 'expense_date'),
         )
 
         for form, field_name in instances_and_fields:
@@ -84,8 +96,14 @@ class DateFormContractTests(TestCase):
         self.assertIsNone(donation_form.save().received_date)
 
     def test_required_dates_reject_empty_values(self):
+        expense = create_expense(allocation=self.allocation, amount=Decimal('10.00'))
+        SupportingDocument.objects.create(
+            expense=expense,
+            title='Soporte fecha',
+            document=SimpleUploadedFile('fecha.pdf', b'%PDF soporte'),
+        )
         allocation_form = FundAllocationForm(data=self._allocation_data(''))
-        expense_form = ExpenseForm(data=self._expense_data(''))
+        expense_form = ExpenseForm(instance=expense, data=self._expense_data(''))
 
         self.assertFalse(allocation_form.is_valid())
         self.assertFalse(expense_form.is_valid())
@@ -138,7 +156,6 @@ class DateFormContractTests(TestCase):
             'description': '',
             'observations': '',
             'support_title': 'Soporte de fecha',
-            'support_file': SimpleUploadedFile('fecha.pdf', b'%PDF soporte'),
         }
 
 

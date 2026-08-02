@@ -88,8 +88,9 @@ class OperationalCodeTests(TestCase):
         project.refresh_from_db()
         self.assertEqual(project.code, original_code)
 
-        for form_class in (ProjectForm, DonationForm, FundAllocationForm, ExpenseForm):
+        for form_class in (ProjectForm, DonationForm, FundAllocationForm):
             self.assertNotIn('code', form_class().fields)
+        self.assertNotIn('code', ExpenseForm.base_fields)
 
     def test_admin_exposes_every_code_as_readonly(self):
         for admin_class, model in (

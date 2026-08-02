@@ -29,6 +29,23 @@ class FormTests(TestCase):
         self.override.disable()
         shutil.rmtree(self.temp_media, ignore_errors=True)
 
+    def _expense_with_support(self, *, allocation=None, amount=Decimal('10.00'), reason='Purchase'):
+        expense = create_expense(
+            allocation=allocation or create_allocation(
+                donation=self.donation,
+                project=self.project,
+                amount=Decimal('40.00'),
+            ),
+            amount=amount,
+            reason=reason,
+        )
+        SupportingDocument.objects.create(
+            expense=expense,
+            title='Receipt',
+            document=SimpleUploadedFile('receipt.txt', b'receipt'),
+        )
+        return expense
+
     def test_institution_form_saves_valid_data(self):
         upload = SimpleUploadedFile('registro.pdf', b'documento legal', content_type='application/pdf')
         form = InstitutionForm(
@@ -77,7 +94,8 @@ class FormTests(TestCase):
         donation_form = DonationForm()
         project_form = ProjectForm()
         allocation_form = FundAllocationForm()
-        expense_form = ExpenseForm()
+        expense = self._expense_with_support()
+        expense_form = ExpenseForm(instance=expense)
 
         self.assertNotIn('code', donation_form.fields)
         self.assertNotIn('code', project_form.fields)
@@ -132,7 +150,7 @@ class FormTests(TestCase):
         project_form = ProjectForm()
         donation_form = DonationForm()
         allocation_form = FundAllocationForm()
-        expense_form = ExpenseForm()
+        expense_form = ExpenseForm(instance=self._expense_with_support())
 
         date_fields = [
             project_form.fields['start_date'],
@@ -153,7 +171,7 @@ class FormTests(TestCase):
 
     def test_selects_use_clear_placeholder_and_expected_choices(self):
         donation_form = DonationForm()
-        expense_form = ExpenseForm()
+        expense_form = ExpenseForm(instance=self._expense_with_support())
 
         self.assertEqual(list(donation_form.fields['donation_type'].choices)[0], ('', 'Seleccione una opción'))
         self.assertIn(('money', 'Dinero'), list(donation_form.fields['donation_type'].choices))
@@ -330,7 +348,9 @@ class FormTests(TestCase):
         allocation = valid_allocation_form.save()
         self.assertEqual(allocation.amount, Decimal('1500.00'))
 
+        expense = self._expense_with_support(allocation=allocation, amount=Decimal('10.00'))
         expense_form = ExpenseForm(
+            instance=expense,
             data={
                 'allocation': allocation.pk,
                 'expense_date': TEST_DATE,
@@ -342,14 +362,11 @@ class FormTests(TestCase):
                 'description': '',
                 'observations': '',
             },
-            files={'support_file': SimpleUploadedFile('monto.pdf', b'%PDF soporte')},
         )
         self.assertTrue(expense_form.is_valid(), expense_form.errors)
         self.assertEqual(expense_form.cleaned_data['amount'], Decimal('1500.00'))
-        with self.assertRaises(ValidationError) as ctx:
-            expense_form.save()
-        self.assertIn('solicitud de gasto', str(ctx.exception).lower())
-        self.assertEqual(Expense.objects.count(), 0)
+        updated = expense_form.save()
+        self.assertEqual(updated.amount, Decimal('1500.00'))
 
     def test_forms_accept_visual_day_month_year_dates(self):
         form = ProjectForm(
@@ -552,17 +569,26 @@ class FormTests(TestCase):
 
         self.assertNotIn(self.project, form.fields['project'].queryset)
 
-    def test_expense_form_excludes_allocation_without_balance(self):
+    def test_expense_form_includes_structurally_eligible_zero_balance_targets(self):
         allocation = create_allocation(
             donation=self.donation,
             project=self.project,
             amount=Decimal('40.00'),
         )
         create_expense(allocation=allocation, amount=Decimal('40.00'))
+        expense = self._expense_with_support(
+            allocation=create_allocation(
+                donation=self.donation,
+                project=self.project,
+                amount=Decimal('50.00'),
+                category='training_entrepreneurship',
+            ),
+            amount=Decimal('10.00'),
+        )
 
-        form = ExpenseForm()
+        form = ExpenseForm(instance=expense)
 
-        self.assertNotIn(allocation, form.fields['allocation'].queryset)
+        self.assertIn(allocation, form.fields['allocation'].queryset)
 
     def test_allocation_form_shows_selected_donation_restrictions(self):
         self.donation.restrictions = 'Uso exclusivo para alimentos.'
@@ -574,14 +600,16 @@ class FormTests(TestCase):
         self.assertIn('Disponible:', form.fields['donation'].label_from_instance(self.donation))
 
     def test_expense_form_explains_mandatory_support_and_reference(self):
-        form = ExpenseForm()
+        form = ExpenseForm(instance=self._expense_with_support())
 
         self.assertIn('Obligatorio', str(form.fields['support_file'].help_text))
         self.assertIn('referencia', str(form.fields['support_title'].help_text).lower())
 
     def test_expense_form_rejects_over_execution(self):
         allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('40.00'))
+        expense = self._expense_with_support(allocation=allocation, amount=Decimal('10.00'))
         form = ExpenseForm(
+            instance=expense,
             data={
                 'allocation': allocation.pk,
                 'expense_date': TEST_DATE,
@@ -592,8 +620,7 @@ class FormTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': '',
                 'observations': '',
-                'status': Expense.Status.REGISTERED,
-            }
+            },
         )
 
         self.assertFalse(form.is_valid())
@@ -601,7 +628,9 @@ class FormTests(TestCase):
 
     def test_expense_requires_supporting_document(self):
         allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('40.00'))
+        expense = create_expense(allocation=allocation, amount=Decimal('10.00'), reason='Purchase')
         form = ExpenseForm(
+            instance=expense,
             data={
                 'allocation': allocation.pk,
                 'expense_date': TEST_DATE,
@@ -612,36 +641,34 @@ class FormTests(TestCase):
                 'payment_method': 'bank_transfer',
                 'description': '',
                 'observations': '',
-            }
+            },
         )
 
         self.assertFalse(form.is_valid())
         self.assertIn('documento soporte', form.errors['support_file'][0])
 
-    def test_expense_form_create_is_blocked_by_expense_request_governance(self):
-        allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('40.00'))
-        upload = SimpleUploadedFile('receipt.txt', b'receipt')
-        form = ExpenseForm(
-            data={
-                'allocation': allocation.pk,
-                'expense_date': TEST_DATE,
-                'category': 'food',
-                'amount': '10.00',
-                'reason': 'Purchase',
-                'provider_or_recipient': 'Provider A',
-                'payment_method': 'bank_transfer',
-                'description': '',
-                'observations': '',
-                'support_title': 'Receipt',
-                'currency': 'EUR',
-            },
-            files={'support_file': upload},
-        )
+    def test_expense_form_rejects_instantiation_without_persisted_instance(self):
+        with self.assertRaises(ValueError):
+            ExpenseForm()
+        with self.assertRaisesMessage(ValidationError, 'solicitud de gasto'):
+            from apps.operations.services import create_expense as create_expense_service
 
-        self.assertTrue(form.is_valid(), form.errors)
-        with self.assertRaises(ValidationError) as ctx:
-            form.save()
-        self.assertIn('solicitud de gasto', str(ctx.exception).lower())
+            create_expense_service(
+                allocation=create_allocation(
+                    donation=self.donation,
+                    project=self.project,
+                    amount=Decimal('40.00'),
+                ),
+                expense_date=TEST_DATE,
+                category='food',
+                amount=Decimal('10.00'),
+                reason='Purchase',
+                provider_or_recipient='Provider A',
+                payment_method='bank_transfer',
+                description='',
+                observations='',
+                support_file=SimpleUploadedFile('receipt.txt', b'receipt'),
+            )
         self.assertEqual(Expense.objects.count(), 0)
         self.assertEqual(SupportingDocument.objects.count(), 0)
 

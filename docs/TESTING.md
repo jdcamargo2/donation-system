@@ -197,6 +197,8 @@ Cobertura focalizada:
 * anulación administrativa pendiente/reservada;
 * anulación de gasto enlazado sin recrear reserva;
 * rechazo de `create_expense()` público;
+* `ExpenseForm` solo edición con choices de asignación alineados a elegibilidad
+  operativa canónica (`test_expense_form_allocation_choices`);
 * concurrencia PostgreSQL (fulfill vs fulfill/annul/bypass/approval);
 * regresión de ciclo de vida de `Expense` y roles.
 

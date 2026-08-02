@@ -574,7 +574,8 @@ El superusuario:
 * Incluso como superusuario, `ExpenseAdmin` es solo inspección (sin alta, cambio
   ni borrado, ni mutación de inlines de soporte): la creación ocurre únicamente
   al cumplir una `ExpenseRequest` aprobada; anulación y demás mutaciones pasan
-  por los servicios/UI de SIGEDON. Los documentos soporte siguen el ciclo
+  por los servicios/UI de SIGEDON. `ExpenseForm` en la UI operativa es solo
+  edición (no crea gastos). Los documentos soporte siguen el ciclo
   protegido de la aplicación, no el Admin.
 * Incluso como superusuario, `SupportingDocumentAdmin` es solo inspección (sin
   alta, cambio, borrado, reemplazo de archivo ni reasignación de gasto): la

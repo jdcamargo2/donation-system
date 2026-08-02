@@ -331,8 +331,11 @@ rechazo.
 * `create_expense()` público rechaza creación directa ordinaria.
 * Camino normal: `fulfill_expense_request`.
 * `create_expense_legacy()` solo para tests/importaciones controladas.
-* UI ordinaria de gasto nuevo puede quedar visible temporalmente; el servicio ya
-  bloquea el bypass.
+* `ExpenseForm` es solo edición de gastos existentes; la ruta `expense_create`
+  redirige a la cola de cumplimiento de solicitudes aprobadas.
+* Las opciones de reasignación en edición usan elegibilidad operativa canónica
+  (`operational_fund_allocation_choices`) y conservan la asignación histórica
+  actual del gasto; `update_expense` permanece como autoridad de escritura.
 
 ### POST
 

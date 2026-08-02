@@ -250,6 +250,9 @@ ANNULLED
 * `create_expense()` público rechaza la creación directa ordinaria; el camino
   canónico es `fulfill_expense_request` (primitiva `_create_expense_locked`).
 * `create_expense_legacy()` queda solo para tests/importaciones controladas.
+* `ExpenseForm` edita gastos existentes: las opciones de asignación siguen
+  elegibilidad operativa canónica y conservan la asignación histórica actual;
+  la validación de escritura la impone `update_expense`.
 
 ## 6. `SupportingDocument`
 

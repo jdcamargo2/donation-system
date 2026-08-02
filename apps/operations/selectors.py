@@ -484,22 +484,47 @@ def user_may_use_global_expense_request_allocations(user):
     return user_can_create_global_expense_request(user)
 
 
+def operational_fund_allocation_choices(*, project=None, include_allocation_id=None):
+    """
+    PRE: optional project scopes choices; include_allocation_id may keep one historical row.
+    POST: returns structurally eligible FundAllocations (ACTIVE allocation, ACTIVE project,
+          RECEIVED operating-currency donation) union the included pk when provided;
+          no balance filter; stable select ordering. Callers apply operation-specific
+          availability (e.g. reservation-aware balance for Expense Requests).
+    """
+    eligible = Q(
+        status=FundAllocation.Status.ACTIVE,
+        project__status=Project.Status.ACTIVE,
+        donation__status=Donation.Status.RECEIVED,
+        donation__currency=OPERATING_CURRENCY,
+    )
+    if include_allocation_id is not None:
+        eligible |= Q(pk=include_allocation_id)
+    queryset = FundAllocation.objects.filter(eligible).select_related('project', 'donation')
+    if project is not None:
+        project_scope = Q(project_id=project.pk)
+        if include_allocation_id is not None:
+            project_scope |= Q(pk=include_allocation_id)
+        queryset = queryset.filter(project_scope)
+    return queryset.order_by(
+        'project__code',
+        'budget_category',
+        'code',
+        'pk',
+    )
+
+
 def expense_request_allocation_choices(*, project=None, include_allocation_id=None):
     """
     PRE: optional project scopes choices; include_allocation_id keeps the current edit row.
-    POST: returns annotated ACTIVE allocations on ACTIVE projects with RECEIVED USD donations,
-          reservation-aware balance > 0 (or the included id), ordered for stable selects.
+    POST: returns annotated structurally eligible allocations with reservation-aware
+          balance > 0 (or the included id still inside the structural set), ordered
+          for stable selects. include_allocation_id does not admit terminal/historical
+          parents — only bypasses the zero-balance filter.
     """
     queryset = with_allocation_list_metrics(
-        FundAllocation.objects.filter(
-            status=FundAllocation.Status.ACTIVE,
-            project__status=Project.Status.ACTIVE,
-            donation__status=Donation.Status.RECEIVED,
-            donation__currency=OPERATING_CURRENCY,
-        ).select_related('project', 'donation')
+        operational_fund_allocation_choices(project=project)
     )
-    if project is not None:
-        queryset = queryset.filter(project_id=project.pk)
     balance_filter = Q(annotated_available_balance__gt=0)
     if include_allocation_id is not None:
         balance_filter |= Q(pk=include_allocation_id)

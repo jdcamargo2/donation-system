@@ -61,13 +61,16 @@ class ExpenseLifecycleTests(TestCase):
         )
 
     def test_form_requires_support_and_excludes_status(self):
-        form = ExpenseForm(data=self.expense_data())
+        expense = self.create_registered_expense()
+        expense.supporting_documents.all().delete()
+        form = ExpenseForm(instance=expense, data=self.expense_data())
         self.assertFalse(form.is_valid())
         self.assertIn('support_file', form.errors)
         self.assertNotIn('status', form.fields)
 
     def test_expense_form_support_file_opts_into_single_file_upload_preview(self):
-        form = ExpenseForm()
+        expense = self.create_registered_expense()
+        form = ExpenseForm(instance=expense)
         field = form.fields['support_file']
 
         self.assertEqual(field.widget.attrs.get('data-file-upload-preview'), 'true')

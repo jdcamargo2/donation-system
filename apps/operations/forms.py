@@ -637,6 +637,13 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
 
 
 class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
+    """
+    Edit-only form for existing Expense records.
+
+    New expenses are created exclusively through Expense Request fulfillment;
+    this form never calls create_expense().
+    """
+
     allocation = AllocationWithBalanceChoiceField(
         queryset=FundAllocation.objects.none(),
         label=_('Asignación'),
@@ -690,21 +697,28 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
 
     def clean(self):
         """
-        PRE: submitted expense data may create a record or edit an existing registered expense.
-        POST: requires protected support for every resulting expense and never exposes lifecycle state.
+        PRE: submitted data edits an existing registered expense with a bound instance.pk.
+        POST: requires protected support and applies UX balance hints; service remains authoritative.
         """
         cleaned_data = super().clean()
         support_file = cleaned_data.get('support_file')
-        has_existing_support = self.instance.pk and self.instance.supporting_documents.exists()
+        has_existing_support = self.instance.supporting_documents.exists()
         if not support_file and not has_existing_support:
             self.add_error('support_file', _('Falta el documento soporte obligatorio para verificar el gasto.'))
         allocation = cleaned_data.get('allocation')
         amount = cleaned_data.get('amount')
-        if allocation and allocation.status != FundAllocation.Status.ACTIVE:
+        is_current_allocation = (
+            allocation is not None and allocation.pk == self.instance.allocation_id
+        )
+        if (
+            allocation
+            and allocation.status != FundAllocation.Status.ACTIVE
+            and not is_current_allocation
+        ):
             self.add_error('allocation', _('La asignación seleccionada no está operativa y no acepta gastos.'))
         elif allocation and amount is not None:
             available = allocation.available_balance
-            if self.instance.pk and self.instance.allocation_id == allocation.pk:
+            if is_current_allocation:
                 available += self.instance.amount
             if available <= 0:
                 self.add_error('allocation', _('La asignación seleccionada no tiene saldo disponible.'))
@@ -716,21 +730,23 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        current_allocation_id = self.instance.allocation_id if self.instance.pk else None
-        allocations = FundAllocation.objects.filter(
-            donation__currency=OPERATING_CURRENCY,
-            status=FundAllocation.Status.ACTIVE,
+        if not getattr(self.instance, 'pk', None):
+            raise ValueError('ExpenseForm only supports existing Expense instances.')
+        from .selectors import operational_fund_allocation_choices
+
+        current_allocation_id = self.instance.allocation_id
+        self.fields['allocation'].queryset = operational_fund_allocation_choices(
+            include_allocation_id=current_allocation_id,
         )
-        eligible_allocation_ids = [
-            allocation.pk for allocation in allocations
-            if allocation.available_balance > 0 or allocation.pk == current_allocation_id
-        ]
-        self.fields['allocation'].queryset = allocations.filter(pk__in=eligible_allocation_ids)
         selected_allocation_id = self.data.get(self.add_prefix('allocation')) or current_allocation_id
-        selected_allocation = allocations.filter(pk=selected_allocation_id).first() if selected_allocation_id else None
+        selected_allocation = (
+            self.fields['allocation'].queryset.filter(pk=selected_allocation_id).first()
+            if selected_allocation_id
+            else None
+        )
         if selected_allocation:
             available = selected_allocation.available_balance
-            if self.instance.pk and self.instance.allocation_id == selected_allocation.pk:
+            if selected_allocation.pk == self.instance.allocation_id:
                 available += self.instance.amount
             self.fields['amount'].help_text = _(
                 'Ejecutado: %(executed)s. Máximo disponible para este gasto: %(available)s.'
@@ -746,34 +762,33 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
             'Indique la referencia, número o título que identifica el soporte.'
         )
         self.fields['support_file'].help_text = _(
-            'Obligatorio al crear el gasto. Adjunte el archivo que permite verificar la operación.'
+            'Obligatorio si el gasto aún no tiene soporte. Adjunte el archivo que permite verificar la operación.'
         )
 
-    # PRE: form.is_valid() has returned True and the expense can be saved.
-    # POST: returns an unsaved instance for commit=False, otherwise persists through transactional expense services.
+    # PRE: form.is_valid() has returned True for an existing editable expense.
+    # POST: returns an unsaved instance for commit=False, otherwise persists via update_expense only.
     def save(self, commit=True):
         expense = super().save(commit=False)
         if not commit:
             return expense
-        from .services import create_expense, update_expense
+        if not expense.pk:
+            raise ValueError('ExpenseForm only supports existing Expense instances.')
+        from .services import update_expense
 
-        service_data = {
-            'allocation': self.cleaned_data['allocation'],
-            'expense_date': self.cleaned_data['expense_date'],
-            'category': self.cleaned_data['category'],
-            'amount': self.cleaned_data['amount'],
-            'reason': self.cleaned_data['reason'],
-            'provider_or_recipient': self.cleaned_data['provider_or_recipient'],
-            'payment_method': self.cleaned_data['payment_method'],
-            'description': self.cleaned_data.get('description', ''),
-            'observations': self.cleaned_data.get('observations', ''),
-            'support_title': self.cleaned_data.get('support_title', ''),
-            'support_file': self.cleaned_data.get('support_file'),
-        }
-        if expense.pk:
-            expense = update_expense(expense=expense, **service_data)
-        else:
-            expense = create_expense(**service_data)
+        expense = update_expense(
+            expense=expense,
+            allocation=self.cleaned_data['allocation'],
+            expense_date=self.cleaned_data['expense_date'],
+            category=self.cleaned_data['category'],
+            amount=self.cleaned_data['amount'],
+            reason=self.cleaned_data['reason'],
+            provider_or_recipient=self.cleaned_data['provider_or_recipient'],
+            payment_method=self.cleaned_data['payment_method'],
+            description=self.cleaned_data.get('description', ''),
+            observations=self.cleaned_data.get('observations', ''),
+            support_title=self.cleaned_data.get('support_title', ''),
+            support_file=self.cleaned_data.get('support_file'),
+        )
         self.instance = expense
         self.save_m2m()
         return expense
