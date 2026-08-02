@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.management import BaseCommand, CommandError, call_command
@@ -21,6 +22,8 @@ from apps.operations.models import (
 from apps.operations.role_services import set_user_functional_role
 
 
+# Local-development convenience only. Unusable in production: handle() refuses
+# when DEBUG=False before any mutation. Never print this value.
 DEFAULT_DEMO_PASSWORD = "0214"
 
 
@@ -64,19 +67,35 @@ class Command(BaseCommand):
             help="No crear ni actualizar usuarios de demostración.",
         )
 
-    @transaction.atomic
     def handle(self, *args, **options):
         """
         PRE:
         - las migraciones están aplicadas;
-        - PostgreSQL está disponible;
+        - DEBUG=True (desarrollo local o efímero);
+        - PostgreSQL/SQLite de desarrollo está disponible;
         - los modelos operations están cargados.
 
         POST:
-        - existe un conjunto demo coherente e idempotente;
+        - si DEBUG=False: CommandError antes de cualquier escritura;
+        - si DEBUG=True: existe un conjunto demo coherente e idempotente;
         - no se exceden saldos;
         - los cinco proyectos de Kobo conservan sus códigos;
-        - las ejecuciones posteriores actualizan sin duplicar.
+        - las ejecuciones posteriores actualizan sin duplicar;
+        - la contraseña demo nunca se imprime.
+        """
+        # Absolute production refusal (policy A): no override flags or env bypass.
+        if not settings.DEBUG:
+            raise CommandError(
+                "seed_sigedon_demo is disabled when DEBUG=False."
+            )
+
+        self._seed_demo_data(**options)
+
+    @transaction.atomic
+    def _seed_demo_data(self, **options):
+        """
+        PRE: DEBUG=True and options are validated by handle().
+        POST: demo entities are created/updated atomically; no password printed.
         """
         password = options["password"]
         skip_users = options["skip_users"]
@@ -113,12 +132,7 @@ class Command(BaseCommand):
             self.stdout.write("  admin_demo")
             self.stdout.write("  operador_demo")
             self.stdout.write("  auditor_demo")
-            self.stdout.write(
-                self.style.WARNING(
-                    "Todos usan la contraseña indicada mediante "
-                    "--password o SIGEDON_DEMO_PASSWORD."
-                )
-            )
+            self.stdout.write("Demo credentials configured.")
 
     def _create_users(self, password: str) -> dict[str, Any]:
         """

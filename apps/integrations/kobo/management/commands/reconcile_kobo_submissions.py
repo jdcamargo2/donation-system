@@ -47,7 +47,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         # PRE: Kobo is enabled, credentials exist, and limit is positive.
         # POST: retries eligible local payloads independently, then stages/processes
-        # missing remote submissions without importing them.
+        # missing remote submissions without importing them; prints a bounded
+        # summary; raises CommandError when errors > 0 (partial commits retained).
+        # Neither this command nor process_kobo_submissions acquires sync leases;
+        # hub incremental sync owns lease semantics separately.
         if not settings.KOBO_ENABLED:
             raise CommandError("Kobo integration is disabled.")
         if options["limit"] <= 0:
@@ -152,25 +155,32 @@ class Command(BaseCommand):
                             errors += 1
             except (KoboIntegrationError, KoboPayloadError):
                 failed_assets += 1
-        self.stdout.write(
-            self.style.SUCCESS(
-                "local_reprocessed={local_reprocessed} local_failed={local_failed} "
-                "local_would_reprocess={local_would_reprocess} created={created} "
-                "existing={existing} failed_assets={failed_assets} "
-                "resolved={resolved} still_pending={still_pending} "
-                "errors={errors} skipped={skipped} "
-                "dry_run={dry_run}".format(
-                    local_reprocessed=local_reprocessed,
-                    local_failed=local_failed,
-                    local_would_reprocess=local_would_reprocess,
-                    created=created,
-                    existing=existing,
-                    failed_assets=failed_assets,
-                    resolved=resolved,
-                    still_pending=still_pending,
-                    errors=errors,
-                    skipped=skipped,
-                    dry_run=options["dry_run"],
-                )
+                errors += 1
+        summary = (
+            "Kobo reconciliation summary: "
+            "local_reprocessed={local_reprocessed} local_failed={local_failed} "
+            "local_would_reprocess={local_would_reprocess} created={created} "
+            "existing={existing} failed_assets={failed_assets} "
+            "resolved={resolved} still_pending={still_pending} "
+            "errors={errors} skipped={skipped} "
+            "dry_run={dry_run}".format(
+                local_reprocessed=local_reprocessed,
+                local_failed=local_failed,
+                local_would_reprocess=local_would_reprocess,
+                created=created,
+                existing=existing,
+                failed_assets=failed_assets,
+                resolved=resolved,
+                still_pending=still_pending,
+                errors=errors,
+                skipped=skipped,
+                dry_run=options["dry_run"],
             )
         )
+        # Partial successes already committed; raise only after the summary.
+        if errors > 0:
+            self.stdout.write(summary)
+            raise CommandError(
+                f"Reconciliation completed with {errors} error(s)."
+            )
+        self.stdout.write(self.style.SUCCESS(summary))

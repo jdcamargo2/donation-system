@@ -59,7 +59,9 @@ La suite cubre:
 * revisiones;
 * decisiones institucionales;
 * escape de fórmulas en exportaciones CSV operativas;
-* flujos end-to-end.
+* flujos end-to-end;
+* seguridad de `seed_sigedon_demo` (rechazo con `DEBUG=False` antes de mutar;
+  sin impresión de contraseña; sin bypass de producción).
 
 ### 3.2. `apps.integrations.kobo`
 
@@ -79,7 +81,11 @@ La suite cubre:
 * revisión;
 * importación;
 * rechazo;
-* restauración.
+* restauración;
+* códigos de salida de `process_kobo_submissions` y
+  `reconcile_kobo_submissions` (éxito → 0; fallo parcial → `CommandError`;
+  commits parciales conservados; dry-run no muta; sin tokens/payloads en
+  salida).
 
 ### 3.3. `apps.public_portal`
 
@@ -343,6 +349,20 @@ python manage.py test apps.public_portal.tests
 ```bash
 python manage.py test apps.integrations.kobo.tests
 ```
+
+### Seguridad operativa de comandos (OPS-COMMAND-SAFETY)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_management_command_safety \
+  apps.integrations.kobo.tests.test_process_kobo_submissions_command \
+  apps.integrations.kobo.tests.test_reconcile_kobo_submissions_command \
+  --noinput
+```
+
+El contrato de exit distinto de cero se verifica con `call_command` +
+`CommandError` (el mismo mecanismo que Django usa para el código de salida del
+shell). No se requiere subprocess adicional salvo regresiones específicas.
 
 Las rutas de módulos de prueba deben ajustarse si la organización interna cambia.
 

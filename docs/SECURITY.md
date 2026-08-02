@@ -302,6 +302,14 @@ deben cumplirse las siguientes condiciones:
   la aplicación permanece segura aunque sean alcanzables; `X-Request-ID`
   permite correlación; no sirven para diagnosticar dependencias externas
   (Kobo, caché, object storage). No hay allowlist de IP dentro de Django.
+* `seed_sigedon_demo` está **deshabilitado** cuando `DEBUG=False` y se rechaza
+  antes de cualquier mutación; no existe bypass operativo. Es exclusivo de
+  desarrollo local/efímero y no forma parte de release, preflight ni arranque
+  web. `SIGEDON_DEMO_PASSWORD` es solo desarrollo y nunca se imprime.
+* Los comandos `process_kobo_submissions` y `reconcile_kobo_submissions` deben
+  devolver exit distinto de cero cuando hay fallos de lote; no imprimen
+  tokens, payloads ni datos personales. No deben invocarse desde el arranque
+  web ni enmascararse con `|| true`.
 
 Según el entorno de despliegue, deben configurarse:
 

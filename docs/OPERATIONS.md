@@ -120,9 +120,20 @@ como evidencia de una mutación financiera exitosa. Este checkpoint no añade
 revisiones manuales y preparar capturas de pantalla. No representa una carga
 productiva ni una verificación integral de las reglas operativas.
 
+### Política de producción (absoluta)
+
+* **Solo desarrollo:** el comando exige `DEBUG=True` (`DJANGO_DEBUG=True`).
+* Cuando `DEBUG=False`, el comando **rechaza la ejecución antes de cualquier
+  escritura** y termina con código distinto de cero (`CommandError`:
+  `seed_sigedon_demo is disabled when DEBUG=False.`).
+* No existe bypass por `--force`, `--allow-production` ni variables de entorno.
+* **No forma parte** de release, preflight, arranque web ni comprobación de
+  disponibilidad productiva.
+* No debe usarse para probar que producción “funciona”.
+
 ### Precondición
 
-* Ejecutar únicamente en un entorno local o efímero.
+* Ejecutar únicamente en un entorno local o efímero con `DEBUG=True`.
 * Utilizar una base de datos no productiva donde se acepten datos de demostración.
 
 Comando:
@@ -138,9 +149,13 @@ python manage.py seed_sigedon_demo
 --skip-users
 ```
 
+`SIGEDON_DEMO_PASSWORD` y `--password` son **solo desarrollo**. El comando nunca
+imprime la contraseña; como máximo indica `Demo credentials configured.`
+
 ### Reglas
 
-* **No debe ejecutarse en producción.**
+* **No debe ejecutarse en producción** (y el runtime lo impide cuando
+  `DEBUG=False`).
 * Usa ORM directo intencionalmente y no pasa por todos los services de dominio.
 * No genera trazabilidad completa en `AuditLog`.
 * Puede crear gastos sin `SupportingDocument`, aunque el flujo UI operativo lo exige.
@@ -283,6 +298,40 @@ Opciones disponibles:
 
 La reconciliación recupera submissions ausentes en staging, pero no sustituye la
 validación, normalización, asignación territorial ni importación automática.
+
+### Códigos de salida (contrato operativo)
+
+Ambos comandos siguen la misma taxonomía:
+
+| Resultado | Exit |
+| --- | --- |
+| Lote seleccionado completado sin errores (incluye “nada elegible”) | `0` |
+| Uno o más registros fallaron, o fallo fatal de configuración/init | distinto de `0` |
+
+Matices importantes para cron, systemd y jobs de release:
+
+* **Exit distinto de cero no implica cero trabajo comprometido.** Registros
+  previos del mismo lote pueden haberse persistido con éxito.
+* Tras un fallo parcial, inspeccione el hub Kobo, `KoboProcessingEvent` y los
+  logs de runtime correlacionados; no asuma rollback total.
+* Es seguro reejecutar según las reglas de idempotencia existentes.
+* No enmascare el fallo con `|| true`.
+
+Ejemplo de orquestación:
+
+```bash
+if ! python manage.py process_kobo_submissions; then
+  echo "Kobo processing completed with failures" >&2
+  exit 1
+fi
+```
+
+`--dry-run` en reconciliación no escribe datos: sin errores → `0`; con errores
+operativos (p. ej. fallo remoto) → distinto de `0`.
+
+Estos comandos CLI **no adquieren** el lease de sincronización incremental del
+hub; ese locking pertenece a la sincronización remota del hub y permanece
+inalterado.
 
 ### Recuperación e incidencias
 

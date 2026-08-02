@@ -12,6 +12,7 @@ from apps.operations.models import Donation, Expense, Project, ProjectUpdate
 from apps.operations.roles import ROLE_EXTERNAL_AUDITOR, ROLE_FIELD_OPERATOR, ROLE_SIGEDON_ADMIN
 
 
+@override_settings(DEBUG=True)
 class SeedSigedonDemoCommandTests(TestCase):
     def setUp(self):
         self.temp_media = tempfile.mkdtemp()

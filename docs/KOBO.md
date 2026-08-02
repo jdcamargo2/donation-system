@@ -379,6 +379,16 @@ El procesamiento ordinario de submissions válidas y con routing resuelto contin
 hacia auto-aprobación e importación. Las fallas e incidencias se presentan en el
 hub global; no se sostiene una cola humana por Project.
 
+### Código de salida
+
+* `0`: el lote seleccionado terminó sin errores (incluye cero elegibles).
+* distinto de `0`: al menos un fallo por registro o un fallo fatal de init;
+  el resumen se imprime antes del `CommandError`.
+* Los éxitos previos del mismo lote **permanecen comprometidos**; no hay
+  rollback del lote completo.
+* Orquestación: no usar `|| true`. Reejecutar es seguro según idempotencia.
+* Detalle operativo: [OPERATIONS.md §5](OPERATIONS.md#5-procesamiento-y-reconciliación-de-kobo).
+
 ## 11. Reconciliación
 
 Las submissions remotas que no llegaron mediante webhook pueden recuperarse mediante:
@@ -410,7 +420,17 @@ La reconciliación permite:
 
 El resumen del comando separa `resolved`, `still_pending`, `errors` y `skipped`.
 
-`--dry-run` permite inspeccionar el resultado sin persistir cambios.
+`--dry-run` permite inspeccionar el resultado sin persistir cambios. Un dry-run
+sin errores sale `0`; un dry-run con errores operativos (p. ej. fallo remoto)
+sale distinto de `0` y no escribe.
+
+### Código de salida
+
+* `errors == 0` → exit `0`.
+* `errors > 0` → resumen final y `CommandError` (exit distinto de `0`).
+* “Sin registros remotos” no es error.
+* Commits parciales exitosos se conservan; inspeccione hub/eventos/logs.
+* Este comando no usa el lease de sync incremental del hub.
 
 La reconciliación no sustituye la validación, normalización, revisión ni importación.
 

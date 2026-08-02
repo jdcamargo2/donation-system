@@ -153,6 +153,13 @@ Notas:
     `makemigrations --check`, `migrate --check`, assets);
   * `/healthz/` = liveness del proceso Django;
   * `/readyz/` = readiness runtime (BD por defecto + migraciones aplicadas).
+* **No** ejecutar `seed_sigedon_demo` en release/preflight/arranque: es solo
+  desarrollo y se rechaza cuando `DEBUG=False`.
+* **No** invocar `process_kobo_submissions` ni `reconcile_kobo_submissions` en
+  el arranque web ni en preflight; son recuperación operativa explícita. Sus
+  códigos de salida distintos de cero pueden coexistir con commits parciales
+  exitosos (ver [OPERATIONS.md §5](OPERATIONS.md#5-procesamiento-y-reconciliación-de-kobo)).
+  No enmascarar con `|| true`.
 * Runbook de roles: [Operaciones §3](OPERATIONS.md#3-sincronización-de-roles).
 * Sondas HTTP: [§6.3](#63-sondas-http-healthz-y-readyz).
 
@@ -312,7 +319,9 @@ KillSignal=SIGTERM
 
 Requisitos: sin `runserver`; sin migraciones en `ExecStart`; la cuenta del
 servicio lee código/estáticos y escribe `SIGEDON_MEDIA_ROOT`; no usar
-credenciales owner de PostgreSQL en el servicio web.
+credenciales owner de PostgreSQL en el servicio web. El `ExecStart` es
+Gunicorn únicamente: no incluir `seed_sigedon_demo`,
+`process_kobo_submissions` ni `reconcile_kobo_submissions`.
 
 ### 6.2. Ejemplo contenedor / plataforma
 

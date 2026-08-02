@@ -217,10 +217,18 @@ python manage.py reconcile_kobo_submissions
 ```
 
 > [!WARNING]
-> `seed_sigedon_demo` es exclusivamente local: usa ORM directo, ofrece
-> idempotencia parcial y no reproduce toda la trazabilidad ni las reglas del
-> flujo operativo. Nunca debe ejecutarse sobre una base de producción. Consulte
+> `seed_sigedon_demo` es exclusivamente local (`DEBUG=True`): usa ORM directo,
+> ofrece idempotencia parcial y no reproduce toda la trazabilidad ni las reglas
+> del flujo operativo. Cuando `DEBUG=False` el comando se rechaza antes de
+> escribir. Nunca debe ejecutarse sobre una base de producción ni en
+> release/preflight. Consulte
 > [Operación y mantenimiento](docs/OPERATIONS.md#2-datos-de-demostración).
+
+> [!NOTE]
+> `process_kobo_submissions` y `reconcile_kobo_submissions` salen con código
+> distinto de cero si hubo errores de lote; éxitos previos del mismo lote pueden
+> permanecer comprometidos. No usar `|| true`. Ver
+> [OPERATIONS.md §5](docs/OPERATIONS.md#5-procesamiento-y-reconciliación-de-kobo).
 
 ## Verificación
 
