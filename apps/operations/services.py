@@ -1212,6 +1212,55 @@ def _validate_project_is_active_for_execution_or_updates(project):
         )
 
 
+def validate_fund_allocation_for_new_operational_use(
+    allocation,
+    *,
+    project=None,
+    donation=None,
+):
+    """
+    PRE: allocation is locked; project/donation are locked parents when provided (preferred).
+    POST: returns only when the target is structurally eligible for a new operational use
+          (ACTIVE allocation, ACTIVE project, RECEIVED USD donation); no permission logic;
+          no mutation. Used by update_expense on reassignment; mirrors
+          fund_allocation_new_operational_use_q / operational_fund_allocation_choices.
+    """
+    locked_project = project if project is not None else allocation.project
+    locked_donation = donation if donation is not None else allocation.donation
+    if allocation.status != FundAllocation.Status.ACTIVE:
+        raise ValidationError(
+            {
+                'allocation': _(
+                    'No se puede reasignar el gasto a una asignación finalizada o anulada.'
+                )
+            }
+        )
+    if locked_project.status != Project.Status.ACTIVE:
+        raise ValidationError(
+            {
+                'allocation': _(
+                    'No se puede reasignar el gasto porque el proyecto de destino no está activo.'
+                )
+            }
+        )
+    if locked_donation.status != Donation.Status.RECEIVED:
+        raise ValidationError(
+            {
+                'allocation': _(
+                    'No se puede reasignar el gasto porque la donación de destino no está recibida.'
+                )
+            }
+        )
+    if locked_donation.currency != OPERATING_CURRENCY:
+        raise ValidationError(
+            {
+                'allocation': _(
+                    'No se puede reasignar el gasto a una asignación con moneda no admitida.'
+                )
+            }
+        )
+
+
 # PRE: donation is locked for update and amount is the complete proposed allocation amount.
 # POST: raises ValidationError unless amount is positive and fits the donation balance excluding exclude_pk.
 def _validate_allocation_balance(donation, amount, exclude_pk=None):
@@ -1505,6 +1554,14 @@ def update_expense(
     support_title='',
     support_file=None,
 ):
+    """
+    PRE: expense is persisted and editable; allocation/amount/fields are proposed values.
+    POST: updates the expense atomically. Reassignment (target pk != current allocation_id)
+          requires a structurally eligible target and rejects linked ExpenseRequest
+          cross-allocation moves. Unchanged historical allocation may remain for other
+          permitted edits even if parents later became terminal. Lock order (preserved):
+          Donations (pk) → FundAllocations (pk) → Expense → Projects (pk).
+    """
     _validate_operating_currency(currency)
     support_document = (
         SupportingDocument(title=support_title or support_file.name)
@@ -1516,20 +1573,59 @@ def update_expense(
     )
     with upload_context as stored_name, transaction.atomic():
         expense_reference = Expense.objects.only('allocation_id').get(pk=expense.pk)
+        # Compare by pk only so a distinct instance with the same pk is not a reassignment.
         allocation_ids = {expense_reference.allocation_id, allocation.pk}
-        donation_ids = FundAllocation.objects.filter(pk__in=allocation_ids).values_list('donation_id', flat=True)
-        list(Donation.objects.select_for_update().filter(pk__in=donation_ids).order_by('pk'))
+        donation_ids = FundAllocation.objects.filter(pk__in=allocation_ids).values_list(
+            'donation_id', flat=True
+        )
+        locked_donations = {
+            item.pk: item
+            for item in Donation.objects.select_for_update()
+            .filter(pk__in=donation_ids)
+            .order_by('pk')
+        }
         locked_allocations = {
             item.pk: item
-            for item in FundAllocation.objects.select_for_update().filter(pk__in=allocation_ids).order_by('pk')
+            for item in FundAllocation.objects.select_for_update()
+            .filter(pk__in=allocation_ids)
+            .order_by('pk')
         }
         locked_expense = Expense.objects.select_for_update().get(pk=expense.pk)
         ensure_expense_is_editable(locked_expense)
+        project_ids = {item.project_id for item in locked_allocations.values()}
+        locked_projects = {
+            item.pk: item
+            for item in Project.objects.select_for_update()
+            .filter(pk__in=project_ids)
+            .order_by('pk')
+        }
         locked_allocation = locked_allocations[allocation.pk]
-        locked_project = Project.objects.select_for_update().get(pk=locked_allocation.project_id)
-        _validate_project_is_active_for_execution_or_updates(locked_project)
-        _validate_operating_currency(locked_allocation.donation.currency, 'allocation')
-        exclude_pk = locked_expense.pk if locked_expense.allocation_id == locked_allocation.pk else None
+        allocation_changed = locked_allocation.pk != locked_expense.allocation_id
+        if allocation_changed:
+            linked_request = (
+                ExpenseRequest.objects.filter(expense_id=locked_expense.pk)
+                .only('pk', 'fund_allocation_id')
+                .first()
+            )
+            if linked_request is not None:
+                raise ValidationError(
+                    {
+                        'allocation': _(
+                            'No se puede cambiar la asignación de un gasto generado desde una '
+                            'solicitud de gasto aprobada.'
+                        )
+                    }
+                )
+            validate_fund_allocation_for_new_operational_use(
+                locked_allocation,
+                project=locked_projects[locked_allocation.project_id],
+                donation=locked_donations[locked_allocation.donation_id],
+            )
+        exclude_pk = (
+            locked_expense.pk
+            if locked_expense.allocation_id == locked_allocation.pk
+            else None
+        )
         _validate_expense_balance(locked_allocation, amount, exclude_pk=exclude_pk)
         has_support = locked_expense.supporting_documents.exists()
         if not support_file and not has_support:

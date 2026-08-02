@@ -484,6 +484,21 @@ def user_may_use_global_expense_request_allocations(user):
     return user_can_create_global_expense_request(user)
 
 
+def fund_allocation_new_operational_use_q():
+    """
+    PRE: none.
+    POST: returns the canonical Q for FundAllocations structurally eligible for a new
+          operational financial use (ACTIVE allocation, ACTIVE project, RECEIVED USD donation).
+          Shared by operational_fund_allocation_choices and service-side validators.
+    """
+    return Q(
+        status=FundAllocation.Status.ACTIVE,
+        project__status=Project.Status.ACTIVE,
+        donation__status=Donation.Status.RECEIVED,
+        donation__currency=OPERATING_CURRENCY,
+    )
+
+
 def operational_fund_allocation_choices(*, project=None, include_allocation_id=None):
     """
     PRE: optional project scopes choices; include_allocation_id may keep one historical row.
@@ -492,12 +507,7 @@ def operational_fund_allocation_choices(*, project=None, include_allocation_id=N
           no balance filter; stable select ordering. Callers apply operation-specific
           availability (e.g. reservation-aware balance for Expense Requests).
     """
-    eligible = Q(
-        status=FundAllocation.Status.ACTIVE,
-        project__status=Project.Status.ACTIVE,
-        donation__status=Donation.Status.RECEIVED,
-        donation__currency=OPERATING_CURRENCY,
-    )
+    eligible = fund_allocation_new_operational_use_q()
     if include_allocation_id is not None:
         eligible |= Q(pk=include_allocation_id)
     queryset = FundAllocation.objects.filter(eligible).select_related('project', 'donation')

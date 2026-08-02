@@ -253,6 +253,12 @@ ANNULLED
 * `ExpenseForm` edita gastos existentes: las opciones de asignación siguen
   elegibilidad operativa canónica y conservan la asignación histórica actual;
   la validación de escritura la impone `update_expense`.
+* Reasignación (`update_expense` cuando cambia el pk de asignación): el destino
+  debe cumplir la misma regla estructural que `operational_fund_allocation_choices`
+  (`validate_fund_allocation_for_new_operational_use`) y capacidad de saldo;
+  la asignación histórica sin cambio puede permanecer en ediciones de otros
+  campos. Gastos materializados desde `ExpenseRequest` no se reasignan a otra
+  asignación.
 
 ## 6. `SupportingDocument`
 

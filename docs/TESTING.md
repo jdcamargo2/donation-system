@@ -199,6 +199,9 @@ Cobertura focalizada:
 * rechazo de `create_expense()` público;
 * `ExpenseForm` solo edición con choices de asignación alineados a elegibilidad
   operativa canónica (`test_expense_form_allocation_choices`);
+* integridad de reasignación en `update_expense` (estructural, saldo, vínculo
+  con `ExpenseRequest`, concurrencia PostgreSQL):
+  `test_expense_reassignment_integrity`;
 * concurrencia PostgreSQL (fulfill vs fulfill/annul/bypass/approval);
 * regresión de ciclo de vida de `Expense` y roles.
 

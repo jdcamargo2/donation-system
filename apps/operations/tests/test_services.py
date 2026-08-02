@@ -526,7 +526,7 @@ class OperationServiceTests(TestCase):
             amount=Decimal('70.00'),
         )
 
-        with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+        with self.assertRaisesMessage(ValidationError, 'proyecto de destino no está activo'):
             update_expense_service(
                 expense=expense,
                 **self.expense_service_data(target_allocation, Decimal('20.00')),

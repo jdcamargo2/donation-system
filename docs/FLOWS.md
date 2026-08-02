@@ -336,6 +336,13 @@ rechazo.
 * Las opciones de reasignación en edición usan elegibilidad operativa canónica
   (`operational_fund_allocation_choices`) y conservan la asignación histórica
   actual del gasto; `update_expense` permanece como autoridad de escritura.
+* Reasignación a otra asignación: el destino debe ser estructuralmente elegible
+  (asignación `ACTIVE`, proyecto `ACTIVE`, donación `RECEIVED` en USD) y tener
+  capacidad financiera; la comprobación es transaccional con bloqueos. Si la
+  asignación no cambia, se conserva el vínculo histórico aunque padres pasen a
+  estado terminal. Un gasto enlazado a una `ExpenseRequest` cumplida no puede
+  moverse a otra asignación. Las restricciones del formulario son UX; el servicio
+  rechaza también llamadas directas.
 
 ### POST
 
