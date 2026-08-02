@@ -98,7 +98,7 @@ Clarificación:
 * avances;
 * publicación de avances;
 * acciones terminales de entidades que las admiten (por ejemplo anular
-  donaciones, asignaciones o gastos; terminar proyectos);
+  donaciones, asignaciones o gastos; finalizar asignaciones; terminar proyectos);
 * consulta de auditoría;
 * administración territorial Kobo (mappings, conflictos, identidad, reconciliación).
 
@@ -114,7 +114,9 @@ operations.manage_project_publication
 ```
 
 * `change_project` habilita editar un proyecto `ACTIVE` y terminar el proyecto
-  (`finish_project` / «Terminar proyecto»).
+  (`finish_project` / «Terminar proyecto») solo cuando el alcance financiero
+  está resuelto (sin asignaciones `ACTIVE` ni solicitudes de gasto abiertas).
+  El servicio rechaza el cierre aunque la UI oculte la acción.
 * `manage_project_publication` habilita publicar y retirar del portal. Solo
   Administrador SIGEDON recibe este permiso.
 

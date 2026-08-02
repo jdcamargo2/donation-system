@@ -31,7 +31,10 @@ from ..models import (
     Project,
 )
 
-from ..selectors import with_allocation_list_metrics
+from ..selectors import (
+    allocation_has_open_financial_work,
+    with_allocation_list_metrics,
+)
 
 from ..services import (
     create_fund_allocation,
@@ -40,6 +43,7 @@ from ..services import (
     allocation_has_effective_expenses,
     annul_fund_allocation,
     ensure_operational_entity_is_editable,
+    finish_fund_allocation,
     update_fund_allocation,
     FUND_ALLOCATION_STATUS_TRANSITIONS,
     transition_fund_allocation_status,
@@ -73,6 +77,22 @@ class FundAllocationAnnulView(TerminalActionView):
     )
     submit_label = _('Confirmar anulación')
     success_message = _('Asignación anulada.')
+
+
+class FundAllocationFinishView(TerminalActionView):
+    permission_required = 'operations.change_fundallocation'
+    model = FundAllocation
+    action_service = staticmethod(finish_fund_allocation)
+    detail_url_name = 'allocation_detail'
+    action_title = _('Finalizar asignación')
+    consequence = _(
+        'Al finalizar esta asignación no podrá recibir nuevas solicitudes de gasto. '
+        'Debe resolver primero cualquier solicitud pendiente o reserva activa.'
+    )
+    submit_label = _('Confirmar finalización')
+    success_message = _('Asignación finalizada.')
+    is_destructive = False
+    requires_reason = False
 
 
 class FundAllocationListView(
@@ -127,9 +147,21 @@ class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermission
         """
         context = super().get_context_data(**kwargs)
         allowed_targets = FUND_ALLOCATION_STATUS_TRANSITIONS.get(self.object.status, ())
+        has_open_financial_work = allocation_has_open_financial_work(self.object)
+        can_change = self.request.user.has_perm('operations.change_fundallocation')
         context['can_annul'] = (
             FundAllocation.Status.ANNULLED in allowed_targets
             and not allocation_has_effective_expenses(self.object)
+        )
+        context['can_finish'] = (
+            can_change
+            and FundAllocation.Status.FINISHED in allowed_targets
+            and not has_open_financial_work
+        )
+        context['show_finish_guidance'] = (
+            can_change
+            and FundAllocation.Status.FINISHED in allowed_targets
+            and has_open_financial_work
         )
         financial_summary = get_allocation_financial_summary(self.object)
         recent_expenses = list(
@@ -153,6 +185,15 @@ class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermission
                 FundAllocation.Status.FINISHED,
                 FundAllocation.Status.ANNULLED,
             )
+        )
+        context['show_more_actions'] = (
+            context['show_edit_in_more']
+            or context['can_finish']
+            or (
+                self.request.user.has_perm('operations.change_fundallocation')
+                and context['can_annul']
+            )
+            or self.request.user.has_perm('operations.delete_fundallocation')
         )
         return context
 

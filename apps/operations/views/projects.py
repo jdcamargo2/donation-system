@@ -39,6 +39,8 @@ from ..models import (
     SupportingDocument,
 )
 
+from ..selectors import project_has_open_financial_work
+
 from ..services import (
     get_project_financial_summary,
     OperationalEntityFinalizedError,
@@ -180,9 +182,20 @@ class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
         POST: returns one coherent detail context with derived milestone progress and UI permissions.
         """
         context = super().get_context_data(**kwargs)
+        can_change_project = self.request.user.has_perm('operations.change_project')
+        project_is_active = self.object.status == Project.Status.ACTIVE
+        has_open_financial_work = (
+            project_has_open_financial_work(self.object) if project_is_active else False
+        )
         context['can_finish'] = (
-            self.request.user.has_perm('operations.change_project')
-            and self.object.status == Project.Status.ACTIVE
+            can_change_project
+            and project_is_active
+            and not has_open_financial_work
+        )
+        context['show_finish_guidance'] = (
+            can_change_project
+            and project_is_active
+            and has_open_financial_work
         )
         context['can_create_expense_request'] = (
             self.request.user.has_perm('operations.add_expenserequest')

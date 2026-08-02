@@ -15,6 +15,7 @@ from apps.operations.services import (
     FUND_ALLOCATION_STATUS_TRANSITIONS,
     PROJECT_STATUS_TRANSITIONS,
     InvalidStateTransitionError,
+    finish_fund_allocation,
     transition_donation_status,
     transition_fund_allocation_status,
     validate_state_transition,
@@ -273,6 +274,16 @@ class StateTransitionBoundaryTests(TestCase):
     def test_detail_shows_finish_without_estado_or_annul(self):
         self.client.force_login(self.user)
 
+        blocked = self.client.get(reverse('project_detail', args=(self.project.pk,)))
+        self.assertNotContains(blocked, 'Terminar proyecto')
+        self.assertContains(
+            blocked,
+            'Para cerrar el proyecto, finaliza o anula sus asignaciones',
+        )
+        self.assertNotContains(blocked, 'aria-label="Cambiar estado del proyecto"')
+        self.assertNotContains(blocked, 'Anular proyecto')
+
+        finish_fund_allocation(self.allocation.pk, actor=self.user)
         response = self.client.get(reverse('project_detail', args=(self.project.pk,)))
 
         self.assertContains(response, reverse('project_finish', args=(self.project.pk,)))

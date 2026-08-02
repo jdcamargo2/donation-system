@@ -1511,6 +1511,17 @@ class ExpenseRequest(models.Model):
         if errors:
             raise ValidationError(errors)
 
+    @classmethod
+    def open_financial_statuses(cls):
+        """
+        PRE: ExpenseRequest status choices are loaded.
+        POST: returns statuses that block financial scope closure (allocation finish / project close).
+        """
+        return (
+            cls.Status.PENDING_DECISION,
+            cls.Status.APPROVED_RESERVED,
+        )
+
     @property
     def is_pending_decision(self):
         return self.status == self.Status.PENDING_DECISION

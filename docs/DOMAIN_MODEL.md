@@ -87,6 +87,7 @@ Reglas del ciclo:
 * El estado no es editable manualmente (formularios ordinarios, dropdown genérico o Admin).
 * No hay flujos de activación, suspensión, reactivación, anulación ni reapertura.
 * Terminar es terminal e irreversible: fija `status=CLOSED`, `is_public=False`, metadatos terminales (`terminal_at`, `terminal_by`, `terminal_reason`) y una entrada de auditoría de cierre.
+* Un proyecto solo puede cerrarse cuando no tiene asignaciones `ACTIVE` y no existen solicitudes de gasto abiertas (`PENDING_DECISION` o `APPROVED_RESERVED`) en su alcance. El cierre nunca finaliza ni anula automáticamente asignaciones ni solicitudes: el usuario debe resolverlas de forma explícita. La guarda se aplica de forma transaccional en `finish_project`.
 * Un `Project` no puede anularse.
 * Un `Project` no puede eliminarse por la UI operativa, URLs, Django Admin, `Project.delete()` ni `Project.objects...delete()`. La administración directa de base de datos queda fuera de la garantía de aplicación.
 
@@ -170,6 +171,11 @@ ANNULLED
 * Una asignación anulada no participa en métricas ni saldos.
 * La ejecución parcial o completa se deriva de los gastos asociados.
 * Una asignación no debe interpretarse como un gasto.
+* Finalizar (`FINISHED`) exige que no existan solicitudes `PENDING_DECISION` ni
+  `APPROVED_RESERVED`, ni reservas activas. El histórico terminal (`FULFILLED`,
+  `DENIED`, `WITHDRAWN`, `ANNULLED`) y los gastos ya ejecutados no bloquean el
+  cierre. La finalización no anula ni modifica solicitudes; la guarda vive en
+  `finish_fund_allocation` bajo bloqueo transaccional.
 
 ## 5a. `ExpenseRequest`
 

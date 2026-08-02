@@ -5,7 +5,6 @@
 
 {% block content %}
 {# DEUDA TÉCNICA: DetailMetricsMixin aún entrega metrics, pero este detalle usa contexto financiero específico. #}
-{# DEUDA DE DOMINIO: finished no tiene un flujo web válido; no se expone una transición desde este detalle. #}
 <div class="ops-page-header ops-page-header-row ops-allocation-detail-header">
     <div class="ops-allocation-detail-identity">
         <div class="ops-kicker">Distribución financiera</div>
@@ -23,6 +22,9 @@
                 {% if perms.operations.view_project %}<a href="{% url 'project_detail' object.project.pk %}">{{ object.project.code }} · {{ object.project.name }}</a>{% else %}{{ object.project.code }} · {{ object.project.name }}{% endif %}
             </span>
         </div>
+        {% if show_finish_guidance %}
+        <p class="small text-muted mb-0 mt-2">Para finalizar la asignación, resuelve las solicitudes de gasto pendientes o con reserva activa.</p>
+        {% endif %}
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
@@ -30,11 +32,12 @@
         {% if perms.operations.change_fundallocation and object.status != 'finished' and object.status != 'annulled' %}
             {% if not show_edit_in_more %}<a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>{% endif %}
         {% endif %}
-        {% if show_edit_in_more or perms.operations.change_fundallocation and can_annul or perms.operations.delete_fundallocation %}
+        {% if show_more_actions %}
             <div class="dropdown">
                 <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="allocation-actions-{{ object.pk }}" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" aria-label="Más acciones para {{ object.code }}">Más</button>
                 <ul class="dropdown-menu dropdown-menu-end ops-allocation-detail-action-menu" aria-labelledby="allocation-actions-{{ object.pk }}">
                     {% if show_edit_in_more %}<li><a class="dropdown-item" href="{% url update_url_name object.pk %}">Editar</a></li>{% endif %}
+                    {% if can_finish %}<li><a class="dropdown-item" href="{% url 'allocation_finish' object.pk %}">Finalizar asignación</a></li>{% endif %}
                     {% if perms.operations.change_fundallocation and can_annul %}<li><a class="dropdown-item text-danger" href="{% url 'allocation_annul' object.pk %}">Anular asignación</a></li>{% endif %}
                     {% if perms.operations.delete_fundallocation %}
                     <li><a class="dropdown-item text-danger" href="{% url delete_url_name object.pk %}" data-confirm-action data-confirm-form="allocation-delete-form" data-confirm-title="¿Eliminar esta asignación?" data-confirm-text="Esta acción no se puede deshacer. Si existen gastos vinculados, el sistema impedirá la eliminación." data-confirm-confirm-label="Sí, eliminar" data-confirm-variant="danger">Eliminar asignación</a></li>

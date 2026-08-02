@@ -23,6 +23,9 @@
             <span><strong>Ubicación:</strong> {{ object.location }}</span>
         </div>
         {% endif %}
+        {% if show_finish_guidance %}
+        <p class="small text-muted mb-0 mt-2">Para cerrar el proyecto, finaliza o anula sus asignaciones y resuelve las solicitudes de gasto abiertas.</p>
+        {% endif %}
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>

@@ -222,7 +222,8 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(response, 'data-confirm-action')
         self.assertContains(response, 'data-confirm-title="¿Eliminar esta asignación?"')
         self.assertContains(response, 'data-confirm-variant="danger"')
-        self.assertNotContains(response, 'Finalizar')
+        self.assertContains(response, 'Finalizar asignación')
+        self.assertContains(response, reverse('allocation_finish', args=[self.allocation.pk]))
         self.assertNotIn('status_transitions', Path('templates/web/allocation_detail.html').read_text())
 
     def test_allocation_detail_links_relations_only_with_their_permissions(self):
@@ -543,8 +544,11 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(response, reverse('project_update', args=[self.project.pk]))
         self.assertNotContains(response, 'aria-label="Cambiar estado del proyecto"')
         self.assertContains(response, 'aria-label="Más acciones del proyecto"')
-        self.assertContains(response, reverse('project_finish', args=[self.project.pk]))
-        self.assertContains(response, 'Terminar proyecto')
+        self.assertNotContains(response, 'Terminar proyecto')
+        self.assertContains(
+            response,
+            'Para cerrar el proyecto, finaliza o anula sus asignaciones',
+        )
         self.assertContains(response, 'Privado')
         self.assertNotContains(response, 'Anular proyecto')
         self.assertIn('name="csrfmiddlewaretoken"', content)
@@ -686,6 +690,9 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertEqual(len(one_update_queries), len(five_update_queries))
 
     def test_project_detail_confirmation_hooks_keep_post_forms_and_get_fallbacks(self):
+        from apps.operations.services import finish_fund_allocation
+
+        finish_fund_allocation(self.allocation.pk, actor=self.user)
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
         content = response.content.decode()
         finish_url = reverse('project_finish', args=[self.project.pk])

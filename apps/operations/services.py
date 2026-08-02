@@ -42,6 +42,9 @@ from .public_portal_cache import invalidate_public_portal_cache
 from .selectors import (
     decidable_pending_expense_requests_for_user,
     fulfillable_expense_requests_for_user,
+    open_expense_requests_for_allocation,
+    open_expense_requests_for_project,
+    project_has_active_allocations,
     tracking_expense_requests_for_user,
     user_has_ownership_scoped_expense_requests,
     with_project_financial_metrics,
@@ -199,7 +202,8 @@ def transition_donation_status(donation_id: int, *, actor, target_status: str) -
 def transition_fund_allocation_status(allocation_id: int, *, actor, target_status: str) -> FundAllocation:
     """
     PRE: allocation_id exists, actor is authenticated, and target_status is requested explicitly.
-    POST: atomically locks, validates and audits exactly one permitted status transition.
+    POST: atomically locks, validates and audits exactly one permitted non-terminal status transition.
+    Terminal FINISHED/ANNULLED require finish_fund_allocation / annul_fund_allocation.
     """
     _require_transition_actor(actor)
     if target_status in ALLOCATION_TERMINAL_STATUSES:
@@ -221,6 +225,83 @@ def transition_fund_allocation_status(allocation_id: int, *, actor, target_statu
         allocation.save(update_fields=('status', 'updated_at'))
         _log_status_transition(actor, allocation, previous_status, target_status)
         return allocation
+
+
+def _raise_allocation_open_financial_work_error(allocation):
+    """
+    PRE: allocation is locked; open-request rows for it are already locked or frozen by parent locks.
+    POST: raises InvalidStateTransitionError naming the concrete open-work blocker when present.
+    """
+    open_statuses = set(
+        open_expense_requests_for_allocation(allocation).values_list('status', flat=True)
+    )
+    if not open_statuses:
+        return
+    if open_statuses == {ExpenseRequest.Status.PENDING_DECISION}:
+        raise InvalidStateTransitionError(
+            {
+                'expense_requests': _(
+                    'La asignación tiene solicitudes pendientes de decisión.'
+                )
+            }
+        )
+    if open_statuses == {ExpenseRequest.Status.APPROVED_RESERVED}:
+        raise InvalidStateTransitionError(
+            {
+                'expense_requests': _(
+                    'La asignación tiene solicitudes aprobadas pendientes de registrar gasto.'
+                )
+            }
+        )
+    raise InvalidStateTransitionError(
+        {
+            'expense_requests': _(
+                'No se puede finalizar la asignación porque tiene solicitudes de gasto '
+                'pendientes o reservas activas. Resuelve esas solicitudes antes de continuar.'
+            )
+        }
+    )
+
+
+def finish_fund_allocation(allocation_id: int, *, actor) -> FundAllocation:
+    """
+    PRE: actor is authenticated and allocation_id identifies an ACTIVE FundAllocation
+    without open ExpenseRequests (PENDING_DECISION / APPROVED_RESERVED).
+    POST: locks Donation → FundAllocation → Project → open ExpenseRequests, finishes the
+    allocation with terminal metadata, and writes exactly one CLOSED audit event.
+    """
+    _require_transition_actor(actor)
+    with transaction.atomic():
+        allocation_reference = FundAllocation.objects.only('donation_id', 'project_id').get(
+            pk=allocation_id
+        )
+        Donation.objects.select_for_update().get(pk=allocation_reference.donation_id)
+        allocation = (
+            FundAllocation.objects.select_for_update()
+            .select_related('donation', 'project')
+            .get(pk=allocation_id)
+        )
+        Project.objects.select_for_update().get(pk=allocation.project_id)
+        list(
+            open_expense_requests_for_allocation(allocation)
+            .select_for_update()
+            .order_by('pk')
+        )
+        validate_state_transition(
+            current_status=allocation.status,
+            target_status=FundAllocation.Status.FINISHED,
+            allowed_transitions=FUND_ALLOCATION_STATUS_TRANSITIONS,
+        )
+        if open_expense_requests_for_allocation(allocation).exists():
+            _raise_allocation_open_financial_work_error(allocation)
+        return _finalize_operational_entity(
+            entity=allocation,
+            target_status=FundAllocation.Status.FINISHED,
+            actor=actor,
+            reason=_('Asignación finalizada.'),
+            action=AuditLog.Action.CLOSED,
+            summary=_('Asignación %(code)s finalizada.') % {'code': allocation.code},
+        )
 
 
 # PRE: reason is the proposed historical justification for an annulment.
@@ -283,15 +364,56 @@ def _finalize_operational_entity(*, entity, target_status, actor, reason, action
 
 def finish_project(project_id: int, *, actor) -> Project:
     """
-    PRE: actor is authenticated and project_id identifies an ACTIVE project.
-    POST: atomically closes it, forces is_public=False, persists terminal metadata,
+    PRE: actor is authenticated and project_id identifies an ACTIVE project whose
+    allocations are all FINISHED/ANNULLED and have no open ExpenseRequests.
+    POST: atomically closes it under Donation → FundAllocation → Project →
+    ExpenseRequest locks, forces is_public=False, persists terminal metadata,
     creates one CLOSE audit event, and invalidates the public portal cache when it
-    was previously public.
+    was previously public. Never auto-finishes or auto-annuls child records.
     """
     _require_transition_actor(actor)
     was_public = False
     with transaction.atomic():
+        allocation_rows = list(
+            FundAllocation.objects.filter(project_id=project_id)
+            .order_by('pk')
+            .values_list('pk', 'donation_id')
+        )
+        allocation_ids = [pk for pk, _ in allocation_rows]
+        donation_ids = sorted({donation_id for _, donation_id in allocation_rows})
+
+        if donation_ids:
+            list(
+                Donation.objects.select_for_update()
+                .filter(pk__in=donation_ids)
+                .order_by('pk')
+            )
+        if allocation_ids:
+            list(
+                FundAllocation.objects.select_for_update()
+                .filter(pk__in=allocation_ids)
+                .order_by('pk')
+            )
         project = Project.objects.select_for_update().get(pk=project_id)
+
+        # Do not lock newly appeared donations after Project is held (avoids Donation↔Project
+        # deadlock with create_fund_allocation). Project lock already serializes create/approve;
+        # the guards below still observe every current child row.
+        allocation_ids = list(
+            FundAllocation.objects.filter(project_id=project.pk)
+            .order_by('pk')
+            .values_list('pk', flat=True)
+        )
+        if allocation_ids:
+            list(
+                ExpenseRequest.objects.select_for_update()
+                .filter(
+                    fund_allocation_id__in=allocation_ids,
+                    status__in=ExpenseRequest.open_financial_statuses(),
+                )
+                .order_by('pk')
+            )
+
         validate_state_transition(
             current_status=project.status,
             target_status=Project.Status.CLOSED,
@@ -301,6 +423,23 @@ def finish_project(project_id: int, *, actor) -> Project:
             raise InvalidStateTransitionError(
                 {'end_date': _('No se puede cerrar un proyecto con fechas incoherentes.')}
             )
+        if project_has_active_allocations(project):
+            raise InvalidStateTransitionError(
+                {
+                    'allocations': _(
+                        'No se puede cerrar el proyecto porque todavía tiene asignaciones activas.'
+                    )
+                }
+            )
+        if open_expense_requests_for_project(project).exists():
+            raise InvalidStateTransitionError(
+                {
+                    'expense_requests': _(
+                        'No se puede cerrar el proyecto porque existen solicitudes de gasto abiertas.'
+                    )
+                }
+            )
+
         was_public = project.is_public
         project.status = Project.Status.CLOSED
         project.is_public = False

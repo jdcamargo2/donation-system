@@ -590,10 +590,59 @@ def fulfillable_expense_requests_for_user(user):
 
 
 # Active statuses for personal/read-only dashboard tracking (awareness, not mutation).
-DASHBOARD_TRACKING_EXPENSE_REQUEST_STATUSES = (
-    ExpenseRequest.Status.PENDING_DECISION,
-    ExpenseRequest.Status.APPROVED_RESERVED,
-)
+# Same authoritative set that blocks financial scope closure.
+DASHBOARD_TRACKING_EXPENSE_REQUEST_STATUSES = ExpenseRequest.open_financial_statuses()
+
+
+def open_expense_requests_for_allocation(allocation):
+    """
+    PRE: allocation is a persisted FundAllocation (or exposes .pk).
+    POST: returns an unevaluated queryset of ExpenseRequests that block finishing that allocation.
+    """
+    return ExpenseRequest.objects.filter(
+        fund_allocation_id=allocation.pk,
+        status__in=ExpenseRequest.open_financial_statuses(),
+    )
+
+
+def allocation_has_open_financial_work(allocation) -> bool:
+    """
+    PRE: allocation is a persisted FundAllocation.
+    POST: True when any PENDING_DECISION or APPROVED_RESERVED request remains on it.
+    """
+    return open_expense_requests_for_allocation(allocation).exists()
+
+
+def open_expense_requests_for_project(project):
+    """
+    PRE: project is a persisted Project (or exposes .pk).
+    POST: returns an unevaluated queryset of open ExpenseRequests under the project's allocations.
+    """
+    return ExpenseRequest.objects.filter(
+        fund_allocation__project_id=project.pk,
+        status__in=ExpenseRequest.open_financial_statuses(),
+    )
+
+
+def project_has_active_allocations(project) -> bool:
+    """
+    PRE: project is a persisted Project.
+    POST: True when at least one FundAllocation under the project is still ACTIVE.
+    """
+    return FundAllocation.objects.filter(
+        project_id=project.pk,
+        status=FundAllocation.Status.ACTIVE,
+    ).exists()
+
+
+def project_has_open_financial_work(project) -> bool:
+    """
+    PRE: project is a persisted Project.
+    POST: True when the project still has ACTIVE allocations or open ExpenseRequests.
+    """
+    return project_has_active_allocations(project) or open_expense_requests_for_project(
+        project
+    ).exists()
 
 
 def tracking_expense_requests_for_user(user):

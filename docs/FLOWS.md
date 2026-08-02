@@ -38,7 +38,12 @@ ACTIVE + Private
    `ACTIVE` puede publicarse.
 6. Terminar proyecto (`finish_project`) es `POST` confirmado, irreversible y
    terminal: pasa a `CLOSED`, fuerza `is_public=False`, escribe metadatos
-   terminales y audita el cierre.
+   terminales y audita el cierre. Solo procede cuando todas las asignaciones del
+   proyecto están `FINISHED` o `ANNULLED` y no queden solicitudes de gasto
+   abiertas (`PENDING_DECISION` / `APPROVED_RESERVED`). No finaliza ni anula
+   automáticamente registros hijos; el usuario debe resolver el trabajo
+   financiero pendiente antes. La validación corre bajo
+   `Donation → FundAllocation → Project → ExpenseRequest`.
 7. No existen flujos de suspensión, reactivación, anulación ni eliminación de
    proyecto. Las acciones críticas generan auditoría.
 
@@ -174,12 +179,21 @@ rechazo.
 7. Se registra la asignación.
 8. Se crea el registro de auditoría.
 9. La transacción se confirma de forma atómica.
+10. Finalizar asignación (`finish_fund_allocation`) es `POST` confirmado y
+    terminal hacia `FINISHED`. Bloquea si existen solicitudes
+    `PENDING_DECISION` o `APPROVED_RESERVED` (reservas activas). No cancela ni
+    anula solicitudes automáticamente. El histórico terminal y los gastos
+    ejecutados sí pueden permanecer. Orden de bloqueo:
+    `Donation → FundAllocation → Project → ExpenseRequest`.
+11. Anular asignación (`annul_fund_allocation`) sigue siendo el flujo terminal
+    con motivo hacia `ANNULLED` y no sustituye a la finalización.
 
 ### POST
 
 * La suma de las asignaciones no anuladas no supera el monto disponible de la donación.
 * La asignación conserva un código único e inmutable.
 * El saldo de la donación queda actualizado de forma derivada.
+* Una asignación finalizada o anulada deja de admitir nuevas solicitudes de gasto.
 
 ---
 
