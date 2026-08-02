@@ -278,6 +278,11 @@ Puede consultar:
 * auditoría;
 * hub territorial (lectura).
 
+Las exportaciones CSV financieras (donaciones, asignaciones, gastos) y de
+proyectos usan los mismos permisos `view_*` y el mismo alcance de queryset que
+el listado correspondiente; el escape de fórmulas de hoja de cálculo no amplía
+ni reduce ese alcance.
+
 En ER3A/ER3B el Auditor ve **todas** las solicitudes visibles en listado/detalle
 (read-only global), con el ítem de sidebar «Solicitudes de gasto»; el ocultamiento
 de accesos rápidos del panel no afecta esa navegación. No ve «Solicitar gasto»,

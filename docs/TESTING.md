@@ -56,6 +56,7 @@ La suite cubre:
 * avances;
 * revisiones;
 * decisiones institucionales;
+* escape de fórmulas en exportaciones CSV operativas;
 * flujos end-to-end.
 
 ### 3.2. `apps.integrations.kobo`
@@ -112,6 +113,8 @@ La suite cubre:
 * auditoría;
 * búsquedas;
 * exportaciones;
+* seguridad de escape CSV frente a inyección de fórmulas de hoja de cálculo
+  (`apps.operations.tests.test_csv_export_security`);
 * pruebas de regresión.
 
 ## 4. Pruebas sobre PostgreSQL

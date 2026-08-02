@@ -46,6 +46,11 @@ ACTIVE + Private
    `Donation → FundAllocation → Project → ExpenseRequest`.
 7. No existen flujos de suspensión, reactivación, anulación ni eliminación de
    proyecto. Las acciones críticas generan auditoría.
+8. La exportación CSV del listado (`project_export_csv` y equivalentes de
+   donación, asignación y gasto) reutiliza el mismo queryset filtrado del
+   listado y neutraliza prefijos de fórmula de hoja de cálculo en texto
+   controlado por el usuario; montos y códigos operativos conservan su
+   representación numérica o generada habitual.
 
 ### POST
 

@@ -4,6 +4,8 @@ from django.http import HttpResponse
 
 from django.views import View
 
+from ..csv_export import escape_csv_cell
+
 from .donations import DonationListView
 
 from .expenses import ExpenseListView
@@ -25,6 +27,7 @@ class FilteredCsvExportView(OperationsPermissionRequiredMixin, View):
         """
         PRE: el usuario tiene permiso de lectura y la configuración declara columnas seguras.
         POST: descarga CSV con encabezados legibles y el mismo queryset filtrado del listado.
+              Cada celda de datos pasa por escape_csv_cell antes de csv.writer.
         """
         list_view = self.list_view_class()
         list_view.request = request
@@ -34,7 +37,7 @@ class FilteredCsvExportView(OperationsPermissionRequiredMixin, View):
         writer = csv.writer(response)
         writer.writerow(self.headers)
         for item in queryset:
-            writer.writerow(self.row_builder(item))
+            writer.writerow([escape_csv_cell(value) for value in self.row_builder(item)])
         return response
 
 
@@ -57,7 +60,7 @@ class ProjectCsvExportView(FilteredCsvExportView):
         item.name,
         item.get_status_display(),
         'Público' if item.is_public else 'Privado',
-        str(item.estimated_budget),
+        item.estimated_budget,
         item.start_date or '',
         item.end_date or '',
         item.location,
@@ -70,7 +73,7 @@ class DonationCsvExportView(FilteredCsvExportView):
     filename = 'donaciones.csv'
     headers = ('Código', 'Institución donante', 'Monto', 'Moneda', 'Estado', 'Compromiso', 'Recepción')
     row_builder = staticmethod(lambda item: (
-        item.code, item.donor.name, str(item.amount), item.currency,
+        item.code, item.donor.name, item.amount, item.currency,
         item.get_status_display(), item.commitment_date or '', item.received_date or '',
     ))
 
@@ -81,7 +84,7 @@ class FundAllocationCsvExportView(FilteredCsvExportView):
     filename = 'asignaciones.csv'
     headers = ('Código', 'Donación', 'Proyecto', 'Monto USD', 'Estado', 'Ejecución', 'Fecha', 'Categoría')
     row_builder = staticmethod(lambda item: (
-        item.code, item.donation.code, item.project.code, str(item.amount),
+        item.code, item.donation.code, item.project.code, item.amount,
         item.get_status_display(), item.execution_progress_label, item.allocation_date,
         item.get_budget_category_display(),
     ))
@@ -94,5 +97,5 @@ class ExpenseCsvExportView(FilteredCsvExportView):
     headers = ('Código', 'Proyecto', 'Asignación', 'Motivo', 'Monto', 'Moneda', 'Estado', 'Fecha')
     row_builder = staticmethod(lambda item: (
         item.code, item.allocation.project.code, item.allocation.code, item.reason,
-        str(item.amount), item.currency, item.get_status_display(), item.expense_date,
+        item.amount, item.currency, item.get_status_display(), item.expense_date,
     ))

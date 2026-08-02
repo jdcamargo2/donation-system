@@ -340,6 +340,22 @@ Las solicitudes `GET` deben limitarse a operaciones de consulta.
   del ciclo de publicación (publicar, retirar, o terminar un proyecto que
   estaba público), mediante limpieza amplia del cache por defecto.
 
+## 10.2. Exportaciones CSV operativas
+
+Las exportaciones CSV del panel interno (`proyectos.csv`, `donaciones.csv`,
+`asignaciones.csv`, `gastos.csv`) neutralizan prefijos de fórmula de hoja de
+cálculo (`=`, `+`, `-`, `@`) en texto controlado por el usuario antes de
+escribir cada celda con `csv.writer`.
+
+* Solo se afecta la representación exportada de texto potencialmente peligroso
+  (prefijo `'`); no se modifican filas en base de datos.
+* Valores numéricos (`Decimal`, enteros), fechas y códigos operativos generados
+  conservan su representación habitual de exportación.
+* Permisos, querysets y columnas exportadas no cambian por este control.
+
+El helper canónico es `apps.operations.csv_export.escape_csv_cell`, aplicado en
+`FilteredCsvExportView`.
+
 ## 11. Datos públicos
 
 El portal público no debe exponer:
