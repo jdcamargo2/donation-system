@@ -34,6 +34,7 @@ from ..selectors import (
     annullable_expense_requests_for_user,
     attachment_display_filename,
     decidable_pending_expense_requests_for_user,
+    expense_request_allocation_choices,
     fulfillable_expense_requests_for_user,
     get_expense_request_financial_display,
     mutable_own_pending_expense_requests_for_attachments,
@@ -588,11 +589,28 @@ class ExpenseRequestCreateForProjectView(
         kwargs['project'] = self.project
         return kwargs
 
+    def get_initial(self):
+        # PRE: optional ?allocation=<pk> is advisory only.
+        # POST: preselects only when the pk is inside the authoritative eligible queryset.
+        initial = super().get_initial()
+        raw_allocation = (self.request.GET.get('allocation') or '').strip()
+        if not raw_allocation.isdigit():
+            return initial
+        eligible = expense_request_allocation_choices(project=self.project)
+        selected = eligible.filter(pk=int(raw_allocation)).first()
+        if selected is not None:
+            initial['fund_allocation'] = selected.pk
+        return initial
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        form = context['form']
         context['project'] = self.project
         context['cancel_url'] = reverse('project_detail', args=[self.project.pk])
         context['submit_label'] = _('Registrar solicitud')
+        context['has_eligible_allocations'] = form.fields[
+            'fund_allocation'
+        ].queryset.exists()
         return context
 
     def form_valid(self, form):

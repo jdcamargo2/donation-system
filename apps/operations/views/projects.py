@@ -40,7 +40,9 @@ from ..models import (
 )
 
 from ..selectors import (
+    expense_request_allocation_choices,
     project_has_open_financial_work,
+    user_can_create_global_expense_request,
     user_can_view_project_financials,
 )
 
@@ -201,9 +203,24 @@ class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
             and project_is_active
             and has_open_financial_work
         )
-        context['can_create_expense_request'] = (
+        may_create_expense_request = (
             self.request.user.has_perm('operations.add_expenserequest')
             and self.object.status == Project.Status.ACTIVE
+        )
+        eligible_allocations = (
+            expense_request_allocation_choices(project=self.object)
+            if may_create_expense_request
+            else None
+        )
+        context['can_create_expense_request'] = (
+            may_create_expense_request and eligible_allocations.exists()
+        )
+        context['show_expense_request_allocation_guidance'] = (
+            may_create_expense_request and not context['can_create_expense_request']
+        )
+        context['show_expense_request_admin_allocation_guidance'] = (
+            context['show_expense_request_allocation_guidance']
+            and user_can_create_global_expense_request(self.request.user)
         )
         context['can_manage_publication'] = self.request.user.has_perm(
             'operations.manage_project_publication'

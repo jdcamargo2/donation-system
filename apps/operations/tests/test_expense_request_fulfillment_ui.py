@@ -566,12 +566,13 @@ class ExpenseRequestFulfillmentUITests(TestCase):
         self.assertNotContains(response, reverse('expense_create'))
         self.assertTrue(response.context['can_create_expense_request'])
         self.assertContains(response, 'Solicitar gasto')
+        create_url = reverse(
+            'expense_request_create_for_project',
+            args=[self.allocation.project.pk],
+        )
         self.assertContains(
             response,
-            reverse(
-                'expense_request_create_for_project',
-                args=[self.allocation.project.pk],
-            ),
+            f'{create_url}?allocation={self.allocation.pk}',
         )
 
     def test_direct_expense_create_get_and_post_create_nothing(self):

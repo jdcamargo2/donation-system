@@ -508,6 +508,18 @@ def expense_request_allocation_choices(*, project=None, include_allocation_id=No
     )
 
 
+def visible_expense_requests_for_allocation(*, user, allocation):
+    """
+    PRE: caller enforces operations.view_expenserequest at the view layer;
+         allocation is the FundAllocation whose linked requests are previewed.
+    POST: returns ExpenseRequest rows for that allocation visible to user,
+          list relations loaded, ordered like the shared Expense Request list.
+    """
+    return with_expense_request_list_data(
+        visible_expense_requests_for_user(user).filter(fund_allocation=allocation)
+    ).order_by('-requested_date', '-created_at', '-pk')
+
+
 def mutable_own_pending_expense_requests_for_user(user):
     """
     PRE: caller enforces change/withdraw permission at the view layer.

@@ -205,7 +205,13 @@ operations.view_expenserequestevent
 En la UI (ER3A+ER3B), el listado/detalle de solicitudes se limita a
 las creadas por el mismo usuario (`requested_by`); no ve solicitudes de otros
 Operadores. El listado no muestra «Nueva solicitud» global; el CTA es
-«Solicitar gasto» en el detalle del proyecto. En ER4A no ve «Aprobar» ni
+«Solicitar gasto» en el detalle del proyecto **solo** cuando existe al menos una
+asignación elegible según `expense_request_allocation_choices` (misma regla del
+formulario). Sin asignaciones elegibles no hay CTA ejecutable; se muestra guía
+neutra. Desde el detalle de una asignación elegible, el CTA preserva
+`?allocation=<pk>` sin ampliar el queryset. El detalle de asignación muestra
+solicitudes vinculadas visibles al usuario (alcance de propiedad del Operador).
+En ER4A no ve «Aprobar» ni
 «Denegar»; esas rutas responden 403. En ER4B no ve «Anular solicitud»; la ruta
 de anulación responde 403. En ER6 ve «Agregar adjunto» / «Eliminar adjunto»
 solo en propias `PENDING_DECISION`; tras la decisión los adjuntos permanecen

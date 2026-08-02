@@ -203,12 +203,13 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(response, f'<h1>{self.allocation.code}</h1>', count=1, html=True)
         self.assertContains(response, self.allocation.get_status_display(), count=1)
         self.assertContains(response, 'Solicitar gasto')
+        create_url = reverse(
+            'expense_request_create_for_project',
+            args=[self.allocation.project.pk],
+        )
         self.assertContains(
             response,
-            reverse(
-                'expense_request_create_for_project',
-                args=[self.allocation.project.pk],
-            ),
+            f'{create_url}?allocation={self.allocation.pk}',
         )
         self.assertNotContains(response, 'Nuevo gasto')
         self.assertNotContains(response, reverse('expense_create'))

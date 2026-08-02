@@ -14,6 +14,12 @@
 
 <div class="card border-0 ops-form-card">
     <div class="card-body">
+        {% if not has_eligible_allocations %}
+            <p class="text-muted mb-3">No hay asignaciones disponibles para registrar esta solicitud.</p>
+            <div class="ops-form-actions">
+                <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Volver al proyecto</a>
+            </div>
+        {% else %}
         <form method="post" novalidate>
             {% csrf_token %}
             {% if form.non_field_errors %}
@@ -44,6 +50,7 @@
                 <button type="submit" class="btn btn-primary">{{ submit_label|default:"Registrar solicitud" }}</button>
             </div>
         </form>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

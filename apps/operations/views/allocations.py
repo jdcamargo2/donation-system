@@ -33,6 +33,8 @@ from ..models import (
 
 from ..selectors import (
     allocation_has_open_financial_work,
+    expense_request_allocation_choices,
+    visible_expense_requests_for_allocation,
     with_allocation_list_metrics,
 )
 
@@ -124,6 +126,9 @@ class FundAllocationListView(
             project_field='project_id',
         ).order_by('-allocation_date', '-created_at', '-pk')
 
+RECENT_ALLOCATION_EXPENSE_REQUESTS_LIMIT = 5
+
+
 class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_fundallocation'
     model = FundAllocation
@@ -143,12 +148,15 @@ class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermission
     def get_context_data(self, **kwargs):
         """
         PRE: self.object incluye el conteo anotado de gastos de la asignación.
-        POST: expone el resumen completo y, por separado, hasta cinco gastos recientes en orden estable.
+        POST: expone el resumen completo, solicitudes visibles acotadas y hasta cinco
+              gastos recientes en orden estable. El CTA de solicitud usa el selector
+              canónico de asignaciones elegibles.
         """
         context = super().get_context_data(**kwargs)
+        user = self.request.user
         allowed_targets = FUND_ALLOCATION_STATUS_TRANSITIONS.get(self.object.status, ())
         has_open_financial_work = allocation_has_open_financial_work(self.object)
-        can_change = self.request.user.has_perm('operations.change_fundallocation')
+        can_change = user.has_perm('operations.change_fundallocation')
         context['can_annul'] = (
             FundAllocation.Status.ANNULLED in allowed_targets
             and not allocation_has_effective_expenses(self.object)
@@ -173,27 +181,50 @@ class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermission
         context['allocation_expense_count'] = expense_count
         context['has_more_allocation_expenses'] = expense_count > len(recent_expenses)
         context['can_create_expense_request'] = (
-            self.request.user.has_perm('operations.add_expenserequest')
+            user.has_perm('operations.add_expenserequest')
+            and expense_request_allocation_choices(project=self.object.project)
+            .filter(pk=self.object.pk)
+            .exists()
+        )
+        context['can_view_expense_requests'] = user.has_perm(
+            'operations.view_expenserequest'
+        )
+        if context['can_view_expense_requests']:
+            linked_requests = visible_expense_requests_for_allocation(
+                user=user,
+                allocation=self.object,
+            )
+            preview = list(
+                linked_requests[: RECENT_ALLOCATION_EXPENSE_REQUESTS_LIMIT + 1]
+            )
+            has_more = len(preview) > RECENT_ALLOCATION_EXPENSE_REQUESTS_LIMIT
+            recent_requests = preview[:RECENT_ALLOCATION_EXPENSE_REQUESTS_LIMIT]
+            request_count = (
+                linked_requests.count() if has_more else len(recent_requests)
+            )
+            context['recent_allocation_expense_requests'] = recent_requests
+            context['allocation_expense_request_count'] = request_count
+            context['has_more_allocation_expense_requests'] = has_more
+        else:
+            context['recent_allocation_expense_requests'] = []
+            context['allocation_expense_request_count'] = 0
+            context['has_more_allocation_expense_requests'] = False
+        # Edit-in-more stays available for ACTIVE allocations with remaining balance
+        # even when the Expense Request CTA is hidden for other eligibility reasons.
+        context['show_edit_in_more'] = (
+            user.has_perm('operations.change_fundallocation')
             and self.object.status == FundAllocation.Status.ACTIVE
             and self.object.project.status == Project.Status.ACTIVE
             and financial_summary['available_amount'] > 0
-        )
-        context['show_edit_in_more'] = (
-            context['can_create_expense_request']
-            and self.request.user.has_perm('operations.change_fundallocation')
-            and self.object.status not in (
-                FundAllocation.Status.FINISHED,
-                FundAllocation.Status.ANNULLED,
-            )
         )
         context['show_more_actions'] = (
             context['show_edit_in_more']
             or context['can_finish']
             or (
-                self.request.user.has_perm('operations.change_fundallocation')
+                user.has_perm('operations.change_fundallocation')
                 and context['can_annul']
             )
-            or self.request.user.has_perm('operations.delete_fundallocation')
+            or user.has_perm('operations.delete_fundallocation')
         )
         return context
 
