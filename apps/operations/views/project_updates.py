@@ -48,7 +48,12 @@ from ..models import (
     ProjectUpdateRemediationAttachment,
 )
 
-from ..selectors import with_project_update_attachment_count
+from ..selectors import (
+    decidable_project_update_reviews_for_user,
+    resolvable_project_update_remediations_for_user,
+    reviewable_project_updates_for_user,
+    with_project_update_attachment_count,
+)
 
 from ..services import (
     create_project_update_review,
@@ -157,12 +162,18 @@ class ProjectUpdateReviewCreateView(OperationsPermissionRequiredMixin, FormView)
     template_name = 'web/project_update_review_form.html'
 
     def dispatch(self, request, *args, **kwargs):
+        # PRE: review route targets a PUBLISHED advance without a committee review.
+        # POST: loads from reviewable_project_updates_for_user or 404; no mutation on GET.
+        # Intentional: stale/ineligible rows 404 (same as expense-request action routes)
+        # instead of 403 after an unscoped get_object_or_404.
         if request.user.is_authenticated and request.user.has_perm(self.permission_required):
-            self.project_update = get_object_or_404(ProjectUpdate, pk=kwargs['update_pk'])
-            if self.project_update.status != ProjectUpdate.Status.PUBLISHED:
-                raise PermissionDenied(_('Solo los avances publicados pueden recibir revisión documental.'))
-            if ProjectUpdateReview.objects.filter(project_update_id=self.project_update.pk).exists():
-                raise PermissionDenied(_('Este avance ya tiene una revisión documental registrada.'))
+            self.project_update = get_object_or_404(
+                reviewable_project_updates_for_user(request.user).select_related(
+                    'project',
+                    'reported_by',
+                ),
+                pk=kwargs['update_pk'],
+            )
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
@@ -204,12 +215,17 @@ class ProjectUpdateReviewDecisionCreateView(OperationsPermissionRequiredMixin, F
     template_name = 'web/project_update_review_decision_form.html'
 
     def dispatch(self, request, *args, **kwargs):
+        # PRE: decision route targets a review of a PUBLISHED advance without a decision.
+        # POST: loads from decidable_project_update_reviews_for_user or 404; no mutation on GET.
+        # Intentional: stale/ineligible rows 404 (same as expense-request action routes).
         if request.user.is_authenticated and request.user.has_perm(self.permission_required):
-            self.review = get_object_or_404(ProjectUpdateReview, pk=kwargs['review_pk'])
-            if self.review.project_update.status != ProjectUpdate.Status.PUBLISHED:
-                raise PermissionDenied(_('La revisión debe pertenecer a un avance publicado.'))
-            if ProjectUpdateReviewDecision.objects.filter(review_id=self.review.pk).exists():
-                raise PermissionDenied(_('Esta revisión ya tiene un resultado institucional registrado.'))
+            self.review = get_object_or_404(
+                decidable_project_update_reviews_for_user(request.user).select_related(
+                    'project_update__project',
+                    'reviewed_by',
+                ),
+                pk=kwargs['review_pk'],
+            )
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
@@ -345,7 +361,18 @@ class ProjectUpdateRemediationResolveView(OperationsPermissionRequiredMixin, For
     template_name = 'web/project_update_remediation_resolve_form.html'
 
     def dispatch(self, request, *args, **kwargs):
-        self.remediation = get_object_or_404(ProjectUpdateRemediation, pk=kwargs['pk'])
+        # PRE: resolve route targets a SUBMITTED remediation under a PUBLISHED update.
+        # POST: loads from resolvable_project_update_remediations_for_user or 404.
+        # Intentional: DRAFT/terminal remediations 404 before the form (service still
+        # remains authoritative on POST race conditions).
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.remediation = get_object_or_404(
+                resolvable_project_update_remediations_for_user(request.user).select_related(
+                    'decision__review__project_update__project',
+                    'submitted_by',
+                ),
+                pk=kwargs['pk'],
+            )
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):

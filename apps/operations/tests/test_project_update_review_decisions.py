@@ -158,7 +158,7 @@ class ProjectUpdateReviewDecisionTests(TestCase):
         )
         self.assertEqual(
             self.client.get(reverse('project_update_review_decision_create', args=[review.pk])).status_code,
-            403,
+            404,
         )
 
     def test_users_without_decision_permission_cannot_create_it(self):

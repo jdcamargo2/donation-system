@@ -543,6 +543,30 @@ impide secuencias inválidas.
 * El avance original permanece inmutable.
 * La revisión y la decisión conservan trazabilidad institucional.
 
+### Colas de gobernanza en el panel (FLOW-COMMITTEE-QUEUES)
+
+El panel financiero expone una sección **Gobernanza de avances** solo cuando el
+usuario tiene al menos uno de los permisos de acción:
+
+* `review_projectupdate` → pendientes de revisión;
+* `decide_projectupdate` → pendientes de decisión;
+* `resolve_projectupdateremediation` → remediaciones por resolver.
+
+Significado exacto (selectores canónicos, no filtros de plantilla):
+
+* **Pendiente de revisión:** `ProjectUpdate` en `PUBLISHED` sin
+  `ProjectUpdateReview` (`committee_review`);
+* **Pendiente de decisión:** `ProjectUpdateReview` sin
+  `ProjectUpdateReviewDecision`, con avance padre publicado;
+* **Remediación por resolver:** `ProjectUpdateRemediation` en `SUBMITTED`
+  (DRAFT / ACCEPTED / REJECTED no entran).
+
+Las colas son superficies de descubrimiento/navegación hacia el detalle
+autorizado; las vistas de acción y los servicios de dominio siguen siendo la
+fuente autoritativa de mutación. Permisos parciales habilitan solo la cola
+correspondiente. No hay «Ver todos» porque el listado de avances no expone aún
+filtros `workflow` acotados.
+
 ---
 
 ## 7. Flujo de auditoría

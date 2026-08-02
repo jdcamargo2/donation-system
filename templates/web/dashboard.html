@@ -156,6 +156,152 @@
     </section>
 {% endif %}
 
+{% if project_update_governance.show_section %}
+    <section class="mb-4 ops-project-update-governance" aria-labelledby="project-update-governance-title">
+        <h2 id="project-update-governance-title" class="h5 ops-section-title">
+            Gobernanza de avances
+        </h2>
+        {% if project_update_governance.review %}
+            {% with queue=project_update_governance.review %}
+                <div class="card border-0 ops-table-card ops-detail-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <div>
+                                <h3 class="h6 mb-1">{{ queue.title }}</h3>
+                                {% if queue.description %}
+                                    <p class="small text-muted mb-0">{{ queue.description }}</p>
+                                {% endif %}
+                            </div>
+                            <span class="badge ops-status-badge" aria-label="{{ queue.total_count }} pendientes de revisión">
+                                {{ queue.total_count }}
+                            </span>
+                        </div>
+                        {% if queue.items %}
+                            <ul class="list-unstyled mb-0 ops-expense-request-queue-list">
+                                {% for item in queue.items %}
+                                    <li class="ops-expense-request-queue-row {% if not forloop.last %}border-bottom pb-3 mb-3{% endif %}">
+                                        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-semibold">{{ item.identifier|truncatechars:80 }}</div>
+                                                <div class="small text-muted">{{ item.project_label }}</div>
+                                                <div class="small text-muted">
+                                                    {{ item.date_label }}
+                                                    {% if item.reporter_label %} · {{ item.reporter_label }}{% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="ops-row-actions">
+                                                <a class="btn btn-sm btn-primary w-100 w-md-auto" href="{{ item.action_url }}">
+                                                    {{ item.action_label }}
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <div class="alert alert-light border mb-0" role="status">
+                                {{ queue.empty_message }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endwith %}
+        {% endif %}
+        {% if project_update_governance.decision %}
+            {% with queue=project_update_governance.decision %}
+                <div class="card border-0 ops-table-card ops-detail-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <div>
+                                <h3 class="h6 mb-1">{{ queue.title }}</h3>
+                                {% if queue.description %}
+                                    <p class="small text-muted mb-0">{{ queue.description }}</p>
+                                {% endif %}
+                            </div>
+                            <span class="badge ops-status-badge" aria-label="{{ queue.total_count }} pendientes de decisión">
+                                {{ queue.total_count }}
+                            </span>
+                        </div>
+                        {% if queue.items %}
+                            <ul class="list-unstyled mb-0 ops-expense-request-queue-list">
+                                {% for item in queue.items %}
+                                    <li class="ops-expense-request-queue-row {% if not forloop.last %}border-bottom pb-3 mb-3{% endif %}">
+                                        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-semibold">{{ item.identifier|truncatechars:80 }}</div>
+                                                <div class="small text-muted">{{ item.project_label }}</div>
+                                                <div class="small text-muted">
+                                                    {{ item.date_label }}
+                                                    {% if item.reviewer_label %} · {{ item.reviewer_label }}{% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="ops-row-actions">
+                                                <a class="btn btn-sm btn-primary w-100 w-md-auto" href="{{ item.action_url }}">
+                                                    {{ item.action_label }}
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <div class="alert alert-light border mb-0" role="status">
+                                {{ queue.empty_message }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endwith %}
+        {% endif %}
+        {% if project_update_governance.remediation %}
+            {% with queue=project_update_governance.remediation %}
+                <div class="card border-0 ops-table-card ops-detail-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <div>
+                                <h3 class="h6 mb-1">{{ queue.title }}</h3>
+                                {% if queue.description %}
+                                    <p class="small text-muted mb-0">{{ queue.description }}</p>
+                                {% endif %}
+                            </div>
+                            <span class="badge ops-status-badge" aria-label="{{ queue.total_count }} remediaciones por resolver">
+                                {{ queue.total_count }}
+                            </span>
+                        </div>
+                        {% if queue.items %}
+                            <ul class="list-unstyled mb-0 ops-expense-request-queue-list">
+                                {% for item in queue.items %}
+                                    <li class="ops-expense-request-queue-row {% if not forloop.last %}border-bottom pb-3 mb-3{% endif %}">
+                                        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-semibold">{{ item.identifier|truncatechars:80 }}</div>
+                                                <div class="small text-muted">{{ item.project_label }}</div>
+                                                <div class="small text-muted">
+                                                    {{ item.date_label }}
+                                                    {% if item.reporter_label %} · {{ item.reporter_label }}{% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="ops-row-actions">
+                                                <a class="btn btn-sm btn-primary w-100 w-md-auto" href="{{ item.action_url }}">
+                                                    {{ item.action_label }}
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <div class="alert alert-light border mb-0" role="status">
+                                {{ queue.empty_message }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endwith %}
+        {% endif %}
+    </section>
+{% endif %}
+
 {% if show_project_financial_section %}
     <section class="mb-4 ops-project-financial-section" aria-labelledby="project-financial-section-title">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">

@@ -41,10 +41,13 @@ from .project_update_responsibles import (
 from .public_portal_cache import invalidate_public_portal_cache
 from .selectors import (
     decidable_pending_expense_requests_for_user,
+    decidable_project_update_reviews_for_user,
     fulfillable_expense_requests_for_user,
     open_expense_requests_for_allocation,
     open_expense_requests_for_project,
     project_has_active_allocations,
+    resolvable_project_update_remediations_for_user,
+    reviewable_project_updates_for_user,
     tracking_expense_requests_for_user,
     user_can_view_project_financials,
     user_has_ownership_scoped_expense_requests,
@@ -1787,6 +1790,7 @@ def _dashboard_visual_width(visual_percentage: Decimal) -> str:
 
 DASHBOARD_EXPENSE_REQUEST_QUEUE_PREVIEW_LIMIT = 5
 DASHBOARD_PROJECT_FINANCIAL_PREVIEW_LIMIT = 10
+DASHBOARD_PROJECT_UPDATE_GOVERNANCE_PREVIEW_LIMIT = DASHBOARD_EXPENSE_REQUEST_QUEUE_PREVIEW_LIMIT
 _DASHBOARD_DATE_DISPLAY = 'j N Y'
 
 
@@ -2098,6 +2102,201 @@ def get_dashboard_expense_request_queues(*, user) -> list:
     return queues
 
 
+def _empty_dashboard_project_update_governance() -> dict:
+    """
+    PRE: caller lacks governance action permissions or needs a safe empty payload.
+    POST: returns a context block with no project-update labels or counts.
+    """
+    return {
+        'show_section': False,
+        'review': None,
+        'decision': None,
+        'remediation': None,
+    }
+
+
+def _dashboard_project_label(project) -> str:
+    return f'{project.code} · {project.name}'
+
+
+def _bounded_dashboard_project_update_governance_queue(
+    *,
+    key: str,
+    title: str,
+    description: str,
+    empty_message: str,
+    queryset,
+    order_by,
+    serialize_row,
+):
+    """
+    PRE: queryset is already permission-scoped; order_by is a stable tuple;
+         serialize_row maps one row to a presentation dict.
+    POST: returns one queue dict with bounded items and matching total_count.
+          list_url is empty: no scoped list filter exists yet (no misleading Ver todos).
+    """
+    scoped = queryset.order_by(*order_by)
+    preview = list(scoped[:DASHBOARD_PROJECT_UPDATE_GOVERNANCE_PREVIEW_LIMIT])
+    if len(preview) < DASHBOARD_PROJECT_UPDATE_GOVERNANCE_PREVIEW_LIMIT:
+        total_count = len(preview)
+    else:
+        total_count = scoped.count()
+    has_more = total_count > len(preview)
+    return {
+        'key': key,
+        'title': title,
+        'description': description,
+        'items': [serialize_row(row) for row in preview],
+        'total_count': total_count,
+        'displayed_count': len(preview),
+        'has_more': has_more,
+        'list_url': '',
+        'empty_message': empty_message,
+        'show_view_all': False,
+    }
+
+
+def _serialize_dashboard_pending_review_row(project_update) -> dict:
+    """
+    PRE: project_update has project and reported_by select_related for display.
+    POST: returns identification fields and a detail CTA (review action lives there).
+    """
+    reporter = ''
+    if project_update.reported_by_id is not None:
+        reporter = str(project_update.reported_by)
+    return {
+        'identifier': project_update.title,
+        'project_label': _dashboard_project_label(project_update.project),
+        'title': project_update.title,
+        'date_label': (
+            f'Publicado el '
+            f'{date_format(timezone.localtime(project_update.updated_at), _DASHBOARD_DATE_DISPLAY)}'
+        ),
+        'reporter_label': reporter,
+        'action_label': 'Revisar avance',
+        'action_url': reverse('project_update_detail', args=[project_update.pk]),
+        'action_style': 'primary',
+    }
+
+
+def _serialize_dashboard_pending_decision_row(review) -> dict:
+    """
+    PRE: review has project_update__project and reviewed_by select_related.
+    POST: returns identification fields and a review-detail CTA.
+    """
+    project_update = review.project_update
+    reviewer = ''
+    if review.reviewed_by_id is not None:
+        reviewer = str(review.reviewed_by)
+    return {
+        'identifier': project_update.title,
+        'project_label': _dashboard_project_label(project_update.project),
+        'title': project_update.title,
+        'date_label': (
+            f'Revisado el '
+            f'{date_format(timezone.localtime(review.reviewed_at), _DASHBOARD_DATE_DISPLAY)}'
+        ),
+        'reviewer_label': reviewer,
+        'action_label': 'Emitir decisión',
+        'action_url': reverse('project_update_review_detail', args=[review.pk]),
+        'action_style': 'primary',
+    }
+
+
+def _serialize_dashboard_pending_remediation_row(remediation) -> dict:
+    """
+    PRE: remediation has decision__review__project_update__project and submitted_by loaded.
+    POST: returns identification fields and a remediation-detail CTA.
+    """
+    project_update = remediation.decision.review.project_update
+    reporter = ''
+    if remediation.submitted_by_id is not None:
+        reporter = str(remediation.submitted_by)
+    submitted_moment = remediation.submitted_at or remediation.updated_at
+    return {
+        'identifier': project_update.title,
+        'project_label': _dashboard_project_label(project_update.project),
+        'title': project_update.title,
+        'date_label': (
+            f'Enviada el '
+            f'{date_format(timezone.localtime(submitted_moment), _DASHBOARD_DATE_DISPLAY)}'
+        ),
+        'reporter_label': reporter,
+        'action_label': 'Resolver remediación',
+        'action_url': reverse('project_update_remediation_detail', args=[remediation.pk]),
+        'action_style': 'primary',
+    }
+
+
+def get_dashboard_project_update_governance(*, user) -> dict:
+    """
+    PRE: user is an authenticated Django user (may lack governance permissions).
+    POST: returns permission-scoped governance queues for project-update work:
+          review → decision → remediation. Unauthorized queues are None and never
+          queried. Counts never exceed the user's accessible selector scope.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return _empty_dashboard_project_update_governance()
+
+    can_review = user.has_perm('operations.review_projectupdate')
+    can_decide = user.has_perm('operations.decide_projectupdate')
+    can_resolve = user.has_perm('operations.resolve_projectupdateremediation')
+    if not (can_review or can_decide or can_resolve):
+        return _empty_dashboard_project_update_governance()
+
+    result = {
+        'show_section': True,
+        'review': None,
+        'decision': None,
+        'remediation': None,
+    }
+
+    if can_review:
+        result['review'] = _bounded_dashboard_project_update_governance_queue(
+            key='review',
+            title='Pendientes de revisión',
+            description='Avances publicados que esperan revisión documental del Comité.',
+            empty_message='No hay avances pendientes de revisión.',
+            queryset=reviewable_project_updates_for_user(user).select_related(
+                'project',
+                'reported_by',
+            ),
+            # Oldest pending first so items are not starved (publish sets updated_at).
+            order_by=('updated_at', 'pk'),
+            serialize_row=_serialize_dashboard_pending_review_row,
+        )
+
+    if can_decide:
+        result['decision'] = _bounded_dashboard_project_update_governance_queue(
+            key='decision',
+            title='Pendientes de decisión',
+            description='Revisiones documentales que esperan resultado institucional.',
+            empty_message='No hay revisiones pendientes de decisión.',
+            queryset=decidable_project_update_reviews_for_user(user).select_related(
+                'project_update__project',
+                'reviewed_by',
+            ),
+            order_by=('reviewed_at', 'pk'),
+            serialize_row=_serialize_dashboard_pending_decision_row,
+        )
+
+    if can_resolve:
+        result['remediation'] = _bounded_dashboard_project_update_governance_queue(
+            key='remediation',
+            title='Remediaciones por resolver',
+            description='Remediaciones enviadas que esperan aceptación o rechazo.',
+            empty_message='No hay remediaciones pendientes de resolución.',
+            queryset=resolvable_project_update_remediations_for_user(user).select_related(
+                'decision__review__project_update__project',
+                'submitted_by',
+            ),
+            order_by=('submitted_at', 'pk'),
+            serialize_row=_serialize_dashboard_pending_remediation_row,
+        )
+
+    return result
+
+
 def get_dashboard_metrics(*, user) -> dict:
     """
     PRE: user es un usuario autenticado de Django.
@@ -2136,6 +2335,8 @@ def get_dashboard_metrics(*, user) -> dict:
         expense_request_section_title = ''
         expense_request_empty_message = ''
 
+    project_update_governance = get_dashboard_project_update_governance(user=user)
+
     context = {
         'can_view_donations': can_view_donations,
         'can_view_allocations': can_view_allocations,
@@ -2152,6 +2353,7 @@ def get_dashboard_metrics(*, user) -> dict:
         'expense_request_queues_have_items': expense_request_queues_have_items,
         'expense_request_section_title': expense_request_section_title,
         'expense_request_empty_message': expense_request_empty_message,
+        'project_update_governance': project_update_governance,
         'recent_donations': Donation.objects.none(),
         'recent_expenses': Expense.objects.none(),
         'recent_audit_logs': AuditLog.objects.none(),

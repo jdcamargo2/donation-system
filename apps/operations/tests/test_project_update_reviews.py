@@ -161,7 +161,7 @@ class ProjectUpdateReviewTests(TestCase):
         )
         self.assertEqual(
             self.client.get(reverse('project_update_review_create', args=[unpublished_update.pk])).status_code,
-            403,
+            404,
         )
         create_response = self.client.post(
             reverse('project_update_review_create', args=[published_update.pk]),

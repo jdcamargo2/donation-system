@@ -680,6 +680,36 @@ El superusuario ve ambas colas accionables cuando aplican. La sección se omite
 si el usuario carece de visibilidad de solicitudes. Con colas autorizadas vacías
 se muestra un estado positivo consolidado (sin tarjetas vacías repetidas).
 
+### Colas de gobernanza de avances (FLOW-COMMITTEE-QUEUES)
+
+Visible solo con al menos uno de `review_projectupdate`, `decide_projectupdate`
+o `resolve_projectupdateremediation` (Comité canónico y superusuario; Admin no
+las recibe por defecto porque esos permisos están excluidos del rol). Cada cola
+usa el selector canónico correspondiente y solo se renderiza si el usuario tiene
+el permiso de esa cola:
+
+```text
+review_projectupdate
+→ «Pendientes de revisión»
+→ PUBLISHED sin ProjectUpdateReview
+→ CTA: Revisar avance (detalle del avance)
+
+decide_projectupdate
+→ «Pendientes de decisión»
+→ revisión sin ProjectUpdateReviewDecision
+→ CTA: Emitir decisión (detalle de la revisión)
+
+resolve_projectupdateremediation
+→ «Remediaciones por resolver»
+→ remediación SUBMITTED
+→ CTA: Resolver remediación (detalle de remediación)
+```
+
+Vista previa acotada (5). Los conteos coinciden con el mismo queryset. Sin
+permiso de acción no hay filas, conteos ni etiquetas en el contexto. Permisos
+parciales (p. ej. solo `decide_projectupdate`) muestran únicamente esa cola.
+Las colas no sustituyen las validaciones de detalle/servicio.
+
 ### Estado financiero por proyecto (DASH-FIN3)
 
 Visible solo con `view_fundallocation` **y** `view_expense` (Administrador,

@@ -28,6 +28,9 @@ from .models import (
     FundAllocation,
     Institution,
     Project,
+    ProjectUpdate,
+    ProjectUpdateRemediation,
+    ProjectUpdateReview,
     SupportingDocument,
     ZERO_MONEY,
 )
@@ -686,4 +689,63 @@ def tracking_expense_requests_for_user(user):
         return ExpenseRequest.objects.none()
     return visible_expense_requests_for_user(user).filter(
         status__in=DASHBOARD_TRACKING_EXPENSE_REQUEST_STATUSES,
+    )
+
+
+def reviewable_project_updates_for_user(user):
+    """
+    PRE: caller enforces review_projectupdate at the view layer when loading routes.
+    POST: returns PUBLISHED advances without a committee review the actor may open.
+
+    Empty when the user lacks review_projectupdate. Does not check role names.
+    Advances already reviewed or not published are excluded so GET action pages 404.
+    Project-update visibility is global for holders of the action permission (no
+    ownership scope exists on ProjectUpdate listings).
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return ProjectUpdate.objects.none()
+    if not user.has_perm('operations.review_projectupdate'):
+        return ProjectUpdate.objects.none()
+    return ProjectUpdate.objects.filter(
+        status=ProjectUpdate.Status.PUBLISHED,
+        committee_review__isnull=True,
+    )
+
+
+def decidable_project_update_reviews_for_user(user):
+    """
+    PRE: caller enforces decide_projectupdate at the view layer when loading routes.
+    POST: returns reviews of PUBLISHED advances without a decision the actor may open.
+
+    Empty when the user lacks decide_projectupdate. Does not check role names.
+    Reviews that already have a decision or whose parent update is not published
+    are excluded so GET action pages resolve as 404.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return ProjectUpdateReview.objects.none()
+    if not user.has_perm('operations.decide_projectupdate'):
+        return ProjectUpdateReview.objects.none()
+    return ProjectUpdateReview.objects.filter(
+        decision__isnull=True,
+        project_update__status=ProjectUpdate.Status.PUBLISHED,
+    )
+
+
+def resolvable_project_update_remediations_for_user(user):
+    """
+    PRE: caller enforces resolve_projectupdateremediation at the view layer.
+    POST: returns SUBMITTED remediations the actor may open for resolution.
+
+    Empty when the user lacks resolve_projectupdateremediation. Does not check
+    role names. DRAFT/ACCEPTED/REJECTED rows are excluded so GET action pages 404.
+    Parent decision/review/update remain joinable for display; terminal remediations
+    never appear.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return ProjectUpdateRemediation.objects.none()
+    if not user.has_perm('operations.resolve_projectupdateremediation'):
+        return ProjectUpdateRemediation.objects.none()
+    return ProjectUpdateRemediation.objects.filter(
+        status=ProjectUpdateRemediation.Status.SUBMITTED,
+        decision__review__project_update__status=ProjectUpdate.Status.PUBLISHED,
     )
