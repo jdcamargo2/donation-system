@@ -375,6 +375,18 @@ rechazo.
   * Operador → solo solicitudes propias activas;
   * Auditor con `view_expenserequest` → seguimiento de solo lectura;
   * los conteos no revelan solicitudes fuera del queryset accesible.
+* DASH-FIN3 añade «Estado financiero por proyecto» entre las colas de
+  solicitudes y la actividad reciente:
+  * lista acotada (máx. 10) en orden estable no ranking (actividad financiera,
+    ACTIVE antes que CLOSED, código, pk);
+  * métricas reservation-aware: Fondos asignados, Gastos registrados,
+    Reservado (`APPROVED_RESERVED`), Disponible operativo
+    (`max(asignados − gastos − reservado, 0)`), Ejecución
+    (`gastos / asignados`; `None` si asignados = 0);
+  * «Ver todos los proyectos» solo cuando hay más de 10;
+  * requiere `view_fundallocation` + `view_expense` (Operador/Comité no lo ven);
+  * el detalle interno del proyecto usa las mismas fórmulas; el portal público
+    no cambia.
 
 ---
 

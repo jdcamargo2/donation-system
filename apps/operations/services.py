@@ -43,6 +43,7 @@ from .selectors import (
     fulfillable_expense_requests_for_user,
     tracking_expense_requests_for_user,
     user_has_ownership_scoped_expense_requests,
+    with_project_financial_metrics,
 )
 
 
@@ -1452,7 +1453,92 @@ def _dashboard_visual_width(visual_percentage: Decimal) -> str:
 
 
 DASHBOARD_EXPENSE_REQUEST_QUEUE_PREVIEW_LIMIT = 5
+DASHBOARD_PROJECT_FINANCIAL_PREVIEW_LIMIT = 10
 _DASHBOARD_DATE_DISPLAY = 'j N Y'
+
+
+def _empty_dashboard_project_financial_block() -> dict:
+    """
+    PRE: caller lacks financial list visibility or needs a safe empty payload.
+    POST: returns a context block with no project names or amounts.
+    """
+    return {
+        'project_financial_rows': [],
+        'show_project_financial_section': False,
+        'show_all_projects_link': False,
+        'project_financial_empty_message': '',
+        'all_projects_url': '',
+    }
+
+
+def _serialize_dashboard_project_financial_row(project) -> dict:
+    """
+    PRE: project carries with_project_financial_metrics annotations.
+    POST: returns a presentation dict with Decimal amounts and no HTML.
+    """
+    assigned = project.annotated_funded_amount
+    spent = project.annotated_executed_amount
+    reserved = project.annotated_reserved_amount
+    available = project.annotated_available_amount
+    execution_percentage = dashboard_ratio_percentage(spent, assigned)
+    visual_percentage = _dashboard_visual_percentage(execution_percentage)
+    return {
+        'project_id': project.pk,
+        'project_code': project.code,
+        'project_name': project.name,
+        'project_label': f'{project.code} · {project.name}',
+        'status': project.status,
+        'status_label': project.get_status_display(),
+        'assigned': assigned,
+        'spent': spent,
+        'reserved': reserved,
+        'available': available,
+        'execution_percentage': execution_percentage,
+        'visual_percentage': visual_percentage,
+        'visual_width': _dashboard_visual_width(visual_percentage),
+        'detail_url': reverse('project_detail', args=[project.pk]),
+    }
+
+
+def get_dashboard_project_financial_rows(
+    *,
+    user,
+    preview_limit=DASHBOARD_PROJECT_FINANCIAL_PREVIEW_LIMIT,
+) -> dict:
+    """
+    PRE: user is authenticated; preview_limit is a positive integer.
+    POST: returns a bounded reservation-aware project financial preview, or an empty
+          block when the user lacks both view_fundallocation and view_expense.
+
+    Inclusion: ACTIVE and CLOSED projects under current project visibility (all rows).
+    Ordering is organizational (activity, status, code, pk), never a ranking.
+    Fetches at most preview_limit + 1 rows to decide show_all_projects_link.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return _empty_dashboard_project_financial_block()
+    can_view_allocations = user.has_perm('operations.view_fundallocation')
+    can_view_expenses = user.has_perm('operations.view_expense')
+    if not (can_view_allocations and can_view_expenses):
+        return _empty_dashboard_project_financial_block()
+
+    scoped = with_project_financial_metrics(Project.objects.all()).order_by(
+        '-annotated_has_financial_activity',
+        'status',
+        'code',
+        'pk',
+    )
+    preview = list(scoped[: preview_limit + 1])
+    show_all_projects_link = len(preview) > preview_limit
+    rows = preview[:preview_limit]
+    return {
+        'project_financial_rows': [
+            _serialize_dashboard_project_financial_row(project) for project in rows
+        ],
+        'show_project_financial_section': True,
+        'show_all_projects_link': show_all_projects_link,
+        'project_financial_empty_message': 'No hay proyectos registrados.',
+        'all_projects_url': reverse('project_list'),
+    }
 
 
 def _dashboard_expense_request_list_url(*, status=None) -> str:
@@ -1877,21 +1963,36 @@ def get_dashboard_metrics(*, user) -> dict:
     if can_view_audit:
         context['recent_audit_logs'] = AuditLog.objects.select_related('user')[:5]
 
+    context.update(get_dashboard_project_financial_rows(user=user))
+
     return context
 
 
 def get_project_financial_summary(project: Project) -> dict:
     """
     PRE: project debe ser una instancia válida de Project.
-    POST: Retorna un resumen financiero del proyecto con fondos asignados, ejecutados y disponibles.
+    POST: Retorna un resumen financiero reservation-aware del proyecto (internal only).
+
+    available_amount = max(funded − executed − reserved, 0).
+    execution_percentage is None when funded is zero. Public portal keeps its own helper.
     """
-    funded_amount = project.funded_amount
-    executed_amount = project.executed_amount
+    annotated = with_project_financial_metrics(
+        Project.objects.filter(pk=project.pk)
+    ).get()
+    funded_amount = annotated.annotated_funded_amount
+    executed_amount = annotated.annotated_executed_amount
+    reserved_amount = annotated.annotated_reserved_amount
+    available_amount = annotated.annotated_available_amount
     return {
         'estimated_budget': project.estimated_budget,
         'funded_amount': funded_amount,
         'executed_amount': executed_amount,
-        'available_amount': max(funded_amount - executed_amount, ZERO_MONEY),
+        'reserved_amount': reserved_amount,
+        'available_amount': available_amount,
+        'execution_percentage': dashboard_ratio_percentage(
+            executed_amount,
+            funded_amount,
+        ),
     }
 
 

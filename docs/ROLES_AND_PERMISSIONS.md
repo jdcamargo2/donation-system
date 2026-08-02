@@ -610,10 +610,14 @@ view_donation + view_fundallocation
 
 view_fundallocation + view_expense
 → ratio Ejecución financiera
+→ bloque «Estado financiero por proyecto» (DASH-FIN3): lista acotada (10),
+  reservation-aware (Reservado / Disponible operativo), sin ranking;
+  «Ver todos los proyectos» cuando hay más de 10
 ```
 
 Las reservas de solicitudes de gasto no intervienen en los cuatro KPI ni en
-las dos ratios del panel global (DASH-FIN1).
+las dos ratios del panel global (DASH-FIN1). Sí restan en el Disponible
+operativo del listado por proyecto y del detalle interno del proyecto.
 
 ### Colas de solicitudes de gasto (DASH-FIN2)
 
@@ -639,6 +643,13 @@ view_expenserequest sin fulfill ni decide
 El superusuario ve ambas colas accionables cuando aplican. La sección se omite
 si el usuario carece de visibilidad de solicitudes. Con colas autorizadas vacías
 se muestra un estado positivo consolidado (sin tarjetas vacías repetidas).
+
+### Estado financiero por proyecto (DASH-FIN3)
+
+Visible solo con `view_fundallocation` **y** `view_expense` (Administrador,
+Auditor, superusuario). Operador y Comité no ven el bloque ni reciben montos
+en el contexto. El detalle interno del proyecto alinea las mismas etiquetas y
+fórmulas; el portal público permanece sin cambios.
 
 Atajos de navegación de solicitudes (ER7) viven en el sidebar y en los listados;
 el dashboard no restaura Accesos rápidos:

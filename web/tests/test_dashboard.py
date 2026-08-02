@@ -92,6 +92,9 @@ class DashboardTests(TestCase):
         self.assertEqual(response.context['financial_ratios'], [])
         self.assertEqual(response.context['expense_request_queues'], [])
         self.assertFalse(response.context['expense_request_queues_have_items'])
+        self.assertFalse(response.context['show_project_financial_section'])
+        self.assertEqual(response.context['project_financial_rows'], [])
+        self.assertNotContains(response, 'Estado financiero por proyecto')
         self.assertNotIn('show_financial_quick_actions', response.context)
 
     def test_sidebar_links_do_not_trigger_sidebar_toggle(self):
@@ -149,9 +152,16 @@ class DashboardTests(TestCase):
         self.assertContains(response, '150,00 USD')
         self.assertContains(response, 'Actividad reciente')
         self.assertLess(html.find('Fondos recibidos'), html.find('Actividad reciente'))
+        self.assertContains(response, 'Estado financiero por proyecto')
+        self.assertLess(
+            html.find('Estado financiero por proyecto'),
+            html.find('Actividad reciente'),
+        )
         self.assertNotContains(response, 'Solicitudes que requieren atención')
         self.assertNotContains(response, 'Accesos rápidos')
         self.assertNotContains(response, 'ops-action-panel')
+        self.assertNotContains(response, 'Top 5')
+        self.assertNotContains(response, 'Top 10')
         self.assertEqual(html.count('<h1'), 1)
 
     def test_dashboard_excludes_registered_donations_from_received_kpi(self):

@@ -1,10 +1,23 @@
 from pathlib import PurePosixPath
 
-from django.db.models import Count, DecimalField, Exists, F, OuterRef, Prefetch, Q, Subquery, Sum, Value
+from django.db.models import (
+    BooleanField,
+    Case,
+    Count,
+    DecimalField,
+    Exists,
+    F,
+    OuterRef,
+    Prefetch,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+    When,
+)
 from django.db.models.functions import Coalesce, Greatest
 from django.shortcuts import get_object_or_404
 
-from .choices import OPERATING_CURRENCY
 from .choices import OPERATING_CURRENCY
 from .models import (
     Donation,
@@ -109,6 +122,92 @@ def with_allocation_list_metrics(queryset):
             _zero_money_value(),
             output_field=MONEY_OUTPUT_FIELD,
         )
+    )
+
+
+def _project_executed_amount_subquery():
+    """
+    PRE: outer query rows are Project instances.
+    POST: returns an isolated subquery summing effective operating-currency expenses.
+    """
+    return Coalesce(
+        Subquery(
+            Expense.objects.filter(
+                allocation__project_id=OuterRef('pk'),
+                currency=OPERATING_CURRENCY,
+                allocation__donation__currency=OPERATING_CURRENCY,
+            )
+            .exclude(allocation__status=FundAllocation.Status.ANNULLED)
+            .exclude(status__in=Expense.non_executing_statuses())
+            .values('allocation__project_id')
+            .annotate(total=Sum('amount'))
+            .values('total')[:1],
+            output_field=MONEY_OUTPUT_FIELD,
+        ),
+        _zero_money_value(),
+        output_field=MONEY_OUTPUT_FIELD,
+    )
+
+
+def _project_reserved_amount_subquery():
+    """
+    PRE: outer query rows are Project instances.
+    POST: returns an isolated subquery summing APPROVED_RESERVED reserved_amount only.
+    """
+    return Coalesce(
+        Subquery(
+            ExpenseRequest.objects.filter(
+                fund_allocation__project_id=OuterRef('pk'),
+                status=ExpenseRequest.Status.APPROVED_RESERVED,
+            )
+            .values('fund_allocation__project_id')
+            .annotate(total=Sum('reserved_amount'))
+            .values('total')[:1],
+            output_field=MONEY_OUTPUT_FIELD,
+        ),
+        _zero_money_value(),
+        output_field=MONEY_OUTPUT_FIELD,
+    )
+
+
+def with_project_financial_metrics(queryset):
+    """
+    PRE: queryset selects Project rows for an operational financial listing or detail.
+    POST: annotates funded/executed/reserved/available amounts without multi-join multiplication.
+    """
+    effective_allocations = (
+        Q(allocations__donation__currency=OPERATING_CURRENCY)
+        & ~Q(allocations__status=FundAllocation.Status.ANNULLED)
+    )
+    queryset = queryset.annotate(
+        annotated_funded_amount=Coalesce(
+            Sum('allocations__amount', filter=effective_allocations),
+            _zero_money_value(),
+            output_field=MONEY_OUTPUT_FIELD,
+        ),
+        annotated_executed_amount=_project_executed_amount_subquery(),
+        annotated_reserved_amount=_project_reserved_amount_subquery(),
+    )
+    return queryset.annotate(
+        annotated_available_amount=Greatest(
+            (
+                F('annotated_funded_amount')
+                - F('annotated_executed_amount')
+                - F('annotated_reserved_amount')
+            ),
+            _zero_money_value(),
+            output_field=MONEY_OUTPUT_FIELD,
+        ),
+        annotated_has_financial_activity=Case(
+            When(
+                Q(annotated_funded_amount__gt=ZERO_MONEY)
+                | Q(annotated_executed_amount__gt=ZERO_MONEY)
+                | Q(annotated_reserved_amount__gt=ZERO_MONEY),
+                then=Value(True),
+            ),
+            default=Value(False),
+            output_field=BooleanField(),
+        ),
     )
 
 

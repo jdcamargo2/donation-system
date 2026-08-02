@@ -209,6 +209,10 @@ PENDING_DECISION / APPROVED_RESERVED
   `LINKED_EXPENSE_ANNULLED` sin recrear reserva.
 * Agregación autoritativa de reservas: `get_allocation_reserved_amount()` en
   `apps/operations/financials.py` (solo `APPROVED_RESERVED`).
+* Resumen financiero interno de proyecto (detalle autenticado y bloque
+  DASH-FIN3 del dashboard): Fondos asignados, Gastos registrados, Reservado,
+  Disponible operativo = `max(asignados − gastos − reservado, 0)`. El portal
+  público conserva su propio resumen sin restar reservas.
 
 ## 5. `Expense`
 

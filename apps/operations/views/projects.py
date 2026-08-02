@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -258,10 +256,7 @@ class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
         )
         summary = get_project_financial_summary(self.object)
         context['project_financial_summary'] = summary
-        context['execution_percentage'] = (
-            (summary['executed_amount'] / summary['funded_amount']) * Decimal('100')
-            if summary['funded_amount'] > 0 else Decimal('0')
-        )
+        context['execution_percentage'] = summary['execution_percentage']
         context.update(
             get_project_detail_integration_context(self.object, self.request.user)
         )

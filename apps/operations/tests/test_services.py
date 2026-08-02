@@ -155,7 +155,9 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(summary['funded_amount'], Decimal('100.00'))
         self.assertEqual(summary['executed_amount'], Decimal('40.00'))
+        self.assertEqual(summary['reserved_amount'], Decimal('0.00'))
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
+        self.assertEqual(summary['execution_percentage'], Decimal('40.0'))
 
     def test_project_financial_summary_excludes_annulled_movements(self):
         project = self.create_project(code='PRJ-SVC-USD-ONLY')
@@ -170,7 +172,9 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(summary['funded_amount'], Decimal('100.00'))
         self.assertEqual(summary['executed_amount'], Decimal('40.00'))
+        self.assertEqual(summary['reserved_amount'], Decimal('0.00'))
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
+        self.assertEqual(summary['execution_percentage'], Decimal('40.0'))
 
     def test_get_dashboard_metrics_returns_expected_keys_with_empty_database(self):
         user = get_user_model().objects.create_user(
@@ -211,6 +215,13 @@ class OperationServiceTests(TestCase):
         self.assertIn('expense_request_queues', metrics)
         self.assertEqual(metrics['expense_request_queues'], [])
         self.assertFalse(metrics['expense_request_queues_have_items'])
+        self.assertTrue(metrics['show_project_financial_section'])
+        self.assertEqual(metrics['project_financial_rows'], [])
+        self.assertFalse(metrics['show_all_projects_link'])
+        self.assertEqual(
+            metrics['project_financial_empty_message'],
+            'No hay proyectos registrados.',
+        )
 
     def test_get_dashboard_metrics_hides_data_without_permissions(self):
         user = get_user_model().objects.create_user(
@@ -228,6 +239,8 @@ class OperationServiceTests(TestCase):
         self.assertEqual(metrics['financial_ratios'], [])
         self.assertEqual(metrics['expense_request_queues'], [])
         self.assertFalse(metrics['expense_request_queues_have_items'])
+        self.assertFalse(metrics['show_project_financial_section'])
+        self.assertEqual(metrics['project_financial_rows'], [])
         self.assertFalse(metrics['recent_donations'].exists())
         self.assertFalse(metrics['recent_expenses'].exists())
         self.assertFalse(metrics['recent_audit_logs'].exists())

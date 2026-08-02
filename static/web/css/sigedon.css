@@ -615,6 +615,22 @@ body.sidebar-collapsed .sigedon-collapse-button i {
     min-width: 0;
 }
 
+.ops-financial-progress-compact {
+    height: 0.4rem;
+    margin-top: 0.35rem;
+}
+
+.ops-project-financial-identity {
+    display: inline-block;
+    max-width: 18rem;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.ops-table-card .ops-project-financial-table {
+    min-width: 860px;
+}
+
 .ops-section-subtitle {
     color: var(--ops-muted);
     font-weight: 750;
@@ -2035,7 +2051,7 @@ input[type="number"] {
 .ops-project-financial-metrics {
     display: grid;
     gap: 0;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     margin-top: 0.9rem;
 }
 

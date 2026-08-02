@@ -156,6 +156,90 @@
     </section>
 {% endif %}
 
+{% if show_project_financial_section %}
+    <section class="mb-4 ops-project-financial-section" aria-labelledby="project-financial-section-title">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+            <h2 id="project-financial-section-title" class="h5 ops-section-title mb-0">
+                Estado financiero por proyecto
+            </h2>
+            {% if show_all_projects_link %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ all_projects_url }}">
+                    Ver todos los proyectos
+                </a>
+            {% endif %}
+        </div>
+        {% if project_financial_rows %}
+            <div class="card border-0 ops-table-card">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 ops-project-financial-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Proyecto</th>
+                                <th scope="col">Fondos asignados</th>
+                                <th scope="col">Gastos registrados</th>
+                                <th scope="col">Reservado</th>
+                                <th scope="col">Disponible operativo</th>
+                                <th scope="col">Ejecución</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in project_financial_rows %}
+                                <tr>
+                                    <td>
+                                        <a class="fw-semibold text-decoration-none ops-project-financial-identity" href="{{ row.detail_url }}">
+                                            {{ row.project_label }}
+                                        </a>
+                                        <span class="badge ops-status-badge d-inline-block mt-1">{{ row.status_label }}</span>
+                                    </td>
+                                    <td class="ops-money text-nowrap">{{ row.assigned|money_es }} USD</td>
+                                    <td class="ops-money text-nowrap">{{ row.spent|money_es }} USD</td>
+                                    <td class="ops-money text-nowrap">{{ row.reserved|money_es }} USD</td>
+                                    <td class="ops-money text-nowrap">{{ row.available|money_es }} USD</td>
+                                    <td>
+                                        <div class="ops-ratio-percentage">
+                                            {% if row.execution_percentage is None %}
+                                                —
+                                            {% else %}
+                                                {{ row.execution_percentage|percentage_es }} %
+                                            {% endif %}
+                                        </div>
+                                        {% if row.execution_percentage is None %}
+                                            <div
+                                                class="ops-financial-progress ops-financial-progress-compact"
+                                                role="progressbar"
+                                                aria-valuemin="0"
+                                                aria-valuemax="100"
+                                                aria-label="{{ row.project_label }}: ejecución sin datos"
+                                            >
+                                                <span style="width: 0%"></span>
+                                            </div>
+                                        {% else %}
+                                            <div
+                                                class="ops-financial-progress ops-financial-progress-compact"
+                                                role="progressbar"
+                                                aria-valuemin="0"
+                                                aria-valuemax="100"
+                                                aria-valuenow="{{ row.visual_width }}"
+                                                aria-label="{{ row.project_label }}: {{ row.execution_percentage|percentage_es }} por ciento"
+                                            >
+                                                <span style="width: {{ row.visual_width }}%"></span>
+                                            </div>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% else %}
+            <div class="alert alert-light border mb-0" role="status">
+                {{ project_financial_empty_message }}
+            </div>
+        {% endif %}
+    </section>
+{% endif %}
+
 {% if can_view_donations or can_view_expenses or can_view_audit %}
     <h2 class="h5 ops-section-title">Actividad reciente</h2>
     <div class="row g-4">

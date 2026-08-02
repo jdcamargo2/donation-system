@@ -491,11 +491,11 @@ class InternalExperienceTemplateTests(TestCase):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Financiado')
-        self.assertContains(response, 'Ejecutado')
-        self.assertContains(response, 'Disponible')
+        self.assertContains(response, 'Fondos asignados')
+        self.assertContains(response, 'Gastos registrados')
+        self.assertContains(response, 'Disponible operativo')
         self.assertContains(response, 'Presupuesto estimado:')
-        self.assertContains(response, 'Ejecución financiera:')
+        self.assertContains(response, 'Ejecución:')
         self.assertNotContains(
             response,
             'Existen movimientos históricos en otras monedas excluidos de este resumen.',
@@ -758,9 +758,11 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertEqual(dashboard.status_code, 200)
         self.assertNotContains(dashboard, 'Crear gasto')
         self.assertNotContains(dashboard, reverse('expense_create'))
-        self.assertContains(dashboard, 'Ver solicitudes de gasto')
-        self.assertContains(dashboard, 'Aprobadas pendientes de registrar gasto')
-        self.assertContains(dashboard, 'status=approved_reserved')
+        self.assertNotContains(dashboard, 'Accesos rápidos')
+        self.assertContains(dashboard, 'Solicitudes que requieren atención')
+        self.assertContains(dashboard, reverse('expense_request_list'))
+        self.assertContains(dashboard, 'Estado financiero por proyecto')
+        self.assertNotContains(dashboard, 'Top 10')
 
     def test_approved_request_detail_shows_registrar_gasto_for_administrator(self):
         sync_operation_roles()

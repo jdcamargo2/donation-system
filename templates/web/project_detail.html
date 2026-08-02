@@ -100,20 +100,30 @@
         <h2 id="project-financial-summary-title" class="h5 mb-0">Resumen financiero</h2>
         <div class="ops-project-financial-secondary">
             <span><strong>Presupuesto estimado:</strong> <span class="ops-money text-nowrap">{{ project_financial_summary.estimated_budget|money_es }} USD</span></span>
-            <span><strong>Ejecución financiera:</strong> {{ execution_percentage|floatformat:1 }}%</span>
+            <span><strong>Ejecución:</strong>
+                {% if execution_percentage is None %}
+                    —
+                {% else %}
+                    {{ execution_percentage|percentage_es }} %
+                {% endif %}
+            </span>
         </div>
     </div>
     <div class="ops-project-financial-metrics">
         <div class="ops-project-financial-metric">
-            <div class="ops-metric-label">Financiado</div>
+            <div class="ops-metric-label">Fondos asignados</div>
             <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.funded_amount|money_es }} USD</div>
         </div>
         <div class="ops-project-financial-metric">
-            <div class="ops-metric-label">Ejecutado</div>
+            <div class="ops-metric-label">Gastos registrados</div>
             <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.executed_amount|money_es }} USD</div>
         </div>
+        <div class="ops-project-financial-metric">
+            <div class="ops-metric-label">Reservado</div>
+            <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.reserved_amount|money_es }} USD</div>
+        </div>
         <div class="ops-project-financial-metric ops-project-financial-metric-available">
-            <div class="ops-metric-label">Disponible</div>
+            <div class="ops-metric-label">Disponible operativo</div>
             <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.available_amount|money_es }} USD</div>
         </div>
     </div>

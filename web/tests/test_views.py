@@ -302,7 +302,7 @@ class OperationalDetailViewTests(TestCase):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
         self.assertContains(response, 'Presupuesto')
-        self.assertContains(response, 'Financiado')
+        self.assertContains(response, 'Fondos asignados')
         self.assertContains(response, 'Ejecución')
         self.assertContains(response, 'La Guaira')
         self.assertContains(response, 'Sin hitos definidos')
