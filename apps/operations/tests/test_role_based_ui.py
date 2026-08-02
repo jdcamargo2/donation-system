@@ -101,7 +101,7 @@ class RoleBasedUITests(TestCase):
         self.assertNotContains(response, reverse('expense_create'))
 
     def test_external_auditor_sees_audit_navigation(self):
-        # Sidebar/navigation only — dashboard Accesos rápidos is hidden for Auditor.
+        # Sidebar/navigation only — dashboard no longer hosts Accesos rápidos.
         self.client.force_login(self.create_user_for_role('ui-auditor-audit', ROLE_EXTERNAL_AUDITOR))
 
         response = self.client.get(reverse('dashboard'))
@@ -110,7 +110,7 @@ class RoleBasedUITests(TestCase):
         self.assertContains(response, 'title="Auditoría"')
         self.assertContains(response, reverse('audit_log_list'))
 
-    def test_external_auditor_dashboard_hides_quick_actions(self):
+    def test_external_auditor_dashboard_shows_read_only_financial_kpis(self):
         self.client.force_login(
             self.create_user_for_role('ui-auditor-quick-actions', ROLE_EXTERNAL_AUDITOR)
         )
@@ -119,14 +119,14 @@ class RoleBasedUITests(TestCase):
         html = response.content.decode()
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context['show_financial_quick_actions'])
+        self.assertNotIn('show_financial_quick_actions', response.context)
         self.assertNotContains(response, 'Accesos rápidos')
         self.assertNotContains(response, 'ops-action-panel')
         self.assertNotIn('ops-action-group-title', html)
         self.assertNotContains(response, 'Ver proyectos')
         self.assertNotContains(response, 'Consultar donaciones')
         self.assertNotContains(response, 'Consultar gastos')
-        self.assertNotContains(response, 'Ver auditoría')
+        self.assertNotContains(response, 'Crear asignación')
         self.assertNotContains(response, 'Ver solicitudes de gasto')
         self.assertNotContains(response, 'Mis solicitudes de gasto')
         self.assertNotContains(response, 'Solicitudes pendientes de decisión')
@@ -136,10 +136,16 @@ class RoleBasedUITests(TestCase):
         )
 
         self.assertContains(response, 'ops-metric-grid')
-        self.assertContains(response, 'Donaciones recibidas USD')
+        self.assertContains(response, 'Fondos recibidos')
+        self.assertContains(response, 'Fondos asignados')
+        self.assertContains(response, 'Gastos registrados')
+        self.assertContains(response, 'Fondos sin asignar')
+        self.assertContains(response, 'Asignación de fondos')
+        self.assertContains(response, 'Ejecución financiera')
+        self.assertContains(response, 'ops-financial-progress')
+        self.assertContains(response, 'Actividad reciente')
         self.assertContains(response, 'Ingresos')
-        self.assertContains(response, 'Gastos recientes')
-        self.assertContains(response, 'Acciones recientes de auditoría')
+        self.assertLess(html.find('Fondos recibidos'), html.find('Actividad reciente'))
 
         self.assertContains(response, 'title="Proyectos"')
         self.assertContains(response, 'title="Auditoría"')
@@ -165,23 +171,28 @@ class RoleBasedUITests(TestCase):
                 response = self.client.get(reverse(url_name))
                 self.assertEqual(response.status_code, 200)
 
-    def test_field_operator_dashboard_focuses_on_projects_and_updates(self):
+    def test_field_operator_dashboard_hides_global_financial_totals(self):
         self.client.force_login(self.create_user_for_role('ui-field-dashboard', ROLE_FIELD_OPERATOR))
 
         response = self.client.get(reverse('dashboard'))
-        list_url = reverse('expense_request_list')
+        html = response.content.decode()
 
-        self.assertTrue(response.context['show_financial_quick_actions'])
-        self.assertContains(response, 'ops-action-panel')
-        self.assertContains(response, 'Accesos rápidos')
-        self.assertContains(response, 'Ver proyectos')
-        self.assertContains(response, 'Registrar avances')
-        self.assertContains(response, 'Mis solicitudes de gasto')
-        self.assertContains(response, list_url)
+        self.assertNotIn('show_financial_quick_actions', response.context)
+        self.assertEqual(response.context['financial_kpis'], [])
+        self.assertEqual(response.context['financial_ratios'], [])
         self.assertContains(
             response,
-            'Las solicitudes se crean desde el detalle de un proyecto.',
+            'El panel muestra información acorde con tus permisos.',
         )
+        self.assertNotContains(response, 'ops-action-panel')
+        self.assertNotContains(response, 'Accesos rápidos')
+        self.assertNotContains(response, 'Fondos recibidos')
+        self.assertNotContains(response, 'Fondos asignados')
+        self.assertNotContains(response, 'Gastos registrados')
+        self.assertNotContains(response, 'Fondos sin asignar')
+        self.assertNotContains(response, '100,00')
+        self.assertNotContains(response, '60,00')
+        self.assertNotContains(response, '20,00')
         self.assertNotContains(response, 'Crear donación')
         self.assertNotContains(response, 'Crear asignación')
         self.assertNotContains(response, 'Crear gasto')
@@ -193,7 +204,11 @@ class RoleBasedUITests(TestCase):
         )
         self.assertNotContains(response, 'status=approved_reserved')
         self.assertNotContains(response, reverse('expense_request_create'))
-        self.assertNotContains(response, 'Ver auditoría')
+        # Sidebar remains the navigation mechanism.
+        self.assertContains(response, 'title="Proyectos"')
+        self.assertContains(response, reverse('project_list'))
+        self.assertContains(response, reverse('expense_request_list'))
+        self.assertNotIn('aria-valuenow=', html)
 
     def test_project_navigation_is_visible_only_with_project_permission(self):
         self.client.force_login(create_user_with_permissions('ui-project-viewer', 'view_project'))
@@ -434,26 +449,32 @@ class RoleBasedUITests(TestCase):
 
         self.assertContains(response, 'ops-topbar')
         self.assertContains(response, 'ops-page-header')
-        self.assertContains(response, 'ops-action-panel')
         self.assertContains(response, 'ops-metric-grid')
+        self.assertContains(response, 'ops-ratio-grid')
+        self.assertNotContains(response, 'ops-action-panel')
 
-    def test_admin_sees_main_actions(self):
+    def test_admin_sees_financial_kpis_without_quick_actions(self):
         self.client.force_login(self.create_user_for_role('ui-admin', ROLE_SIGEDON_ADMIN))
 
         dashboard_response = self.client.get(reverse('dashboard'))
         project_response = self.client.get(reverse('project_list'))
         expense_response = self.client.get(reverse('expense_list'))
+        html = dashboard_response.content.decode()
 
-        self.assertTrue(dashboard_response.context['show_financial_quick_actions'])
-        self.assertContains(dashboard_response, 'Accesos rápidos')
-        self.assertContains(dashboard_response, 'ops-action-panel')
-        self.assertContains(dashboard_response, 'Crear proyecto')
-        self.assertContains(dashboard_response, 'Ver solicitudes de gasto')
-        self.assertContains(
-            dashboard_response,
-            'Aprobadas pendientes de registrar gasto',
+        self.assertNotIn('show_financial_quick_actions', dashboard_response.context)
+        self.assertNotContains(dashboard_response, 'Accesos rápidos')
+        self.assertNotContains(dashboard_response, 'ops-action-panel')
+        self.assertContains(dashboard_response, 'Fondos recibidos')
+        self.assertContains(dashboard_response, 'Fondos asignados')
+        self.assertContains(dashboard_response, 'Gastos registrados')
+        self.assertContains(dashboard_response, 'Fondos sin asignar')
+        self.assertContains(dashboard_response, 'Asignación de fondos')
+        self.assertContains(dashboard_response, 'Ejecución financiera')
+        self.assertEqual(
+            [item['key'] for item in dashboard_response.context['financial_kpis']],
+            ['received', 'assigned', 'spent', 'unallocated'],
         )
-        self.assertContains(dashboard_response, 'status=approved_reserved')
+        self.assertLess(html.find('Fondos recibidos'), html.find('Actividad reciente'))
         self.assertNotContains(dashboard_response, 'Crear gasto')
         self.assertNotContains(dashboard_response, reverse('expense_create'))
         self.assertNotContains(dashboard_response, 'Mis solicitudes de gasto')
@@ -461,26 +482,31 @@ class RoleBasedUITests(TestCase):
             dashboard_response,
             'Solicitudes pendientes de decisión',
         )
-        self.assertContains(dashboard_response, 'Ver auditoría')
         self.assertContains(project_response, reverse('project_create'))
         self.assertNotContains(expense_response, reverse('expense_create'))
         self.assertNotContains(expense_response, 'Nuevo gasto')
         self.assertContains(expense_response, 'Ver solicitudes de gasto')
 
-    def test_committee_dashboard_keeps_quick_actions_container(self):
+    def test_committee_dashboard_hides_global_financial_totals(self):
         self.client.force_login(
             self.create_user_for_role('ui-committee-dashboard', ROLE_PROJECT_COMMITTEE)
         )
 
         response = self.client.get(reverse('dashboard'))
-        list_url = reverse('expense_request_list')
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context['show_financial_quick_actions'])
-        self.assertContains(response, 'Accesos rápidos')
-        self.assertContains(response, 'ops-action-panel')
-        self.assertContains(response, 'Solicitudes pendientes de decisión')
-        self.assertContains(response, f'{list_url}?status=pending_decision')
+        self.assertNotIn('show_financial_quick_actions', response.context)
+        self.assertEqual(response.context['financial_kpis'], [])
+        self.assertEqual(response.context['financial_ratios'], [])
+        self.assertContains(
+            response,
+            'El panel muestra información acorde con tus permisos.',
+        )
+        self.assertNotContains(response, 'Accesos rápidos')
+        self.assertNotContains(response, 'ops-action-panel')
+        self.assertNotContains(response, 'Fondos recibidos')
+        self.assertNotContains(response, 'Fondos asignados')
+        self.assertNotContains(response, 'Gastos registrados')
         self.assertNotContains(response, 'Crear gasto')
         self.assertNotContains(response, reverse('expense_create'))
         self.assertNotContains(response, 'Ver solicitudes de gasto')
@@ -490,8 +516,11 @@ class RoleBasedUITests(TestCase):
             'Aprobadas pendientes de registrar gasto',
         )
         self.assertNotContains(response, 'status=approved_reserved')
+        # Sidebar remains available for request navigation.
+        self.assertContains(response, reverse('expense_request_list'))
+        self.assertContains(response, 'title="Solicitudes de gasto"')
 
-    def test_direct_permission_user_sees_quick_actions(self):
+    def test_direct_permission_user_sees_only_authorized_kpis(self):
         user = create_user_with_permissions(
             'ui-direct-quick-actions',
             'view_project',
@@ -502,13 +531,20 @@ class RoleBasedUITests(TestCase):
         response = self.client.get(reverse('dashboard'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context['show_financial_quick_actions'])
-        self.assertContains(response, 'Accesos rápidos')
-        self.assertContains(response, 'ops-action-panel')
-        self.assertContains(response, 'Ver proyectos')
-        self.assertContains(response, 'Consultar donaciones')
+        self.assertNotIn('show_financial_quick_actions', response.context)
+        self.assertNotContains(response, 'Accesos rápidos')
+        self.assertNotContains(response, 'ops-action-panel')
+        self.assertEqual(
+            [item['key'] for item in response.context['financial_kpis']],
+            ['received'],
+        )
+        self.assertContains(response, 'Fondos recibidos')
+        self.assertNotContains(response, 'Fondos sin asignar')
+        self.assertNotContains(response, 'Asignación de fondos')
+        self.assertContains(response, reverse('project_list'))
+        self.assertContains(response, 'title="Proyectos"')
 
-    def test_superuser_dashboard_keeps_quick_actions(self):
+    def test_superuser_dashboard_shows_financial_overview_without_quick_actions(self):
         user = get_user_model().objects.create_superuser(
             username='ui-superuser-dashboard',
             email='ui-superuser@example.com',
@@ -519,9 +555,11 @@ class RoleBasedUITests(TestCase):
         response = self.client.get(reverse('dashboard'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context['show_financial_quick_actions'])
-        self.assertContains(response, 'Accesos rápidos')
-        self.assertContains(response, 'ops-action-panel')
+        self.assertNotIn('show_financial_quick_actions', response.context)
+        self.assertNotContains(response, 'Accesos rápidos')
+        self.assertNotContains(response, 'ops-action-panel')
+        self.assertContains(response, 'Fondos recibidos')
+        self.assertContains(response, 'ops-financial-progress')
 
     def test_forbidden_actions_are_hidden_even_when_routes_remain_protected(self):
         field_user = self.create_user_for_role('ui-field-routes', ROLE_FIELD_OPERATOR)

@@ -15,6 +15,7 @@ from apps.operations.services import (
     create_expense as create_expense_public,
     create_expense_legacy as create_expense_service,
     create_fund_allocation,
+    dashboard_ratio_percentage,
     get_allocation_financial_summary,
     get_dashboard_metrics,
     get_donation_financial_summary,
@@ -194,6 +195,16 @@ class OperationServiceTests(TestCase):
         self.assertEqual(metrics['total_assigned'], ZERO_MONEY)
         self.assertEqual(metrics['total_executed'], ZERO_MONEY)
         self.assertEqual(metrics['available_balance'], ZERO_MONEY)
+        self.assertEqual(
+            [item['key'] for item in metrics['financial_kpis']],
+            ['received', 'assigned', 'spent', 'unallocated'],
+        )
+        self.assertEqual(
+            [item['key'] for item in metrics['financial_ratios']],
+            ['assignment', 'execution'],
+        )
+        self.assertIsNone(metrics['financial_ratios'][0]['percentage'])
+        self.assertIsNone(metrics['financial_ratios'][1]['percentage'])
         self.assertIn('recent_donations', metrics)
         self.assertIn('recent_expenses', metrics)
         self.assertIn('recent_audit_logs', metrics)
@@ -210,9 +221,51 @@ class OperationServiceTests(TestCase):
         self.assertIsNone(metrics['total_assigned'])
         self.assertIsNone(metrics['total_executed'])
         self.assertIsNone(metrics['available_balance'])
+        self.assertEqual(metrics['financial_kpis'], [])
+        self.assertEqual(metrics['financial_ratios'], [])
         self.assertFalse(metrics['recent_donations'].exists())
         self.assertFalse(metrics['recent_expenses'].exists())
         self.assertFalse(metrics['recent_audit_logs'].exists())
+
+    def test_get_dashboard_metrics_counts_only_received_donations(self):
+        user = get_user_model().objects.create_user(
+            username='dashboard-received-only',
+            password='pass-12345',
+        )
+        user.user_permissions.add(
+            *Permission.objects.filter(
+                content_type__app_label='operations',
+                codename='view_donation',
+            )
+        )
+        self.create_donation(code='DON-REG', amount=Decimal('40.00'))
+        Donation.objects.filter(code='DON-REG').update(status=Donation.Status.REGISTERED)
+        self.create_donation(code='DON-REC', amount=Decimal('25.00'))
+        self.create_donation(code='DON-ANN', amount=Decimal('90.00'))
+        Donation.objects.filter(code='DON-ANN').update(status=Donation.Status.ANNULLED)
+
+        metrics = get_dashboard_metrics(user=user)
+
+        self.assertEqual(metrics['total_donations'], Decimal('25.00'))
+        self.assertEqual(metrics['financial_kpis'][0]['key'], 'received')
+        self.assertEqual(metrics['financial_kpis'][0]['value'], Decimal('25.00'))
+        self.assertIsInstance(metrics['financial_kpis'][0]['value'], Decimal)
+
+    def test_dashboard_ratio_percentage_handles_zero_and_decimals(self):
+        self.assertIsNone(dashboard_ratio_percentage(Decimal('10.00'), ZERO_MONEY))
+        self.assertIsNone(dashboard_ratio_percentage(ZERO_MONEY, ZERO_MONEY))
+        self.assertEqual(
+            dashboard_ratio_percentage(Decimal('80.00'), Decimal('100.00')),
+            Decimal('80.0'),
+        )
+        self.assertEqual(
+            dashboard_ratio_percentage(Decimal('50.00'), Decimal('80.00')),
+            Decimal('62.5'),
+        )
+        self.assertIsInstance(
+            dashboard_ratio_percentage(Decimal('1.00'), Decimal('3.00')),
+            Decimal,
+        )
 
     def test_create_fund_allocation_rejects_over_allocation(self):
         donation = self.create_donation(amount=Decimal('100.00'))

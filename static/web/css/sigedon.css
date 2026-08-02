@@ -545,6 +545,67 @@ body.sidebar-collapsed .sigedon-collapse-button i {
     margin-top: 0.45rem;
 }
 
+.ops-metric-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.ops-metric-link:hover,
+.ops-metric-link:focus-visible {
+    color: var(--ops-primary);
+    text-decoration: underline;
+}
+
+.ops-metric-helper {
+    color: var(--ops-muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
+    margin-top: 0.55rem;
+}
+
+.ops-ratio-grid {
+    align-items: stretch;
+}
+
+.ops-ratio-card .ops-ratio-percentage {
+    color: var(--ops-text);
+    font-size: clamp(1.35rem, 2vw, 1.75rem);
+    font-variant-numeric: tabular-nums;
+    font-weight: 850;
+    line-height: 1.15;
+    margin-top: 0.4rem;
+}
+
+.ops-ratio-amounts {
+    color: var(--ops-muted);
+    font-size: 0.92rem;
+    margin-top: 0.35rem;
+}
+
+.ops-financial-progress {
+    background: #e2e8f0;
+    border-radius: 999px;
+    display: block;
+    height: 0.55rem;
+    margin-top: 0.85rem;
+    overflow: hidden;
+    width: 100%;
+}
+
+.ops-financial-progress > span {
+    background: var(--ops-primary);
+    display: block;
+    height: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.ops-section-subtitle {
+    color: var(--ops-muted);
+    font-weight: 750;
+    margin-bottom: 0.75rem;
+}
+
 .ops-activity-list .list-group-item {
     min-height: 74px;
 }

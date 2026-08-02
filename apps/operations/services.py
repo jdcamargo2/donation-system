@@ -1,9 +1,11 @@
 from contextlib import contextmanager, nullcontext
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy as _
@@ -1401,64 +1403,210 @@ def sum_money(queryset, field_name: str):
     return queryset.aggregate(total=Sum(field_name))['total'] or ZERO_MONEY
 
 
+_RATIO_PERCENTAGE_QUANTUM = Decimal('0.1')
+_RATIO_PERCENTAGE_SCALE = Decimal('100')
+_RATIO_VISUAL_MAX = Decimal('100')
+
+
+def dashboard_ratio_percentage(numerator: Decimal, denominator: Decimal):
+    """
+    PRE: numerator and denominator are Decimal monetary totals (not mutated).
+    POST: returns None when denominator is zero; otherwise percentage with one decimal.
+    """
+    if denominator == ZERO_MONEY:
+        return None
+    return (
+        numerator * _RATIO_PERCENTAGE_SCALE / denominator
+    ).quantize(_RATIO_PERCENTAGE_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _dashboard_visual_percentage(percentage):
+    """
+    PRE: percentage is Decimal or None from dashboard_ratio_percentage.
+    POST: returns a CSS-safe width in 0..100 without mutating financial totals.
+    """
+    if percentage is None:
+        return ZERO_MONEY
+    if percentage < ZERO_MONEY:
+        return ZERO_MONEY
+    if percentage > _RATIO_VISUAL_MAX:
+        return _RATIO_VISUAL_MAX
+    return percentage
+
+
+def _dashboard_visual_width(visual_percentage: Decimal) -> str:
+    """
+    PRE: visual_percentage is a constrained Decimal in 0..100.
+    POST: returns a locale-independent CSS width number using '.' as separator.
+    """
+    return format(visual_percentage, 'f')
+
+
 def get_dashboard_metrics(*, user) -> dict:
     """
     PRE: user es un usuario autenticado de Django.
-    POST: retorna únicamente métricas y actividad autorizadas por sus permisos.
+    POST: retorna KPIs/ratios financieros y actividad reciente autorizados por permisos.
     """
     can_view_donations = user.has_perm('operations.view_donation')
     can_view_allocations = user.has_perm('operations.view_fundallocation')
     can_view_expenses = user.has_perm('operations.view_expense')
     can_view_audit = user.has_perm('operations.view_auditlog')
+    can_view_unallocated = can_view_donations and can_view_allocations
+
+    total_received = None
+    total_assigned = None
+    total_spent = None
+    unallocated = None
 
     context = {
         'can_view_donations': can_view_donations,
         'can_view_allocations': can_view_allocations,
         'can_view_expenses': can_view_expenses,
         'can_view_audit': can_view_audit,
-        'can_view_available_balance': (
-            can_view_donations and can_view_allocations
-        ),
+        'can_view_available_balance': can_view_unallocated,
         'total_donations': None,
         'total_assigned': None,
         'total_executed': None,
         'available_balance': None,
+        'financial_kpis': [],
+        'financial_ratios': [],
         'recent_donations': Donation.objects.none(),
         'recent_expenses': Expense.objects.none(),
         'recent_audit_logs': AuditLog.objects.none(),
     }
 
-    donations = None
-    allocations = None
-
     if can_view_donations:
-        donations = Donation.objects.filter(
-            currency=OPERATING_CURRENCY,
-        ).exclude(status=Donation.Status.ANNULLED)
-        context['total_donations'] = sum_money(donations, 'amount')
-        context['recent_donations'] = donations.select_related('donor')[:5]
+        # Fondos recibidos: only RECEIVED donations in operating currency.
+        total_received = sum_money(
+            Donation.objects.filter(
+                currency=OPERATING_CURRENCY,
+                status=Donation.Status.RECEIVED,
+            ),
+            'amount',
+        )
+        context['total_donations'] = total_received
+        context['recent_donations'] = (
+            Donation.objects.filter(currency=OPERATING_CURRENCY)
+            .exclude(status=Donation.Status.ANNULLED)
+            .select_related('donor')[:5]
+        )
+        context['financial_kpis'].append(
+            {
+                'key': 'received',
+                'label': 'Fondos recibidos',
+                'value': total_received,
+                'currency': OPERATING_CURRENCY,
+                'helper': 'Donaciones confirmadas como recibidas.',
+                'url': reverse('donation_list') + '?status=received',
+            }
+        )
 
     if can_view_allocations:
-        allocations = FundAllocation.objects.filter(
-            donation__currency=OPERATING_CURRENCY,
-        ).exclude(status=FundAllocation.Status.ANNULLED)
-        context['total_assigned'] = sum_money(allocations, 'amount')
+        total_assigned = sum_money(
+            FundAllocation.objects.filter(
+                donation__currency=OPERATING_CURRENCY,
+            ).exclude(status=FundAllocation.Status.ANNULLED),
+            'amount',
+        )
+        context['total_assigned'] = total_assigned
+        context['financial_kpis'].append(
+            {
+                'key': 'assigned',
+                'label': 'Fondos asignados',
+                'value': total_assigned,
+                'currency': OPERATING_CURRENCY,
+                'helper': 'Asignaciones activas e históricas no anuladas.',
+                'url': reverse('allocation_list'),
+            }
+        )
 
     if can_view_expenses:
         expenses = Expense.objects.filter(
             currency=OPERATING_CURRENCY,
             allocation__donation__currency=OPERATING_CURRENCY,
-        ).exclude(status__in=Expense.non_executing_statuses())
-        context['total_executed'] = sum_money(expenses, 'amount')
+        ).exclude(status=Expense.Status.ANNULLED)
+        total_spent = sum_money(expenses, 'amount')
+        context['total_executed'] = total_spent
         context['recent_expenses'] = expenses.select_related(
             'allocation',
             'allocation__project',
         )[:5]
+        context['financial_kpis'].append(
+            {
+                'key': 'spent',
+                'label': 'Gastos registrados',
+                'value': total_spent,
+                'currency': OPERATING_CURRENCY,
+                'helper': 'Gastos no anulados en moneda operativa.',
+                'url': reverse('expense_list'),
+            }
+        )
+
+    if can_view_unallocated:
+        unallocated = max(total_received - total_assigned, ZERO_MONEY)
+        context['available_balance'] = unallocated
+        context['financial_kpis'].append(
+            {
+                'key': 'unallocated',
+                'label': 'Fondos sin asignar',
+                'value': unallocated,
+                'currency': OPERATING_CURRENCY,
+                'helper': 'Fondos recibidos aún no destinados a proyectos.',
+                'url': reverse('donation_list') + '?status=received',
+            }
+        )
+
+    # Stable KPI order when partial permissions omit earlier items:
+    # received → assigned → spent → unallocated (insertion order above).
 
     if can_view_donations and can_view_allocations:
-        context['available_balance'] = max(
-            context['total_donations'] - context['total_assigned'],
-            ZERO_MONEY,
+        assignment_percentage = dashboard_ratio_percentage(
+            total_assigned,
+            total_received,
+        )
+        assignment_visual = _dashboard_visual_percentage(assignment_percentage)
+        context['financial_ratios'].append(
+            {
+                'key': 'assignment',
+                'label': 'Asignación de fondos',
+                'numerator': total_assigned,
+                'denominator': total_received,
+                'currency': OPERATING_CURRENCY,
+                'percentage': assignment_percentage,
+                'visual_percentage': assignment_visual,
+                'visual_width': _dashboard_visual_width(assignment_visual),
+                'helper': (
+                    'Porción de los fondos recibidos que ya fue destinada a proyectos.'
+                ),
+                'empty_helper': (
+                    'Aún no hay fondos recibidos para calcular esta relación.'
+                ),
+            }
+        )
+
+    if can_view_allocations and can_view_expenses:
+        execution_percentage = dashboard_ratio_percentage(
+            total_spent,
+            total_assigned,
+        )
+        execution_visual = _dashboard_visual_percentage(execution_percentage)
+        context['financial_ratios'].append(
+            {
+                'key': 'execution',
+                'label': 'Ejecución financiera',
+                'numerator': total_spent,
+                'denominator': total_assigned,
+                'currency': OPERATING_CURRENCY,
+                'percentage': execution_percentage,
+                'visual_percentage': execution_visual,
+                'visual_width': _dashboard_visual_width(execution_visual),
+                'helper': (
+                    'Porción de los fondos asignados que ya fue registrada como gasto.'
+                ),
+                'empty_helper': (
+                    'Aún no hay fondos asignados para calcular esta relación.'
+                ),
+            }
         )
 
     if can_view_audit:

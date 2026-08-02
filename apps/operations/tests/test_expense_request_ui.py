@@ -293,7 +293,7 @@ class ExpenseRequestUITests(TestCase):
         self.client.force_login(self.auditor)
         response = self.client.get(reverse('dashboard'))
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context['show_financial_quick_actions'])
+        self.assertNotIn('show_financial_quick_actions', response.context)
         self.assertNotContains(response, 'Accesos rápidos')
         self.assertContains(response, 'title="Solicitudes de gasto"')
         self.assertContains(response, reverse('expense_request_list'))

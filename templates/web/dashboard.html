@@ -8,125 +8,90 @@
     <div>
         <div class="ops-kicker">Resumen operativo</div>
         <h1>Panel financiero</h1>
-        <p>Trazabilidad básica de donaciones, asignaciones y gastos.</p>
+        <p>Estado general de los recursos y su ejecución.</p>
     </div>
 </div>
 
-{% if show_financial_quick_actions %}
-<div class="card border-0 mb-4 ops-action-panel">
-    <div class="card-body">
-        <h2 class="h5 mb-3">Accesos rápidos</h2>
-        <div class="row g-3 ops-action-grid">
-            <div class="col-lg-4">
-                <div class="ops-action-group">
-                    <div class="ops-action-group-title">Consulta</div>
-                    {% if perms.operations.view_project %}
-                        <a class="btn btn-outline-primary" href="{% url 'project_list' %}">Ver proyectos</a>
-                    {% endif %}
-                    {% if perms.operations.view_donation %}
-                        <a class="btn btn-outline-primary" href="{% url 'donation_list' %}">Consultar donaciones</a>
-                    {% endif %}
-                    {% if perms.operations.view_expense %}
-                        <a class="btn btn-outline-primary" href="{% url 'expense_list' %}">Consultar gastos</a>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="col-lg-4">
-                <div class="ops-action-group">
-                    <div class="ops-action-group-title">Registro</div>
-                    {% if perms.operations.add_projectupdate %}
-                        <a class="btn btn-primary" href="{% url 'project_update_list' %}">Registrar avances</a>
-                    {% endif %}
-                    {% if perms.operations.add_project %}
-                        <a class="btn btn-outline-primary" href="{% url 'project_create' %}">Crear proyecto</a>
-                    {% endif %}
-                    {% if perms.operations.fulfill_expenserequest %}
-                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}">Ver solicitudes de gasto</a>
-                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}?status=approved_reserved">Aprobadas pendientes de registrar gasto</a>
-                    {% elif perms.operations.decide_expenserequest %}
-                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}?status=pending_decision">Solicitudes pendientes de decisión</a>
-                    {% elif perms.operations.view_expenserequest %}
-                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}">Mis solicitudes de gasto</a>
-                        <p class="small text-muted mb-0 mt-2">Las solicitudes se crean desde el detalle de un proyecto.</p>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="col-lg-4">
-                <div class="ops-action-group">
-                    <div class="ops-action-group-title">Auditoría</div>
-                    {% if perms.operations.view_auditlog %}
-                        <a class="btn btn-outline-secondary" href="{% url 'audit_log_list' %}">Ver auditoría</a>
-                    {% endif %}
-                    {% if perms.operations.add_donation %}
-                        <a class="btn btn-outline-primary" href="{% url 'donation_create' %}">Crear donación</a>
-                    {% endif %}
-                    {% if perms.operations.add_fundallocation %}
-                        <a class="btn btn-outline-primary" href="{% url 'allocation_create' %}">Crear asignación</a>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
-
-{% if can_view_donations or can_view_allocations or can_view_expenses %}
+{% if financial_kpis %}
     <div class="row g-3 mb-4 ops-metric-grid">
-        {% if can_view_donations %}
-            <div class="col-md-3">
+        {% for kpi in financial_kpis %}
+            <div class="col-md-6 col-xl-3">
                 <div class="card h-100 border-0 ops-metric-card">
                     <div class="card-body">
-                        <div class="ops-metric-label">Donaciones recibidas USD</div>
-                        <div class="ops-metric-value">{{ total_donations|money_es }}</div>
+                        <div class="ops-metric-label">{{ kpi.label }}</div>
+                        <div class="ops-metric-value ops-money text-nowrap">
+                            {% if kpi.url %}
+                                <a class="ops-metric-link" href="{{ kpi.url }}">{{ kpi.value|money_es }} {{ kpi.currency }}</a>
+                            {% else %}
+                                {{ kpi.value|money_es }} {{ kpi.currency }}
+                            {% endif %}
+                        </div>
+                        <p class="ops-metric-helper mb-0">{{ kpi.helper }}</p>
                     </div>
                 </div>
             </div>
-        {% endif %}
-
-        {% if can_view_allocations %}
-            <div class="col-md-3">
-                <div class="card h-100 border-0 ops-metric-card">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Asignado USD</div>
-                        <div class="ops-metric-value">{{ total_assigned|money_es }}</div>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
-
-        {% if can_view_expenses %}
-            <div class="col-md-3">
-                <div class="card h-100 border-0 ops-metric-card">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Ejecutado USD</div>
-                        <div class="ops-metric-value">{{ total_executed|money_es }}</div>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
-
-        {% if can_view_available_balance %}
-            <div class="col-md-3">
-                <div class="card h-100 border-0 ops-metric-card ops-metric-card-available">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Disponible USD</div>
-                        <div class="ops-metric-value">{{ available_balance|money_es }}</div>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
+        {% endfor %}
     </div>
+
+    {% if financial_ratios %}
+        <div class="row g-3 mb-4 ops-ratio-grid">
+            {% for ratio in financial_ratios %}
+                <div class="col-lg-6">
+                    <div class="card h-100 border-0 ops-metric-card ops-ratio-card">
+                        <div class="card-body">
+                            <div class="ops-metric-label">{{ ratio.label }}</div>
+                            <div class="ops-ratio-percentage">
+                                {% if ratio.percentage is None %}
+                                    —
+                                {% else %}
+                                    {{ ratio.percentage|percentage_es }} %
+                                {% endif %}
+                            </div>
+                            <div class="ops-ratio-amounts ops-money text-nowrap">
+                                {{ ratio.numerator|money_es }} de {{ ratio.denominator|money_es }} {{ ratio.currency }}
+                            </div>
+                            {% if ratio.percentage is None %}
+                                <div
+                                    class="ops-financial-progress"
+                                    role="progressbar"
+                                    aria-valuemin="0"
+                                    aria-valuemax="100"
+                                    aria-label="{{ ratio.label }}: sin datos"
+                                >
+                                    <span style="width: 0%"></span>
+                                </div>
+                                <p class="ops-metric-helper mb-0">{{ ratio.empty_helper }}</p>
+                            {% else %}
+                                <div
+                                    class="ops-financial-progress"
+                                    role="progressbar"
+                                    aria-valuemin="0"
+                                    aria-valuemax="100"
+                                    aria-valuenow="{{ ratio.visual_width }}"
+                                    aria-label="{{ ratio.label }}: {{ ratio.percentage|percentage_es }} por ciento"
+                                >
+                                    <span style="width: {{ ratio.visual_width }}%"></span>
+                                </div>
+                                <p class="ops-metric-helper mb-0">{{ ratio.helper }}</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
 {% else %}
     <div class="alert alert-light border mb-4" role="status">
-        Las métricas financieras se muestran según los permisos asignados a tu cuenta.
+        El panel muestra información acorde con tus permisos.
     </div>
 {% endif %}
 
 {% if can_view_donations or can_view_expenses or can_view_audit %}
+    <h2 class="h5 ops-section-title">Actividad reciente</h2>
     <div class="row g-4">
         {% if can_view_donations %}
             <div class="col-lg-4">
-                <h2 class="h5 ops-section-title">Ingresos</h2>
+                <h3 class="h6 ops-section-subtitle">Ingresos</h3>
                 <div class="list-group ops-activity-list">
                     {% for donation in recent_donations %}
                         <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
@@ -147,7 +112,7 @@
 
         {% if can_view_expenses %}
             <div class="col-lg-4">
-                <h2 class="h5 ops-section-title">Gastos recientes</h2>
+                <h3 class="h6 ops-section-subtitle">Gastos</h3>
                 <div class="list-group ops-activity-list">
                     {% for expense in recent_expenses %}
                         <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
@@ -165,7 +130,7 @@
 
         {% if can_view_audit %}
             <div class="col-lg-4">
-                <h2 class="h5 ops-section-title">Acciones recientes de auditoría</h2>
+                <h3 class="h6 ops-section-subtitle">Auditoría</h3>
                 <div class="list-group ops-activity-list">
                     {% for log in recent_audit_logs %}
                         <a class="list-group-item list-group-item-action" href="{% url 'audit_log_list' %}">

@@ -139,6 +139,8 @@ ANNULLED
 * PostgreSQL impide monedas distintas de USD.
 * Las asignaciones no anuladas no pueden exceder el monto disponible.
 * Una donación anulada queda excluida de métricas y saldos operativos.
+* El KPI global de dashboard **Fondos recibidos** cuenta solo `RECEIVED`
+  (no `REGISTERED`).
 * El nivel de asignación se calcula a partir de sus asignaciones y no se almacena como estado editable.
 
 ## 4. `FundAllocation`

@@ -588,41 +588,46 @@ No puede acceder a:
 ## 13. Control de acceso en el dashboard
 
 El dashboard filtra tanto la presentación visual como la consulta de datos.
+Los accesos rápidos se eliminaron del dashboard: la navegación operativa
+permanece en el sidebar.
 
 ```text
 view_donation
-→ total y actividad de donaciones
+→ KPI Fondos recibidos (solo Donation.Status.RECEIVED) y actividad de ingresos
 
 view_fundallocation
-→ total asignado
+→ KPI Fondos asignados
 
 view_expense
-→ total ejecutado y gastos recientes
+→ KPI Gastos registrados y actividad de gastos
 
 view_auditlog
 → actividad reciente de auditoría
 
 view_donation + view_fundallocation
-→ saldo global disponible
+→ KPI Fondos sin asignar (recibidos − asignados, mínimo 0)
+→ ratio Asignación de fondos
+
+view_fundallocation + view_expense
+→ ratio Ejecución financiera
 ```
 
-Además, el bloque de accesos rápidos (`show_financial_quick_actions`) se oculta
-únicamente para el rol funcional `Auditor externo`. Los demás roles y usuarios
-sin rol canónico siguen viendo el bloque; los botones internos siguen filtrados
-por permisos efectivos. Ocultar el bloque no revoca permisos.
+Las reservas de solicitudes de gasto no intervienen en los cuatro KPI ni en
+las dos ratios del panel global (DASH-FIN1).
 
-Atajos de solicitudes de gasto (ER7), por permisos efectivos:
+Atajos de solicitudes de gasto (ER7) viven en el sidebar y en los listados,
+no en el dashboard:
 
 ```text
 fulfill_expenserequest
-→ Ver solicitudes de gasto
-→ Aprobadas pendientes de registrar gasto (?status=approved_reserved)
+→ Ver solicitudes de gasto (sidebar / listados)
+→ filtro aprobadas pendientes de registrar gasto (?status=approved_reserved)
 
 decide_expenserequest (sin fulfill)
-→ Solicitudes pendientes de decisión (?status=pending_decision)
+→ filtro solicitudes pendientes de decisión (?status=pending_decision)
 
 view_expenserequest (sin fulfill ni decide)
-→ Mis solicitudes de gasto
+→ Mis solicitudes de gasto (listado)
 → guía: se crean desde el detalle de un proyecto
 ```
 

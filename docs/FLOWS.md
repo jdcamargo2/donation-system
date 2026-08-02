@@ -136,6 +136,10 @@ contra el SHA-384 oficial
 * La donación conserva un código único e inmutable.
 * El saldo disponible se deriva de las asignaciones no anuladas.
 * Una donación anulada queda excluida de las métricas operativas.
+* En el dashboard global, el KPI **Fondos recibidos** suma solo donaciones en
+  estado `RECEIVED` (moneda operativa). `REGISTERED` no cuenta.
+* **Fondos sin asignar** = recibidos − asignaciones no anuladas (mínimo 0);
+  las reservas de solicitudes no entran en este KPI.
 
 ### Regla monetaria
 
@@ -353,7 +357,8 @@ rechazo.
   * no hay URLs directas de media ni exposición pública;
   * Admin/Comité/Auditor leen adjuntos de solicitudes visibles; el Operador
     solo las propias.
-* ER7 cierra el módulo con atajos de dashboard por permisos efectivos:
+* ER7 cierra el módulo con navegación de solicitudes por permisos efectivos
+  (sidebar y listados; el dashboard ya no expone Accesos rápidos):
   * Admin (`fulfill_expenserequest`): ver solicitudes y aprobadas pendientes de
     registrar gasto;
   * Operador (`view_expenserequest` sin decide/fulfill): mis solicitudes, sin

@@ -73,15 +73,24 @@ class DashboardTests(TestCase):
         self.assertContains(response, 'Cerrar sesión')
         self.assertContains(
             response,
-            'Las métricas financieras se muestran según los permisos asignados a tu cuenta.',
+            'El panel muestra información acorde con tus permisos.',
         )
-        self.assertNotContains(response, 'Donaciones recibidas')
-        self.assertNotContains(response, 'Gastos recientes')
+        self.assertNotContains(response, 'Fondos recibidos')
+        self.assertNotContains(response, 'Fondos asignados')
+        self.assertNotContains(response, 'Gastos registrados')
+        self.assertNotContains(response, 'Fondos sin asignar')
+        self.assertNotContains(response, 'Accesos rápidos')
+        self.assertNotContains(response, 'ops-action-panel')
+        self.assertNotContains(response, 'Actividad reciente')
+        self.assertNotContains(response, 'Gastos')
         self.assertNotContains(response, 'Acciones recientes de auditoría')
         self.assertIsNone(response.context['total_donations'])
         self.assertIsNone(response.context['total_assigned'])
         self.assertIsNone(response.context['total_executed'])
         self.assertIsNone(response.context['available_balance'])
+        self.assertEqual(response.context['financial_kpis'], [])
+        self.assertEqual(response.context['financial_ratios'], [])
+        self.assertNotIn('show_financial_quick_actions', response.context)
 
     def test_sidebar_links_do_not_trigger_sidebar_toggle(self):
         self.client.force_login(self.user)
@@ -118,11 +127,61 @@ class DashboardTests(TestCase):
         self.client.force_login(self.user)
 
         response = self.client.get(reverse('dashboard'))
+        html = response.content.decode()
 
         self.assertEqual(response.context['total_donations'], Decimal('150.00'))
         self.assertEqual(response.context['total_assigned'], Decimal('85.00'))
         self.assertEqual(response.context['total_executed'], Decimal('20.00'))
         self.assertEqual(response.context['available_balance'], Decimal('65.00'))
+        kpi_keys = [item['key'] for item in response.context['financial_kpis']]
+        self.assertEqual(kpi_keys, ['received', 'assigned', 'spent', 'unallocated'])
+        ratio_keys = [item['key'] for item in response.context['financial_ratios']]
+        self.assertEqual(ratio_keys, ['assignment', 'execution'])
+        self.assertContains(response, 'Fondos recibidos')
+        self.assertContains(response, 'Fondos asignados')
+        self.assertContains(response, 'Gastos registrados')
+        self.assertContains(response, 'Fondos sin asignar')
+        self.assertContains(response, 'Asignación de fondos')
+        self.assertContains(response, 'Ejecución financiera')
+        self.assertContains(response, 'ops-financial-progress')
+        self.assertContains(response, '150,00 USD')
+        self.assertContains(response, 'Actividad reciente')
+        self.assertLess(html.find('Fondos recibidos'), html.find('Actividad reciente'))
+        self.assertNotContains(response, 'Accesos rápidos')
+        self.assertNotContains(response, 'ops-action-panel')
+        self.assertEqual(html.count('<h1'), 1)
+
+    def test_dashboard_excludes_registered_donations_from_received_kpi(self):
+        create_donation(
+            code='DON-REGISTERED',
+            donor=self.donor,
+            amount=Decimal('200.00'),
+            status=Donation.Status.REGISTERED,
+        )
+        create_donation(
+            code='DON-RECEIVED',
+            donor=self.donor,
+            amount=Decimal('100.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        create_donation(
+            code='DON-ANNULLED',
+            donor=self.donor,
+            amount=Decimal('900.00'),
+            status=Donation.Status.ANNULLED,
+        )
+        self.grant_permissions('view_donation')
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(response.context['total_donations'], Decimal('100.00'))
+        self.assertEqual(response.context['financial_kpis'][0]['value'], Decimal('100.00'))
+        self.assertEqual(len(response.context['financial_kpis']), 1)
+        self.assertEqual(response.context['financial_ratios'], [])
+        self.assertContains(response, 'Fondos recibidos')
+        self.assertNotContains(response, 'Fondos sin asignar')
+        self.assertNotContains(response, 'Asignación de fondos')
 
     def test_dashboard_excludes_annulled_financial_records(self):
         donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
@@ -151,6 +210,62 @@ class DashboardTests(TestCase):
         self.assertEqual(response.context['total_executed'], Decimal('15.00'))
         self.assertEqual(response.context['available_balance'], Decimal('40.00'))
 
+    def test_dashboard_unallocated_never_renders_negative(self):
+        donation = create_donation(donor=self.donor, amount=Decimal('50.00'))
+        create_allocation(donation=donation, project=self.project, amount=Decimal('50.00'))
+        # Legacy anomaly fixture: assigned already equals received; unallocated stays zero.
+        self.grant_permissions('view_donation', 'view_fundallocation')
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('dashboard'))
+        unallocated = next(
+            item for item in response.context['financial_kpis'] if item['key'] == 'unallocated'
+        )
+        assignment = response.context['financial_ratios'][0]
+
+        self.assertEqual(unallocated['value'], Decimal('0.00'))
+        self.assertGreaterEqual(unallocated['value'], Decimal('0.00'))
+        self.assertEqual(assignment['percentage'], Decimal('100.0'))
+        self.assertEqual(assignment['visual_percentage'], Decimal('100.0'))
+
+    def test_dashboard_ratio_zero_denominators_and_visual_cap(self):
+        self.grant_permissions(
+            'view_donation',
+            'view_fundallocation',
+            'view_expense',
+        )
+        self.client.force_login(self.user)
+
+        empty = self.client.get(reverse('dashboard'))
+        assignment, execution = empty.context['financial_ratios']
+        self.assertIsNone(assignment['percentage'])
+        self.assertEqual(assignment['visual_percentage'], Decimal('0.00'))
+        self.assertIsNone(execution['percentage'])
+        self.assertEqual(execution['visual_percentage'], Decimal('0.00'))
+        self.assertContains(empty, '—')
+        self.assertContains(empty, 'Aún no hay fondos recibidos para calcular esta relación.')
+        self.assertContains(empty, 'Aún no hay fondos asignados para calcular esta relación.')
+
+        donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
+        allocation = create_allocation(
+            donation=donation,
+            project=self.project,
+            amount=Decimal('80.00'),
+        )
+        create_expense(allocation=allocation, amount=Decimal('50.00'))
+        # Force assigned > received via ORM to exercise visual cap without mutating domain services.
+        FundAllocation.objects.filter(pk=allocation.pk).update(amount=Decimal('150.00'))
+
+        capped = self.client.get(reverse('dashboard'))
+        assignment = capped.context['financial_ratios'][0]
+        self.assertEqual(assignment['percentage'], Decimal('150.0'))
+        self.assertEqual(assignment['visual_percentage'], Decimal('100'))
+        self.assertEqual(assignment['visual_width'], '100')
+        self.assertContains(capped, '150 %')
+        self.assertContains(capped, 'width: 100%')
+        self.assertIsInstance(assignment['numerator'], Decimal)
+        self.assertIsInstance(assignment['denominator'], Decimal)
+
     def test_dashboard_uses_usd_financial_records(self):
         usd_donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
         usd_allocation = create_allocation(
@@ -172,6 +287,9 @@ class DashboardTests(TestCase):
         self.assertEqual(response.context['total_assigned'], Decimal('60.00'))
         self.assertEqual(response.context['total_executed'], Decimal('15.00'))
         self.assertEqual(response.context['available_balance'], Decimal('40.00'))
+        assignment, execution = response.context['financial_ratios']
+        self.assertEqual(assignment['percentage'], Decimal('60.0'))
+        self.assertEqual(execution['percentage'], Decimal('25.0'))
 
     def test_dashboard_renders_legacy_audit_model_names_in_spanish(self):
         self.grant_permissions('view_auditlog')
@@ -188,6 +306,7 @@ class DashboardTests(TestCase):
 
         self.assertContains(response, 'Actualizada Donación')
         self.assertNotContains(response, 'Actualizada Donation')
+        self.assertContains(response, 'Actividad reciente')
 
     def test_dashboard_does_not_expose_financial_or_audit_data_without_permissions(self):
         donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
@@ -207,15 +326,22 @@ class DashboardTests(TestCase):
         self.client.force_login(self.user)
 
         response = self.client.get(reverse('dashboard'))
+        html = response.content.decode()
 
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.context['total_donations'])
         self.assertIsNone(response.context['total_assigned'])
         self.assertIsNone(response.context['total_executed'])
         self.assertIsNone(response.context['available_balance'])
+        self.assertEqual(response.context['financial_kpis'], [])
+        self.assertEqual(response.context['financial_ratios'], [])
         self.assertNotContains(response, donation.code)
-        self.assertNotContains(response, 'Gastos recientes')
-        self.assertNotContains(response, 'Acciones recientes de auditoría')
+        self.assertNotContains(response, '100,00')
+        self.assertNotContains(response, '60,00')
+        self.assertNotContains(response, '20,00')
+        self.assertNotContains(response, 'Fondos recibidos')
+        self.assertNotContains(response, 'Actividad reciente')
+        self.assertNotContains(response, 'Accesos rápidos')
         self.assertNotContains(response, 'Ver solicitudes de gasto')
         self.assertNotContains(response, 'Mis solicitudes de gasto')
         self.assertNotContains(response, 'Solicitudes pendientes de decisión')
@@ -226,55 +352,86 @@ class DashboardTests(TestCase):
         self.assertNotContains(response, reverse('expense_request_list'))
         self.assertNotContains(response, 'Crear gasto')
         self.assertNotContains(response, reverse('expense_create'))
+        self.assertNotIn('aria-valuenow="60"', html)
 
-    def test_dashboard_expense_request_shortcuts_follow_effective_permissions(self):
-        list_url = reverse('expense_request_list')
-
-        self.grant_permissions('fulfill_expenserequest', 'view_expenserequest')
+    def test_dashboard_partial_permissions_hide_derived_values(self):
+        donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
+        allocation = create_allocation(
+            donation=donation,
+            project=self.project,
+            amount=Decimal('60.00'),
+        )
+        create_expense(allocation=allocation, amount=Decimal('20.00'))
         self.client.force_login(self.user)
-        admin_like = self.client.get(reverse('dashboard'))
-        self.assertContains(admin_like, 'Ver solicitudes de gasto')
-        self.assertContains(admin_like, 'Aprobadas pendientes de registrar gasto')
-        self.assertContains(admin_like, f'{list_url}?status=approved_reserved')
-        self.assertNotContains(admin_like, 'Mis solicitudes de gasto')
-        self.assertNotContains(admin_like, 'Solicitudes pendientes de decisión')
-        self.assertNotContains(admin_like, 'Crear gasto')
-        self.assertNotContains(admin_like, reverse('expense_create'))
+
+        self.grant_permissions('view_donation')
+        donation_only = self.client.get(reverse('dashboard'))
+        self.assertEqual(
+            [item['key'] for item in donation_only.context['financial_kpis']],
+            ['received'],
+        )
+        self.assertEqual(donation_only.context['financial_ratios'], [])
+        self.assertContains(donation_only, 'Fondos recibidos')
+        self.assertNotContains(donation_only, 'Fondos sin asignar')
+        self.assertNotContains(donation_only, 'Asignación de fondos')
+        self.assertNotContains(donation_only, '60,00')
+        self.assertNotContains(donation_only, '20,00')
 
         self.user.user_permissions.clear()
-        self.grant_permissions('decide_expenserequest', 'view_expenserequest')
-        committee_like = self.client.get(reverse('dashboard'))
-        self.assertContains(committee_like, 'Solicitudes pendientes de decisión')
-        self.assertContains(
-            committee_like,
-            f'{list_url}?status=pending_decision',
+        self.grant_permissions('view_fundallocation')
+        allocation_only = self.client.get(reverse('dashboard'))
+        self.assertEqual(
+            [item['key'] for item in allocation_only.context['financial_kpis']],
+            ['assigned'],
         )
-        self.assertNotContains(committee_like, 'Ver solicitudes de gasto')
-        self.assertNotContains(committee_like, 'Mis solicitudes de gasto')
-        self.assertNotContains(
-            committee_like,
-            'Aprobadas pendientes de registrar gasto',
-        )
+        self.assertEqual(allocation_only.context['financial_ratios'], [])
+        self.assertContains(allocation_only, 'Fondos asignados')
+        self.assertNotContains(allocation_only, 'Fondos recibidos')
+        self.assertNotContains(allocation_only, '100,00')
+        self.assertNotContains(allocation_only, '20,00')
 
         self.user.user_permissions.clear()
-        self.grant_permissions('view_expenserequest')
-        operator_like = self.client.get(reverse('dashboard'))
-        self.assertContains(operator_like, 'Mis solicitudes de gasto')
-        self.assertContains(operator_like, list_url)
-        self.assertContains(
-            operator_like,
-            'Las solicitudes se crean desde el detalle de un proyecto.',
+        self.grant_permissions('view_expense')
+        expense_only = self.client.get(reverse('dashboard'))
+        self.assertEqual(
+            [item['key'] for item in expense_only.context['financial_kpis']],
+            ['spent'],
         )
-        self.assertNotContains(operator_like, reverse('expense_request_create'))
-        self.assertNotContains(operator_like, 'Ver solicitudes de gasto')
-        self.assertNotContains(
-            operator_like,
-            'Aprobadas pendientes de registrar gasto',
+        self.assertEqual(expense_only.context['financial_ratios'], [])
+        self.assertContains(expense_only, 'Gastos registrados')
+        self.assertNotContains(expense_only, 'Ejecución financiera')
+        self.assertNotContains(expense_only, '100,00')
+        self.assertNotContains(expense_only, '60,00')
+
+    def test_dashboard_has_no_quick_access_block(self):
+        self.grant_permissions(
+            'view_project',
+            'view_donation',
+            'view_expenserequest',
+            'fulfill_expenserequest',
+            'decide_expenserequest',
+            'add_projectupdate',
+            'add_donation',
+            'add_fundallocation',
+            'view_auditlog',
         )
-        self.assertNotContains(operator_like, 'status=approved_reserved')
-        self.assertNotContains(operator_like, 'Solicitudes pendientes de decisión')
-        self.assertNotContains(operator_like, 'Crear gasto')
-        self.assertNotContains(operator_like, reverse('expense_create'))
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertNotIn('show_financial_quick_actions', response.context)
+        self.assertNotContains(response, 'Accesos rápidos')
+        self.assertNotContains(response, 'ops-action-panel')
+        self.assertNotContains(response, 'Ver proyectos')
+        self.assertNotContains(response, 'Registrar avances')
+        self.assertNotContains(response, 'Crear asignación')
+        self.assertNotContains(response, 'Crear donación')
+        self.assertNotContains(response, 'Ver solicitudes de gasto')
+        self.assertNotContains(response, 'Aprobadas pendientes de registrar gasto')
+        self.assertNotContains(response, 'Solicitudes pendientes de decisión')
+        self.assertNotContains(response, 'Mis solicitudes de gasto')
+        self.assertNotContains(response, 'Crear gasto')
+        self.assertNotContains(response, reverse('expense_create'))
 
 class SidebarOverflowContractTests(TestCase):
     """Regression: short/zoomed viewports must scroll nav without covering the footer."""
