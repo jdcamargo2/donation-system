@@ -303,9 +303,50 @@ class ProjectPublicationUiTests(TestCase):
         self.client.force_login(self.admin)
 
         response = self.client.get(reverse('project_list'))
+        content = response.content.decode()
 
         self.assertContains(response, 'Privado')
         self.assertContains(response, 'Público')
+        self.assertContains(response, self.project.get_status_display())
+        self.assertContains(response, 'project-actions-')
+        self.assertContains(
+            response,
+            'd-inline-flex align-items-center gap-2 flex-wrap',
+        )
+
+        # Parse list status cells only (avoid brittle whole-page substring checks).
+        status_cells = []
+        for row in content.split('<tr>')[1:]:
+            cells = row.split('<td>')
+            if len(cells) < 3:
+                continue
+            status_cells.append(cells[2].split('</td>', 1)[0])
+
+        public_cell = next(cell for cell in status_cells if 'Público' in cell)
+        private_cell = next(cell for cell in status_cells if 'Privado' in cell)
+
+        for cell in (public_cell, private_cell):
+            self.assertIn(
+                'class="d-inline-flex align-items-center gap-2 flex-wrap"',
+                cell,
+            )
+            self.assertIn('class="badge ops-status-badge"', cell)
+            self.assertNotIn('d-block', cell)
+            self.assertNotIn('mt-1', cell)
+
+        self.assertIn('text-bg-success', public_cell)
+        self.assertIn('aria-label="Visibilidad: Público"', public_cell)
+        self.assertIn('text-bg-secondary', private_cell)
+        self.assertIn('aria-label="Visibilidad: Privado"', private_cell)
+
+        # Project detail visibility markup remains independent of the list layout.
+        detail = self.client.get(reverse('project_detail', args=[self.project.pk]))
+        detail_content = detail.content.decode()
+        self.assertContains(detail, 'Privado')
+        self.assertNotIn(
+            'd-inline-flex align-items-center gap-2 flex-wrap',
+            detail_content,
+        )
 
 
 class ProjectPublicationRoleTests(TestCase):

@@ -40,12 +40,23 @@
                             </span>
                         </td>
                         <td>
-                            <span class="badge ops-status-badge">{{ project.get_status_display }}</span>
-                            {% if project.is_public %}
-                                <span class="badge text-bg-success d-block mt-1" aria-label="Visibilidad: Público">Público</span>
-                            {% else %}
-                                <span class="badge text-bg-secondary d-block mt-1" aria-label="Visibilidad: Privado">Privado</span>
-                            {% endif %}
+                            <div class="d-inline-flex align-items-center gap-2 flex-wrap">
+                                <span class="badge ops-status-badge">
+                                    {{ project.get_status_display }}
+                                </span>
+
+                                {% if project.is_public %}
+                                    <span class="badge text-bg-success"
+                                          aria-label="Visibilidad: Público">
+                                        Público
+                                    </span>
+                                {% else %}
+                                    <span class="badge text-bg-secondary"
+                                          aria-label="Visibilidad: Privado">
+                                        Privado
+                                    </span>
+                                {% endif %}
+                            </div>
                         </td>
                         <td class="ops-money text-nowrap">{{ project.estimated_budget|money_es }} USD</td>
                         <td>
