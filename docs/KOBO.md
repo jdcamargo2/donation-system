@@ -371,11 +371,13 @@ El comando puede:
 * resolver el proyecto;
 * descargar adjuntos cuando se solicita;
 * registrar eventos técnicos;
-* dejar la submission lista para revisión;
+* dejar la submission en estado interno listo para el pipeline automático;
 * ejecutar el mismo dispatcher territorial utilizado por el webhook;
 * registrar errores de validación o procesamiento.
 
-El procesamiento no debe importar automáticamente información operativa cuando el flujo exige revisión humana.
+El procesamiento ordinario de submissions válidas y con routing resuelto continúa
+hacia auto-aprobación e importación. Las fallas e incidencias se presentan en el
+hub global; no se sostiene una cola humana por Project.
 
 ## 11. Reconciliación
 
@@ -453,24 +455,24 @@ permisos `kobo.view_kobosubmission` / elevación sensible.
 
 ## 13. Histórico: revisión manual por proyecto
 
-La revisión ordinaria asociada a un proyecto permite:
+Antes del pipeline automático, la revisión ordinaria asociada a un proyecto
+permitía consultar información normalizada, importar, rechazar, restaurar y
+consultar el historial. Esa bandeja humana por Project ya no forma parte del
+flujo operativo vigente: las submissions resueltas se enrutan y auto-importan,
+y las rutas HTTP de revisión/importación/rechazo por proyecto permanecen
+deshabilitadas (`Http404`) donde aún existen. El detalle del proyecto muestra
+datos importados e historial Kobo; las incidencias operativas viven en el hub
+global.
 
-* consultar información normalizada;
-* revisar evidencia y adjuntos autorizados;
-* importar;
-* rechazar;
-* restaurar;
-* consultar el historial del procesamiento.
+### Permisos (histórico / rutas retenidas)
 
-### Permisos
-
-La consulta ordinaria requiere:
+La consulta ordinaria requería:
 
 ```text
 operations.view_project
 ```
 
-La importación, el rechazo o la restauración requieren:
+La importación, el rechazo o la restauración requerían:
 
 ```text
 operations.change_project
@@ -614,11 +616,15 @@ Ambas rutas terminan ahora en el servicio materializador común.
 
 ## 14. Histórico: rechazo y restauración
 
+Las rutas HTTP de rechazo/restauración por proyecto están deshabilitadas. Los
+servicios de dominio pueden conservar estas transiciones para compatibilidad y
+trazabilidad; no reabren una cola humana por Project.
+
 ### Rechazo
 
-Una submission lista para revisión puede rechazarse cuando:
+Una submission puede rechazarse por servicio cuando:
 
-* el usuario posee permisos;
+* el actor posee permisos;
 * se registra un motivo;
 * la transición está permitida.
 
@@ -633,11 +639,11 @@ El rechazo:
 * no elimina el payload original;
 * no importa información operativa;
 * conserva la trazabilidad;
-* puede permitir una restauración posterior.
+* no restaura una bandeja de revisión por Project.
 
 ### Restauración
 
-Una submission rechazada puede restaurarse al estado revisable:
+Una submission rechazada puede restaurarse al estado interno transitorio:
 
 ```text
 REJECTED
@@ -647,9 +653,10 @@ REJECTED
 La restauración:
 
 * requiere autorización;
-* no implica importación automática;
+* no implica aprobación humana por Project;
 * debe registrar un evento técnico;
-* conserva el rechazo anterior en el historial.
+* conserva el rechazo anterior en el historial;
+* permite que el pipeline automático reintente cuando corresponda.
 
 ## 15. Consola global
 
@@ -779,15 +786,16 @@ El lenguaje visible del panel prioriza términos operativos:
 * Asignación de zonas (configuración zona pastoral → proyecto)
 * Núcleos registrados
 * Casos por revisar
-* Formularios pendientes de revisión / importados
+* Incidencias de importación automática / formularios importados
 
 Los nombres técnicos internos (`mapping`, `routing`, identidades territoriales)
 se conservan en modelos, servicios y documentación de arquitectura.
 
-El criterio compartido de «formularios pendientes de revisión» es
-`status=ready_for_review` (`pending_review_queryset` en el hub). Ese mismo
-queryset alimenta la métrica del resumen, la categoría en Casos por revisar,
-el enlace «Ver listado» y el listado en `/integrations/kobo/submissions/pending/`.
+El listado `/integrations/kobo/submissions/pending/` es el hub global de
+incidencias (`incident_queryset`). `pending_review_queryset` es un alias
+deprecado de ese mismo queryset; no significa `status=READY_FOR_REVIEW` ni una
+cola humana por Project. `READY_FOR_REVIEW` permanece como estado interno
+transitorio del pipeline automático.
 
 La asignación de zonas admite `?zone=<codigo>` para preseleccionar la zona en el
 formulario de configuración sin mutar por GET. El historial completo de

@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="container-fluid py-3">
-    {% if back_to_history %}<a href="{% url 'kobo:project_submission_history' project.pk %}" class="text-decoration-none">← Volver al historial</a>{% else %}<a href="{% url 'kobo:project_pending_submission_list' project.pk %}" class="text-decoration-none">← Volver a fichas pendientes</a>{% endif %}
+    {% if back_to_history %}<a href="{% url 'kobo:project_submission_history' project.pk %}" class="text-decoration-none">← Volver al historial</a>{% else %}<a href="{% url 'project_detail' project.pk %}" class="text-decoration-none">← Volver al proyecto</a>{% endif %}
     <div class="my-3"><div class="text-uppercase text-muted small">Revisión Kobo</div><h1 class="h3">{{ project_submission_detail_title }}</h1></div>
     <section class="card card-body mb-3"><dl class="row mb-0">
         <dt class="col-sm-4">Proyecto destino</dt><dd class="col-sm-8">{{ project }}</dd>

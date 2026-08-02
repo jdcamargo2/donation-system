@@ -10,7 +10,6 @@ from apps.integrations.kobo.models import KoboAttachment
 from apps.integrations.kobo.models import KoboFormDefinition
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.services import get_project_imported_submissions
-from apps.integrations.kobo.services import get_project_pending_submissions
 from apps.integrations.kobo.services import get_project_submission_history
 from apps.integrations.kobo.services import import_kobo_submission
 from apps.integrations.kobo.services import reject_kobo_submission
@@ -27,6 +26,7 @@ from django.db import transaction
 from django.test import TestCase
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
+from django.urls import NoReverseMatch
 from django.urls import reverse
 from django.utils import timezone as django_timezone
 
@@ -300,27 +300,25 @@ class KoboProjectImportedSubmissionsTests(TestCase):
 
         self.assertEqual(submissions, [self.prioritization_imported])
 
-    def test_pending_service_and_project_detail_show_only_reviewable_submissions(self):
-        submissions = list(get_project_pending_submissions(self.project))
-
-        self.assertEqual(submissions, [self.ready])
+    def test_project_detail_removes_obsolete_pending_review_surface(self):
         self.client.force_login(self.viewer)
         response = self.client.get(reverse("project_detail", args=(self.project.pk,)))
-        queue_response = self.client.get(
-            reverse("kobo:project_pending_submission_list", args=(self.project.pk,))
-        )
 
-        self.assertContains(response, "Fichas Kobo pendientes de revisión")
-        self.assertContains(response, "ready-hidden")
-        self.assertNotContains(response, "approved-hidden")
-        self.assertNotContains(response, "validation-failed-hidden")
-        self.assertNotContains(response, "other-project-imported")
-        self.assertNotContains(response, "Revisar")
-        self.assertEqual(queue_response.status_code, 200)
-        self.assertContains(queue_response, "ready-hidden")
-        self.assertNotContains(queue_response, "approved-hidden")
-        self.assertNotContains(queue_response, "validation-failed-hidden")
-        self.assertNotContains(queue_response, "other-project-imported")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "operations/project_detail.html")
+        self.assertNotContains(response, "Fichas Kobo pendientes de revisión")
+        self.assertNotContains(response, "Ver bandeja de revisión")
+        self.assertNotContains(response, "No hay fichas Kobo pendientes de revisión.")
+        self.assertNotContains(response, "Procesamiento automático")
+        self.assertNotContains(response, "ready-hidden")
+        self.assertContains(response, "Ver historial Kobo")
+        self.assertContains(
+            response,
+            reverse("kobo:project_submission_history", args=(self.project.pk,)),
+        )
+        self.assertNotContains(response, "/integrations/kobo/submissions/pending/")
+        with self.assertRaises(NoReverseMatch):
+            reverse("kobo:project_pending_submission_list", args=(self.project.pk,))
 
     def test_project_detail_shows_only_visible_imported_submission(self):
         self.client.force_login(self.viewer)
@@ -330,9 +328,10 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "operations/project_detail.html")
         self.assertContains(response, "Levantamientos de campo")
+        self.assertContains(response, "Ver historial Kobo")
         self.assertContains(response, "visible-parish")
         self.assertNotContains(response, "other-project-imported")
-        self.assertContains(response, "ready-hidden")
+        self.assertNotContains(response, "ready-hidden")
         self.assertNotContains(response, "approved-hidden")
         self.assertNotContains(response, "inactive-asset-hidden")
         self.assertContains(response, "Microproyectos priorizados")
@@ -419,7 +418,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         )
         self.assertEqual(prioritization_pending.processing_events.count(), 1)
 
-    def test_pending_territorial_submission_is_not_importable_or_in_project_queue(self):
+    def test_pending_territorial_submission_is_not_importable(self):
         pending = KoboSubmission.objects.create(
             form_definition=self.microproject_form_definition,
             asset=self.microproject_asset,
@@ -440,7 +439,6 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertFalse(result.imported)
         self.assertEqual(pending.status, KoboSubmission.Status.PROCESSING_FAILED)
         self.assertEqual(pending.error_code, "IMPORT_ROUTING_PENDING")
-        self.assertNotIn(pending, get_project_pending_submissions(self.project))
 
     def test_operational_import_lock_query_has_no_nullable_join(self):
         with transaction.atomic():
@@ -494,7 +492,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertEqual(self.ready.status, KoboSubmission.Status.READY_FOR_REVIEW)
         self.assertIsNone(self.ready.imported_at)
 
-    def test_rejection_is_auditable_idempotent_and_excluded_from_pending(self):
+    def test_rejection_is_auditable_idempotent_and_excluded_from_imported(self):
         original_raw = deepcopy(self.ready.raw_payload)
         original_normalized = deepcopy(self.ready.normalized_payload)
 
@@ -521,11 +519,11 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             ).count(),
             1,
         )
-        self.assertNotIn(self.ready, get_project_pending_submissions(self.project))
         self.assertNotIn(
             self.ready,
             get_project_imported_submissions(self.project),
         )
+        self.assertIn(self.ready, get_project_submission_history(self.project))
 
         repeated = reject_kobo_submission(
             self.ready,

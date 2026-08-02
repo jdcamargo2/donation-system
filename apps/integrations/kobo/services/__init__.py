@@ -1,6 +1,5 @@
 from apps.integrations.kobo.services.association import (
     get_project_imported_submissions,
-    get_project_pending_submissions,
     get_project_submission_history,
 )
 from apps.integrations.kobo.services.automation import (
@@ -63,7 +62,6 @@ __all__ = (
     "get_asset_readiness",
     "get_kobo_system_actor",
     "get_project_imported_submissions",
-    "get_project_pending_submissions",
     "get_project_submission_history",
     "import_kobo_submission",
     "process_pending_submissions",

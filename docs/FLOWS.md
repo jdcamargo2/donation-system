@@ -564,60 +564,62 @@ impide secuencias inválidas.
 10. El dispatcher resuelve el proyecto: Ficha 1 crea o confirma la identidad;
     Ficha 10/11 consulta exclusivamente esa identidad por `nucleo_code`.
 11. Si una Ficha 10/11 aún no tiene identidad, queda `PENDING_IDENTITY`, sin
-    proyecto y fuera de bandejas de proyecto; no se usa binding como fallback.
-12. Una submission con routing resuelto queda disponible para revisión humana.
-13. Un usuario autorizado consulta la información normalizada.
-14. El usuario puede:
-
-    * aprobar para importación;
-    * rechazar.
-
-15. La aprobación cambia `READY_FOR_REVIEW` a `APPROVED_FOR_IMPORT`; todavía no
-    constituye una importación.
-16. El servicio común bloquea la submission, revalida routing, proyecto,
-    normalización, payload preservado, revisión y permisos, y selecciona el
-    handler cerrado de Ficha 1, 10 u 11.
-17. Solo una materialización específica exitosa crea `KoboImportRecord`, cambia
+    proyecto; no se usa binding como fallback y la incidencia aparece en el hub
+    global de incidencias Kobo.
+12. Una submission con routing resuelto entra al pipeline automático: se
+    auto-aprueba e importa sin cola humana por proyecto.
+13. `READY_FOR_REVIEW` permanece como estado interno transitorio del pipeline;
+    no representa una bandeja sostenida de revisión en el detalle del proyecto.
+14. Las rutas HTTP de revisión/importación/rechazo manual por proyecto están
+    deshabilitadas (`Http404`) donde aún existen por compatibilidad.
+15. El servicio común bloquea la submission, revalida routing, proyecto,
+    normalización, payload preservado, revisión automática y permisos, y
+    selecciona el handler cerrado de Ficha 1, 10 u 11.
+16. Solo una materialización específica exitosa crea `KoboImportRecord`, cambia
     la submission a `IMPORTED`, completa `processed_at` e `imported_at` y registra
     evento y auditoría.
-18. El handler de Ficha 1 localiza la identidad ya creada por routing, valida
+17. El handler de Ficha 1 localiza la identidad ya creada por routing, valida
     código, zona, proyecto, conflictos y datos normalizados, y crea un
     `KoboTerritorialProfile` inmutable por submission.
-19. Si la identidad estaba `PENDING_REVIEW`, pasa a `ACTIVE`; `OBSERVED`
+18. Si la identidad estaba `PENDING_REVIEW`, pasa a `ACTIVE`; `OBSERVED`
     permanece observada e `INACTIVE` bloquea la importación.
-20. El handler de Ficha 10 localiza la identidad sin crearla, valida código,
+19. El handler de Ficha 10 localiza la identidad sin crearla, valida código,
     proyecto, estado, conflictos, campos requeridos y catálogos, y crea un
     `KoboPrioritizedMicroproject` inmutable por submission.
-21. La Ficha 10 conserva `beneficiary_group` como lista canónica y
+20. La Ficha 10 conserva `beneficiary_group` como lista canónica y
     `main_activities` como texto libre; no interpreta de nuevo `raw_payload`.
-22. El handler de Ficha 11 localiza la identidad sin crearla, valida código,
+21. El handler de Ficha 11 localiza la identidad sin crearla, valida código,
     proyecto, estado, conflictos, diez scores, cálculos, catálogos, decisiones
     humanas y warnings, y crea un `KoboPrioritizationAssessment` inmutable por
     submission.
-23. La Ficha 11 conserva por separado total y semáforo originales, total y
+22. La Ficha 11 conserva por separado total y semáforo originales, total y
     semáforo recalculados, semáforo final humano y prioridad final. Las
     discrepancias son warnings y `linked_microprojects` permanece como snapshot
     textual, sin relaciones automáticas por nombre.
+23. El detalle del proyecto muestra datos importados de Ficha 1/10/11 y el
+    historial Kobo del proyecto. Fallos operativos e identidades sin resolver
+    se gestionan en el hub global de incidencias.
 
 ### POST
 
 * El payload original permanece conservado.
-* Routing resuelto no implica revisión aprobada.
-* Revisión aprobada no implica importación.
+* Routing resuelto dispara importación automática cuando la submission es válida.
 * Importación significa materialización exitosa y resultado persistido.
+* No existe cola humana de revisión pendiente asociada a un Project.
 * Una Ficha 1 importada produce exactamente un perfil territorial y un import
   record; otra Ficha 1 válida del mismo núcleo conserva un perfil histórico nuevo.
 * Una Ficha 10 importada produce exactamente un microproyecto priorizado y un
   import record; otra submission con el mismo nombre conserva otra propuesta.
 * El routing de Ficha 10 identifica el proyecto Núcleo Vital; su importación crea
   la propuesta subordinada y no crea otro `Project`.
-* Una Ficha 11 importada produce exactamente una evaluación histórica y un
-  import record; otra Ficha 11 válida del mismo núcleo crea otra evaluación.
+* Una Ficha 11 importada produce exactamente una evaluación histórica y un import
+  record; otra Ficha 11 válida del mismo núcleo crea otra evaluación.
 * El routing de Ficha 11 identifica el proyecto Núcleo Vital; su importación no
   cambia el estado ni la prioridad institucional del proyecto, la identidad o
   los microproyectos.
 * La integración no modifica directamente saldos financieros.
 * Las Fichas 10 y 11 no crean presupuesto, donación, asignación de fondos ni gasto.
+* `KoboProjectBinding` permanece histórico y no se usa en runtime.
 
 ---
 
@@ -651,49 +653,52 @@ la misma transacción.
 
 ---
 
-## 10. Flujo de rechazo y restauración de Kobo
+## 10. Flujo histórico de rechazo y restauración de Kobo
+
+Las rutas HTTP de rechazo/restauración por proyecto están deshabilitadas. Los
+servicios de dominio pueden conservar capacidad programática para trazabilidad y
+compatibilidad; no restauran una cola humana de revisión por Project.
 
 ### 10.1. Rechazo
 
 #### PRE
 
-* La submission se encuentra disponible para revisión.
-* El usuario posee permisos para rechazarla.
+* La submission se encuentra en un estado rechazable del servicio de dominio.
+* El actor posee permisos para rechazarla.
 
 #### Pasos
 
-1. El usuario revisa la submission.
-2. Registra el motivo del rechazo.
-3. La submission pasa a estado `REJECTED`.
-4. Se registra el evento técnico correspondiente.
-5. No se importa información al dominio operativo.
+1. Se registra el motivo del rechazo.
+2. La submission pasa a estado `REJECTED`.
+3. Se registra el evento técnico correspondiente.
+4. No se importa información al dominio operativo.
 
 #### POST
 
-* La submission permanece conservada en el historial.
+* La submission permanece conservada en el historial del proyecto.
 * El payload original no se elimina.
-* La información rechazada no modifica entidades operativas.
+* El rechazo no reabre una bandeja humana por Project.
 
 ### 10.2. Restauración
 
 #### PRE
 
 * La submission se encuentra en estado `REJECTED`.
-* El usuario posee permisos para restaurarla.
+* El actor posee permisos para restaurarla.
 
 #### Pasos
 
-1. El usuario abre la submission desde el historial.
-2. Solicita su restauración.
-3. El sistema valida que la transición sea permitida.
-4. La submission vuelve a un estado revisable.
-5. Se registra el evento técnico correspondiente.
+1. El sistema valida que la transición sea permitida.
+2. La submission vuelve a `READY_FOR_REVIEW` como estado interno transitorio.
+3. Se registra el evento técnico correspondiente.
+4. El pipeline automático puede reintentar routing/importación; no implica
+   aprobación humana por Project.
 
 #### POST
 
-* La submission puede revisarse nuevamente.
-* La restauración no implica una importación automática.
 * El historial conserva tanto el rechazo como la restauración.
+* La restauración no reabre una bandeja humana por Project.
+* `READY_FOR_REVIEW` permanece transitorio interno del pipeline.
 
 ---
 

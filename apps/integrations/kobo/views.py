@@ -20,7 +20,6 @@ from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.forms import (
     KoboAssetConfigurationForm,
     KoboReviewForm,
-    KoboRejectionForm,
     get_compatible_asset_configuration,
 )
 from apps.integrations.kobo.mappings.ficha_10 import (
@@ -46,13 +45,9 @@ from apps.integrations.kobo.services import (
     activate_kobo_asset,
     configure_discovered_asset,
     converge_webhook_submission,
-    get_project_pending_submissions,
     get_project_submission_history,
-    import_kobo_submission,
     review_submission,
-    reject_kobo_submission,
     receive_webhook_submission,
-    restore_kobo_submission_to_review,
     route_normalized_submission,
 )
 from apps.integrations.kobo.hub import (
@@ -408,38 +403,6 @@ def _project_submission_detail_title(submission) -> str:
     return "Proyecto y territorio"
 
 
-def _project_pending_submission_summary(submission) -> str:
-    """
-    PRE: submission is normalized and belongs to a supported Kobo form role.
-    POST: returns a concise non-sensitive summary for an internal review list.
-    """
-    payload = submission.normalized_payload or {}
-    if submission.asset.form_role == KoboAsset.FormRole.PRIORITIZED_MICROPROJECT:
-        return payload.get("microproject_name") or "Microproyecto sin nombre"
-    if submission.asset.form_role == KoboAsset.FormRole.PRIORITIZATION_MATRIX:
-        priority = payload.get("final_priority") or "sin prioridad final"
-        return f"Prioridad {priority}"
-    return (
-        payload.get("communities_covered")
-        or submission.primary_community
-        or "Sin resumen territorial"
-    )
-
-
-def _project_pending_submission_rows(project):
-    """
-    PRE: project is persisted and Kobo is enabled for its internal detail.
-    POST: returns display rows for exactly that project's pending submissions.
-    """
-    return tuple(
-        {
-            "submission": submission,
-            "summary": _project_pending_submission_summary(submission),
-        }
-        for submission in get_project_pending_submissions(project)
-    )
-
-
 def _project_submission_history_rows(project):
     """
     PRE: project is persisted and the internal history is being displayed.
@@ -708,28 +671,6 @@ def project_submission_detail(request, pk):
                 "submitted_by": submission.raw_payload.get("_submitted_by"),
                 "device_id": submission.raw_payload.get("deviceid"),
             },
-        },
-    )
-
-
-@login_required
-@permission_required("operations.view_project", raise_exception=True)
-def project_pending_submission_list(request, project_pk):
-    # PRE: request user can view operations projects and Kobo is enabled.
-    # POST: renders only the selected project's pending Kobo submissions.
-    _require_kobo_enabled()
-    from apps.operations.models import Project
-
-    project = get_object_or_404(Project, pk=project_pk)
-    return render(
-        request,
-        "kobo/project_pending_submission_list.html",
-        {
-            "project": project,
-            "pending_submission_rows": _project_pending_submission_rows(project),
-            "can_import_kobo_submissions": request.user.has_perm(
-                "operations.change_project"
-            ),
         },
     )
 

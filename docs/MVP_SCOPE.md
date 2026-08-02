@@ -361,10 +361,9 @@ Incluye:
 * recepción;
 * normalización;
 * asociación;
-* revisión;
-* importación;
-* rechazo;
-* restauración;
+* enrutamiento e importación automática;
+* hub global de incidencias;
+* historial e importaciones por proyecto;
 * reconciliación;
 * gestión de adjuntos.
 

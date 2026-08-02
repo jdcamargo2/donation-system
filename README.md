@@ -86,8 +86,9 @@ debe actualizarse cuando el total cambie de forma estable.
 * Staging del payload original
 * Normalización de las fichas 1, 10 y 11
 * Enrutamiento hacia proyectos
-* Revisión humana
-* Importación, rechazo y restauración
+* Importación automática de submissions resueltas
+* Hub global de incidencias operativas
+* Historial Kobo por proyecto y datos importados
 * Descarga protegida de archivos adjuntos
 * Historial técnico de procesamiento
 
