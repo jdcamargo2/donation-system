@@ -395,6 +395,34 @@ def mutable_own_pending_expense_requests_for_user(user):
     )
 
 
+def mutable_own_pending_expense_requests_for_attachments(user):
+    """
+    PRE: caller enforces add/delete_expenserequestattachment at the view layer.
+    POST: returns own PENDING_DECISION rows eligible for attachment mutation (404-safe).
+
+    Reuses parent ownership/visibility policy; does not check role names.
+    """
+    return mutable_own_pending_expense_requests_for_user(user)
+
+
+def visible_expense_request_attachments_for_user(*, user, request_pk):
+    """
+    PRE: caller enforces view_expenserequestattachment at the view layer;
+         request_pk identifies the parent Expense Request.
+    POST: returns attachments of that parent when the parent is visible to user;
+          empty queryset when the parent is invisible (mismatched/foreign → 404 upstream).
+    """
+    visible_parents = visible_expense_requests_for_user(user).filter(pk=request_pk)
+    return (
+        ExpenseRequestAttachment.objects.filter(
+            expense_request_id=request_pk,
+            expense_request__in=visible_parents,
+        )
+        .select_related('expense_request', 'uploaded_by')
+        .order_by('uploaded_at', 'pk')
+    )
+
+
 def decidable_pending_expense_requests_for_user(user):
     """
     PRE: caller enforces decide_expenserequest at the view layer when loading routes.

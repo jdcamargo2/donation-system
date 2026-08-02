@@ -186,3 +186,15 @@ class ExpenseRequestPermissionTests(TestCase):
             ).status_code,
             200,
         )
+
+    def test_attachment_mutation_routes_require_owner_pending_scope(self):
+        create_url = reverse(
+            'expense_request_attachment_create', args=[self.own_request.pk]
+        )
+        self.client.force_login(self.operator)
+        self.assertEqual(self.client.get(create_url).status_code, 200)
+
+        for user in (self.other_operator, self.committee, self.auditor, self.admin):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                self.assertIn(self.client.get(create_url).status_code, {403, 404})

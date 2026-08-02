@@ -86,8 +86,12 @@ y, en PostgreSQL, mediante el trigger
 de mutación de eventos. Complementa `AuditLog`; no lo sustituye.
 
 Los adjuntos de solicitud (`ExpenseRequestAttachment`) son evidencia privada del
-panel interno: mutables solo en `PENDING_DECISION` y sin ruta pública de media
-en ER1/ER2C (rutas protegidas de adjunto pendientes de UI).
+flujo de solicitud de gasto. Solo el solicitante original puede mutarlos mientras
+la solicitud está en `PENDING_DECISION`. Tras cualquier decisión o cierre quedan
+congelados. La lectura autorizada (Admin, Comité, Auditor, Operador dueño) usa
+rutas protegidas anidadas (`expense_request_attachment_preview` /
+`expense_request_attachment_download`); no se exponen URLs directas de media ni
+acceso público.
 
 Los servicios de ciclo de vida (ER2B–ER2E) escriben `ExpenseRequestEvent` y
 `AuditLog` en la misma transacción que la mutación. El fallo de evento o

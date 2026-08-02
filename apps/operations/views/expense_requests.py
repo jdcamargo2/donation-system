@@ -2,24 +2,29 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Case, IntegerField, Value, When
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseNotAllowed, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
+from django.views import View
 from django.views.generic import DetailView, FormView, ListView
 
 from ..choices import BUDGET_CATEGORY_CHOICES
 from ..expense_request_services import (
+    add_expense_request_attachments,
     annul_expense_request,
     approve_expense_request,
     create_expense_request,
+    delete_expense_request_attachment,
     deny_expense_request,
     fulfill_expense_request,
     update_expense_request,
     withdraw_expense_request,
 )
+from ..file_access import build_protected_file_actions
 from ..forms import (
     ExpenseRequestApproveForm,
+    ExpenseRequestAttachmentForm,
     ExpenseRequestForProjectForm,
     ExpenseRequestForm,
     ExpenseRequestFulfillmentForm,
@@ -31,6 +36,7 @@ from ..selectors import (
     decidable_pending_expense_requests_for_user,
     fulfillable_expense_requests_for_user,
     get_expense_request_financial_display,
+    mutable_own_pending_expense_requests_for_attachments,
     mutable_own_pending_expense_requests_for_user,
     user_can_create_global_expense_request,
     user_has_global_expense_request_visibility,
@@ -82,7 +88,7 @@ def _status_label(status_value):
 def _requester_action_flags(*, user, expense_request):
     """
     PRE: expense_request is visible to user; permissions are effective, not role names.
-    POST: returns edit/withdraw flags for PENDING_DECISION rows owned by the actor.
+    POST: returns edit/withdraw/attachment flags for PENDING_DECISION rows owned by the actor.
     """
     is_owner = expense_request.requested_by_id == user.id
     is_pending = expense_request.status == ExpenseRequest.Status.PENDING_DECISION
@@ -96,6 +102,16 @@ def _requester_action_flags(*, user, expense_request):
             is_owner
             and is_pending
             and user.has_perm('operations.withdraw_expenserequest')
+        ),
+        'can_add_expense_request_attachment': (
+            is_owner
+            and is_pending
+            and user.has_perm('operations.add_expenserequestattachment')
+        ),
+        'can_delete_expense_request_attachments': (
+            is_owner
+            and is_pending
+            and user.has_perm('operations.delete_expenserequestattachment')
         ),
     }
 
@@ -349,19 +365,52 @@ class ExpenseRequestDetailView(
         if context['can_approve_expense_request']:
             context.update(_approval_preview_context(expense_request))
 
-        attachments = []
+        attachments_frozen = (
+            expense_request.status != ExpenseRequest.Status.PENDING_DECISION
+        )
+        context['attachments_frozen'] = attachments_frozen
+
+        attachment_items = []
         if context['can_view_attachments']:
+            can_download = (
+                user.has_perm('operations.view_expenserequest')
+                and user.has_perm('operations.view_expenserequestattachment')
+            )
+            can_delete = context['can_delete_expense_request_attachments']
             for attachment in expense_request.attachments.all():
-                attachments.append(
+                delete_url = None
+                if can_delete:
+                    delete_url = reverse(
+                        'expense_request_attachment_delete',
+                        args=[expense_request.pk, attachment.pk],
+                    )
+                file_actions = build_protected_file_actions(
+                    file_field=attachment.file,
+                    file_label=attachment.title or str(attachment),
+                    uploaded_at=attachment.uploaded_at,
+                    can_download=can_download,
+                    preview_url_name='expense_request_attachment_preview',
+                    download_url_name='expense_request_attachment_download',
+                    url_args=(expense_request.pk, attachment.pk),
+                    delete_url=delete_url,
+                    can_delete=can_delete,
+                )
+                attachment_items.append(
                     {
+                        'object': attachment,
                         'title': attachment.title,
                         'notes': attachment.notes,
                         'uploaded_by_display': _user_display_name(attachment.uploaded_by),
                         'uploaded_at': attachment.uploaded_at,
                         'filename': attachment_display_filename(attachment),
+                        'file_actions': file_actions,
+                        'preview_url': file_actions.preview_url,
+                        'download_url': file_actions.download_url,
+                        'can_delete': file_actions.can_delete,
                     }
                 )
-        context['detail_attachments'] = attachments
+        context['detail_attachments'] = attachment_items
+        context['attachment_items'] = attachment_items
 
         events = []
         if context['can_view_events']:
@@ -420,6 +469,98 @@ class ExpenseRequestDetailView(
             'financial_rows': financial_rows,
         }
 
+
+class ExpenseRequestAttachmentCreateView(
+    OperationsPermissionRequiredMixin,
+    RouteContextMixin,
+    FormView,
+):
+    permission_required = 'operations.add_expenserequestattachment'
+    form_class = ExpenseRequestAttachmentForm
+    template_name = 'web/expense_request_attachment_form.html'
+    route_prefix = 'expense_request'
+    page_title = _('Agregar adjunto')
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: request_pk targets an own PENDING_DECISION row under visibility rules.
+        # POST: loads the mutable parent or 404 (stale/foreign/terminal stay hidden).
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.expense_request = get_object_or_404(
+                mutable_own_pending_expense_requests_for_attachments(
+                    request.user
+                ).select_related(
+                    'fund_allocation',
+                    'fund_allocation__project',
+                ),
+                pk=kwargs['request_pk'],
+            )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['expense_request'] = self.expense_request
+        context['title'] = self.page_title
+        return context
+
+    def form_valid(self, form):
+        # PRE: parent is URL-scoped own pending; files/title/notes passed form validation.
+        # POST: creates attachments via service (uploader=session user) or 404 on stale parent.
+        self.expense_request = get_object_or_404(
+            mutable_own_pending_expense_requests_for_attachments(self.request.user),
+            pk=self.expense_request.pk,
+        )
+        files = form.cleaned_data['files']
+        try:
+            created = add_expense_request_attachments(
+                expense_request_id=self.expense_request.pk,
+                files=files,
+                title=form.cleaned_data['title'],
+                notes=form.cleaned_data.get('notes', ''),
+                actor=self.request.user,
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        if len(created) == 1:
+            messages.success(self.request, _('Adjunto agregado a la solicitud.'))
+        else:
+            messages.success(self.request, _('Adjuntos agregados a la solicitud.'))
+        return HttpResponseRedirect(
+            reverse('expense_request_detail', args=[self.expense_request.pk])
+        )
+
+
+class ExpenseRequestAttachmentDeleteView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.delete_expenserequestattachment'
+
+    def post(self, request, *args, **kwargs):
+        # PRE: request_pk/pk identify an attachment on an own PENDING_DECISION request.
+        # POST: deletes via service or 404 when parent/attachment scope fails.
+        expense_request = get_object_or_404(
+            mutable_own_pending_expense_requests_for_attachments(request.user),
+            pk=kwargs['request_pk'],
+        )
+        get_object_or_404(
+            expense_request.attachments.all(),
+            pk=kwargs['pk'],
+        )
+        try:
+            delete_expense_request_attachment(
+                expense_request_id=expense_request.pk,
+                attachment_id=kwargs['pk'],
+                actor=request.user,
+            )
+        except ValidationError as error:
+            raise PermissionDenied(error.messages[0]) from error
+        messages.success(request, _('Adjunto eliminado de la solicitud.'))
+        return HttpResponseRedirect(
+            reverse('expense_request_detail', args=[expense_request.pk])
+        )
+
+    def get(self, request, *args, **kwargs):
+        # PRE: delete is POST-only.
+        # POST: refuses GET mutation with 405.
+        return HttpResponseNotAllowed(['POST'])
 
 class ExpenseRequestCreateForProjectView(
     OperationsPermissionRequiredMixin,

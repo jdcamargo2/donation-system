@@ -52,7 +52,10 @@ python manage.py reconcile_operational_code_sequences
 `expense_request` (`SGS`). `sync_sigedon_roles` aplica la matriz canónica de
 permisos de solicitud de gasto (incluida fulfillment/anulación administrativa)
 sin mutar eventos. La UI de cumplimiento (ER5) usa `fulfill_expenserequest` y no
-requiere sync adicional de roles. No ejecutar sync de roles ni migraciones contra
+requiere sync adicional de roles. La UI de adjuntos de solicitud (ER6) reutiliza
+`add_expenserequestattachment`, `delete_expenserequestattachment` y
+`view_expenserequestattachment` ya presentes en la matriz canónica; no introduce
+permisos nuevos ni sync de roles. No ejecutar sync de roles ni migraciones contra
 `db_sigedon` activo durante checkpoints de desarrollo de solicitudes.
 
 ### 1.5. Crear un superusuario

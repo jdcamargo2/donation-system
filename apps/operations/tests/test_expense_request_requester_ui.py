@@ -575,9 +575,9 @@ class ExpenseRequestRequesterUITests(TestCase):
                 self.assertNotIn('expense_request_approve', html)
                 self.assertNotIn('expense_request_deny', html)
 
-    def test_no_fulfill_or_attachment_actions_for_pending_non_admin_roles(self):
+    def test_no_fulfill_or_attachment_actions_for_pending_non_owner_roles(self):
         request_obj = self._create_via_service(self.operator)
-        for user in (self.operator, self.committee, self.auditor):
+        for user in (self.committee, self.auditor):
             with self.subTest(user=user.username):
                 self.client.force_login(user)
                 response = self.client.get(
@@ -593,6 +593,22 @@ class ExpenseRequestRequesterUITests(TestCase):
                     self.assertNotIn(label, html)
                 self.assertNotIn('expense_request_fulfill', html)
                 self.assertNotIn('expense_request_annul', html)
+                self.assertFalse(response.context['can_add_expense_request_attachment'])
+
+        self.client.force_login(self.operator)
+        owner_response = self.client.get(
+            reverse('expense_request_detail', args=[request_obj.pk])
+        )
+        owner_html = owner_response.content.decode()
+        self.assertTrue(owner_response.context['can_add_expense_request_attachment'])
+        self.assertIn('Agregar adjunto', owner_html)
+        self.assertIn(
+            reverse('expense_request_attachment_create', args=[request_obj.pk]),
+            owner_html,
+        )
+        self.assertNotIn('Registrar gasto', owner_html)
+        self.assertNotIn('Anular solicitud', owner_html)
+        self.assertNotIn('expense_request_fulfill', owner_html)
 
         self.client.force_login(self.admin)
         admin_response = self.client.get(
@@ -602,6 +618,7 @@ class ExpenseRequestRequesterUITests(TestCase):
         self.assertIn('Anular solicitud', admin_html)
         self.assertIn(reverse('expense_request_annul', args=[request_obj.pk]), admin_html)
         self.assertFalse(admin_response.context['can_fulfill_expense_request'])
+        self.assertFalse(admin_response.context['can_add_expense_request_attachment'])
         for label in ('Registrar gasto', 'Agregar adjunto', 'Eliminar adjunto'):
             self.assertNotIn(label, admin_html)
         self.assertNotIn('expense_request_fulfill', admin_html)

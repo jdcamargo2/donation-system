@@ -239,8 +239,35 @@ Cobertura focalizada:
 * ítem de sidebar entre Asignaciones y Gastos;
 * regresión de navegación, permisos y panel.
 
-ER5 no cubre mutación/preview protegido de adjuntos de solicitud ni contadores
-nuevos en el dashboard.
+ER5 no cubre contadores nuevos en el dashboard.
+
+### Solicitudes de gasto — adjuntos protegidos (ER6)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_expense_request_attachments_ui \
+  apps.operations.tests.test_expense_request_attachment_files \
+  apps.operations.tests.test_protected_file_preview \
+  apps.operations.tests.test_expense_request_ui \
+  apps.operations.tests.test_expense_request_permissions \
+  apps.operations.tests.test_expense_request_views \
+  apps.operations.tests.test_expense_request_requester_ui \
+  apps.operations.tests.test_expense_request_committee_ui \
+  apps.operations.tests.test_expense_request_admin_annul_ui \
+  apps.operations.tests.test_expense_request_fulfillment_ui \
+  apps.operations.tests.test_role_based_ui \
+  apps.operations.tests.test_permissions \
+  --noinput
+```
+
+Cubre:
+
+* upload/delete solo del solicitante original en `PENDING_DECISION`;
+* congelación tras aprobación/denegación/retiro/anulación/cumplimiento;
+* preview/download protegidos con alcance del padre visible;
+* Operador ajeno → 404; sin permiso de vista → 403; anónimo → login;
+* sin URLs `/media/` directas; MIME whitelist; compensación de huérfanos;
+* regresión ER3–ER5 (Editar/Retirar, Aprobar/Denegar, Anular, Registrar gasto).
 
 ### Concurrencia
 

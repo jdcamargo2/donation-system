@@ -1,6 +1,9 @@
 {% if can_fulfill_expense_request %}
     <a class="btn btn-primary" href="{% url 'expense_request_fulfill' expense_request.pk %}">Registrar gasto</a>
 {% endif %}
+{% if can_add_expense_request_attachment %}
+    <a class="btn btn-outline-primary" href="{% url 'expense_request_attachment_create' expense_request.pk %}">Agregar adjunto</a>
+{% endif %}
 {% if can_approve_expense_request or can_deny_expense_request %}
     {% if can_approve_expense_request %}
         <a class="btn btn-primary" href="{% url 'expense_request_approve' expense_request.pk %}">Aprobar</a>

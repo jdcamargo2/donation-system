@@ -341,8 +341,18 @@ rechazo.
   * la UI ordinaria de creación directa de `Expense` queda retirada (listado,
     dashboard, detalle de asignación y ruta `expense_create` redirigen o apuntan
     a solicitudes); listado/detalle de gastos históricos permanecen;
-  * aún no hay mutación de adjuntos de solicitud ni preview/download protegido;
   * aún no hay contadores nuevos en el dashboard.
+* ER6 añade adjuntos protegidos de solicitud:
+  * el solicitante original puede agregar o eliminar adjuntos solo mientras la
+    solicitud está en `PENDING_DECISION`;
+  * tras cualquier decisión o cierre (`APPROVED_RESERVED`, `DENIED`,
+    `WITHDRAWN`, `FULFILLED`, `ANNULLED`) los adjuntos quedan congelados
+    (sin upload ni delete) pero siguen legibles;
+  * preview/download van por rutas anidadas autorizadas
+    (`expense_request_attachment_preview` / `expense_request_attachment_download`);
+  * no hay URLs directas de media ni exposición pública;
+  * Admin/Comité/Auditor leen adjuntos de solicitudes visibles; el Operador
+    solo las propias.
 
 ---
 

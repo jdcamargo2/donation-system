@@ -27,6 +27,8 @@ from .donations import (
 from .expense_requests import (
     ExpenseRequestAnnulView,
     ExpenseRequestApproveView,
+    ExpenseRequestAttachmentCreateView,
+    ExpenseRequestAttachmentDeleteView,
     ExpenseRequestCreateForProjectView,
     ExpenseRequestCreateView,
     ExpenseRequestDenyView,
@@ -101,6 +103,8 @@ from .project_milestones import (
     ProjectMilestoneReopenView,
 )
 from .protected_files import (
+    ExpenseRequestAttachmentDownloadView,
+    ExpenseRequestAttachmentPreviewView,
     InstitutionLegalDocumentDownloadView,
     InstitutionLegalDocumentPreviewView,
     ProjectDocumentDownloadView,
@@ -138,6 +142,10 @@ __all__ = [
     'ExpenseListView',
     'ExpenseRequestAnnulView',
     'ExpenseRequestApproveView',
+    'ExpenseRequestAttachmentCreateView',
+    'ExpenseRequestAttachmentDeleteView',
+    'ExpenseRequestAttachmentDownloadView',
+    'ExpenseRequestAttachmentPreviewView',
     'ExpenseRequestCreateForProjectView',
     'ExpenseRequestCreateView',
     'ExpenseRequestDenyView',

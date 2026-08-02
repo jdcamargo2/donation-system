@@ -193,6 +193,26 @@ urlpatterns = [
         views.ExpenseRequestFulfillView.as_view(),
         name='expense_request_fulfill',
     ),
+    path(
+        'expense-requests/<int:request_pk>/attachments/new/',
+        views.ExpenseRequestAttachmentCreateView.as_view(),
+        name='expense_request_attachment_create',
+    ),
+    path(
+        'expense-requests/<int:request_pk>/attachments/<int:pk>/delete/',
+        views.ExpenseRequestAttachmentDeleteView.as_view(),
+        name='expense_request_attachment_delete',
+    ),
+    path(
+        'expense-requests/<int:request_pk>/attachments/<int:pk>/preview/',
+        views.ExpenseRequestAttachmentPreviewView.as_view(),
+        name='expense_request_attachment_preview',
+    ),
+    path(
+        'expense-requests/<int:request_pk>/attachments/<int:pk>/download/',
+        views.ExpenseRequestAttachmentDownloadView.as_view(),
+        name='expense_request_attachment_download',
+    ),
     path('expenses/', views.ExpenseListView.as_view(), name='expense_list'),
     path('expenses/export.csv', views.ExpenseCsvExportView.as_view(), name='expense_export_csv'),
     path('expenses/new/', views.ExpenseCreateView.as_view(), name='expense_create'),

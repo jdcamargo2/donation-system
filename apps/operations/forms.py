@@ -897,6 +897,34 @@ class ExpenseRequestFulfillmentForm(BootstrapFormMixin, forms.Form):
         return amount
 
 
+class ExpenseRequestAttachmentForm(BootstrapFormMixin, forms.Form):
+    """
+    Optional attachment upload for a pending Expense Request.
+
+    Parent request and uploader are set by the view/service, never from POST.
+    """
+
+    title = forms.CharField(
+        label=_('Título'),
+        max_length=160,
+        help_text=_('Se aplica a todos los archivos cargados en este envío.'),
+    )
+    notes = forms.CharField(
+        label=_('Notas'),
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3}),
+        help_text=_('Opcional. Aclaraciones internas sobre los adjuntos.'),
+    )
+    files = MultipleFileField(
+        label=_('Archivos'),
+        help_text=_('Puede seleccionar varios archivos a la vez.'),
+        widget=MultipleFileInput(attrs={
+            'data-file-upload': 'multiple',
+            'data-file-upload-preview': 'true',
+        }),
+    )
+
+
 class ExpenseRequestForm(BootstrapFormMixin, forms.Form):
     """
     Global or project-scoped Expense Request create/update form.

@@ -61,10 +61,8 @@ class ExpenseRequestUITests(TestCase):
         user.groups.add(Group.objects.get(name=role_name))
         return user
 
-    def _assert_no_fulfill_attachment_controls(self, response):
+    def _assert_no_fulfill_controls(self, response):
         html = response.content.decode()
-        for label in FULFILL_ATTACHMENT_LABELS:
-            self.assertNotIn(label, html)
         self.assertNotIn(FULFILL_ACTION_LABEL, html)
         self.assertNotIn('expense_request_fulfill', html)
 
@@ -72,6 +70,10 @@ class ExpenseRequestUITests(TestCase):
         html = response.content.decode()
         for label in FULFILL_ATTACHMENT_LABELS:
             self.assertNotIn(label, html)
+
+    def _assert_no_fulfill_attachment_controls(self, response):
+        self._assert_no_fulfill_controls(response)
+        self._assert_no_attachment_mutation_controls(response)
 
     def _assert_no_annul_controls(self, response):
         html = response.content.decode()
@@ -84,7 +86,7 @@ class ExpenseRequestUITests(TestCase):
             self.assertNotIn(label, html)
         self.assertNotIn('expense_request_approve', html)
         self.assertNotIn('expense_request_deny', html)
-        self._assert_no_fulfill_attachment_controls(response)
+        self._assert_no_fulfill_controls(response)
 
     def test_committee_detail_shows_decision_actions(self):
         self.client.force_login(self.committee)
@@ -108,6 +110,7 @@ class ExpenseRequestUITests(TestCase):
         self.assertFalse(detail_response.context['can_edit_expense_request'])
         self.assertFalse(detail_response.context['can_withdraw_expense_request'])
         self.assertFalse(detail_response.context['can_annul_expense_request'])
+        self.assertFalse(detail_response.context['can_add_expense_request_attachment'])
         self.assertTrue(detail_response.context['can_approve_expense_request'])
         self.assertTrue(detail_response.context['can_deny_expense_request'])
         self.assertContains(detail_response, 'Aprobar')
@@ -130,7 +133,6 @@ class ExpenseRequestUITests(TestCase):
         )
         self._assert_no_fulfill_attachment_controls(detail_response)
         self._assert_no_annul_controls(detail_response)
-
     def test_auditor_detail_remains_read_only(self):
         self.client.force_login(self.auditor)
         list_response = self.client.get(reverse('expense_request_list'))
@@ -148,6 +150,7 @@ class ExpenseRequestUITests(TestCase):
         self.assertFalse(detail_response.context['can_approve_expense_request'])
         self.assertFalse(detail_response.context['can_deny_expense_request'])
         self.assertFalse(detail_response.context['can_annul_expense_request'])
+        self.assertFalse(detail_response.context['can_add_expense_request_attachment'])
         self.assertNotContains(
             detail_response,
             reverse('expense_request_update', args=[self.request_obj.pk]),
@@ -157,6 +160,7 @@ class ExpenseRequestUITests(TestCase):
             reverse('expense_request_withdraw', args=[self.request_obj.pk]),
         )
         self._assert_no_decision_controls(detail_response)
+        self._assert_no_attachment_mutation_controls(detail_response)
         self._assert_no_annul_controls(detail_response)
 
     def test_pending_owner_sees_edit_and_withdraw(self):
@@ -166,11 +170,17 @@ class ExpenseRequestUITests(TestCase):
         )
         self.assertTrue(response.context['can_edit_expense_request'])
         self.assertTrue(response.context['can_withdraw_expense_request'])
+        self.assertTrue(response.context['can_add_expense_request_attachment'])
         self.assertFalse(response.context['can_approve_expense_request'])
         self.assertFalse(response.context['can_deny_expense_request'])
         self.assertFalse(response.context['can_annul_expense_request'])
         self.assertContains(response, 'Editar')
         self.assertContains(response, 'Retirar')
+        self.assertContains(response, 'Agregar adjunto')
+        self.assertContains(
+            response,
+            reverse('expense_request_attachment_create', args=[self.request_obj.pk]),
+        )
         self._assert_no_decision_controls(response)
         self._assert_no_annul_controls(response)
 
@@ -183,6 +193,7 @@ class ExpenseRequestUITests(TestCase):
         self.assertFalse(response.context['can_withdraw_expense_request'])
         self.assertFalse(response.context['can_approve_expense_request'])
         self.assertFalse(response.context['can_deny_expense_request'])
+        self.assertFalse(response.context['can_add_expense_request_attachment'])
         self.assertTrue(response.context['can_annul_expense_request'])
         self.assertFalse(response.context['can_fulfill_expense_request'])
         self.assertContains(response, 'Anular solicitud')
@@ -220,8 +231,16 @@ class ExpenseRequestUITests(TestCase):
         self.assertContains(response, 'Cotización')
         self.assertContains(response, 'Nota de adjunto')
         self.assertContains(response, 'cotizacion.pdf')
+        self.assertContains(
+            response,
+            reverse(
+                'expense_request_attachment_download',
+                args=[self.request_obj.pk, attachment.pk],
+            ),
+        )
         self.assertNotContains(response, attachment.file.url)
         self.assertNotContains(response, '/media/')
+        self._assert_no_attachment_mutation_controls(response)
 
     def test_timeline_renders_labels_without_raw_metadata(self):
         event = ExpenseRequestEvent.objects.filter(
@@ -305,6 +324,7 @@ class ExpenseRequestUITests(TestCase):
         self.assertFalse(response.context['can_deny_expense_request'])
         self.assertFalse(response.context['can_annul_expense_request'])
         self.assertFalse(response.context.get('can_fulfill_expense_request', False))
+        self.assertFalse(response.context.get('can_add_expense_request_attachment', False))
         self._assert_no_decision_controls(response)
         self._assert_no_annul_controls(response)
         self._assert_no_attachment_mutation_controls(response)

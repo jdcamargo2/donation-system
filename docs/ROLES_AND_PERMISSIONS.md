@@ -146,6 +146,8 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
 * En ER5 registra el gasto final desde `APPROVED_RESERVED`
   (`expense_request_fulfill`; soporte obligatorio; exacto o parcial). Los CTAs
   ordinarios de creación directa de gasto quedan retirados.
+* En ER6 puede agregar/eliminar adjuntos solo en solicitudes propias pendientes
+  y leer adjuntos de cualquier solicitud visible mediante rutas protegidas.
 * No recibe `delete_expenserequest` ni permisos de mutación de `ExpenseRequestEvent`.
 * No recibe automáticamente permisos técnicos generales de Kobo distintos de los cinco territoriales.
 
@@ -192,14 +194,20 @@ operations.view_expenserequestevent
 * gestionar remediaciones propias (crear, editar, adjuntar, enviar);
 * crear solicitudes de gasto desde el detalle de un proyecto (no desde el
   listado global);
-* editar y retirar **solo** solicitudes propias en `PENDING_DECISION`.
+* editar y retirar **solo** solicitudes propias en `PENDING_DECISION`;
+* agregar o eliminar adjuntos **solo** en solicitudes propias pendientes
+  (`add_expenserequestattachment` / `delete_expenserequestattachment`);
+* previsualizar o descargar adjuntos de sus propias solicitudes visibles
+  (`view_expenserequestattachment`) mediante rutas protegidas.
 
 En la UI (ER3A+ER3B), el listado/detalle de solicitudes se limita a
 las creadas por el mismo usuario (`requested_by`); no ve solicitudes de otros
 Operadores. El listado no muestra «Nueva solicitud» global; el CTA es
 «Solicitar gasto» en el detalle del proyecto. En ER4A no ve «Aprobar» ni
 «Denegar»; esas rutas responden 403. En ER4B no ve «Anular solicitud»; la ruta
-de anulación responde 403.
+de anulación responde 403. En ER6 ve «Agregar adjunto» / «Eliminar adjunto»
+solo en propias `PENDING_DECISION`; tras la decisión los adjuntos permanecen
+legibles pero congelados.
 
 Al registrar un avance, el usuario autenticado se asigna automáticamente como
 persona responsable. El campo se muestra en modo no editable.
@@ -265,7 +273,8 @@ En ER3A/ER3B el Auditor ve **todas** las solicitudes visibles en listado/detalle
 de accesos rápidos del panel no afecta esa navegación. No ve «Solicitar gasto»,
 «Editar», «Retirar», «Aprobar» ni «Denegar». En ER4A las rutas de decisión
 responden 403. En ER4B no ve «Anular solicitud»; la ruta de anulación responde
-403.
+403. En ER6 puede previsualizar/descargar adjuntos protegidos de solicitudes
+visibles, sin CTAs de mutación.
 
 ### Restricciones
 
@@ -334,7 +343,9 @@ o deniega solicitudes pendientes desde páginas dedicadas (`expense_request_appr
 `expense_request_deny`); la aprobación reserva fondos de forma atómica y la denegación
 exige motivo. No ve CTAs de creación/edición/retiro del solicitante; tampoco ve
 «Anular solicitud» (ER4B; la ruta responde 403). No ve «Registrar gasto» (ER5;
-la ruta de cumplimiento responde 403). Aún no hay mutación de adjuntos protegidos.
+la ruta de cumplimiento responde 403). En ER6 puede previsualizar/descargar
+adjuntos de solicitudes visibles, pero no ve CTAs de mutación de adjuntos
+(upload/delete responden 403/404 según alcance).
 
 ### No recibe
 

@@ -1,5 +1,8 @@
 <section class="ops-expense-detail-section" aria-labelledby="expense-request-attachments-title">
     <h2 id="expense-request-attachments-title" class="h5">Adjuntos</h2>
+    {% if attachments_frozen %}
+        <p class="text-muted small">Los adjuntos están bloqueados porque la solicitud ya fue decidida o cerrada.</p>
+    {% endif %}
     <div class="ops-expense-document-list">
         {% for attachment in detail_attachments %}
             <div class="ops-expense-document-item">
@@ -17,8 +20,40 @@
                         {% if attachment.notes %}
                             <div class="small mt-1">{{ attachment.notes }}</div>
                         {% endif %}
+                        {% include "web/includes/protected_file_item.html" with file_actions=attachment.file_actions %}
                     </div>
                 </div>
+                {% if attachment.file_actions.can_delete and attachment.file_actions.delete_url %}
+                    <div class="dropdown">
+                        <button
+                            class="btn btn-sm btn-outline-secondary ops-expense-document-more"
+                            type="button"
+                            data-bs-toggle="dropdown"
+                            data-bs-boundary="viewport"
+                            aria-expanded="false"
+                            aria-label="Acciones del adjunto {{ attachment.title }}"
+                        >⋮</button>
+                        <ul class="dropdown-menu dropdown-menu-end ops-expense-document-action-menu">
+                            <li>
+                                <a
+                                    class="dropdown-item text-danger"
+                                    href="{{ attachment.file_actions.delete_url }}"
+                                    data-confirm-action
+                                    data-confirm-form="expense-request-attachment-delete-form-{{ attachment.object.pk }}"
+                                    data-confirm-title="Eliminar adjunto"
+                                    data-confirm-text="Este archivo se eliminará de la solicitud."
+                                    data-confirm-confirm-label="Sí, eliminar"
+                                    data-confirm-variant="danger"
+                                >Eliminar adjunto</a>
+                            </li>
+                        </ul>
+                        <form
+                            id="expense-request-attachment-delete-form-{{ attachment.object.pk }}"
+                            method="post"
+                            action="{{ attachment.file_actions.delete_url }}"
+                        >{% csrf_token %}</form>
+                    </div>
+                {% endif %}
             </div>
         {% empty %}
             <p class="text-muted mb-0">Esta solicitud no tiene adjuntos.</p>

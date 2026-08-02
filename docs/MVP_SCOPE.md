@@ -121,8 +121,11 @@ preserva). ER5 añade la UI de cumplimiento: el Administrador registra el gasto
 final desde una solicitud `APPROVED_RESERVED` (soporte obligatorio; conversión
 exacta o parcial con liberación del remanente). La UI ordinaria de creación
 directa de `Expense` queda retirada; el listado/detalle de gastos históricos
-permanecen. Aún no hay adjuntos de solicitud protegidos ni contadores nuevos en
-el dashboard. ER1 estableció modelos, permisos, evidencias y eventos inmutables.
+permanecen. ER6 añade adjuntos opcionales de solicitud con mutación solo por el
+solicitante original en `PENDING_DECISION`, congelados tras cualquier decisión o
+cierre, y preview/download protegidos (sin URLs directas de media ni exposición
+pública). Aún no hay contadores nuevos en el dashboard. ER1 estableció modelos,
+permisos, evidencias y eventos inmutables.
 
 Estados:
 

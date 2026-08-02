@@ -12,6 +12,7 @@ from ..file_access import (
 )
 from ..models import (
     Expense,
+    ExpenseRequestAttachment,
     Institution,
     Project,
     ProjectDocument,
@@ -21,6 +22,7 @@ from ..models import (
     ProjectUpdateRemediationAttachment,
     SupportingDocument,
 )
+from ..selectors import visible_expense_requests_for_user
 from .common import OperationsPermissionRequiredMixin, _protected_file_response
 
 
@@ -243,4 +245,48 @@ class ProjectSupportingDocumentDownloadView(
 
 
 class ProjectSupportingDocumentPreviewView(ProjectSupportingDocumentDownloadView):
+    disposition = DISPOSITION_INLINE
+
+
+class ExpenseRequestAttachmentDownloadView(
+    OperationsPermissionRequiredMixin,
+    ProtectedFileDispositionMixin,
+    DetailView,
+):
+    """
+    Parent-scoped Expense Request attachment download.
+
+    Authorization: view_expenserequest + view_expenserequestattachment plus
+    parent visibility via visible_expense_requests_for_user.
+    """
+
+    permission_required = (
+        'operations.view_expenserequest',
+        'operations.view_expenserequestattachment',
+    )
+    model = ExpenseRequestAttachment
+    file_attr = 'file'
+    disposition = DISPOSITION_ATTACHMENT
+    missing_message = _('El adjunto de la solicitud no está disponible.')
+    pk_url_kwarg = 'pk'
+
+    def get_queryset(self):
+        """
+        PRE: URL nests request_pk and attachment pk.
+        POST: only attachments belonging to that expense request are candidates.
+        """
+        return ExpenseRequestAttachment.objects.filter(
+            pk=self.kwargs['pk'],
+            expense_request_id=self.kwargs['request_pk'],
+        )
+
+    def get_object(self, queryset=None):
+        get_object_or_404(
+            visible_expense_requests_for_user(self.request.user),
+            pk=self.kwargs['request_pk'],
+        )
+        return super().get_object(queryset=queryset)
+
+
+class ExpenseRequestAttachmentPreviewView(ExpenseRequestAttachmentDownloadView):
     disposition = DISPOSITION_INLINE

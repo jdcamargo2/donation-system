@@ -14,6 +14,7 @@ from .models import (
     Donation,
     Expense,
     ExpenseRequest,
+    ExpenseRequestAttachment,
     ExpenseRequestEvent,
     FundAllocation,
     Project,
@@ -21,10 +22,14 @@ from .models import (
     ZERO_MONEY,
 )
 from .services import (
+    _compensate_stored_upload,
     _create_expense_locked,
+    _store_upload_for_field,
     _stored_upload,
     ensure_operational_entity_is_editable,
     log_action,
+    log_create,
+    log_delete,
     validate_terminal_reason,
     _require_transition_actor,
     _validate_operating_currency,
@@ -1081,3 +1086,106 @@ def annul_expense_request(request, *, reason, actor) -> ExpenseRequest:
             'decided_by',
             'terminal_by',
         ).get(pk=locked_request.pk)
+
+
+def _validate_attachment_title(title: str) -> str:
+    """
+    PRE: title is the proposed attachment label from a validated form or service caller.
+    POST: returns a non-empty trimmed title or raises a field ValidationError.
+    """
+    clean_title = (title or '').strip()
+    if not clean_title:
+        raise ValidationError({'title': _('El título del adjunto es obligatorio.')})
+    if len(clean_title) > 160:
+        raise ValidationError(
+            {'title': _('El título del adjunto no puede exceder 160 caracteres.')}
+        )
+    return clean_title
+
+
+def add_expense_request_attachments(
+    *,
+    expense_request_id: int,
+    files,
+    title: str,
+    notes: str = '',
+    actor,
+) -> list[ExpenseRequestAttachment]:
+    """
+    PRE: expense_request_id is own PENDING_DECISION; files is a non-empty validated list;
+         actor holds add_expenserequestattachment.
+    POST: stores files outside the transaction, then creates one audited row per file
+          atomically; compensates every stored name if relational confirmation fails.
+    """
+    _ensure_request_permission(actor, 'add_expenserequestattachment')
+    if not files:
+        raise ValidationError({'files': _('Debe seleccionar al menos un archivo.')})
+    clean_title = _validate_attachment_title(title)
+    clean_notes = (notes or '').strip()
+
+    with transaction.atomic():
+        locked_request = ExpenseRequest.objects.select_for_update().get(pk=expense_request_id)
+        _ensure_actor_is_requester(locked_request, actor)
+        _ensure_request_is_pending(locked_request)
+
+    stored_uploads = []
+    try:
+        for uploaded_file in files:
+            draft = ExpenseRequestAttachment(
+                expense_request_id=expense_request_id,
+                title=clean_title,
+            )
+            storage, stored_name = _store_upload_for_field(draft, 'file', uploaded_file)
+            stored_uploads.append((storage, stored_name))
+
+        with transaction.atomic():
+            locked_request = ExpenseRequest.objects.select_for_update().get(
+                pk=expense_request_id
+            )
+            _ensure_actor_is_requester(locked_request, actor)
+            _ensure_request_is_pending(locked_request)
+            created = []
+            for _storage, stored_name in stored_uploads:
+                attachment = ExpenseRequestAttachment.objects.create(
+                    expense_request=locked_request,
+                    file=stored_name,
+                    title=clean_title,
+                    notes=clean_notes,
+                    uploaded_by=actor,
+                )
+                log_create(actor, attachment, _('Adjunto de solicitud agregado.'))
+                created.append(attachment)
+            return created
+    except Exception:
+        for storage, stored_name in stored_uploads:
+            _compensate_stored_upload(storage, stored_name)
+        raise
+
+
+def delete_expense_request_attachment(
+    *,
+    expense_request_id: int,
+    attachment_id: int,
+    actor,
+) -> int:
+    """
+    PRE: attachment belongs to expense_request_id; actor is the original requester;
+         parent remains PENDING_DECISION; actor holds delete_expenserequestattachment.
+    POST: audits and deletes the attachment (and its stored file) atomically; returns parent pk.
+    """
+    _ensure_request_permission(actor, 'delete_expenserequestattachment')
+    with transaction.atomic():
+        locked_request = ExpenseRequest.objects.select_for_update().get(pk=expense_request_id)
+        _ensure_actor_is_requester(locked_request, actor)
+        _ensure_request_is_pending(locked_request)
+        attachment = ExpenseRequestAttachment.objects.select_for_update().get(
+            pk=attachment_id,
+            expense_request_id=expense_request_id,
+        )
+        log_delete(actor, attachment, _('Adjunto de solicitud eliminado.'))
+        storage = attachment.file.storage if attachment.file else None
+        stored_name = attachment.file.name if attachment.file else ''
+        attachment.delete()
+        if storage and stored_name:
+            _compensate_stored_upload(storage, stored_name)
+        return expense_request_id

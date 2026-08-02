@@ -388,6 +388,69 @@ class ProtectedFileRoleMatrixTests(TestCase):
         )
 
 
+class ExpenseRequestAttachmentProtectedFileTests(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+
+        from apps.operations.expense_request_services import (
+            add_expense_request_attachments,
+            create_expense_request,
+        )
+        from apps.operations.tests.helpers import TEST_DATE, create_allocation
+
+        self.media = TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        self.override = override_settings(MEDIA_ROOT=self.media.name)
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+        sync_operation_roles()
+        self.admin = create_user('er6-prev-admin')
+        self.operator = self._user('er6-prev-op', ROLE_FIELD_OPERATOR)
+        self.other = self._user('er6-prev-op-b', ROLE_FIELD_OPERATOR)
+        allocation = create_allocation(amount=Decimal('100.00'))
+        self.request_obj = create_expense_request(
+            fund_allocation=allocation,
+            requested_amount=Decimal('20.00'),
+            purpose='Preview ER6',
+            requested_date=TEST_DATE,
+            actor=self.operator,
+        )
+        self.attachment = add_expense_request_attachments(
+            expense_request_id=self.request_obj.pk,
+            files=[SimpleUploadedFile('er6.png', PNG_BYTES)],
+            title='ER6 PNG',
+            actor=self.operator,
+        )[0]
+
+    def _user(self, username, role_name):
+        user = get_user_model().objects.create_user(username=username, password='pass-12345')
+        user.groups.add(Group.objects.get(name=role_name))
+        return user
+
+    def test_owner_and_admin_preview_download_nested_scope(self):
+        preview = reverse(
+            'expense_request_attachment_preview',
+            args=[self.request_obj.pk, self.attachment.pk],
+        )
+        download = reverse(
+            'expense_request_attachment_download',
+            args=[self.request_obj.pk, self.attachment.pk],
+        )
+        for actor in (self.operator, self.admin):
+            self.client.force_login(actor)
+            preview_response = self.client.get(preview)
+            self.assertEqual(preview_response.status_code, 200)
+            self.assertIn('inline;', preview_response['Content-Disposition'])
+            self.assertEqual(preview_response['Content-Type'], 'image/png')
+            download_response = self.client.get(download)
+            self.assertEqual(download_response.status_code, 200)
+            self.assertIn('attachment;', download_response['Content-Disposition'])
+
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(preview).status_code, 404)
+        self.assertEqual(self.client.get(download).status_code, 404)
+
+
 class DebugMediaHardeningTests(TestCase):
     def test_core_urls_does_not_mount_private_media(self):
         import core.urls as core_urls
