@@ -104,7 +104,7 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 Las revisiones remotas se identifican por `_uuid` dentro del asset y hash canónico
 del payload. Una revisión de una submission aprobada, importada o rechazada nunca
 sobrescribe staging ni materialización: queda privada, marcada como pendiente y
-requiere revisión humana posterior. Solo una ejecución completa avanza el cursor;
+requiere inspección técnica posterior en el hub. Solo una ejecución completa avanza el cursor;
 una ejecución parcial conserva el cursor anterior y libera su lease.
 * `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
 * `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900).
@@ -453,16 +453,29 @@ Se reutiliza `apps.operations.file_access.protected_file_response` sin debilitar
 las reglas de `privacy_level`, estado `DOWNLOADED`, submission `IMPORTED` ni
 permisos `kobo.view_kobosubmission` / elevación sensible.
 
-## 13. Histórico: revisión manual por proyecto
+## 13. Histórico: revisión manual por proyecto (retirada)
+
+> **Histórico / superseded.** La bandeja humana de approve/reject/restore por
+> Project y la consola técnica de decisión humana sobre submissions fueron
+> retiradas del producto. No quedan rutas HTTP registradas ni tombstones
+> `Http404`: las peticiones a las rutas antiguas reciben 404 de resolución de
+> URL y `reverse()` de sus nombres lanza `NoReverseMatch`.
 
 Antes del pipeline automático, la revisión ordinaria asociada a un proyecto
 permitía consultar información normalizada, importar, rechazar, restaurar y
-consultar el historial. Esa bandeja humana por Project ya no forma parte del
-flujo operativo vigente: las submissions resueltas se enrutan y auto-importan,
-y las rutas HTTP de revisión/importación/rechazo por proyecto permanecen
-deshabilitadas (`Http404`) donde aún existen. El detalle del proyecto muestra
-datos importados e historial Kobo; las incidencias operativas viven en el hub
-global.
+consultar el historial. El flujo vigente es automático e incident-driven:
+
+* webhook/sync recibe submissions;
+* normalización y routing corren automáticamente;
+* submissions elegibles se importan automáticamente;
+* fallos e incidencias de routing se presentan en el hub territorial;
+* usuarios técnicos autorizados inspeccionan submissions y reintentan
+  procesamiento/importación;
+* registros importados permanecen visibles en detalle de proyecto e historial.
+
+`READY_FOR_REVIEW` es un estado interno/incidencia de automatización, no una
+bandeja de aprobación humana. Los valores históricos del enum y las filas
+existentes se conservan.
 
 El detalle importado en proyecto usa un contrato de presentación compartido
 (`submission_presentation`) para Ficha 1, 10 y 11: valores y etiquetas en
@@ -481,19 +494,16 @@ cargan recursos de mapa de terceros embebidos en la página; las coordenadas
 textuales siguen visibles dentro de SIGEDON; coordenadas inválidas o ausentes
 no producen enlace.
 
-### Permisos (histórico / rutas retenidas)
+### Permisos vigentes (consulta e inspección)
 
-La consulta ordinaria requería:
+La consulta ordinaria de historial/detalle importado requiere:
 
 ```text
 operations.view_project
 ```
 
-La importación, el rechazo o la restauración requerían:
-
-```text
-operations.change_project
-```
+La inspección técnica y el reintento de importación requieren permisos `kobo.*`
+según la acción (hub territorial / detalle técnico).
 
 El acceso al payload crudo y a la información técnica sensible continúa protegido mediante permisos `kobo.*`.
 
@@ -624,77 +634,47 @@ Antes de este contrato existían dos escritores de `IMPORTED`:
   creaba un evento técnico, pero no `AuditLog` ni entidad materializada.
 
 La bandeja por proyecto invocaba la primera ruta; la consola técnica ejecutaba
-`review_submission()` y después la segunda. Los reintentos sobre `IMPORTED` no
+el retirado `review_submission()` y después la segunda. Los reintentos sobre `IMPORTED` no
 duplicaban eventos, pero tampoco podían responder qué entidad había producido
 la importación. Como el cambio de estado y sus eventos estaban dentro de
 `transaction.atomic()`, una excepción de base de datos posterior al `save()`
 revertía esas escrituras; la deuda era semántica, no un commit parcial conocido.
 Ambas rutas terminan ahora en el servicio materializador común.
 
-## 14. Histórico: rechazo y restauración
+## 14. Histórico: rechazo y restauración (servicios retirados)
 
-Las rutas HTTP de rechazo/restauración por proyecto están deshabilitadas. Los
-servicios de dominio pueden conservar estas transiciones para compatibilidad y
-trazabilidad; no reabren una cola humana por Project.
+> **Histórico / superseded.** Las rutas HTTP y los servicios de dominio
+> `reject_kobo_submission()` / `restore_kobo_submission_to_review()` /
+> `review_submission()` fueron eliminados del código productivo. Los estados
+> `REJECTED` y `READY_FOR_REVIEW`, los eventos históricos y las filas
+> existentes se conservan para trazabilidad; no hay endpoints ni formularios
+> para crear nuevos rechazos/restauraciones humanas.
 
-### Rechazo
+Filas históricas con `REJECTED` siguen visibles en el historial del proyecto.
+La recuperación operativa vigente es el reintento técnico de importación /
+procesamiento desde el hub o el detalle técnico, no una restauración a una
+cola humana.
 
-Una submission puede rechazarse por servicio cuando:
+## 15. Consola global / hub territorial
 
-* el actor posee permisos;
-* se registra un motivo;
-* la transición está permitida.
+La consola global (hub territorial) es una herramienta de administración técnica.
 
-La submission pasa a:
-
-```text
-REJECTED
-```
-
-El rechazo:
-
-* no elimina el payload original;
-* no importa información operativa;
-* conserva la trazabilidad;
-* no restaura una bandeja de revisión por Project.
-
-### Restauración
-
-Una submission rechazada puede restaurarse al estado interno transitorio:
-
-```text
-REJECTED
-→ READY_FOR_REVIEW
-```
-
-La restauración:
-
-* requiere autorización;
-* no implica aprobación humana por Project;
-* debe registrar un evento técnico;
-* conserva el rechazo anterior en el historial;
-* permite que el pipeline automático reintente cuando corresponda.
-
-## 15. Consola global
-
-La consola global es una herramienta de administración técnica.
-
-Requiere permisos `kobo.*`.
+Requiere permisos `kobo.*` (lectura territorial y, según la acción, cambio).
 
 ### Permite
 
-* revisar submissions;
-* consultar payloads técnicos;
-* asociar proyectos;
-* reintentar procesamiento;
+* inspeccionar incidencias de routing/importación;
+* consultar payloads técnicos (con elevación);
+* reintentar procesamiento e importación;
 * inspeccionar errores;
-* gestionar activos;
-* consultar el historial del flujo histórico de aprobación, ya retirado;
+* gestionar activos y mappings;
+* consultar historial de sync;
 * realizar acciones de soporte y diagnóstico.
 
 ### Restricciones
 
-* No debe confundirse con el flujo operativo ordinario desde un proyecto.
+* No debe confundirse con la revisión de gobernanza de `ProjectUpdate`.
+* No debe confundirse con la retirada bandeja humana de submissions Kobo.
 * No debe estar disponible para usuarios operativos sin autorización técnica.
 * El acceso técnico no implica permiso para modificar información financiera.
 * Los datos sensibles deben mantenerse protegidos.

@@ -103,8 +103,8 @@ Incluye:
 * routing hacia proyectos;
 * gestión de adjuntos;
 * procesamiento;
-* revisión humana;
-* importación;
+* inspección técnica de incidencias;
+* importación automática;
 * reconciliación;
 * recepción mediante webhook.
 

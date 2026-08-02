@@ -42,11 +42,8 @@ EXPECTED_PUBLIC_API = {
     "process_pending_submissions",
     "observe_territorial_identity",
     "receive_webhook_submission",
-    "reject_kobo_submission",
     "reconcile_territorial_identity_submissions",
-    "restore_kobo_submission_to_review",
     "retry_auto_import",
-    "review_submission",
     "route_dependent_territorial_submission",
     "route_ficha_1_submission",
     "route_normalized_submission",
@@ -76,11 +73,8 @@ EXPECTED_SIGNATURES = {
     "process_pending_submissions": "(*, limit=100, default_timezone)",
     "observe_territorial_identity": "(*, identity, actor, reason)",
     "receive_webhook_submission": "(*, asset, raw_payload)",
-    "reject_kobo_submission": "(submission, *, actor, reason, comment='')",
     "reconcile_territorial_identity_submissions": "(*, identity, actor, limit=100)",
-    "restore_kobo_submission_to_review": "(submission, *, actor)",
     "retry_auto_import": "(submission)",
-    "review_submission": "(submission, *, decision, reason, reviewed_by)",
     "route_dependent_territorial_submission": "(submission)",
     "route_ficha_1_submission": "(submission)",
     "route_normalized_submission": "(submission)",
@@ -141,12 +135,12 @@ class KoboServicesPackageArchitectureTests(TestCase):
         submissions = importlib.import_module(
             "apps.integrations.kobo.services.submissions"
         )
-        importers = importlib.import_module(
-            "apps.integrations.kobo.services.importers"
+        processing = importlib.import_module(
+            "apps.integrations.kobo.services.processing"
         )
 
         self.assertIs(submissions.KoboPayloadError, errors.KoboPayloadError)
-        self.assertIs(importers.KoboPayloadError, errors.KoboPayloadError)
+        self.assertIs(processing.KoboConfigurationError, errors.KoboConfigurationError)
 
     def test_each_definition_has_one_owner_module(self):
         services_directory = Path(services.__file__).parent

@@ -93,15 +93,15 @@ EVENT_PRESENTATIONS = {
     ),
     "incomplete": (
         "Devuelto para revisión",
-        "Se solicitó completar o corregir información antes de continuar.",
+        "Histórico: se solicitó completar o corregir información antes de continuar.",
     ),
     "restored": (
-        "Restaurado a revisión",
-        "El formulario volvió a la cola de revisión humana.",
+        "Restaurado al pipeline",
+        "Histórico: el formulario volvió al estado interno de procesamiento.",
     ),
     "auto_approved": (
         "Aprobado automáticamente",
-        "El sistema autorizó la importación sin revisión humana.",
+        "El sistema autorizó la importación en el pipeline automático.",
     ),
     "auto_imported": (
         "Importado automáticamente",
@@ -112,20 +112,20 @@ EVENT_PRESENTATIONS = {
         "La información quedó registrada en el proyecto.",
     ),
     "remote_update_detected": (
-        "Cambio recibido que requiere revisión",
-        "KoboToolbox envió una actualización que debe revisarse antes de aplicarse.",
+        "Cambio recibido que requiere inspección",
+        "KoboToolbox envió una actualización que debe inspeccionarse antes de aplicarse.",
     ),
     "REMOTE_UPDATE_DETECTED": (
-        "Cambio recibido que requiere revisión",
-        "KoboToolbox envió una actualización que debe revisarse antes de aplicarse.",
+        "Cambio recibido que requiere inspección",
+        "KoboToolbox envió una actualización que debe inspeccionarse antes de aplicarse.",
     ),
     KoboSubmission.Status.APPROVED_FOR_IMPORT: (
         "Aprobado para importar",
-        "La revisión humana autorizó la importación al proyecto.",
+        "Estado transitorio de autorización automática hacia la importación.",
     ),
     KoboSubmission.Status.REJECTED: (
         "Formulario rechazado",
-        "La revisión humana rechazó el formulario.",
+        "Histórico: el formulario quedó rechazado y no se importó.",
     ),
     "test_submission": (
         "Rechazado: envío de prueba",
@@ -145,7 +145,7 @@ EVENT_PRESENTATIONS = {
     ),
     "other": (
         "Rechazado",
-        "El formulario se rechazó por un motivo registrado en la revisión.",
+        "Histórico: el formulario se rechazó por un motivo registrado.",
     ),
 }
 

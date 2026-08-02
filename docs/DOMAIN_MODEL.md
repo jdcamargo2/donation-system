@@ -495,8 +495,8 @@ Responsabilidades:
 * conservar el payload original;
 * mantener el estado del pipeline;
 * registrar intentos y resultados;
-* permitir revisión humana;
-* soportar rechazo, restauración e importación;
+* soportar importación automática e inspección técnica de incidencias;
+* conservar estados históricos (`REJECTED`, `READY_FOR_REVIEW`, etc.) sin reabrir una bandeja humana;
 * evitar la pérdida de información original.
 
 ### 14.6. `KoboTerritorialIdentity`

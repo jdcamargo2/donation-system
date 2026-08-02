@@ -73,21 +73,6 @@ urlpatterns = [
         name="project_submission_evidence_download",
     ),
     path(
-        "projects/<int:project_pk>/pending-submissions/<int:pk>/",
-        views.project_pending_submission_review,
-        name="project_pending_submission_review",
-    ),
-    path(
-        "projects/<int:project_pk>/pending-submissions/<int:pk>/import/",
-        views.project_pending_submission_import,
-        name="project_pending_submission_import",
-    ),
-    path(
-        "projects/<int:project_pk>/pending-submissions/<int:pk>/reject/",
-        views.project_pending_submission_reject,
-        name="project_pending_submission_reject",
-    ),
-    path(
         "projects/<int:project_pk>/submission-history/",
         views.project_submission_history,
         name="project_submission_history",
@@ -97,21 +82,11 @@ urlpatterns = [
         views.project_submission_history_detail,
         name="project_submission_history_detail",
     ),
-    path(
-        "projects/<int:project_pk>/submission-history/<int:pk>/restore/",
-        views.project_rejected_submission_restore,
-        name="project_rejected_submission_restore",
-    ),
     path("submissions/", views.submission_list, name="submission_list"),
     path(
         "submissions/<int:pk>/",
         views.submission_detail,
         name="submission_detail",
-    ),
-    path(
-        "submissions/<int:pk>/review/",
-        views.review_submission_action,
-        name="submission_review",
     ),
     path(
         "submissions/<int:pk>/retry-normalization/",

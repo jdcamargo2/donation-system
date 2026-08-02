@@ -3,6 +3,7 @@ from datetime import date
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.test import TestCase
+from django.urls import NoReverseMatch
 from django.urls import reverse
 
 from apps.integrations.kobo.contracts import TerritorialRoutingReasonCode
@@ -125,9 +126,8 @@ class KoboReviewPanelTests(TestCase):
             "kobo:submission_detail",
             args=(self.submission.pk,),
         )
-        self.review_url = reverse(
-            "kobo:submission_review",
-            args=(self.submission.pk,),
+        self.retired_review_path = (
+            f"/integrations/kobo/submissions/{self.submission.pk}/review/"
         )
 
     def test_login_is_required(self):
@@ -386,13 +386,17 @@ class KoboReviewPanelTests(TestCase):
         for event in events:
             self.assertNotIn(" / ", event.title)
 
-    def test_legacy_review_endpoint_is_disabled_without_mutation(self):
+    def test_legacy_review_endpoint_is_removed_without_mutation(self):
         self.client.force_login(self.reviewer)
         detail = self.client.get(self.detail_url)
         self.assertNotContains(detail, "Aprobar e importar")
+        self.assertNotIn("review_form", detail.context)
+
+        with self.assertRaises(NoReverseMatch):
+            reverse("kobo:submission_review", args=(self.submission.pk,))
 
         response = self.client.post(
-            self.review_url,
+            self.retired_review_path,
             {
                 "review_intent": "approve",
                 "reason": "",
@@ -403,13 +407,13 @@ class KoboReviewPanelTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(self.submission.status, KoboSubmission.Status.READY_FOR_REVIEW)
 
-    def test_get_cannot_execute_review(self):
+    def test_get_cannot_reach_removed_review_path(self):
         self.client.force_login(self.reviewer)
 
-        response = self.client.get(self.review_url)
+        response = self.client.get(self.retired_review_path)
         self.submission.refresh_from_db()
 
-        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(
             self.submission.status,
             KoboSubmission.Status.READY_FOR_REVIEW,

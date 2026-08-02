@@ -1,5 +1,4 @@
 from django import forms
-from django.core.exceptions import ValidationError
 
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
@@ -8,11 +7,9 @@ from apps.integrations.kobo.models import (
     KoboAsset,
     KoboDiscoveredAsset,
     KoboFormDefinition,
-    KoboSubmission,
     KoboTerritorialIdentityConflict,
 )
 from apps.integrations.kobo.form_registry import list_registered_forms
-from apps.integrations.kobo.services import REJECTION_REASON_LABELS
 
 
 SUPPORTED_FORM_ROLES = {
@@ -81,101 +78,6 @@ class KoboAssetConfigurationForm(forms.Form):
         self.fields["form_definition"].initial = definition
         self.fields["form_role"].choices = ((form_role, dict(KoboAsset.FormRole.choices)[form_role]),)
         self.fields["form_role"].initial = form_role
-
-
-class KoboReviewForm(forms.Form):
-    decision = forms.ChoiceField(
-        required=False,
-        choices=(
-            (
-                KoboSubmission.Status.APPROVED_FOR_IMPORT,
-                "Aprobar e importar",
-            ),
-            (KoboSubmission.Status.REJECTED, "Rechazar formulario"),
-        ),
-        widget=forms.HiddenInput,
-    )
-    review_intent = forms.ChoiceField(
-        required=False,
-        choices=(
-            ("approve", "Aprobar e importar"),
-            ("request_correction", "Solicitar corrección"),
-            ("reject", "Rechazar formulario"),
-        ),
-        widget=forms.HiddenInput,
-    )
-    reason = forms.CharField(
-        required=False,
-        widget=forms.Textarea(
-            attrs={
-                "rows": 3,
-                "class": "form-control",
-                "placeholder": "Describa el motivo para la persona que corregirá o revisará el formulario.",
-            }
-        ),
-        label="Motivo",
-    )
-
-    def __init__(self, *args, submission: KoboSubmission, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.submission = submission
-
-    def clean(self):
-        # PRE: submission is the staging record being reviewed.
-        # POST: allows only one ready-state decision and requires reason for
-        # correction requests and rejections without changing stored contracts.
-        cleaned_data = super().clean()
-        if self.submission.status != KoboSubmission.Status.READY_FOR_REVIEW:
-            raise ValidationError("Este formulario ya no está pendiente de revisión.")
-        intent = cleaned_data.get("review_intent") or ""
-        decision = cleaned_data.get("decision")
-        if intent == "approve":
-            cleaned_data["decision"] = KoboSubmission.Status.APPROVED_FOR_IMPORT
-            decision = cleaned_data["decision"]
-        elif intent in {"request_correction", "reject"}:
-            cleaned_data["decision"] = KoboSubmission.Status.REJECTED
-            decision = cleaned_data["decision"]
-        if decision not in {
-            KoboSubmission.Status.APPROVED_FOR_IMPORT,
-            KoboSubmission.Status.REJECTED,
-        }:
-            raise ValidationError("Seleccione una acción de revisión.")
-        needs_reason = decision == KoboSubmission.Status.REJECTED
-        if needs_reason and not cleaned_data.get("reason", "").strip():
-            if intent == "request_correction":
-                self.add_error(
-                    "reason",
-                    "Indique el motivo para solicitar la corrección.",
-                )
-            else:
-                self.add_error(
-                    "reason",
-                    "Indique el motivo del rechazo.",
-                )
-        return cleaned_data
-
-
-class KoboRejectionForm(forms.Form):
-    reason = forms.ChoiceField(
-        choices=tuple(REJECTION_REASON_LABELS.items()),
-        label="Motivo",
-    )
-    comment = forms.CharField(
-        required=False,
-        widget=forms.Textarea(attrs={"rows": 3}),
-        label="Comentario",
-    )
-
-    def clean(self):
-        # PRE: rejection values come from the project review confirmation form.
-        # POST: requires a comment only for the other reason without mutating data.
-        cleaned_data = super().clean()
-        if (
-            cleaned_data.get("reason") == "other"
-            and not cleaned_data.get("comment", "").strip()
-        ):
-            self.add_error("comment", "El comentario es obligatorio para el motivo otro.")
-        return cleaned_data
 
 
 class PastoralZoneProjectMappingForm(forms.Form):

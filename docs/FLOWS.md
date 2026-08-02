@@ -675,8 +675,10 @@ filtros `workflow` acotados.
     auto-aprueba e importa sin cola humana por proyecto.
 13. `READY_FOR_REVIEW` permanece como estado interno transitorio del pipeline;
     no representa una bandeja sostenida de revisión en el detalle del proyecto.
-14. Las rutas HTTP de revisión/importación/rechazo manual por proyecto están
-    deshabilitadas (`Http404`) donde aún existen por compatibilidad.
+14. Las rutas HTTP de revisión/importación/rechazo/restauración manual por
+    proyecto fueron eliminadas. Las peticiones a esas rutas reciben un 404
+    normal de resolución de URL; `reverse()` de sus nombres antiguos lanza
+    `NoReverseMatch`.
 15. El servicio común bloquea la submission, revalida routing, proyecto,
     normalización, payload preservado, revisión automática y permisos, y
     selecciona el handler cerrado de Ficha 1, 10 u 11.

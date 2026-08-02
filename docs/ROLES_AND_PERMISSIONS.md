@@ -529,24 +529,28 @@ Ninguna acción territorial se concede por poseer solamente `change_kobosubmissi
 
 ## 9. Flujo Kobo asociado a proyectos
 
-La consulta ordinaria de fichas asociadas a un proyecto requiere:
+La consulta ordinaria de fichas importadas e historial Kobo asociados a un
+proyecto requiere:
 
 ```text
 operations.view_project
 ```
 
-La importación, el rechazo o la restauración de submissions asociadas a un proyecto requieren:
-
-```text
-operations.change_project
-```
+No existen endpoints HTTP de aprobación, rechazo o restauración humana de
+submissions Kobo. La importación ordinaria es automática; el reintento técnico
+de importación e inspección de incidencias viven en el hub territorial y requieren
+permisos `kobo.*` (lectura/cambio según la acción).
 
 ### Reglas
 
-* El permiso sobre el proyecto habilita las acciones funcionales asociadas a ese proyecto.
+* El permiso sobre el proyecto habilita la consulta funcional de resultados ya
+  importados y del historial del proyecto.
 * La información cruda y sensible continúa protegida por permisos técnicos `kobo.*`.
 * Un usuario puede consultar resultados normalizados sin acceder necesariamente al payload original.
 * La integración Kobo no debe utilizar permisos operativos para exponer información técnica sensible.
+* Distinguir: (1) revisión de gobernanza de `ProjectUpdate`; (2) inspección
+  técnica de incidencias Kobo en el hub; (3) la retirada revisión humana de
+  submissions Kobo (sin endpoints).
 
 ## 10. Superusuario de Django
 

@@ -554,11 +554,13 @@ La integración debe comprobar:
 * privacidad;
 * procesamiento;
 * reconciliación sin duplicados;
-* revisión humana;
-* importación;
-* rechazo;
-* restauración;
+* importación automática;
+* reintento técnico de importación;
 * diferenciación entre `KoboProcessingEvent` y `AuditLog`.
+
+No cubre una bandeja de aprobación/rechazo humana de submissions: esa superficie
+HTTP fue retirada. `READY_FOR_REVIEW` se prueba como estado interno/incidencia
+de routing, no como cola de aprobación.
 
 Para transporte remoto, use `FakeResponse`, `SequenceTransport` y
 `RecordingSleeper` en `apps.integrations.kobo.tests.helpers`: el adapter espera

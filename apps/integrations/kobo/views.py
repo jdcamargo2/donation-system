@@ -19,7 +19,6 @@ from apps.integrations.kobo.client import build_kobo_api_client
 from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.forms import (
     KoboAssetConfigurationForm,
-    KoboReviewForm,
     get_compatible_asset_configuration,
 )
 from apps.integrations.kobo.models import (
@@ -38,7 +37,6 @@ from apps.integrations.kobo.services import (
     configure_discovered_asset,
     converge_webhook_submission,
     get_project_submission_history,
-    review_submission,
     receive_webhook_submission,
     route_normalized_submission,
 )
@@ -309,7 +307,7 @@ def _project_submission_history_rows(project):
     return tuple(rows)
 
 
-def _detail_context(submission, user, *, review_form=None):
+def _detail_context(submission, user):
     # PRE: submission is loaded and user passed general view authorization.
     # POST: returns detail context for imported rows or automatic-import incidents.
     attachments = list(submission.attachments.all())
@@ -331,7 +329,6 @@ def _detail_context(submission, user, *, review_form=None):
         "attachments": attachments,
         "attachment_status_label": attachment_status_label,
         "has_project": submission.project_id is not None,
-        "review_form": review_form or KoboReviewForm(submission=submission),
         "can_change_submission": can_change_submission,
         "can_view_technical": can_view_technical,
         "can_view_raw_payload": can_view_raw_payload,
@@ -416,17 +413,6 @@ def submission_detail(request, pk):
         "kobo/submission_detail.html",
         _detail_context(submission, request.user),
     )
-
-
-@require_POST
-@login_required
-@permission_required(
-    ("kobo.view_kobosubmission", "kobo.change_kobosubmission"),
-    raise_exception=True,
-)
-def review_submission_action(request, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
 
 
 @require_POST
@@ -527,38 +513,6 @@ def project_submission_detail(request, pk):
 
 
 @login_required
-@permission_required(
-    ("operations.view_project", "operations.change_project"),
-    raise_exception=True,
-)
-def project_pending_submission_review(request, project_pk, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
-
-
-@require_POST
-@login_required
-@permission_required(
-    ("operations.view_project", "operations.change_project"),
-    raise_exception=True,
-)
-def project_pending_submission_import(request, project_pk, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
-
-
-@require_POST
-@login_required
-@permission_required(
-    ("operations.view_project", "operations.change_project"),
-    raise_exception=True,
-)
-def project_pending_submission_reject(request, project_pk, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
-
-
-@login_required
 @permission_required("operations.view_project", raise_exception=True)
 def project_submission_history(request, project_pk):
     # PRE: request user may view the selected operations project.
@@ -573,9 +527,6 @@ def project_submission_history(request, project_pk):
         {
             "project": project,
             "history_rows": _project_submission_history_rows(project),
-            "can_restore_kobo_submissions": request.user.has_perm(
-                "operations.change_project"
-            ),
         },
     )
 
@@ -610,17 +561,6 @@ def project_submission_history_detail(request, project_pk, pk):
             "back_to_history": True,
         },
     )
-
-
-@require_POST
-@login_required
-@permission_required(
-    ("operations.view_project", "operations.change_project"),
-    raise_exception=True,
-)
-def project_rejected_submission_restore(request, project_pk, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
 
 
 @login_required
