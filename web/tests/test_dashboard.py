@@ -379,3 +379,68 @@ class SidebarOverflowContractTests(TestCase):
         self.assertNotContains(response, 'data-bs-toggle="offcanvas"')
         self.assertTrue(SIGEDON_CSS.is_file())
         self.assertIn('web/css/sigedon.css', Path('templates/base.html').read_text())
+
+
+class SidebarBrandingTests(TestCase):
+    """UI-BRAND1: authenticated sidebar uses local ILDE logos; login brand unchanged."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username='sidebar-brand-user',
+            password='pass-12345',
+        )
+
+    def _sidebar_header_html(self, html):
+        match = re.search(
+            r'<div class="sigedon-sidebar-header">(.*?)</div>',
+            html,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(match, 'Expected .sigedon-sidebar-header in authenticated HTML')
+        return match.group(1)
+
+    def _brand_link_html(self, header_html):
+        match = re.search(
+            r'<a\s[^>]*class="sigedon-brand[^"]*"[^>]*>.*?</a>',
+            header_html,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(match, 'Expected .sigedon-brand link in sidebar header')
+        return match.group(0)
+
+    def test_authenticated_sidebar_uses_local_ilde_logos(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('dashboard'))
+        html = response.content.decode()
+        header = self._sidebar_header_html(html)
+        brand = self._brand_link_html(header)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('web/img/logo_ilde.png', brand)
+        self.assertIn('web/img/logo_ilde_short.png', brand)
+        self.assertIn(f'href="{reverse("dashboard")}"', brand)
+        self.assertIn('aria-label="ILDE · SIGEDON"', brand)
+        self.assertIn('title="ILDE · SIGEDON"', brand)
+        self.assertIn('class="sigedon-brand-logo sigedon-brand-logo-expanded"', brand)
+        self.assertIn('class="sigedon-brand-logo sigedon-brand-logo-collapsed"', brand)
+        self.assertEqual(brand.count('alt=""'), 2)
+        self.assertNotIn('class="sigedon-brand-mark">S</span>', brand)
+        self.assertNotIn('sigedon-nav-label">SIGEDON', brand)
+        self.assertIn('data-sidebar-toggle', header)
+        self.assertNotIn('http://', brand)
+        self.assertNotIn('https://', brand)
+        self.assertNotRegex(brand, r'src="/(?:mnt|home)/')
+        # Topbar title remains intentionally.
+        self.assertContains(response, 'ops-topbar-title">SIGEDON')
+
+    def test_login_brand_mark_remains_unchanged(self):
+        response = self.client.get(reverse('login'))
+        html = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="login-badge sigedon-brand-mark">S</span>')
+        self.assertNotContains(response, 'web/img/logo_ilde.png')
+        self.assertNotContains(response, 'web/img/logo_ilde_short.png')
+        self.assertNotContains(response, 'aria-label="ILDE · SIGEDON"')
+        self.assertNotIn('id="sigedonSidebar"', html)

@@ -28,9 +28,24 @@
     {% if user.is_authenticated %}
         <aside class="sigedon-sidebar" id="sigedonSidebar" aria-label="Navegación principal">
             <div class="sigedon-sidebar-header">
-                <a class="sigedon-brand text-decoration-none" href="{% url 'dashboard' %}" title="SIGEDON">
-                    <span class="sigedon-brand-mark">S</span>
-                    <span class="sigedon-nav-label">SIGEDON</span>
+                <a
+                    class="sigedon-brand text-decoration-none"
+                    href="{% url 'dashboard' %}"
+                    aria-label="ILDE · SIGEDON"
+                    title="ILDE · SIGEDON"
+                >
+                    <img
+                        class="sigedon-brand-logo sigedon-brand-logo-expanded"
+                        src="{% static 'web/img/logo_ilde.png' %}"
+                        alt=""
+                        decoding="async"
+                    >
+                    <img
+                        class="sigedon-brand-logo sigedon-brand-logo-collapsed"
+                        src="{% static 'web/img/logo_ilde_short.png' %}"
+                        alt=""
+                        decoding="async"
+                    >
                 </a>
                 <button class="sigedon-collapse-button" type="button" aria-label="Colapsar navegación" title="Colapsar navegación" data-sidebar-toggle>
                     <i class="bi bi-chevron-left" aria-hidden="true"></i>

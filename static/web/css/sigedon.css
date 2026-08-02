@@ -93,6 +93,31 @@ body {
     color: var(--ops-primary);
 }
 
+.sigedon-brand:focus-visible {
+    outline: 2px solid var(--ops-primary);
+    outline-offset: 2px;
+    border-radius: 0.8rem;
+}
+
+.sigedon-brand-logo {
+    display: block;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.sigedon-brand-logo-expanded {
+    max-width: 150px;
+    max-height: 40px;
+}
+
+.sigedon-brand-logo-collapsed {
+    display: none;
+    max-width: 40px;
+    max-height: 40px;
+}
+
 .sigedon-brand-mark {
     align-items: center;
     background: linear-gradient(135deg, var(--ops-primary), var(--ops-primary-strong));
@@ -287,6 +312,14 @@ body.sidebar-collapsed .sigedon-collapse-button i {
 .sidebar-collapsed .sigedon-brand {
     flex: 0 0 auto;
     justify-content: flex-start;
+}
+
+.sidebar-collapsed .sigedon-brand-logo-expanded {
+    display: none;
+}
+
+.sidebar-collapsed .sigedon-brand-logo-collapsed {
+    display: block;
 }
 
 .sidebar-collapsed .sigedon-collapse-button {
