@@ -46,6 +46,7 @@ from .selectors import (
     open_expense_requests_for_project,
     project_has_active_allocations,
     tracking_expense_requests_for_user,
+    user_can_view_project_financials,
     user_has_ownership_scoped_expense_requests,
     with_project_financial_metrics,
 )
@@ -1848,9 +1849,7 @@ def get_dashboard_project_financial_rows(
     """
     if not getattr(user, 'is_authenticated', False):
         return _empty_dashboard_project_financial_block()
-    can_view_allocations = user.has_perm('operations.view_fundallocation')
-    can_view_expenses = user.has_perm('operations.view_expense')
-    if not (can_view_allocations and can_view_expenses):
+    if not user_can_view_project_financials(user):
         return _empty_dashboard_project_financial_block()
 
     scoped = with_project_financial_metrics(Project.objects.all()).order_by(

@@ -67,7 +67,6 @@ from ..models import (
 from ..services import (
     get_allocation_financial_summary,
     get_donation_financial_summary,
-    get_project_financial_summary,
     log_action,
     log_delete,
 )
@@ -298,6 +297,12 @@ class PaginatedListMixin:
 
 
 class DetailMetricsMixin:
+    """
+    Legacy metrics context for donation/allocation/institution detail views.
+    Project detail no longer uses this mixin; its financial contract is gated
+    separately via user_can_view_project_financials.
+    """
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         metrics = []
@@ -307,14 +312,6 @@ class DetailMetricsMixin:
                 (_('Monto'), summary['total_amount']),
                 (_('Monto asignado'), summary['assigned_amount']),
                 (_('Saldo disponible'), summary['available_amount']),
-                (_('Estado'), self.object.get_status_display()),
-            ]
-        elif isinstance(self.object, Project):
-            summary = get_project_financial_summary(self.object)
-            metrics = [
-                (_('Presupuesto estimado'), summary['estimated_budget']),
-                (_('Monto financiado'), summary['funded_amount']),
-                (_('Monto ejecutado'), summary['executed_amount']),
                 (_('Estado'), self.object.get_status_display()),
             ]
         elif isinstance(self.object, FundAllocation):

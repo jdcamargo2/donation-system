@@ -4,7 +4,6 @@
 {% block title %}Proyecto - SIGEDON{% endblock %}
 
 {% block content %}
-{# DEUDA TÉCNICA: DetailMetricsMixin aún entrega metrics, pero esta vista usa project_financial_summary. Retirar el contexto en una intervención posterior. #}
 <div class="ops-page-header ops-page-header-row ops-project-detail-header">
     <div class="ops-project-detail-identity">
         <div class="ops-kicker">Proyecto operativo</div>
@@ -98,16 +97,17 @@
     </div>
 </div>
 
+{% if can_view_project_financials %}
 <section class="ops-project-financial-summary mb-4" aria-labelledby="project-financial-summary-title">
     <div class="ops-project-financial-heading">
         <h2 id="project-financial-summary-title" class="h5 mb-0">Resumen financiero</h2>
         <div class="ops-project-financial-secondary">
             <span><strong>Presupuesto estimado:</strong> <span class="ops-money text-nowrap">{{ project_financial_summary.estimated_budget|money_es }} USD</span></span>
             <span><strong>Ejecución:</strong>
-                {% if execution_percentage is None %}
+                {% if project_financial_summary.execution_percentage is None %}
                     —
                 {% else %}
-                    {{ execution_percentage|percentage_es }} %
+                    {{ project_financial_summary.execution_percentage|percentage_es }} %
                 {% endif %}
             </span>
         </div>
@@ -131,6 +131,7 @@
         </div>
     </div>
 </section>
+{% endif %}
 
 {% include "web/includes/project_milestones.html" %}
 

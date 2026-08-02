@@ -218,11 +218,19 @@ Los datos de Kobo ya integrados en un proyecto pueden seguir siendo visibles
 cuando el acceso se gobierna por `operations.view_project`; eso no implica
 acceso al panel de administración territorial.
 
+`view_project` otorga identidad, estado, datos descriptivos, hitos, avances y
+otra información no financiera del detalle. Las métricas financieras
+operativas del detalle (Fondos asignados, Gastos registrados, Reservado,
+Disponible operativo, Ejecución) requieren **ambos**
+`operations.view_fundallocation` y `operations.view_expense` — la misma regla
+que DASH-FIN3. Sin ambos permisos no se calculan ni se añaden al contexto.
+
 ### No puede
 
 * crear proyectos;
 * publicar ni retirar proyectos del portal;
-* gestionar finanzas (donaciones, asignaciones, gastos);
+* gestionar finanzas (donaciones, asignaciones, gastos), incluidos los montos
+  del resumen financiero en el detalle de proyecto;
 * consultar la auditoría global;
 * revisar ni decidir avances en nombre del Comité;
 * resolver remediaciones;
@@ -374,7 +382,8 @@ las acciones de flujo `review_projectupdate`, `decide_projectupdate` y
 * publicar ni retirar proyectos del portal;
 * eliminar avances;
 * modificar una revisión o decisión ya registrada vía CRUD genérico;
-* gestionar finanzas.
+* gestionar finanzas, incluidos los montos del resumen financiero en el detalle
+  de proyecto.
 
 La revisión, la decisión y la remediación se registran en entidades separadas y
 no alteran el contenido inmutable del avance publicado.
@@ -664,8 +673,11 @@ se muestra un estado positivo consolidado (sin tarjetas vacías repetidas).
 
 Visible solo con `view_fundallocation` **y** `view_expense` (Administrador,
 Auditor, superusuario). Operador y Comité no ven el bloque ni reciben montos
-en el contexto. El detalle interno del proyecto alinea las mismas etiquetas y
-fórmulas; el portal público permanece sin cambios.
+en el contexto. El detalle interno del proyecto aplica **exactamente** la misma
+regla de permisos (`user_can_view_project_financials`): sin ambos permisos no se
+calcula el resumen ni se expone en contexto/HTML; con ambos, las etiquetas y
+fórmulas reservation-aware coinciden con DASH-FIN3. El portal público permanece
+sin cambios.
 
 Atajos de navegación de solicitudes (ER7) viven en el sidebar y en los listados;
 el dashboard no restaura Accesos rápidos:

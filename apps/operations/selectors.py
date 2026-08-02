@@ -441,6 +441,21 @@ def attachment_display_filename(attachment):
     return PurePosixPath(name).name
 
 
+def user_can_view_project_financials(user) -> bool:
+    """
+    PRE: user may be anonymous or authenticated.
+    POST: True when the user may see project operational financial metrics
+          (DASH-FIN3 and project detail). Requires both view_fundallocation and
+          view_expense. No role-name checks; superuser works via has_perm.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return False
+    return (
+        user.has_perm('operations.view_fundallocation')
+        and user.has_perm('operations.view_expense')
+    )
+
+
 def user_can_create_global_expense_request(user):
     """
     PRE: user may be anonymous or authenticated.

@@ -39,7 +39,10 @@ from ..models import (
     SupportingDocument,
 )
 
-from ..selectors import project_has_open_financial_work
+from ..selectors import (
+    project_has_open_financial_work,
+    user_can_view_project_financials,
+)
 
 from ..services import (
     get_project_financial_summary,
@@ -54,7 +57,6 @@ from ..services import (
 
 from .common import (
     AuditMixin,
-    DetailMetricsMixin,
     FilteredListContextMixin,
     OperationsPermissionRequiredMixin,
     PaginatedListMixin,
@@ -153,7 +155,7 @@ class ProjectListView(
             text_fields=('code', 'name'), date_field='start_date',
         ).order_by('code', 'pk')
 
-class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
+class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailView):
     permission_required = 'operations.view_project'
     model = Project
     template_name = 'web/project_detail.html'
@@ -179,7 +181,9 @@ class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
     def get_context_data(self, **kwargs):
         """
         PRE: self.object was loaded through get_queryset with detail relations prefetched.
-        POST: returns one coherent detail context with derived milestone progress and UI permissions.
+        POST: returns one coherent detail context with derived milestone progress and UI
+              permissions. Operational financial metrics are included only when the user
+              has both view_fundallocation and view_expense (same rule as DASH-FIN3).
         """
         context = super().get_context_data(**kwargs)
         can_change_project = self.request.user.has_perm('operations.change_project')
@@ -267,9 +271,12 @@ class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, De
         context.update(
             build_project_milestone_context(self.object, self.request.user)
         )
-        summary = get_project_financial_summary(self.object)
-        context['project_financial_summary'] = summary
-        context['execution_percentage'] = summary['execution_percentage']
+        can_view_financials = user_can_view_project_financials(user)
+        context['can_view_project_financials'] = can_view_financials
+        if can_view_financials:
+            context['project_financial_summary'] = get_project_financial_summary(
+                self.object
+            )
         context.update(
             get_project_detail_integration_context(self.object, self.request.user)
         )

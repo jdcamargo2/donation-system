@@ -220,8 +220,10 @@ PENDING_DECISION / APPROVED_RESERVED
   `apps/operations/financials.py` (solo `APPROVED_RESERVED`).
 * Resumen financiero interno de proyecto (detalle autenticado y bloque
   DASH-FIN3 del dashboard): Fondos asignados, Gastos registrados, Reservado,
-  Disponible operativo = `max(asignados − gastos − reservado, 0)`. El portal
-  público conserva su propio resumen sin restar reservas.
+  Disponible operativo = `max(asignados − gastos − reservado, 0)`. Visible solo
+  con `view_fundallocation` **y** `view_expense` (misma regla en detalle y
+  dashboard); sin ambos permisos el resumen no se calcula ni se añade al
+  contexto. El portal público conserva su propio resumen sin restar reservas.
 
 ## 5. `Expense`
 

@@ -411,8 +411,9 @@ rechazo.
     (`gastos / asignados`; `None` si asignados = 0);
   * «Ver todos los proyectos» solo cuando hay más de 10;
   * requiere `view_fundallocation` + `view_expense` (Operador/Comité no lo ven);
-  * el detalle interno del proyecto usa las mismas fórmulas; el portal público
-    no cambia.
+  * el detalle interno del proyecto exige la misma pareja de permisos antes de
+    calcular o exponer el resumen; sin ambos, no hay montos en contexto ni HTML;
+  * el portal público no cambia.
 
 ---
 
