@@ -341,7 +341,7 @@ rechazo.
   * la UI ordinaria de creación directa de `Expense` queda retirada (listado,
     dashboard, detalle de asignación y ruta `expense_create` redirigen o apuntan
     a solicitudes); listado/detalle de gastos históricos permanecen;
-  * aún no hay contadores nuevos en el dashboard.
+  * no hay contadores financieros nuevos de solicitudes en el dashboard.
 * ER6 añade adjuntos protegidos de solicitud:
   * el solicitante original puede agregar o eliminar adjuntos solo mientras la
     solicitud está en `PENDING_DECISION`;
@@ -353,6 +353,14 @@ rechazo.
   * no hay URLs directas de media ni exposición pública;
   * Admin/Comité/Auditor leen adjuntos de solicitudes visibles; el Operador
     solo las propias.
+* ER7 cierra el módulo con atajos de dashboard por permisos efectivos:
+  * Admin (`fulfill_expenserequest`): ver solicitudes y aprobadas pendientes de
+    registrar gasto;
+  * Operador (`view_expenserequest` sin decide/fulfill): mis solicitudes, sin
+    atajo global de creación;
+  * Comité (`decide_expenserequest`): pendientes de decisión;
+  * Auditor: sin bloque de accesos rápidos (sigue el sidebar);
+  * sin contadores agregados nuevos ni CTAs de creación directa de `Expense`.
 
 ---
 

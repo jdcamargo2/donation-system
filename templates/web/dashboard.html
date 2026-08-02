@@ -40,11 +40,14 @@
                     {% if perms.operations.add_project %}
                         <a class="btn btn-outline-primary" href="{% url 'project_create' %}">Crear proyecto</a>
                     {% endif %}
-                    {% if perms.operations.view_expenserequest %}
-                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}">Ver solicitudes</a>
-                    {% endif %}
                     {% if perms.operations.fulfill_expenserequest %}
-                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}?status=approved_reserved">Pendientes de registrar gasto</a>
+                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}">Ver solicitudes de gasto</a>
+                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}?status=approved_reserved">Aprobadas pendientes de registrar gasto</a>
+                    {% elif perms.operations.decide_expenserequest %}
+                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}?status=pending_decision">Solicitudes pendientes de decisión</a>
+                    {% elif perms.operations.view_expenserequest %}
+                        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}">Mis solicitudes de gasto</a>
+                        <p class="small text-muted mb-0 mt-2">Las solicitudes se crean desde el detalle de un proyecto.</p>
                     {% endif %}
                 </div>
             </div>

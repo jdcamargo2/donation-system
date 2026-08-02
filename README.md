@@ -11,6 +11,7 @@ Institución
 → Donación
 → Asignación de fondos
 → Proyecto
+→ Solicitud de gasto
 → Gasto
 → Evidencia
 → Avance
@@ -25,9 +26,9 @@ El MVP se encuentra funcional y cubierto por pruebas automatizadas.
 
 | Indicador                             | Estado          |
 | ------------------------------------- | --------------- |
-| Pruebas automatizadas                 | 880             |
+| Pruebas automatizadas                 | 1562            |
 | Estado de la suite                    | OK              |
-| Migraciones pendientes                | Ninguna         |
+| Migraciones pendientes                | `0030` (evento→gasto PROTECT; aplicar en entorno autorizado) |
 | Django system check                   | Sin incidencias |
 | Base de datos soportada en producción | PostgreSQL      |
 
@@ -56,6 +57,7 @@ debe actualizarse cuando el total cambie de forma estable.
 * Proyectos
 * Donaciones
 * Asignaciones de fondos
+* Solicitudes de gasto
 * Gastos
 * Documentos de soporte
 * Avances de proyectos

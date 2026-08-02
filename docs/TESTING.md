@@ -269,6 +269,53 @@ Cubre:
 * sin URLs `/media/` directas; MIME whitelist; compensación de huérfanos;
 * regresión ER3–ER5 (Editar/Retirar, Aprobar/Denegar, Anular, Registrar gasto).
 
+### Solicitudes de gasto — cierre de módulo y dashboard (ER7)
+
+```bash
+python manage.py test \
+  web.tests.test_dashboard \
+  apps.operations.tests.test_role_based_ui \
+  apps.operations.tests.test_expense_request_fulfillment_ui \
+  apps.operations.tests.test_expense_request_ui \
+  apps.operations.tests.test_expense_request_views \
+  apps.operations.tests.test_expense_request_permissions \
+  apps.operations.tests.test_expense_request_attachments_ui \
+  apps.operations.tests.test_internal_experience \
+  --noinput
+```
+
+Cubre:
+
+* atajos de dashboard por permisos efectivos (Admin / Operador / Comité);
+* Auditor sin bloque de accesos rápidos; sidebar de solicitudes intacto;
+* ausencia de CTAs `Crear gasto` / `Nuevo gasto` / `expense_create` activos;
+* filtros `status=approved_reserved` y `status=pending_decision` en atajos;
+* etiquetas canónicas: «Solicitudes de gasto», «Solicitar gasto», «Registrar gasto»;
+* regresión de navegación y experiencia interna.
+
+Suite completa (PostgreSQL, sin sustituir por SQLite):
+
+```bash
+python manage.py test --noinput
+```
+
+Resultado de validación ER7 (PostgreSQL `test_db_sigedon`):
+
+* 1562 tests;
+* OK;
+* 0 skips reportados por el runner en la corrida de cierre;
+* duración registrada ~796 s (no normativa);
+* teardown: Destroying test database OK;
+* exit code 0.
+
+Migración de cierre descubierta en la suite: `operations.0030_expense_request_event_expense_protect`
+(`ExpenseRequestEvent.expense` `SET_NULL` → `PROTECT`). Aplicar solo en bases
+autorizadas; no se ejecuta automáticamente contra `db_sigedon` en este
+checkpoint.
+
+ER7 no añade contadores financieros de solicitudes, descarga ZIP, antivirus ni
+versionado de adjuntos.
+
 ### Concurrencia
 
 ```bash

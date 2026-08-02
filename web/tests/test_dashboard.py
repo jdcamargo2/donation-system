@@ -216,7 +216,65 @@ class DashboardTests(TestCase):
         self.assertNotContains(response, donation.code)
         self.assertNotContains(response, 'Gastos recientes')
         self.assertNotContains(response, 'Acciones recientes de auditoría')
+        self.assertNotContains(response, 'Ver solicitudes de gasto')
+        self.assertNotContains(response, 'Mis solicitudes de gasto')
+        self.assertNotContains(response, 'Solicitudes pendientes de decisión')
+        self.assertNotContains(
+            response,
+            'Aprobadas pendientes de registrar gasto',
+        )
+        self.assertNotContains(response, reverse('expense_request_list'))
+        self.assertNotContains(response, 'Crear gasto')
+        self.assertNotContains(response, reverse('expense_create'))
 
+    def test_dashboard_expense_request_shortcuts_follow_effective_permissions(self):
+        list_url = reverse('expense_request_list')
+
+        self.grant_permissions('fulfill_expenserequest', 'view_expenserequest')
+        self.client.force_login(self.user)
+        admin_like = self.client.get(reverse('dashboard'))
+        self.assertContains(admin_like, 'Ver solicitudes de gasto')
+        self.assertContains(admin_like, 'Aprobadas pendientes de registrar gasto')
+        self.assertContains(admin_like, f'{list_url}?status=approved_reserved')
+        self.assertNotContains(admin_like, 'Mis solicitudes de gasto')
+        self.assertNotContains(admin_like, 'Solicitudes pendientes de decisión')
+        self.assertNotContains(admin_like, 'Crear gasto')
+        self.assertNotContains(admin_like, reverse('expense_create'))
+
+        self.user.user_permissions.clear()
+        self.grant_permissions('decide_expenserequest', 'view_expenserequest')
+        committee_like = self.client.get(reverse('dashboard'))
+        self.assertContains(committee_like, 'Solicitudes pendientes de decisión')
+        self.assertContains(
+            committee_like,
+            f'{list_url}?status=pending_decision',
+        )
+        self.assertNotContains(committee_like, 'Ver solicitudes de gasto')
+        self.assertNotContains(committee_like, 'Mis solicitudes de gasto')
+        self.assertNotContains(
+            committee_like,
+            'Aprobadas pendientes de registrar gasto',
+        )
+
+        self.user.user_permissions.clear()
+        self.grant_permissions('view_expenserequest')
+        operator_like = self.client.get(reverse('dashboard'))
+        self.assertContains(operator_like, 'Mis solicitudes de gasto')
+        self.assertContains(operator_like, list_url)
+        self.assertContains(
+            operator_like,
+            'Las solicitudes se crean desde el detalle de un proyecto.',
+        )
+        self.assertNotContains(operator_like, reverse('expense_request_create'))
+        self.assertNotContains(operator_like, 'Ver solicitudes de gasto')
+        self.assertNotContains(
+            operator_like,
+            'Aprobadas pendientes de registrar gasto',
+        )
+        self.assertNotContains(operator_like, 'status=approved_reserved')
+        self.assertNotContains(operator_like, 'Solicitudes pendientes de decisión')
+        self.assertNotContains(operator_like, 'Crear gasto')
+        self.assertNotContains(operator_like, reverse('expense_create'))
 
 class SidebarOverflowContractTests(TestCase):
     """Regression: short/zoomed viewports must scroll nav without covering the footer."""

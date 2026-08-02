@@ -554,8 +554,8 @@ class ExpenseRequestFulfillmentUITests(TestCase):
         response = self.client.get(reverse('dashboard'))
         self.assertNotContains(response, 'Crear gasto')
         self.assertNotContains(response, reverse('expense_create'))
-        self.assertContains(response, 'Ver solicitudes')
-        self.assertContains(response, 'Pendientes de registrar gasto')
+        self.assertContains(response, 'Ver solicitudes de gasto')
+        self.assertContains(response, 'Aprobadas pendientes de registrar gasto')
         self.assertContains(response, 'status=approved_reserved')
 
     def test_allocation_detail_points_to_request_creation(self):

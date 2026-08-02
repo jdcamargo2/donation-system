@@ -2,6 +2,7 @@ import shutil
 import tempfile
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
@@ -344,8 +345,11 @@ class FormTests(TestCase):
             files={'support_file': SimpleUploadedFile('monto.pdf', b'%PDF soporte')},
         )
         self.assertTrue(expense_form.is_valid(), expense_form.errors)
-        expense = expense_form.save()
-        self.assertEqual(expense.amount, Decimal('1500.00'))
+        self.assertEqual(expense_form.cleaned_data['amount'], Decimal('1500.00'))
+        with self.assertRaises(ValidationError) as ctx:
+            expense_form.save()
+        self.assertIn('solicitud de gasto', str(ctx.exception).lower())
+        self.assertEqual(Expense.objects.count(), 0)
 
     def test_forms_accept_visual_day_month_year_dates(self):
         form = ProjectForm(
@@ -614,7 +618,7 @@ class FormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn('documento soporte', form.errors['support_file'][0])
 
-    def test_expense_form_creates_supporting_document(self):
+    def test_expense_form_create_is_blocked_by_expense_request_governance(self):
         allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('40.00'))
         upload = SimpleUploadedFile('receipt.txt', b'receipt')
         form = ExpenseForm(
@@ -635,9 +639,40 @@ class FormTests(TestCase):
         )
 
         self.assertTrue(form.is_valid(), form.errors)
-        expense = form.save()
-        self.assertEqual(expense.currency, 'USD')
-        self.assertEqual(SupportingDocument.objects.filter(expense=expense).count(), 1)
+        with self.assertRaises(ValidationError) as ctx:
+            form.save()
+        self.assertIn('solicitud de gasto', str(ctx.exception).lower())
+        self.assertEqual(Expense.objects.count(), 0)
+        self.assertEqual(SupportingDocument.objects.count(), 0)
+
+    def test_expense_form_update_preserves_supporting_document_path(self):
+        allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('40.00'))
+        expense = create_expense(allocation=allocation, amount=Decimal('10.00'), reason='Purchase')
+        SupportingDocument.objects.create(
+            expense=expense,
+            title='Receipt',
+            document=SimpleUploadedFile('receipt.txt', b'receipt'),
+        )
+        form = ExpenseForm(
+            instance=expense,
+            data={
+                'allocation': allocation.pk,
+                'expense_date': TEST_DATE,
+                'category': 'food',
+                'amount': '12.00',
+                'reason': 'Purchase updated',
+                'provider_or_recipient': 'Provider A',
+                'payment_method': 'bank_transfer',
+                'description': '',
+                'observations': '',
+            },
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        updated = form.save()
+        self.assertEqual(updated.amount, Decimal('12.00'))
+        self.assertEqual(updated.reason, 'Purchase updated')
+        self.assertEqual(SupportingDocument.objects.filter(expense=updated).count(), 1)
 
     def test_project_form_rejects_negative_budget(self):
         form = ProjectForm(

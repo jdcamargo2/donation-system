@@ -35,10 +35,11 @@ Antes de continuar, debe completarse la configuración mínima requerida en `.en
 python manage.py migrate
 ```
 
-Las migraciones `0026`–`0029` de `operations` introducen `ExpenseRequest`,
-constraints, la secuencia operativa `expense_request`/`SGS` y el trigger
-append-only de `ExpenseRequestEvent`. Deben aplicarse solo sobre bases
-autorizadas; no se documenta aquí su aplicación sobre `db_sigedon` activa.
+Las migraciones `0026`–`0030` de `operations` introducen `ExpenseRequest`,
+constraints, la secuencia operativa `expense_request`/`SGS`, el trigger
+append-only de `ExpenseRequestEvent` y el `PROTECT` del FK `expense` en eventos
+(compatible con el trigger ante borrados de gasto). Deben aplicarse solo sobre
+bases autorizadas; no se documenta aquí su aplicación sobre `db_sigedon` activa.
 
 Tras migrar un entorno desechable o de staging, sincronizar roles y verificar
 secuencias:
@@ -55,8 +56,10 @@ sin mutar eventos. La UI de cumplimiento (ER5) usa `fulfill_expenserequest` y no
 requiere sync adicional de roles. La UI de adjuntos de solicitud (ER6) reutiliza
 `add_expenserequestattachment`, `delete_expenserequestattachment` y
 `view_expenserequestattachment` ya presentes en la matriz canónica; no introduce
-permisos nuevos ni sync de roles. No ejecutar sync de roles ni migraciones contra
-`db_sigedon` activo durante checkpoints de desarrollo de solicitudes.
+permisos nuevos ni sync de roles. ER7 solo ajusta atajos de dashboard y
+documentación; no cambia permisos ni esquema. No ejecutar sync de roles ni
+migraciones contra `db_sigedon` activo durante checkpoints de desarrollo de
+solicitudes.
 
 ### 1.5. Crear un superusuario
 

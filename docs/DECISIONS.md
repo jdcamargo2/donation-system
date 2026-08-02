@@ -122,6 +122,16 @@ con estados de aprobación y permite trazabilidad financiera explícita.
 * ER5 completa la UI de cumplimiento y retira los puntos de entrada ordinarios
   de creación directa de `Expense` (la ruta legacy redirige a solicitudes
   aprobadas-reservadas).
+* ER6 añade adjuntos protegidos (mutación solo en pendiente; preview/download
+  autorizados; sin `/media/` directo).
+* ER7 cierra el módulo: atajos de dashboard por permisos efectivos, auditoría de
+  navegación/acciones por rol, reconciliación documental y suite completa
+  PostgreSQL. Sin contadores agregados nuevos, ZIP, antivirus ni versionado.
+* Defecto de cierre ER7: el FK `ExpenseRequestEvent.expense` pasa de `SET_NULL`
+  a `PROTECT`. El trigger append-only es `FOR EACH STATEMENT` y rechazaba
+  incluso el `UPDATE` vacío que Django emite al borrar un `Expense` no
+  enlazado; `PROTECT` evita esa mutación y bloquea borrados duros de gastos
+  referenciados por historial de solicitud.
 
 ---
 

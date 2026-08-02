@@ -1689,9 +1689,12 @@ class ExpenseRequestEvent(models.Model):
     allocation_balance_before = models.DecimalField(max_digits=14, decimal_places=2)
     allocation_balance_after = models.DecimalField(max_digits=14, decimal_places=2)
     reason = models.TextField(blank=True)
+    # PROTECT (not SET_NULL): append-only events cannot be UPDATEd on expense
+    # delete, and the PostgreSQL statement-level trigger rejects even empty
+    # SET_NULL statements issued by Django's deletion collector.
     expense = models.ForeignKey(
         Expense,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name='expense_request_events',

@@ -124,7 +124,13 @@ directa de `Expense` queda retirada; el listado/detalle de gastos históricos
 permanecen. ER6 añade adjuntos opcionales de solicitud con mutación solo por el
 solicitante original en `PENDING_DECISION`, congelados tras cualquier decisión o
 cierre, y preview/download protegidos (sin URLs directas de media ni exposición
-pública). Aún no hay contadores nuevos en el dashboard. ER1 estableció modelos,
+permanecen. ER6 añade adjuntos opcionales de solicitud con mutación solo por el
+solicitante original en `PENDING_DECISION`, congelados tras cualquier decisión o
+cierre, y preview/download protegidos (sin URLs directas de media ni exposición
+pública). ER7 cierra el módulo: atajos de dashboard por permisos efectivos
+(Admin: listado y aprobadas-reservadas; Operador: mis solicitudes; Comité:
+pendientes de decisión; Auditor: sin bloque de accesos rápidos), sin contadores
+agregados nuevos ni creación directa de `Expense`. ER1 estableció modelos,
 permisos, evidencias y eventos inmutables.
 
 Estados:

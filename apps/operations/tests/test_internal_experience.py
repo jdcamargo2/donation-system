@@ -758,8 +758,8 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertEqual(dashboard.status_code, 200)
         self.assertNotContains(dashboard, 'Crear gasto')
         self.assertNotContains(dashboard, reverse('expense_create'))
-        self.assertContains(dashboard, 'Ver solicitudes')
-        self.assertContains(dashboard, 'Pendientes de registrar gasto')
+        self.assertContains(dashboard, 'Ver solicitudes de gasto')
+        self.assertContains(dashboard, 'Aprobadas pendientes de registrar gasto')
         self.assertContains(dashboard, 'status=approved_reserved')
 
     def test_approved_request_detail_shows_registrar_gasto_for_administrator(self):

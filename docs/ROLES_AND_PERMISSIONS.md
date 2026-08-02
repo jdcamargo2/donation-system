@@ -611,6 +611,26 @@ Además, el bloque de accesos rápidos (`show_financial_quick_actions`) se ocult
 sin rol canónico siguen viendo el bloque; los botones internos siguen filtrados
 por permisos efectivos. Ocultar el bloque no revoca permisos.
 
+Atajos de solicitudes de gasto (ER7), por permisos efectivos:
+
+```text
+fulfill_expenserequest
+→ Ver solicitudes de gasto
+→ Aprobadas pendientes de registrar gasto (?status=approved_reserved)
+
+decide_expenserequest (sin fulfill)
+→ Solicitudes pendientes de decisión (?status=pending_decision)
+
+view_expenserequest (sin fulfill ni decide)
+→ Mis solicitudes de gasto
+→ guía: se crean desde el detalle de un proyecto
+```
+
+No se muestra un CTA de creación directa de `Expense` (`Crear gasto` /
+`expense_create`). La creación global de solicitudes permanece en el encabezado
+del listado para quien tenga `add_expenserequest` con alcance global; el Operador
+no recibe atajo de creación desde el dashboard.
+
 ### Regla de seguridad
 
 Cuando el usuario carece de un permiso:

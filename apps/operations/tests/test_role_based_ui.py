@@ -127,6 +127,13 @@ class RoleBasedUITests(TestCase):
         self.assertNotContains(response, 'Consultar donaciones')
         self.assertNotContains(response, 'Consultar gastos')
         self.assertNotContains(response, 'Ver auditoría')
+        self.assertNotContains(response, 'Ver solicitudes de gasto')
+        self.assertNotContains(response, 'Mis solicitudes de gasto')
+        self.assertNotContains(response, 'Solicitudes pendientes de decisión')
+        self.assertNotContains(
+            response,
+            'Aprobadas pendientes de registrar gasto',
+        )
 
         self.assertContains(response, 'ops-metric-grid')
         self.assertContains(response, 'Donaciones recibidas USD')
@@ -136,9 +143,11 @@ class RoleBasedUITests(TestCase):
 
         self.assertContains(response, 'title="Proyectos"')
         self.assertContains(response, 'title="Auditoría"')
+        self.assertContains(response, 'title="Solicitudes de gasto"')
         self.assertContains(response, reverse('project_list'))
         self.assertContains(response, reverse('donation_list'))
         self.assertContains(response, reverse('expense_list'))
+        self.assertContains(response, reverse('expense_request_list'))
         self.assertContains(response, reverse('audit_log_list'))
 
     def test_external_auditor_can_open_financial_list_routes(self):
@@ -160,15 +169,30 @@ class RoleBasedUITests(TestCase):
         self.client.force_login(self.create_user_for_role('ui-field-dashboard', ROLE_FIELD_OPERATOR))
 
         response = self.client.get(reverse('dashboard'))
+        list_url = reverse('expense_request_list')
 
         self.assertTrue(response.context['show_financial_quick_actions'])
         self.assertContains(response, 'ops-action-panel')
         self.assertContains(response, 'Accesos rápidos')
         self.assertContains(response, 'Ver proyectos')
         self.assertContains(response, 'Registrar avances')
+        self.assertContains(response, 'Mis solicitudes de gasto')
+        self.assertContains(response, list_url)
+        self.assertContains(
+            response,
+            'Las solicitudes se crean desde el detalle de un proyecto.',
+        )
         self.assertNotContains(response, 'Crear donación')
         self.assertNotContains(response, 'Crear asignación')
         self.assertNotContains(response, 'Crear gasto')
+        self.assertNotContains(response, reverse('expense_create'))
+        self.assertNotContains(response, 'Ver solicitudes de gasto')
+        self.assertNotContains(
+            response,
+            'Aprobadas pendientes de registrar gasto',
+        )
+        self.assertNotContains(response, 'status=approved_reserved')
+        self.assertNotContains(response, reverse('expense_request_create'))
         self.assertNotContains(response, 'Ver auditoría')
 
     def test_project_navigation_is_visible_only_with_project_permission(self):
@@ -424,10 +448,19 @@ class RoleBasedUITests(TestCase):
         self.assertContains(dashboard_response, 'Accesos rápidos')
         self.assertContains(dashboard_response, 'ops-action-panel')
         self.assertContains(dashboard_response, 'Crear proyecto')
-        self.assertContains(dashboard_response, 'Ver solicitudes')
-        self.assertContains(dashboard_response, 'Pendientes de registrar gasto')
+        self.assertContains(dashboard_response, 'Ver solicitudes de gasto')
+        self.assertContains(
+            dashboard_response,
+            'Aprobadas pendientes de registrar gasto',
+        )
+        self.assertContains(dashboard_response, 'status=approved_reserved')
         self.assertNotContains(dashboard_response, 'Crear gasto')
         self.assertNotContains(dashboard_response, reverse('expense_create'))
+        self.assertNotContains(dashboard_response, 'Mis solicitudes de gasto')
+        self.assertNotContains(
+            dashboard_response,
+            'Solicitudes pendientes de decisión',
+        )
         self.assertContains(dashboard_response, 'Ver auditoría')
         self.assertContains(project_response, reverse('project_create'))
         self.assertNotContains(expense_response, reverse('expense_create'))
@@ -440,11 +473,23 @@ class RoleBasedUITests(TestCase):
         )
 
         response = self.client.get(reverse('dashboard'))
+        list_url = reverse('expense_request_list')
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context['show_financial_quick_actions'])
         self.assertContains(response, 'Accesos rápidos')
         self.assertContains(response, 'ops-action-panel')
+        self.assertContains(response, 'Solicitudes pendientes de decisión')
+        self.assertContains(response, f'{list_url}?status=pending_decision')
+        self.assertNotContains(response, 'Crear gasto')
+        self.assertNotContains(response, reverse('expense_create'))
+        self.assertNotContains(response, 'Ver solicitudes de gasto')
+        self.assertNotContains(response, 'Mis solicitudes de gasto')
+        self.assertNotContains(
+            response,
+            'Aprobadas pendientes de registrar gasto',
+        )
+        self.assertNotContains(response, 'status=approved_reserved')
 
     def test_direct_permission_user_sees_quick_actions(self):
         user = create_user_with_permissions(
