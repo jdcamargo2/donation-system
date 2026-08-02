@@ -686,7 +686,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertContains(response, "Nivel de daño físico")
         self.assertContains(response, "Puntaje total")
         self.assertContains(response, "Semáforo sugerido")
-        self.assertContains(response, "Semáforo final validado")
+        self.assertContains(response, "Semáforo final")
         self.assertNotContains(response, "Nombre del microproyecto")
         self.assertNotContains(response, "Hogares estimados")
         self.assertNotContains(response, "raw_payload")

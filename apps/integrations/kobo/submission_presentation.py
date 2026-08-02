@@ -7,13 +7,23 @@ shapes Spanish labels, values and history copy for templates.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any, Iterable
 
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID, FICHA_10_VERSION
-from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_FORM_ID, FICHA_11_VERSION
+from apps.integrations.kobo.mappings.ficha_11 import (
+    FICHA_11_FORM_ID,
+    FICHA_11_VERSION,
+    SCORE_FIELDS,
+)
 from apps.integrations.kobo.models import KoboAttachment, KoboSubmission
-from apps.integrations.kobo.presentation import FORM_ROLE_TITLES, pastoral_zone_label, presentation_label
+from apps.integrations.kobo.presentation import (
+    FORM_ROLE_TITLES,
+    KOBO_PRESENTATION_LABELS,
+    pastoral_zone_label,
+    presentation_label,
+)
 
 
 SENSITIVE_PAYLOAD_KEYS = frozenset(
@@ -188,6 +198,9 @@ CONTACT_FIELDS = (
     ("main_informant_role", "Rol del informante principal"),
 )
 
+EMPTY_DISPLAY = "—"
+LOCATION_UNAVAILABLE = "No disponible"
+
 
 @dataclass(frozen=True)
 class PresentedField:
@@ -211,24 +224,51 @@ def submission_status_label(status: str) -> str:
 
 
 def choice_value_label(value) -> str:
+    """
+    PRE: value is a stored choice code, boolean, or empty placeholder.
+    POST: returns a Spanish label; never exposes raw snake_case when mapped or
+    when a safe humanization fallback applies.
+    """
     if value is None or value == "":
-        return "—"
-    text = str(value)
-    return CHOICE_VALUE_LABELS.get(text, presentation_label(text) or text)
+        return EMPTY_DISPLAY
+    if isinstance(value, bool):
+        return "Sí" if value else "No"
+    text = str(value).strip()
+    if not text:
+        return EMPTY_DISPLAY
+    if text in CHOICE_VALUE_LABELS:
+        return CHOICE_VALUE_LABELS[text]
+    labeled = KOBO_PRESENTATION_LABELS.get(text)
+    if labeled is not None:
+        return labeled
+    if "_" in text and text.replace("_", "").isalnum():
+        return text.replace("_", " ").capitalize()
+    return text
 
 
 def format_presented_value(value, *, format_name: str) -> str:
     if value is None or value == "":
-        return "—"
+        return EMPTY_DISPLAY
+    if isinstance(value, bool):
+        return "Sí" if value else "No"
     if format_name == "multi_choice":
         if isinstance(value, (list, tuple)):
-            labels = [choice_value_label(item) for item in value if item not in (None, "")]
-            return ", ".join(labels) if labels else "—"
+            labels = [
+                choice_value_label(item) for item in value if item not in (None, "")
+            ]
+            return ", ".join(labels) if labels else EMPTY_DISPLAY
         return choice_value_label(value)
     if format_name == "choice":
         return choice_value_label(value)
-    if isinstance(value, (list, tuple, dict)):
-        return str(value)
+    if isinstance(value, dict):
+        return EMPTY_DISPLAY
+    if isinstance(value, (list, tuple)):
+        labels = [
+            format_presented_value(item, format_name="text")
+            for item in value
+            if item not in (None, "")
+        ]
+        return ", ".join(labels) if labels else EMPTY_DISPLAY
     return str(value)
 
 
@@ -384,15 +424,15 @@ def should_show_retry_attachments(submission, attachments) -> bool:
 
 def territorial_summary_rows(submission) -> list[tuple[str, str]]:
     zone = submission.pastoral_zone
-    zone_label = pastoral_zone_label(zone) if zone else "—"
+    zone_label = pastoral_zone_label(zone) if zone else EMPTY_DISPLAY
     project = submission.project
     project_label = str(project) if project else ""
     rows = [
         ("Zona pastoral", zone_label),
-        ("Parroquia", submission.parish or "—"),
-        ("Comunidad", submission.primary_community or "—"),
-        ("Código del núcleo", submission.nucleo_code_normalized or "—"),
-        ("Fecha de evaluación", str(submission.assessment_date or "—")),
+        ("Parroquia", submission.parish or EMPTY_DISPLAY),
+        ("Comunidad", submission.primary_community or EMPTY_DISPLAY),
+        ("Código del núcleo", submission.nucleo_code_normalized or EMPTY_DISPLAY),
+        ("Fecha de evaluación", str(submission.assessment_date or EMPTY_DISPLAY)),
         ("Recibido", str(submission.received_at)),
     ]
     if project_label:
@@ -400,58 +440,23 @@ def territorial_summary_rows(submission) -> list[tuple[str, str]]:
     return rows
 
 
-EMPTY_DISPLAY = "—"
-LOCATION_UNAVAILABLE = "No disponible"
-
-# Choice labels retained for Ficha 10 project-detail compatibility until KD2.
-# Prefer CHOICE_VALUE_LABELS for new presentation paths.
-_MICROPROJECT_DETAIL_CHOICE_LABELS = {
-    "component": {
-        "infrastructure": "Infraestructura",
-        "health_psychosocial": "Salud y atención psicosocial",
-        "training": "Formación",
-        "livelihoods": "Medios de vida",
-        "communication": "Comunicación",
-        "mixed": "Mixto",
-    },
-    "beneficiary_group": {
-        "youth": "Jóvenes",
-        "women": "Mujeres",
-        "adults": "Adultos",
-        "unemployed": "Personas desempleadas",
-        "entrepreneurs": "Emprendedores",
-        "parish_volunteers": "Voluntariado parroquial",
-        "mixed": "Mixto",
-        "other": "Otro",
-    },
-    "estimated_cost_range": {
-        "under_1000": "Menos de USD 1.000",
-        "1000_5000": "USD 1.000 a 5.000",
-        "5000_15000": "USD 5.000 a 15.000",
-        "15000_50000": "USD 15.000 a 50.000",
-        "over_50000": "Más de USD 50.000",
-        "unknown": "Por determinar",
-    },
-    "implementation_urgency": {
-        "immediate": "Inmediata",
-        "short_term": "Corto plazo",
-        "medium_term": "Mediano plazo",
-        "follow_up": "Seguimiento",
-        "unknown": "Por determinar",
-    },
-    "technical_viability": {
-        "high": "Alta",
-        "medium": "Media",
-        "low": "Baja",
-        "requires_design": "Requiere diseño",
-        "not_viable": "No viable",
-    },
-}
-
 TECHNICAL_METADATA_FIELDS = (
     ("submitted_by", "Enviado por", "_submitted_by"),
     ("device_id", "ID del dispositivo", "deviceid"),
 )
+
+FICHA_11_SCORE_LABELS = {
+    "physical_damage_score": "Nivel de daño físico",
+    "affected_families_score": "Familias afectadas",
+    "social_vulnerability_score": "Vulnerabilidad social",
+    "services_interruption_score": "Interrupción de servicios básicos",
+    "livelihood_loss_score": "Pérdida de medios de vida",
+    "parish_capacity_score": "Capacidad parroquial disponible",
+    "territorial_accessibility_score": "Accesibilidad territorial",
+    "allies_availability_score": "Existencia de aliados",
+    "rapid_impact_score": "Potencial de impacto rápido",
+    "financial_viability_score": "Viabilidad financiera",
+}
 
 
 def _display_or_empty(value) -> str:
@@ -460,8 +465,25 @@ def _display_or_empty(value) -> str:
     return str(value)
 
 
-def _presentation_item(label: str, value: str) -> dict[str, str]:
-    return {"label": label, "value": value}
+def _presentation_item(
+    label: str,
+    value: str,
+    *,
+    values: list[str] | None = None,
+) -> dict[str, Any]:
+    item: dict[str, Any] = {"label": label, "value": value}
+    if values is not None:
+        item["values"] = values
+    return item
+
+
+def _compact_summary(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in items
+        if item.get("value") not in (None, "", EMPTY_DISPLAY)
+        or item.get("values")
+    ]
 
 
 def _is_ficha_01(submission) -> bool:
@@ -488,6 +510,53 @@ def _is_ficha_11(submission) -> bool:
     )
 
 
+def _nucleo_code_display(submission) -> str:
+    payload = submission.normalized_payload or {}
+    return _display_or_empty(
+        submission.nucleo_code_normalized or payload.get("nucleo_code")
+    )
+
+
+def _normalize_linked_items(value) -> list[str]:
+    """
+    PRE: value is a linked-microprojects snapshot (string, sequence, or empty).
+    POST: returns ordered non-empty display strings without mutating input.
+    """
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, tuple)):
+        items = [str(item).strip() for item in value if item not in (None, "")]
+        return [item for item in items if item]
+    text = str(value).strip()
+    if not text:
+        return []
+    if any(separator in text for separator in (",", ";", "\n")):
+        parts: list[str] = []
+        for chunk in text.replace(";", ",").replace("\n", ",").split(","):
+            item = chunk.strip()
+            if item and item not in parts:
+                parts.append(item)
+        return parts
+    return [text]
+
+
+def format_linked_collection(
+    value,
+    *,
+    label: str = "Microproyectos vinculados",
+) -> dict[str, Any]:
+    """
+    PRE: value is a stored linked-microprojects snapshot of any supported shape.
+    POST: returns a presentation item payload: single text, multi values, or —.
+    """
+    items = _normalize_linked_items(value)
+    if not items:
+        return _presentation_item(label, EMPTY_DISPLAY)
+    if len(items) == 1:
+        return _presentation_item(label, items[0])
+    return _presentation_item(label, EMPTY_DISPLAY, values=items)
+
+
 def _format_coordinate_component(value) -> str:
     """
     PRE: value is a numeric coordinate component or an unusable placeholder.
@@ -501,6 +570,49 @@ def _format_coordinate_component(value) -> str:
         return LOCATION_UNAVAILABLE
     text = f"{number:.6f}".rstrip("0").rstrip(".")
     return text if text else "0"
+
+
+def get_valid_coordinates(location) -> tuple[float, float] | None:
+    """
+    PRE: location may be a dict, None, or malformed presentation input.
+    POST: returns (latitude, longitude) as floats when both are finite and
+    in range; otherwise None. Does not mutate input or raise.
+    """
+    if not isinstance(location, dict):
+        return None
+    latitude = location.get("latitude")
+    longitude = location.get("longitude")
+    if latitude is None or longitude is None:
+        return None
+    if isinstance(latitude, bool) or isinstance(longitude, bool):
+        return None
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+        return None
+    if not isfinite(latitude) or not isfinite(longitude):
+        return None
+    if not -90 <= latitude <= 90:
+        return None
+    if not -180 <= longitude <= 180:
+        return None
+    return (float(latitude), float(longitude))
+
+
+def build_openstreetmap_map_url(location) -> str | None:
+    """
+    PRE: location may be a dict, None, or malformed presentation input.
+    POST: returns a coordinates-only OpenStreetMap URL at zoom 15, or None.
+    Makes no network request and includes no project/community identifiers.
+    """
+    coordinates = get_valid_coordinates(location)
+    if coordinates is None:
+        return None
+    latitude, longitude = coordinates
+    lat_text = _format_coordinate_component(latitude)
+    lon_text = _format_coordinate_component(longitude)
+    return (
+        f"https://www.openstreetmap.org/?mlat={lat_text}&mlon={lon_text}"
+        f"#map=15/{lat_text}/{lon_text}"
+    )
 
 
 def format_location(location) -> dict[str, str]:
@@ -523,88 +635,137 @@ def format_location(location) -> dict[str, str]:
     }
 
 
-def project_submission_detail_title(submission) -> str:
+def history_submission_detail_title(submission) -> str:
     """
     PRE: submission has its form definition loaded.
-    POST: returns a form-specific internal detail title without exposing metadata.
+    POST: returns a concise history-detail title without technical suffixes.
     """
     if _is_ficha_11(submission):
-        return "Matriz de priorización y semáforo"
+        return "Ficha 11 · Evaluación de priorización"
     if _is_ficha_10(submission):
-        return "Microproyecto priorizado"
+        return "Ficha 10 · Microproyecto priorizado"
     if _is_ficha_01(submission):
         return "Ficha 1 · Identificación territorial"
-    return "Proyecto y territorio"
+    return "Historial Kobo"
 
 
-def project_submission_detail_rows(submission) -> tuple[tuple[str, Any], ...]:
+def history_submission_detail_rows(submission) -> tuple[tuple[str, Any], ...]:
     """
-    PRE: submission is an imported Kobo record with normalized payload data.
-    POST: returns labelled Ficha 10/11 fields only; territorial forms return none.
+    PRE: submission is a historical imported/rejected Kobo record.
+    POST: returns labelled Ficha 10/11 fields with Spanish values; Ficha 1 none.
     """
     payload = submission.normalized_payload or {}
     if _is_ficha_11(submission):
-        return (
-            ("Código del Núcleo Vital / comunidad", payload.get("nucleo_code")),
-            ("Nivel de daño físico", payload.get("physical_damage_score")),
-            ("Familias afectadas", payload.get("affected_families_score")),
-            ("Vulnerabilidad social", payload.get("social_vulnerability_score")),
-            ("Interrupción de servicios básicos", payload.get("services_interruption_score")),
-            ("Pérdida de medios de vida", payload.get("livelihood_loss_score")),
-            ("Capacidad parroquial disponible", payload.get("parish_capacity_score")),
-            ("Accesibilidad territorial", payload.get("territorial_accessibility_score")),
-            ("Existencia de aliados", payload.get("allies_availability_score")),
-            ("Potencial de impacto rápido", payload.get("rapid_impact_score")),
-            ("Viabilidad financiera", payload.get("financial_viability_score")),
-            ("Puntaje total", payload.get("priority_total")),
-            ("Semáforo sugerido", payload.get("suggested_semaphore")),
-            ("Semáforo final validado", payload.get("final_semaphore")),
-            ("Prioridad final de intervención", payload.get("final_priority")),
-            ("Síntesis de decisión", payload.get("priority_summary")),
-            ("Microproyectos vinculados", payload.get("linked_microprojects")),
+        score_rows = tuple(
+            (
+                FICHA_11_SCORE_LABELS[key],
+                format_presented_value(payload.get(key), format_name="text"),
+            )
+            for key in SCORE_FIELDS
+        )
+        linked = format_linked_collection(payload.get("linked_microprojects"))
+        linked_value = (
+            ", ".join(linked["values"])
+            if linked.get("values")
+            else linked["value"]
+        )
+        return score_rows + (
+            (
+                "Puntaje total",
+                format_presented_value(payload.get("priority_total"), format_name="text"),
+            ),
+            (
+                "Semáforo sugerido",
+                format_presented_value(
+                    payload.get("suggested_semaphore"), format_name="choice"
+                ),
+            ),
+            (
+                "Semáforo final",
+                format_presented_value(
+                    payload.get("final_semaphore"), format_name="choice"
+                ),
+            ),
+            (
+                "Prioridad final",
+                format_presented_value(
+                    payload.get("final_priority"), format_name="choice"
+                ),
+            ),
+            (
+                "Resumen de priorización",
+                format_presented_value(
+                    payload.get("priority_summary"), format_name="text"
+                ),
+            ),
+            ("Microproyectos vinculados", linked_value),
         )
     if not _is_ficha_10(submission):
         return ()
-    beneficiary_groups = payload.get("beneficiary_group", ())
-    beneficiary_labels = ", ".join(
-        _MICROPROJECT_DETAIL_CHOICE_LABELS["beneficiary_group"].get(value, value)
-        for value in beneficiary_groups
-    )
     return (
-        ("Código del Núcleo Vital", payload.get("nucleo_code")),
-        ("Nombre del microproyecto", payload.get("microproject_name")),
+        ("Código del Núcleo Vital", _nucleo_code_display(submission)),
         (
-            "Componente principal",
-            _MICROPROJECT_DETAIL_CHOICE_LABELS["component"].get(
-                payload.get("component"), payload.get("component")
-            ),
-        ),
-        ("Problema que atiende", payload.get("problem_summary")),
-        ("Objetivo específico", payload.get("specific_objective")),
-        ("Población beneficiaria principal", beneficiary_labels),
-        ("Actividades principales", payload.get("main_activities")),
-        (
-            "Rango de costo estimado",
-            _MICROPROJECT_DETAIL_CHOICE_LABELS["estimated_cost_range"].get(
-                payload.get("estimated_cost_range"),
-                payload.get("estimated_cost_range"),
-            ),
+            "Nombre del microproyecto",
+            format_presented_value(payload.get("microproject_name"), format_name="text"),
         ),
         (
-            "Urgencia de implementación",
-            _MICROPROJECT_DETAIL_CHOICE_LABELS["implementation_urgency"].get(
-                payload.get("implementation_urgency"),
-                payload.get("implementation_urgency"),
+            "Componente",
+            format_presented_value(payload.get("component"), format_name="choice"),
+        ),
+        (
+            "Resumen del problema",
+            format_presented_value(payload.get("problem_summary"), format_name="text"),
+        ),
+        (
+            "Objetivo específico",
+            format_presented_value(payload.get("specific_objective"), format_name="text"),
+        ),
+        (
+            "Grupo beneficiario",
+            format_presented_value(
+                payload.get("beneficiary_group"), format_name="multi_choice"
             ),
         ),
         (
-            "Viabilidad técnica inicial",
-            _MICROPROJECT_DETAIL_CHOICE_LABELS["technical_viability"].get(
-                payload.get("technical_viability"), payload.get("technical_viability")
+            "Actividades principales",
+            format_presented_value(payload.get("main_activities"), format_name="text"),
+        ),
+        (
+            "Rango de costo",
+            format_presented_value(
+                payload.get("estimated_cost_range"), format_name="choice"
             ),
         ),
-        ("Resultado esperado verificable", payload.get("expected_result")),
+        (
+            "Urgencia",
+            format_presented_value(
+                payload.get("implementation_urgency"), format_name="choice"
+            ),
+        ),
+        (
+            "Viabilidad técnica",
+            format_presented_value(
+                payload.get("technical_viability"), format_name="choice"
+            ),
+        ),
+        (
+            "Resultado esperado",
+            format_presented_value(payload.get("expected_result"), format_name="text"),
+        ),
     )
+
+
+
+
+
+def _imported_page_title(submission) -> str:
+    if _is_ficha_01(submission):
+        return "Ficha 1 · Identificación territorial"
+    if _is_ficha_10(submission):
+        return "Ficha 10 · Microproyecto priorizado"
+    if _is_ficha_11(submission):
+        return "Ficha 11 · Evaluación de priorización"
+    return "Levantamiento importado"
 
 
 def _imported_page_subtitle(submission) -> str:
@@ -612,6 +773,26 @@ def _imported_page_subtitle(submission) -> str:
     parts: list[str] = []
     if project is not None and getattr(project, "code", None):
         parts.append(str(project.code))
+
+    if _is_ficha_10(submission):
+        payload = submission.normalized_payload or {}
+        nucleo = submission.nucleo_code_normalized or payload.get("nucleo_code")
+        if nucleo:
+            parts.append(str(nucleo))
+        name = payload.get("microproject_name")
+        if name:
+            parts.append(str(name))
+        return " · ".join(parts) if parts else EMPTY_DISPLAY
+
+    if _is_ficha_11(submission):
+        payload = submission.normalized_payload or {}
+        nucleo = submission.nucleo_code_normalized or payload.get("nucleo_code")
+        if nucleo:
+            parts.append(str(nucleo))
+        if submission.assessment_date:
+            parts.append(str(submission.assessment_date))
+        return " · ".join(parts) if parts else EMPTY_DISPLAY
+
     zone = submission.pastoral_zone
     if zone:
         parts.append(pastoral_zone_label(zone))
@@ -626,126 +807,327 @@ def _imported_page_subtitle(submission) -> str:
     return subtitle
 
 
-def present_imported_submission_summary(submission) -> list[dict[str, str]]:
+def _ficha_1_summary(submission) -> list[dict[str, Any]]:
+    payload = submission.normalized_payload or {}
+    zone = (
+        pastoral_zone_label(submission.pastoral_zone)
+        if submission.pastoral_zone
+        else EMPTY_DISPLAY
+    )
+    return _compact_summary(
+        [
+            _presentation_item("Código del Núcleo Vital", _nucleo_code_display(submission)),
+            _presentation_item("Zona pastoral", zone),
+            _presentation_item(
+                "Hogares estimados",
+                format_presented_value(
+                    payload.get("estimated_households"), format_name="text"
+                ),
+            ),
+            _presentation_item(
+                "Prioridad inicial",
+                format_presented_value(
+                    payload.get("initial_priority_perception"),
+                    format_name="choice",
+                ),
+            ),
+            _presentation_item(
+                "Fecha de evaluación",
+                _display_or_empty(submission.assessment_date),
+            ),
+        ]
+    )
+
+
+def _ficha_10_summary(submission) -> list[dict[str, Any]]:
+    payload = submission.normalized_payload or {}
+    return _compact_summary(
+        [
+            _presentation_item(
+                "Nombre del microproyecto",
+                format_presented_value(
+                    payload.get("microproject_name"), format_name="text"
+                ),
+            ),
+            _presentation_item(
+                "Componente",
+                format_presented_value(payload.get("component"), format_name="choice"),
+            ),
+            _presentation_item(
+                "Urgencia",
+                format_presented_value(
+                    payload.get("implementation_urgency"), format_name="choice"
+                ),
+            ),
+            _presentation_item(
+                "Viabilidad técnica",
+                format_presented_value(
+                    payload.get("technical_viability"), format_name="choice"
+                ),
+            ),
+            _presentation_item(
+                "Rango de costo",
+                format_presented_value(
+                    payload.get("estimated_cost_range"), format_name="choice"
+                ),
+            ),
+        ]
+    )
+
+
+def _ficha_11_summary(submission) -> list[dict[str, Any]]:
+    payload = submission.normalized_payload or {}
+    return _compact_summary(
+        [
+            _presentation_item(
+                "Puntaje total",
+                format_presented_value(
+                    payload.get("priority_total"), format_name="text"
+                ),
+            ),
+            _presentation_item(
+                "Semáforo final",
+                format_presented_value(
+                    payload.get("final_semaphore"), format_name="choice"
+                ),
+            ),
+            _presentation_item(
+                "Prioridad final",
+                format_presented_value(
+                    payload.get("final_priority"), format_name="choice"
+                ),
+            ),
+            _presentation_item("Código del Núcleo Vital", _nucleo_code_display(submission)),
+            _presentation_item(
+                "Fecha de evaluación",
+                _display_or_empty(submission.assessment_date),
+            ),
+        ]
+    )
+
+
+def present_imported_submission_summary(submission) -> list[dict[str, Any]]:
     """
-    PRE: submission is an imported Ficha 1 (or compatible) with payload loaded.
+    PRE: submission is an imported project-scoped Kobo record.
     POST: returns at most five compact summary items with Spanish values.
     """
-    if not _is_ficha_01(submission):
-        return []
+    if _is_ficha_01(submission):
+        return _ficha_1_summary(submission)
+    if _is_ficha_10(submission):
+        return _ficha_10_summary(submission)
+    if _is_ficha_11(submission):
+        return _ficha_11_summary(submission)
+    return []
+
+
+def _ficha_1_sections(submission) -> list[dict[str, Any]]:
     payload = submission.normalized_payload or {}
-    nucleo = (
-        submission.nucleo_code_normalized
-        or payload.get("nucleo_code")
-        or EMPTY_DISPLAY
-    )
-    zone = pastoral_zone_label(submission.pastoral_zone) if submission.pastoral_zone else EMPTY_DISPLAY
     return [
-        _presentation_item("Código del Núcleo Vital", _display_or_empty(nucleo)),
-        _presentation_item("Zona pastoral", zone),
+        {
+            "title": "Territorio y población",
+            "fields": [
+                _presentation_item(
+                    "Proyecto",
+                    _display_or_empty(submission.project),
+                ),
+                _presentation_item(
+                    "Parroquia",
+                    _display_or_empty(submission.parish),
+                ),
+                _presentation_item(
+                    "Comunidad",
+                    _display_or_empty(submission.primary_community),
+                ),
+                _presentation_item(
+                    "Comunidades cubiertas",
+                    format_presented_value(
+                        payload.get("communities_covered"),
+                        format_name="text",
+                    ),
+                ),
+                _presentation_item(
+                    "Hogares estimados",
+                    format_presented_value(
+                        payload.get("estimated_households"),
+                        format_name="text",
+                    ),
+                ),
+            ],
+        },
+        {
+            "title": "Acceso y evaluación",
+            "fields": [
+                _presentation_item(
+                    "Dificultades de acceso",
+                    format_presented_value(
+                        payload.get("access_difficulties"),
+                        format_name="choice",
+                    ),
+                ),
+                _presentation_item(
+                    "Notas de acceso",
+                    format_presented_value(
+                        payload.get("access_difficulties_notes"),
+                        format_name="text",
+                    ),
+                ),
+                _presentation_item(
+                    "Percepción inicial de prioridad",
+                    format_presented_value(
+                        payload.get("initial_priority_perception"),
+                        format_name="choice",
+                    ),
+                ),
+                _presentation_item(
+                    "Notas generales",
+                    format_presented_value(
+                        payload.get("general_notes"),
+                        format_name="text",
+                    ),
+                ),
+            ],
+        },
+    ]
+
+
+def _ficha_10_sections(submission) -> list[dict[str, Any]]:
+    payload = submission.normalized_payload or {}
+    context_fields = [
+        _presentation_item("Proyecto", _display_or_empty(submission.project)),
+        _presentation_item("Código del Núcleo Vital", _nucleo_code_display(submission)),
+    ]
+    if submission.pastoral_zone:
+        context_fields.append(
+            _presentation_item(
+                "Zona pastoral",
+                pastoral_zone_label(submission.pastoral_zone),
+            )
+        )
+    if submission.parish:
+        context_fields.append(
+            _presentation_item("Parroquia", _display_or_empty(submission.parish))
+        )
+    if submission.primary_community:
+        context_fields.append(
+            _presentation_item(
+                "Comunidad",
+                _display_or_empty(submission.primary_community),
+            )
+        )
+    return [
+        {
+            "title": "Diagnóstico y objetivo",
+            "fields": [
+                _presentation_item(
+                    "Resumen del problema",
+                    format_presented_value(
+                        payload.get("problem_summary"), format_name="text"
+                    ),
+                ),
+                _presentation_item(
+                    "Objetivo específico",
+                    format_presented_value(
+                        payload.get("specific_objective"), format_name="text"
+                    ),
+                ),
+                _presentation_item(
+                    "Resultado esperado",
+                    format_presented_value(
+                        payload.get("expected_result"), format_name="text"
+                    ),
+                ),
+            ],
+        },
+        {
+            "title": "Población y actividades",
+            "fields": [
+                _presentation_item(
+                    "Grupo beneficiario",
+                    format_presented_value(
+                        payload.get("beneficiary_group"), format_name="multi_choice"
+                    ),
+                ),
+                _presentation_item(
+                    "Actividades principales",
+                    format_presented_value(
+                        payload.get("main_activities"), format_name="text"
+                    ),
+                ),
+            ],
+        },
+        {
+            "title": "Contexto territorial",
+            "fields": context_fields,
+        },
+    ]
+
+
+def _ficha_11_sections(submission) -> list[dict[str, Any]]:
+    payload = submission.normalized_payload or {}
+    score_fields = [
         _presentation_item(
-            "Hogares estimados",
-            format_presented_value(payload.get("estimated_households"), format_name="text"),
-        ),
-        _presentation_item(
-            "Prioridad inicial",
-            format_presented_value(
-                payload.get("initial_priority_perception"),
-                format_name="choice",
-            ),
-        ),
-        _presentation_item(
-            "Fecha de evaluación",
-            _display_or_empty(submission.assessment_date),
-        ),
+            FICHA_11_SCORE_LABELS[key],
+            format_presented_value(payload.get(key), format_name="text"),
+        )
+        for key in SCORE_FIELDS
+    ]
+    linked = format_linked_collection(
+        payload.get("linked_microprojects"),
+        label="Referencias",
+    )
+    return [
+        {
+            "title": "Puntajes de evaluación",
+            "fields": score_fields,
+        },
+        {
+            "title": "Decisión de priorización",
+            "fields": [
+                _presentation_item(
+                    "Resumen de priorización",
+                    format_presented_value(
+                        payload.get("priority_summary"), format_name="text"
+                    ),
+                ),
+                _presentation_item(
+                    "Semáforo sugerido",
+                    format_presented_value(
+                        payload.get("suggested_semaphore"), format_name="choice"
+                    ),
+                ),
+                _presentation_item(
+                    "Semáforo final",
+                    format_presented_value(
+                        payload.get("final_semaphore"), format_name="choice"
+                    ),
+                ),
+                _presentation_item(
+                    "Prioridad final",
+                    format_presented_value(
+                        payload.get("final_priority"), format_name="choice"
+                    ),
+                ),
+            ],
+        },
+        {
+            "title": "Microproyectos vinculados",
+            "fields": [linked],
+        },
     ]
 
 
 def present_imported_submission_sections(submission) -> list[dict[str, Any]]:
     """
     PRE: submission carries normalized payload for an imported project detail.
-    POST: returns operational field sections; Ficha 1 is grouped, others legacy.
+    POST: returns domain-specific operational field sections for Ficha 1/10/11.
     """
-    payload = submission.normalized_payload or {}
     if _is_ficha_01(submission):
-        return [
-            {
-                "title": "Territorio y población",
-                "fields": [
-                    _presentation_item(
-                        "Proyecto",
-                        _display_or_empty(submission.project),
-                    ),
-                    _presentation_item(
-                        "Parroquia",
-                        _display_or_empty(submission.parish),
-                    ),
-                    _presentation_item(
-                        "Comunidad",
-                        _display_or_empty(submission.primary_community),
-                    ),
-                    _presentation_item(
-                        "Comunidades cubiertas",
-                        format_presented_value(
-                            payload.get("communities_covered"),
-                            format_name="text",
-                        ),
-                    ),
-                    _presentation_item(
-                        "Hogares estimados",
-                        format_presented_value(
-                            payload.get("estimated_households"),
-                            format_name="text",
-                        ),
-                    ),
-                ],
-            },
-            {
-                "title": "Acceso y evaluación",
-                "fields": [
-                    _presentation_item(
-                        "Dificultades de acceso",
-                        format_presented_value(
-                            payload.get("access_difficulties"),
-                            format_name="choice",
-                        ),
-                    ),
-                    _presentation_item(
-                        "Notas de acceso",
-                        format_presented_value(
-                            payload.get("access_difficulties_notes"),
-                            format_name="text",
-                        ),
-                    ),
-                    _presentation_item(
-                        "Percepción inicial de prioridad",
-                        format_presented_value(
-                            payload.get("initial_priority_perception"),
-                            format_name="choice",
-                        ),
-                    ),
-                    _presentation_item(
-                        "Notas generales",
-                        format_presented_value(
-                            payload.get("general_notes"),
-                            format_name="text",
-                        ),
-                    ),
-                ],
-            },
-        ]
-    legacy_rows = project_submission_detail_rows(submission)
-    if not legacy_rows:
-        return []
-    return [
-        {
-            "title": project_submission_detail_title(submission),
-            "fields": [
-                _presentation_item(label, _display_or_empty(value))
-                for label, value in legacy_rows
-            ],
-        }
-    ]
+        return _ficha_1_sections(submission)
+    if _is_ficha_10(submission):
+        return _ficha_10_sections(submission)
+    if _is_ficha_11(submission):
+        return _ficha_11_sections(submission)
+    return []
 
 
 def present_imported_submission_sensitive_fields(submission) -> list[dict[str, str]]:
@@ -802,20 +1184,21 @@ def present_imported_submission_registration(submission) -> list[dict[str, str]]
     ]
 
 
-def build_imported_submission_detail_context(
+def _imported_location(submission) -> dict[str, Any] | None:
+    if not _is_ficha_01(submission):
+        return None
+    payload = submission.normalized_payload or {}
+    raw_location = payload.get("location")
+    location = format_location(raw_location)
+    location["map_url"] = build_openstreetmap_map_url(raw_location)
+    return location
+
+
+def _build_ficha_imported_detail(
     submission,
     *,
     can_view_sensitive: bool,
 ) -> dict[str, Any]:
-    """
-    PRE: submission is an imported, project-scoped Kobo record for detail UI.
-    POST: returns a template-ready presentation contract without mutating payload.
-    """
-    is_redesigned = _is_ficha_01(submission)
-    payload = submission.normalized_payload or {}
-    location = None
-    if is_redesigned:
-        location = format_location(payload.get("location"))
     sensitive_fields = (
         present_imported_submission_sensitive_fields(submission)
         if can_view_sensitive
@@ -827,15 +1210,59 @@ def build_imported_submission_detail_context(
         else []
     )
     return {
-        "is_redesigned": is_redesigned,
+        "is_redesigned": True,
         "page_kicker": "Levantamiento Kobo importado",
-        "page_title": project_submission_detail_title(submission),
+        "page_title": _imported_page_title(submission),
         "page_subtitle": _imported_page_subtitle(submission),
         "summary_items": present_imported_submission_summary(submission),
         "sections": present_imported_submission_sections(submission),
-        "location": location,
+        "location": _imported_location(submission),
         "sensitive_fields": sensitive_fields,
         "technical_fields": technical_fields,
         "registration_fields": present_imported_submission_registration(submission),
         "show_sensitive_block": bool(sensitive_fields or technical_fields),
     }
+
+
+def _build_ficha_1_imported_detail(submission, *, can_view_sensitive: bool) -> dict[str, Any]:
+    return _build_ficha_imported_detail(
+        submission, can_view_sensitive=can_view_sensitive
+    )
+
+
+def _build_ficha_10_imported_detail(submission, *, can_view_sensitive: bool) -> dict[str, Any]:
+    return _build_ficha_imported_detail(
+        submission, can_view_sensitive=can_view_sensitive
+    )
+
+
+def _build_ficha_11_imported_detail(submission, *, can_view_sensitive: bool) -> dict[str, Any]:
+    return _build_ficha_imported_detail(
+        submission, can_view_sensitive=can_view_sensitive
+    )
+
+
+def build_imported_submission_detail_context(
+    submission,
+    *,
+    can_view_sensitive: bool,
+) -> dict[str, Any]:
+    """
+    PRE: submission is an imported, project-scoped Kobo record for detail UI.
+    POST: returns a template-ready presentation contract without mutating payload.
+    """
+    if _is_ficha_01(submission):
+        return _build_ficha_1_imported_detail(
+            submission, can_view_sensitive=can_view_sensitive
+        )
+    if _is_ficha_10(submission):
+        return _build_ficha_10_imported_detail(
+            submission, can_view_sensitive=can_view_sensitive
+        )
+    if _is_ficha_11(submission):
+        return _build_ficha_11_imported_detail(
+            submission, can_view_sensitive=can_view_sensitive
+        )
+    return _build_ficha_imported_detail(
+        submission, can_view_sensitive=can_view_sensitive
+    )

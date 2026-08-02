@@ -5,7 +5,17 @@
         <dl class="row mb-0">
             {% for field in fields %}
                 <dt class="col-sm-4 ops-detail-label">{{ field.label }}</dt>
-                <dd class="col-sm-8 text-break">{{ field.value }}</dd>
+                <dd class="col-sm-8 text-break">
+                    {% if field.values %}
+                        <ul class="mb-0 ps-3">
+                            {% for value in field.values %}
+                                <li class="text-break">{{ value }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        {{ field.value }}
+                    {% endif %}
+                </dd>
             {% endfor %}
         </dl>
     </div>

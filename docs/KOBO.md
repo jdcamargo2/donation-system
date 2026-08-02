@@ -465,11 +465,21 @@ datos importados e historial Kobo; las incidencias operativas viven en el hub
 global.
 
 El detalle importado en proyecto usa un contrato de presentación compartido
-(`submission_presentation`): valores y etiquetas en español, geolocalización
-formateada sin representación cruda del payload, IDs técnicos agrupados bajo
+(`submission_presentation`) para Ficha 1, 10 y 11: valores y etiquetas en
+español, secciones y resumen propios de cada dominio, geolocalización formateada
+sin representación cruda del payload (solo Ficha 1 aporta ubicación
+normalizada y el enlace opt-in a OpenStreetMap), IDs técnicos agrupados bajo
 **Registro Kobo**, y datos de contacto/técnicos colapsados solo con
-`kobo.change_kobosubmission`. Ficha 1 es el piloto visual de ese patrón; Fichas
-10 y 11 conservan un fallback compatible hasta KD2.
+`kobo.change_kobosubmission`.
+
+En el detalle importado de Ficha 1, la sección **Ubicación** puede mostrar un
+enlace opt-in **Ver en mapa** hacia OpenStreetMap. OpenStreetMap solo se
+contacta tras una activación explícita del usuario; la URL de destino incluye
+únicamente latitud y longitud (más un zoom fijo), con
+`rel="noopener noreferrer"` para evitar exposición de opener/referrer. No se
+cargan recursos de mapa de terceros embebidos en la página; las coordenadas
+textuales siguen visibles dentro de SIGEDON; coordenadas inválidas o ausentes
+no producen enlace.
 
 ### Permisos (histórico / rutas retenidas)
 

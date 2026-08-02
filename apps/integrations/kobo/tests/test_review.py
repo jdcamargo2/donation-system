@@ -167,6 +167,8 @@ class KoboReviewPanelTests(TestCase):
         self.assertNotContains(response, "Submission #")
         self.assertNotContains(response, "READY_FOR_REVIEW")
         self.assertNotContains(response, "Ready for review")
+        self.assertNotContains(response, "Ver en mapa")
+        self.assertNotContains(response, "www.openstreetmap.org")
         self.assertEqual(
             submission_status_label(KoboSubmission.Status.READY_FOR_REVIEW),
             "Incidencia",

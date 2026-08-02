@@ -27,7 +27,26 @@
 {% if presentation.location %}
 <section class="card border-0 ops-detail-card mb-4" aria-labelledby="imported-location-title">
     <div class="card-body">
-        <h2 id="imported-location-title" class="h5 ops-section-title">Ubicación</h2>
+        <div class="ops-page-header-row align-items-center mb-3">
+            <h2 id="imported-location-title"
+                class="h5 ops-section-title mb-0">
+                Ubicación
+            </h2>
+
+            {% if presentation.location.map_url %}
+                <a
+                    class="btn btn-sm btn-outline-secondary"
+                    href="{{ presentation.location.map_url }}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Ver ubicación en OpenStreetMap; se abrirá en una pestaña nueva"
+                >
+                    Ver en mapa
+                    <i class="bi bi-box-arrow-up-right ms-1"
+                       aria-hidden="true"></i>
+                </a>
+            {% endif %}
+        </div>
         <dl class="row mb-0">
             <dt class="col-sm-4 ops-detail-label">Latitud</dt>
             <dd class="col-sm-8 text-break">{{ presentation.location.latitude }}</dd>

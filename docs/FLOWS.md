@@ -597,12 +597,13 @@ impide secuencias inválidas.
     discrepancias son warnings y `linked_microprojects` permanece como snapshot
     textual, sin relaciones automáticas por nombre.
 23. El detalle del proyecto muestra datos importados de Ficha 1/10/11 y el
-    historial Kobo del proyecto. El detalle importado presenta campos traducidos
-    (Ficha 1 como piloto visual del patrón compartido); IDs técnicos van en
-    Registro Kobo y los datos sensibles/técnicos permanecen colapsados y
-    condicionados por permiso. El rediseño completo de Ficha 10/11 queda para
-    KD2. Fallos operativos e identidades sin resolver se gestionan en el hub
-    global de incidencias.
+    historial Kobo del proyecto. El detalle importado usa el contrato de
+    presentación compartido: resumen y secciones por dominio, valores de
+    catálogo traducidos al español, IDs técnicos en Registro Kobo y datos
+    sensibles/técnicos colapsados y condicionados por permiso. Solo Ficha 1
+    aporta ubicación normalizada y el enlace opt-in a OpenStreetMap. Fallos
+    operativos e identidades sin resolver se gestionan en el hub global de
+    incidencias.
 
 ### POST
 
