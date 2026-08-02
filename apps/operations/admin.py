@@ -633,6 +633,17 @@ class FundAllocationAdmin(admin.ModelAdmin):
         return obj.execution_progress_label
 
 
+def _supporting_document_filename(document):
+    """
+    PRE: document is a SupportingDocument instance or None.
+    POST: returns the stored basename for inspection, never a media URL.
+    """
+    if document is None or not document.document:
+        return '—'
+    name = document.document.name
+    return name.rsplit('/', 1)[-1] if name else '—'
+
+
 class SupportingDocumentInline(admin.TabularInline):
     """Read-only inspection of support files; no add/change/delete via admin."""
 
@@ -640,8 +651,8 @@ class SupportingDocumentInline(admin.TabularInline):
     extra = 0
     can_delete = False
     show_change_link = False
-    fields = ('title', 'document', 'uploaded_at', 'notes')
-    readonly_fields = ('title', 'document', 'uploaded_at', 'notes')
+    fields = ('title', 'document_filename_display', 'uploaded_at', 'notes')
+    readonly_fields = ('title', 'document_filename_display', 'uploaded_at', 'notes')
 
     def has_add_permission(self, request, obj=None):
         """
@@ -663,6 +674,14 @@ class SupportingDocumentInline(admin.TabularInline):
         POST: always denies deletion, including for superusers.
         """
         return False
+
+    @admin.display(description=_('Archivo'))
+    def document_filename_display(self, obj):
+        """
+        PRE: obj is an optional SupportingDocument inline row.
+        POST: returns filename metadata without exposing document.file.url / MEDIA_URL.
+        """
+        return _supporting_document_filename(obj)
 
 
 @admin.register(Expense)
@@ -801,20 +820,142 @@ class ExpenseAdmin(admin.ModelAdmin):
 
 @admin.register(SupportingDocument)
 class SupportingDocumentAdmin(admin.ModelAdmin):
-    actions = None
+    """Inspection-only admin for support files; mutations stay in SIGEDON services."""
+
     list_display = ('title', 'expense', 'uploaded_at')
-    search_fields = ('title', 'expense__reason')
+    search_fields = ('title', 'expense__reason', 'expense__code')
+    list_filter = ('uploaded_at',)
+    fieldsets = (
+        (
+            _('Identificación del documento'),
+            {
+                'fields': ('title',),
+            },
+        ),
+        (
+            _('Gasto relacionado'),
+            {
+                'fields': (
+                    'expense',
+                    'related_expense_link',
+                ),
+            },
+        ),
+        (
+            _('Metadatos del archivo'),
+            {
+                'fields': (
+                    'document_filename_display',
+                    'protected_preview_link',
+                    'protected_download_link',
+                ),
+            },
+        ),
+        (
+            _('Registro y auditoría'),
+            {
+                'fields': (
+                    'notes',
+                    'uploaded_at',
+                ),
+            },
+        ),
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        """
+        PRE: obj is an optional SupportingDocument shown in admin.
+        POST: every non-file persisted field plus inspection helpers are readonly.
+             The FileField itself is omitted so admin never renders document.url.
+        """
+        concrete = tuple(
+            field.name
+            for field in self.model._meta.concrete_fields
+            if field.name != 'document'
+        )
+        return concrete + (
+            'document_filename_display',
+            'protected_preview_link',
+            'protected_download_link',
+            'related_expense_link',
+        )
+
+    def has_add_permission(self, request):
+        """
+        PRE: request targets the SupportingDocument admin.
+        POST: always denies creation, including for superusers.
+        """
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional SupportingDocument admin object.
+        POST: always denies modification, including for superusers.
+        """
+        return False
 
     def has_delete_permission(self, request, obj=None):
-        if (
-            obj
-            and (
-                obj.expense.status == Expense.Status.ANNULLED
-                or obj.expense.supporting_documents.count() <= 1
-            )
-        ):
-            return False
-        return super().has_delete_permission(request, obj)
+        """
+        PRE: request targets an optional SupportingDocument admin object.
+        POST: always denies deletion, including for superusers.
+        """
+        return False
+
+    def get_actions(self, request):
+        """
+        PRE: request targets the SupportingDocument admin changelist.
+        POST: removes the bulk delete action while leaving other actions unchanged.
+        """
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
+
+    @admin.display(description=_('Archivo'))
+    def document_filename_display(self, obj):
+        """
+        PRE: obj is an optional SupportingDocument shown in admin.
+        POST: returns filename metadata without exposing document.url / MEDIA_URL.
+        """
+        return _supporting_document_filename(obj)
+
+    @admin.display(description=_('Vista previa'))
+    def protected_preview_link(self, obj):
+        """
+        PRE: obj is a persisted SupportingDocument with a related expense.
+        POST: returns a SIGEDON protected preview route, never a direct storage URL.
+        """
+        if obj is None or obj.pk is None or obj.expense_id is None:
+            return '—'
+        url = reverse(
+            'supporting_document_preview',
+            args=[obj.expense_id, obj.pk],
+        )
+        return format_html('<a href="{}">{}</a>', url, _('Ver vista previa protegida'))
+
+    @admin.display(description=_('Descarga'))
+    def protected_download_link(self, obj):
+        """
+        PRE: obj is a persisted SupportingDocument with a related expense.
+        POST: returns a SIGEDON protected download route, never a direct storage URL.
+        """
+        if obj is None or obj.pk is None or obj.expense_id is None:
+            return '—'
+        url = reverse(
+            'supporting_document_download',
+            args=[obj.expense_id, obj.pk],
+        )
+        return format_html('<a href="{}">{}</a>', url, _('Descargar mediante SIGEDON'))
+
+    @admin.display(description=_('Gasto'))
+    def related_expense_link(self, obj):
+        """
+        PRE: obj is a persisted SupportingDocument with a related expense.
+        POST: returns a SIGEDON expense detail link when the parent expense exists.
+        """
+        if obj is None or obj.expense_id is None:
+            return '—'
+        url = reverse('expense_detail', args=[obj.expense_id])
+        return format_html('<a href="{}">{}</a>', url, _('Ver gasto relacionado'))
 
 
 @admin.register(AuditLog)

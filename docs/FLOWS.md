@@ -222,6 +222,11 @@ rechazo.
   ocurre solo al cumplir una `ExpenseRequest` aprobada; anulación y demás
   mutaciones pasan por los servicios/UI de SIGEDON. Los documentos soporte
   permanecen protegidos y gestionados por el flujo operativo.
+* Django Admin (`SupportingDocumentAdmin` y su inline en `ExpenseAdmin`) es solo
+  inspección: sin alta, cambio, borrado, reemplazo ni reasignación (incluido
+  para superusuarios). Vista previa y descarga usan rutas protegidas de
+  SIGEDON; el Admin no expone URLs directas de media ni altera el ciclo de vida
+  del archivo.
 
 ---
 

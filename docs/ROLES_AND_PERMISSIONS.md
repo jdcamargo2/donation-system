@@ -554,6 +554,11 @@ El superusuario:
   al cumplir una `ExpenseRequest` aprobada; anulación y demás mutaciones pasan
   por los servicios/UI de SIGEDON. Los documentos soporte siguen el ciclo
   protegido de la aplicación, no el Admin.
+* Incluso como superusuario, `SupportingDocumentAdmin` es solo inspección (sin
+  alta, cambio, borrado, reemplazo de archivo ni reasignación de gasto): la
+  carga, vista previa y descarga pasan por rutas protegidas de SIGEDON; el Admin
+  no expone URLs directas de almacenamiento ni muta el ciclo de vida del
+  documento.
 
 ## 11. Usuario autenticado sin permisos
 
