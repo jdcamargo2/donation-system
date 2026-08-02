@@ -531,6 +531,36 @@ class DonationAdmin(admin.ModelAdmin):
     list_filter = ('status',)
     readonly_fields = ('code', 'currency', 'status', 'terminal_reason', 'terminal_at', 'terminal_by')
 
+    def has_add_permission(self, request):
+        """
+        PRE: request targets the Donation admin.
+        POST: always denies creation, including for superusers; use the application UI.
+        """
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional Donation admin object.
+        POST: always denies modification, including for superusers.
+        """
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """
+        PRE: request targets an optional Donation admin object.
+        POST: always denies deletion, including for superusers.
+        """
+        return False
+
+    def get_actions(self, request):
+        """
+        PRE: request targets the Donation admin changelist.
+        POST: removes the bulk delete action while leaving other actions unchanged.
+        """
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
+
     def get_readonly_fields(self, request, obj=None):
         # PRE: obj is an optional donation shown in admin.
         # POST: terminal donations expose every persisted field as readonly.
@@ -542,7 +572,7 @@ class DonationAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         """
         PRE: obj is new or an existing donation submitted through admin.
-        POST: creates REGISTERED and preserves persisted status on ordinary edits.
+        POST: unreachable via HTTP (mutations denied); preserves status if invoked in tests.
         """
         if change:
             persisted = Donation.objects.get(pk=obj.pk)

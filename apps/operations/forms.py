@@ -32,6 +32,7 @@ from .role_services import (
     operation_role_names,
     set_user_functional_role,
 )
+from .selectors import eligible_donation_donors
 
 
 SELECT_PLACEHOLDER = _('Seleccione una opción')
@@ -499,6 +500,47 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
         super().__init__(*args, **kwargs)
         if not self.instance.pk:
             self.fields['donation_type'].initial = None
+            self.fields['donor'].queryset = eligible_donation_donors()
+        else:
+            self.fields['donor'].queryset = eligible_donation_donors(
+                current_donor_id=self.instance.donor_id,
+            )
+
+    def clean(self):
+        """
+        PRE: cleaned fields hold the proposed donation edit or prior field errors.
+        POST: rejects amount below non-annulled allocations and inactive donor replacement early.
+        """
+        cleaned_data = super().clean()
+        amount = cleaned_data.get('amount')
+        donor = cleaned_data.get('donor')
+
+        if self.instance.pk and amount is not None and 'amount' not in self.errors:
+            allocated_total = self.instance.total_assigned
+            if amount < allocated_total:
+                self.add_error(
+                    'amount',
+                    _(
+                        'El importe de la donación no puede ser inferior al total ya asignado '
+                        '(%(allocated_total)s USD).'
+                    )
+                    % {'allocated_total': allocated_total},
+                )
+
+        if donor is not None and donor.status != Institution.Status.ACTIVE:
+            if not self.instance.pk or self.instance.donor_id != donor.pk:
+                if not self.instance.pk:
+                    self.add_error(
+                        'donor',
+                        _('Solo instituciones activas pueden registrar nuevas donaciones.'),
+                    )
+                else:
+                    self.add_error(
+                        'donor',
+                        _('No se puede reemplazar el donante por una institución inactiva.'),
+                    )
+
+        return cleaned_data
 
 
 class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):

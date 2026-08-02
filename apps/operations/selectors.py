@@ -26,6 +26,7 @@ from .models import (
     ExpenseRequestAttachment,
     ExpenseRequestEvent,
     FundAllocation,
+    Institution,
     Project,
     SupportingDocument,
     ZERO_MONEY,
@@ -51,6 +52,17 @@ EXPENSE_REQUEST_OWNERSHIP_PERMISSION = 'operations.withdraw_expenserequest'
 
 def _zero_money_value():
     return Value(ZERO_MONEY, output_field=MONEY_OUTPUT_FIELD)
+
+
+def eligible_donation_donors(*, current_donor_id=None):
+    """
+    PRE: optional current_donor_id identifies the donor already linked to an existing donation.
+    POST: ACTIVE institutions for new activity, plus the current donor when editing historically.
+    """
+    active = Q(status=Institution.Status.ACTIVE)
+    if current_donor_id is not None:
+        return Institution.objects.filter(active | Q(pk=current_donor_id)).order_by('name')
+    return Institution.objects.filter(active).order_by('name')
 
 
 def with_donation_list_metrics(queryset):

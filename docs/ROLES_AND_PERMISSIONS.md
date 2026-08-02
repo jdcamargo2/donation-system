@@ -545,6 +545,10 @@ El superusuario:
 * Incluso como superusuario, Django Admin no permite eliminar proyectos: el Admin
   deniega la eliminación y el modelo/queryset la rechazan. La garantía es de
   aplicación, no de base de datos.
+* Incluso como superusuario, `DonationAdmin` es de solo lectura (sin alta, cambio
+  ni borrado): las mutaciones de donación deben pasar por `create_donation` /
+  `update_donation` en la UI operativa, que aplican la invariante
+  monto ≥ asignaciones no anuladas y la elegibilidad de instituciones activas.
 
 ## 11. Usuario autenticado sin permisos
 

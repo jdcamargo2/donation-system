@@ -20,6 +20,7 @@ from .models import (
     Expense,
     ExpenseRequest,
     FundAllocation,
+    Institution,
     Project,
     ProjectMilestone,
     ProjectUpdate,
@@ -847,6 +848,198 @@ def move_project_milestone_down(milestone_id: int, *, actor):
 def _validate_operating_currency(currency, field_name='currency'):
     if currency != OPERATING_CURRENCY:
         raise ValidationError({field_name: _('SIGEDON solo permite operaciones financieras en USD.')})
+
+
+def _require_donation_actor(actor):
+    """
+    PRE: actor is proposed as the author of a donation create/update.
+    POST: returns only for authenticated users; otherwise raises safely.
+    """
+    if not getattr(actor, 'is_authenticated', False):
+        raise ValidationError({'actor': _('La operación exige un usuario autenticado.')})
+
+
+def _donation_non_annulled_allocated_total(donation) -> Decimal:
+    """
+    PRE: donation is locked or otherwise stable for the aggregate read.
+    POST: returns Sum of non-annulled allocation amounts (ACTIVE and FINISHED count).
+    """
+    return (
+        donation.allocations.exclude(status=FundAllocation.Status.ANNULLED).aggregate(
+            total=Sum('amount')
+        )['total']
+        or ZERO_MONEY
+    )
+
+
+def _validate_donation_amount_against_allocations(donation, amount):
+    """
+    PRE: donation is locked; amount is the complete proposed donation amount.
+    POST: raises unless amount is positive and >= total non-annulled allocations.
+    """
+    if amount is None or amount <= ZERO_MONEY:
+        raise ValidationError({'amount': _('El monto de la donación debe ser positivo.')})
+    allocated_total = _donation_non_annulled_allocated_total(donation)
+    if amount < allocated_total:
+        raise ValidationError(
+            {
+                'amount': _(
+                    'El importe de la donación no puede ser inferior al total ya asignado '
+                    '(%(allocated_total)s USD).'
+                )
+                % {'allocated_total': allocated_total}
+            }
+        )
+
+
+def _validate_donation_donor(*, donor, previous_donor_id=None):
+    """
+    PRE: donor is the proposed Institution; previous_donor_id is None on create.
+    POST: allows ACTIVE donors always; allows an unchanged historical inactive donor on update.
+    """
+    if donor is None:
+        raise ValidationError({'donor': _('Debe seleccionar un donante.')})
+    if donor.status == Institution.Status.ACTIVE:
+        return
+    if previous_donor_id is not None and previous_donor_id == donor.pk:
+        return
+    if previous_donor_id is None:
+        raise ValidationError(
+            {'donor': _('Solo instituciones activas pueden registrar nuevas donaciones.')}
+        )
+    raise ValidationError(
+        {'donor': _('No se puede reemplazar el donante por una institución inactiva.')}
+    )
+
+
+def create_donation(
+    *,
+    actor,
+    donor,
+    donation_type,
+    amount,
+    objective,
+    restrictions='',
+    commitment_date=None,
+    received_date=None,
+    support_reference='',
+):
+    """
+    PRE: actor is authenticated; donor is ACTIVE; amount is positive; fields come from trusted UI.
+    POST: creates one REGISTERED USD donation, writes exactly one CREATED audit, returns it.
+    """
+    _require_donation_actor(actor)
+    with transaction.atomic():
+        locked_donor = Institution.objects.select_for_update().get(pk=donor.pk)
+        _validate_donation_donor(donor=locked_donor, previous_donor_id=None)
+        if amount is None or amount <= ZERO_MONEY:
+            raise ValidationError({'amount': _('El monto de la donación debe ser positivo.')})
+        donation = Donation(
+            donor=locked_donor,
+            donation_type=donation_type,
+            amount=amount,
+            currency=OPERATING_CURRENCY,
+            objective=objective,
+            restrictions=restrictions or '',
+            commitment_date=commitment_date,
+            received_date=received_date,
+            support_reference=support_reference or '',
+            status=Donation.Status.REGISTERED,
+        )
+        donation.full_clean(exclude=('code',))
+        donation.save()
+        log_action(actor, AuditLog.Action.CREATED, donation, _('Donación creada.'))
+        return donation
+
+
+def update_donation(
+    *,
+    actor,
+    donation,
+    donor,
+    donation_type,
+    amount,
+    objective,
+    restrictions='',
+    commitment_date=None,
+    received_date=None,
+    support_reference='',
+):
+    """
+    PRE: actor authenticated; donation editable; amount >= non-annulled allocations; donor eligible.
+    POST: locks donation, applies only allowed fields, audits once with before/after metadata.
+    """
+    _require_donation_actor(actor)
+    with transaction.atomic():
+        locked_donation = Donation.objects.select_for_update().get(pk=donation.pk)
+        ensure_operational_entity_is_editable(locked_donation)
+        locked_donor = Institution.objects.select_for_update().get(pk=donor.pk)
+        previous_amount = locked_donation.amount
+        previous_donor_id = locked_donation.donor_id
+        _validate_donation_donor(donor=locked_donor, previous_donor_id=previous_donor_id)
+        _validate_donation_amount_against_allocations(locked_donation, amount)
+
+        changed_fields = []
+        if previous_donor_id != locked_donor.pk:
+            changed_fields.append('donor')
+        if locked_donation.donation_type != donation_type:
+            changed_fields.append('donation_type')
+        if previous_amount != amount:
+            changed_fields.append('amount')
+        if locked_donation.objective != objective:
+            changed_fields.append('objective')
+        if (locked_donation.restrictions or '') != (restrictions or ''):
+            changed_fields.append('restrictions')
+        if locked_donation.commitment_date != commitment_date:
+            changed_fields.append('commitment_date')
+        if locked_donation.received_date != received_date:
+            changed_fields.append('received_date')
+        if (locked_donation.support_reference or '') != (support_reference or ''):
+            changed_fields.append('support_reference')
+
+        locked_donation.donor = locked_donor
+        locked_donation.donation_type = donation_type
+        locked_donation.amount = amount
+        locked_donation.objective = objective
+        locked_donation.restrictions = restrictions or ''
+        locked_donation.commitment_date = commitment_date
+        locked_donation.received_date = received_date
+        locked_donation.support_reference = support_reference or ''
+        locked_donation.full_clean()
+        locked_donation.save(
+            update_fields=(
+                'donor',
+                'donation_type',
+                'amount',
+                'objective',
+                'restrictions',
+                'commitment_date',
+                'received_date',
+                'support_reference',
+                'updated_at',
+            )
+        )
+        log_action(
+            actor,
+            AuditLog.Action.UPDATED,
+            locked_donation,
+            _(
+                'Donación actualizada. donation_id=%(donation_id)s code=%(code)s '
+                'changed_fields=%(changed_fields)s previous_amount=%(previous_amount)s '
+                'new_amount=%(new_amount)s previous_donor_id=%(previous_donor_id)s '
+                'new_donor_id=%(new_donor_id)s.'
+            )
+            % {
+                'donation_id': locked_donation.pk,
+                'code': locked_donation.code,
+                'changed_fields': ','.join(changed_fields) or '-',
+                'previous_amount': previous_amount,
+                'new_amount': locked_donation.amount,
+                'previous_donor_id': previous_donor_id,
+                'new_donor_id': locked_donation.donor_id,
+            },
+        )
+        return locked_donation
 
 
 # PRE: donation is locked for update before funds are evaluated or reserved.

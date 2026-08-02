@@ -116,20 +116,21 @@ contra el SHA-384 oficial
 
 ### PRE
 
-* Existe una institución con rol de donante.
+* Existe una institución donante en estado `ACTIVE`.
 * El monto es positivo.
 * La moneda es USD y las fechas son válidas.
 
 ### Pasos
 
-1. El usuario registra la donación.
-2. El sistema reserva un código operativo con prefijo `DON`.
+1. El usuario registra la donación mediante la UI operativa (no el admin).
+2. El servicio `create_donation` valida el donante activo, reserva un código `DON` y persiste la fila.
 3. La donación queda inicialmente en estado `REGISTERED`.
 4. Cuando se confirma la recepción, puede pasar a `RECEIVED`.
 5. Sus fondos pueden distribuirse mediante asignaciones.
 6. El progreso de asignación se calcula automáticamente.
-7. La donación puede anularse cuando las reglas del dominio lo permitan.
-8. Las acciones críticas generan auditoría.
+7. Una edición ordinaria (`update_donation`) bloquea la fila, exige que el monto no sea inferior al total de asignaciones no anuladas (`ACTIVE`/`FINISHED`) y aplica la regla de donante histórico/inactivo.
+8. La donación puede anularse cuando las reglas del dominio lo permitan.
+9. Las acciones críticas generan exactamente una auditoría por mutación exitosa.
 
 ### POST
 
@@ -140,6 +141,7 @@ contra el SHA-384 oficial
   estado `RECEIVED` (moneda operativa). `REGISTERED` no cuenta.
 * **Fondos sin asignar** = recibidos − asignaciones no anuladas (mínimo 0);
   las reservas de solicitudes no entran en este KPI.
+* Instituciones inactivas siguen visibles en donaciones históricas, pero no financian actividad nueva.
 
 ### Regla monetaria
 

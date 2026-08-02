@@ -137,11 +137,14 @@ ANNULLED
 * La moneda es estrictamente USD; no existe conversión monetaria.
 * El código operativo es único e inmutable.
 * PostgreSQL impide monedas distintas de USD.
+* El monto de la donación no puede ser inferior a la suma de sus asignaciones no anuladas (`ACTIVE` y `FINISHED` cuentan; `ANNULLED` no cuenta). La invariante se aplica de forma transaccional en el servicio (`update_donation` / `create_donation`), con validación defensiva en formulario y modelo; no existe un `CheckConstraint` cruzado.
+* Solo instituciones `ACTIVE` pueden figurar como donante en una donación nueva. Un donante histórico `INACTIVE` puede permanecer en ediciones existentes, pero no puede sustituirse por otra institución inactiva.
 * Las asignaciones no anuladas no pueden exceder el monto disponible.
 * Una donación anulada queda excluida de métricas y saldos operativos.
 * El KPI global de dashboard **Fondos recibidos** cuenta solo `RECEIVED`
   (no `REGISTERED`).
 * El nivel de asignación se calcula a partir de sus asignaciones y no se almacena como estado editable.
+* `DonationAdmin` es de solo lectura (sin alta, cambio ni borrado), para impedir bypass del servicio.
 
 ## 4. `FundAllocation`
 

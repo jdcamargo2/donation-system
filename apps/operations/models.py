@@ -821,10 +821,57 @@ class Donation(models.Model):
             return super().save(*args, **kwargs)
 
     def clean(self):
+        """
+        PRE: amount/donor may be partially present during form or service validation.
+        POST: rejects non-positive amounts; when pk exists, rejects amount below non-annulled
+        allocated total; rejects inactive donors on create or donor replacement.
+        Limitation: historical inactive donor retention is allowed when donor_id is unchanged;
+        create/update donor eligibility remains authoritative in services/forms under concurrency.
+        """
         # PRE: amount may be absent when field validation has already rejected submitted data.
         # POST: rejects non-positive numeric amounts without masking field errors for missing or invalid values.
+        errors = {}
         if self.amount is not None and self.amount <= ZERO_MONEY:
-            raise ValidationError({'amount': _('El monto de la donación debe ser positivo.')})
+            errors['amount'] = _('El monto de la donación debe ser positivo.')
+
+        if self.pk and self.amount is not None and 'amount' not in errors:
+            allocated_total = self.total_assigned
+            if self.amount < allocated_total:
+                errors['amount'] = _(
+                    'El importe de la donación no puede ser inferior al total ya asignado '
+                    '(%(allocated_total)s USD).'
+                ) % {'allocated_total': allocated_total}
+
+        if self.donor_id is not None:
+            donor_status = None
+            if getattr(self, 'donor', None) is not None and self.donor.pk == self.donor_id:
+                donor_status = self.donor.status
+            else:
+                donor_status = (
+                    Institution.objects.filter(pk=self.donor_id)
+                    .values_list('status', flat=True)
+                    .first()
+                )
+            if donor_status == Institution.Status.INACTIVE:
+                previous_donor_id = None
+                if self.pk:
+                    previous_donor_id = (
+                        type(self).objects.filter(pk=self.pk)
+                        .values_list('donor_id', flat=True)
+                        .first()
+                    )
+                if previous_donor_id != self.donor_id:
+                    if previous_donor_id is None:
+                        errors['donor'] = _(
+                            'Solo instituciones activas pueden registrar nuevas donaciones.'
+                        )
+                    else:
+                        errors['donor'] = _(
+                            'No se puede reemplazar el donante por una institución inactiva.'
+                        )
+
+        if errors:
+            raise ValidationError(errors)
 
     @property
     def total_assigned(self):
