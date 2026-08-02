@@ -8,7 +8,7 @@ El entorno de producción requiere:
 
 * Python 3.12;
 * PostgreSQL;
-* un servidor WSGI o ASGI;
+* Gunicorn sirviendo `core.wsgi:application` (contrato WSGI canónico);
 * un proxy inverso con HTTPS;
 * almacenamiento persistente para archivos;
 * variables de entorno seguras;
@@ -107,88 +107,191 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 
 ## 5. Preparación del despliegue
 
+La fuente canónica del arranque en producción es este documento. Migraciones,
+`collectstatic`, sincronización de roles y verificaciones de seguridad son
+pasos de **release**, no del proceso web.
+
 ### 5.1. Instalar dependencias
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 5.2. Aplicar migraciones
+`requirements.txt` incluye Gunicorn (`gunicorn==23.0.0`) como servidor WSGI
+de producción. No se declara Uvicorn/Daphne ni workers async/gevent.
 
-```bash
-python manage.py migrate
-```
+### 5.2. Secuencia de release (mutaciones controladas)
 
-### 5.3. Recopilar archivos estáticos
-
-```bash
-python manage.py collectstatic --noinput
-```
-
-### 5.4. Sincronizar roles
-
-Sincroniza los cuatro roles funcionales canónicos. No modifica membresías de
-usuarios. Runbook completo: [Operaciones §3](OPERATIONS.md#3-sincronización-de-roles).
-
-```bash
-python manage.py sync_sigedon_roles
-```
-
-### 5.5. Verificar la configuración
-
-```bash
-python manage.py check
-```
-
-Para una verificación específica de producción:
+Ejecutar **una vez por despliegue**, con las credenciales apropiadas
+(`sigedon_owner` para migraciones; runtime `sigedon_app` donde corresponda).
+Los workers de Gunicorn **nunca** ejecutan estos pasos.
 
 ```bash
 python manage.py check --deploy
+python manage.py makemigrations --check --dry-run
+python manage.py migrate --plan
+python manage.py migrate
+python manage.py collectstatic --noinput
+python manage.py sync_sigedon_roles
+python manage.py verify_postgres_security
+python manage.py reconcile_operational_code_sequences
+./deploy/preflight.sh
 ```
+
+Notas:
+
+* `migrate` corre una vez bajo el propietario del esquema;
+* `collectstatic` debe completarse antes de reemplazar el proceso web;
+* `sync_sigedon_roles` corre una vez por release;
+* `verify_postgres_security` debe ejecutarse con el rol runtime previsto;
+* `reconcile_operational_code_sequences` es **detect-only** (solo lectura):
+  falla ante secuencias ausentes/atrasadas/inválidas y no repara automáticamente;
+* `./deploy/preflight.sh` es la puerta de readiness **después** de las mutaciones
+  y **antes** de aceptar tráfico; no aplica migraciones ni inicia Gunicorn.
+* Runbook de roles: [Operaciones §3](OPERATIONS.md#3-sincronización-de-roles).
+
+Variables opcionales de preflight:
+
+* `PYTHON_BIN` — intérprete (por defecto `python`);
+* `SIGEDON_PREFLIGHT_SHOW_MIGRATE_PLAN=YES` — muestra `migrate --plan` sin aplicar.
+
+### 5.3. Prerrequisitos de media y estáticos
+
+* Montar el volumen persistente y exportar `SIGEDON_MEDIA_ROOT` **antes** del
+  preflight (`check --deploy` valida existencia/permisos).
+* `collectstatic` debe haber poblado `STATIC_ROOT` (por defecto
+  `<BASE_DIR>/staticfiles`) con sentinelas locales (`web/css/sigedon.css`,
+  logos ILDE). El comando `verify_deployment_assets` lo comprueba sin mutar
+  archivos. Assets CDN externos (p. ej. Bootstrap) no forman parte de esta
+  puerta.
 
 ### Orden recomendado
 
 ```text
 Instalar dependencias
-→ Validar variables
+→ Validar variables / montar media
 → Crear respaldo
-→ Aplicar migraciones
-→ Recopilar estáticos
-→ Sincronizar roles
-→ Verificar configuración
-→ Reiniciar aplicación
-→ Ejecutar comprobaciones funcionales
+→ Migraciones (owner)
+→ collectstatic
+→ sync_sigedon_roles
+→ verify_postgres_security / reconcile (detect-only)
+→ ./deploy/preflight.sh
+→ Sustituir proceso web (Gunicorn)
+→ Comprobaciones funcionales
 ```
 
-## 6. Servidor de aplicación
+## 6. Servidor de aplicación (Gunicorn)
 
-SIGEDON debe ejecutarse mediante un servidor WSGI o ASGI apropiado para producción.
-
-Ejemplos de arquitectura:
+SIGEDON usa **Gunicorn con workers síncronos** como servidor de aplicación
+canónico de producción, sirviendo el entry point WSGI:
 
 ```text
-Cliente
-→ Proxy HTTPS
-→ Servidor WSGI o ASGI
-→ Django
-→ PostgreSQL
+core.wsgi:application
 ```
 
-El servidor de desarrollo:
+ASGI (`core.asgi:application`) permanece disponible para uso futuro, pero
+**no** es el contrato de producción de este checkpoint.
+
+### Comando canónico
+
+```bash
+gunicorn core.wsgi:application --config deploy/gunicorn.conf.py
+```
+
+Equivalente con wrapper del repositorio (sin migraciones ni collectstatic):
+
+```bash
+./deploy/start_web.sh
+```
+
+Configuración: `deploy/gunicorn.conf.py` (overrides por entorno; ver
+`.env.example`). Valores conservadores iniciales:
+
+| Variable | Default |
+| --- | --- |
+| `PORT` / bind | `0.0.0.0:8000` (`GUNICORN_BIND` sustituye) |
+| `GUNICORN_WORKERS` | `2` |
+| `GUNICORN_THREADS` | `1` |
+| `worker_class` | `sync` |
+| `GUNICORN_TIMEOUT` | `60` |
+| `GUNICORN_GRACEFUL_TIMEOUT` | `30` |
+| `GUNICORN_KEEPALIVE` | `5` |
+| access / error log | stdout / stderr (`-`) |
+| daemon / reload / preload | desactivados |
+
+### Capacidad de workers y PostgreSQL
+
+```text
+conexiones potenciales ≈ GUNICORN_WORKERS × GUNICORN_THREADS
+```
+
+Ese producto debe quedar **por debajo** del cupo de conexiones del rol runtime,
+dejando margen para comandos de release, backup/restore, administración,
+comandos Kobo y monitoreo. No usar `(2 × CPU) + 1` como default incondicional.
+Las operaciones financieras usan transacciones y bloqueos de fila: más workers
+no garantizan más throughput.
+
+### Apagado elegante
+
+* El gestor de procesos envía `SIGTERM`; Gunicorn deja de aceptar trabajo nuevo
+  y espera hasta `graceful_timeout` (default 30s).
+* `TimeoutStopSec` (systemd) u homogeneo de plataforma debe ser **mayor** que
+  `GUNICORN_GRACEFUL_TIMEOUT`.
+* `timeout` (default 60s) mata workers atascados; transacciones DB en vuelo
+  pueden revertirse si el proceso es hard-killed.
+* No hay jobs en background dentro de los workers web.
+* Webhooks y peticiones deben completar dentro de los timeouts del proxy y de
+  Gunicorn.
+
+### Desarrollo
 
 ```bash
 python manage.py runserver
 ```
 
-no debe utilizarse en producción.
+es **solo desarrollo**. No usarlo en producción. Gunicorn no es necesario para
+ejecutar la suite de tests.
 
-El proceso debe gestionarse mediante una herramienta de supervisión capaz de:
+El proceso web debe gestionarse con supervisión capaz de reiniciar ante fallos,
+conservar logs, aplicar límites de recursos e iniciar tras reinicio del host.
 
-* iniciar la aplicación;
-* reiniciarla ante fallos;
-* conservar logs;
-* aplicar límites de recursos;
-* iniciar el servicio después de reiniciar el servidor.
+### 6.1. Ejemplo systemd / VPS
+
+```ini
+[Service]
+WorkingDirectory=/path/to/sigedon
+EnvironmentFile=/path/to/sigedon.env
+ExecStart=/path/to/venv/bin/gunicorn core.wsgi:application --config /path/to/sigedon/deploy/gunicorn.conf.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGTERM
+```
+
+Requisitos: sin `runserver`; sin migraciones en `ExecStart`; la cuenta del
+servicio lee código/estáticos y escribe `SIGEDON_MEDIA_ROOT`; no usar
+credenciales owner de PostgreSQL en el servicio web.
+
+### 6.2. Ejemplo contenedor / plataforma
+
+* Fase de **release/job**: migraciones, `collectstatic`, sync de roles,
+  verificaciones y `./deploy/preflight.sh` **una vez**.
+* Comando **web**: solo Gunicorn (`./deploy/start_web.sh` o el comando canónico).
+* Volumen de media persistente montado **antes** del preflight.
+* La readiness HTTP se formalizará en un checkpoint posterior; el arranque del
+  proceso web debe depender igualmente de un release/preflight exitoso.
+* La plataforma envía `SIGTERM`; Gunicorn aplica apagado elegante.
+* No se añade Dockerfile en este checkpoint (el repositorio no lo exige).
+
+Arquitectura:
+
+```text
+Cliente
+→ Proxy HTTPS
+→ Gunicorn (WSGI, core.wsgi:application)
+→ Django
+→ PostgreSQL
+```
 
 ## 7. Usuarios y roles
 
@@ -543,30 +646,22 @@ También debe verificarse:
 
 ## 16. Actualización de una versión
 
-Flujo recomendado:
+Flujo recomendado (release separado del arranque web):
 
 ```text
 Activar modo de mantenimiento, si corresponde
 → Crear respaldo
 → Descargar nueva versión
 → Instalar dependencias
-→ Aplicar migraciones
-→ Recopilar estáticos
-→ Sincronizar roles
-→ Reiniciar procesos
+→ Secuencia de release (§5.2: migrate, collectstatic, roles, preflight)
+→ Sustituir proceso web (Gunicorn; §6)
 → Ejecutar verificaciones
 → Retirar modo de mantenimiento
 ```
 
-Comandos de referencia:
-
-```bash
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py collectstatic --noinput
-python manage.py sync_sigedon_roles
-python manage.py check --deploy
-```
+Comandos de referencia: ver [§5.2](#52-secuencia-de-release-mutaciones-controladas)
+y el comando canónico en [§6](#6-servidor-de-aplicación-gunicorn). No ejecutar
+`migrate` ni `collectstatic` dentro de los workers.
 
 ## 17. Reversión
 
@@ -574,11 +669,11 @@ Antes de desplegar debe existir una estrategia de reversión.
 
 Debe contemplar:
 
-* versión anterior del código;
+* artefacto/versión anterior de la aplicación (código + dependencias pinneadas);
 * respaldo previo;
 * compatibilidad de migraciones;
 * restauración de archivos;
-* procedimiento de reinicio;
+* procedimiento de reinicio del proceso Gunicorn sin reaplicar un release parcial;
 * responsables de aprobar la reversión.
 
 No todas las migraciones pueden revertirse de forma segura. La estrategia debe revisarse antes de ejecutar cambios destructivos.

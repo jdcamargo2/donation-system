@@ -586,6 +586,14 @@ git diff --check
 
 Cuando el cambio afecte concurrencia o comportamiento específico de PostgreSQL, la suite correspondiente debe ejecutarse contra PostgreSQL.
 
+### Arranque de producción (Gunicorn / preflight)
+
+Los tests de contrato de runtime viven en `core.tests.test_runtime_startup`
+(config Gunicorn, `deploy/start_web.sh`, `deploy/preflight.sh`,
+`verify_deployment_assets`). No requieren iniciar el servidor ni abrir puertos.
+Gunicorn no es necesario para el resto de la suite unitaria. Detalle operativo:
+[DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn).
+
 ## 18. Criterio de aceptación
 
 Un cambio se considera listo cuando:

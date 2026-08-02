@@ -78,6 +78,10 @@ python manage.py sync_sigedon_roles
 
 ### 1.7. Ejecutar el servidor local
 
+> [!WARNING]
+> Django `runserver` no es un servidor de aplicación de producción. El contrato
+> de producción es Gunicorn (`docs/DEPLOYMENT.md`).
+
 ```bash
 python manage.py runserver
 ```
@@ -311,6 +315,10 @@ Estos directorios no deben versionarse.
 * Producción exige `SIGEDON_MEDIA_ROOT` fuera del repositorio; el despliegue
   monta el volumen antes del arranque y `check --deploy` verifica
   existencia/permisos. Django no crea el directorio de producción.
+* Tras `collectstatic` en el release, `./deploy/preflight.sh` (vía
+  `verify_deployment_assets`) exige sentinelas bajo `STATIC_ROOT`. El proceso
+  web (Gunicorn) no ejecuta `collectstatic`. Ver
+  [DEPLOYMENT.md](DEPLOYMENT.md#5-preparación-del-despliegue).
 * Los respaldos de archivos deben tratarse como información sensible y usar el
   mismo `SIGEDON_MEDIA_ROOT` que Django.
 * Debe verificarse el espacio disponible y la política de retención.

@@ -40,6 +40,7 @@ debe actualizarse cuando el total cambie de forma estable.
 * Python 3.12
 * Django 6.0.6
 * PostgreSQL mediante Psycopg 3
+* Gunicorn (WSGI) como servidor de aplicación en producción
 * SQLite únicamente para desarrollo local con `DEBUG=True`
 * Django Templates
 * Bootstrap 5
@@ -171,6 +172,11 @@ python manage.py sync_sigedon_roles
 ```
 
 ### 7. Ejecutar el servidor
+
+> [!WARNING]
+> `python manage.py runserver` es **solo para desarrollo local**. No es un
+> servidor de aplicación de producción. En producción use Gunicorn; ver
+> [Despliegue](docs/DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn).
 
 ```bash
 python manage.py runserver

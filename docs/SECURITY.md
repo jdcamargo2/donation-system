@@ -286,7 +286,11 @@ deben cumplirse las siguientes condiciones:
 * PostgreSQL es obligatorio;
 * SQLite está prohibido;
 * los secretos deben obtenerse desde variables de entorno;
-* los errores internos no deben mostrarse al usuario.
+* los errores internos no deben mostrarse al usuario;
+* el proceso web de producción es Gunicorn sirviendo `core.wsgi:application`
+  ([DEPLOYMENT.md §6](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn));
+  `runserver` no es aceptable en producción; los workers no ejecutan
+  migraciones ni `collectstatic`.
 
 Según el entorno de despliegue, deben configurarse:
 

@@ -45,7 +45,9 @@ Contiene la configuración central del proyecto:
 * seguridad de producción;
 * archivos estáticos;
 * archivos multimedia;
-* carga de variables de entorno.
+* carga de variables de entorno;
+* contrato de arranque WSGI de producción (`core.wsgi:application` vía Gunicorn;
+  detalle en [DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn)).
 
 ### 2.2. `apps.operations`
 
@@ -366,6 +368,8 @@ Actualmente se mantienen las siguientes condiciones:
 * `web` se conserva como cascarón histórico;
 * existe un flujo legado de sincronización de la Ficha 1;
 * algunos estados históricos de Kobo permanecen declarados por compatibilidad;
-* las dependencias de producción y desarrollo comparten `requirements.txt`.
+* las dependencias de producción y desarrollo comparten `requirements.txt`
+  (incluye Gunicorn pinneado para el runtime WSGI de producción; el arranque
+  canónico está en [DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn)).
 
 Estas condiciones no impiden la operación actual del MVP, pero deben tratarse como deuda técnica controlada y no como patrón para nuevas implementaciones.

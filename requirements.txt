@@ -3,6 +3,8 @@ bandit==1.9.4
 Django==6.0.6
 django-bootstrap5==26.2
 django-countries==9.0.0
+gunicorn==23.0.0
+packaging==26.2
 markdown-it-py==4.2.0
 mdurl==0.1.2
 psycopg==3.2.9
