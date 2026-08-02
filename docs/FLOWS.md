@@ -192,6 +192,9 @@ rechazo.
     `Donation → FundAllocation → Project → ExpenseRequest`.
 11. Anular asignación (`annul_fund_allocation`) sigue siendo el flujo terminal
     con motivo hacia `ANNULLED` y no sustituye a la finalización.
+12. No existe endpoint genérico de cambio de estado para `FundAllocation`.
+    `Finalizar` y `Anular` son los únicos flujos HTTP de ciclo de vida;
+    Donation conserva su transición de estado no terminal donde aplique.
 
 ### POST
 

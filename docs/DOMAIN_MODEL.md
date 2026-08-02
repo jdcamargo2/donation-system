@@ -176,6 +176,9 @@ ANNULLED
   `DENIED`, `WITHDRAWN`, `ANNULLED`) y los gastos ya ejecutados no bloquean el
   cierre. La finalización no anula ni modifica solicitudes; la guarda vive en
   `finish_fund_allocation` bajo bloqueo transaccional.
+* Las transiciones terminales de `FundAllocation` usan acciones dedicadas
+  (`finish_fund_allocation` / `annul_fund_allocation`). No hay cambio genérico
+  de estado para asignaciones.
 
 ## 5a. `ExpenseRequest`
 

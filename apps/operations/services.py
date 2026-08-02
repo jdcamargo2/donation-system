@@ -203,34 +203,6 @@ def transition_donation_status(donation_id: int, *, actor, target_status: str) -
         return donation
 
 
-def transition_fund_allocation_status(allocation_id: int, *, actor, target_status: str) -> FundAllocation:
-    """
-    PRE: allocation_id exists, actor is authenticated, and target_status is requested explicitly.
-    POST: atomically locks, validates and audits exactly one permitted non-terminal status transition.
-    Terminal FINISHED/ANNULLED require finish_fund_allocation / annul_fund_allocation.
-    """
-    _require_transition_actor(actor)
-    if target_status in ALLOCATION_TERMINAL_STATUSES:
-        raise InvalidStateTransitionError(
-            {'status': _('Las acciones terminales requieren su confirmación específica.')}
-        )
-    with transaction.atomic():
-        allocation = FundAllocation.objects.select_for_update().select_related('donation', 'project').get(pk=allocation_id)
-        previous_status = allocation.status
-        validate_state_transition(current_status=previous_status, target_status=target_status, allowed_transitions=FUND_ALLOCATION_STATUS_TRANSITIONS)
-        _validate_allocation_balance(
-            allocation.donation,
-            allocation.amount,
-            exclude_pk=allocation.pk,
-        )
-        allocation.full_clean()
-        allocation.status = target_status
-        allocation.full_clean()
-        allocation.save(update_fields=('status', 'updated_at'))
-        _log_status_transition(actor, allocation, previous_status, target_status)
-        return allocation
-
-
 def _raise_allocation_open_financial_work_error(allocation):
     """
     PRE: allocation is locked; open-request rows for it are already locked or frozen by parent locks.

@@ -48,7 +48,6 @@ from ..services import (
     finish_fund_allocation,
     update_fund_allocation,
     FUND_ALLOCATION_STATUS_TRANSITIONS,
-    transition_fund_allocation_status,
 )
 
 from .common import (
@@ -59,8 +58,6 @@ from .common import (
     OperationsPermissionRequiredMixin,
     PaginatedListMixin,
     RouteContextMixin,
-    StateTransitionContextMixin,
-    StateTransitionView,
     TerminalActionView,
     add_service_errors_to_form,
     apply_list_filters,
@@ -129,14 +126,12 @@ class FundAllocationListView(
 RECENT_ALLOCATION_EXPENSE_REQUESTS_LIMIT = 5
 
 
-class FundAllocationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
+class FundAllocationDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_fundallocation'
     model = FundAllocation
     template_name = 'web/allocation_detail.html'
     route_prefix = 'allocation'
     page_title = _('Asignación de fondos')
-    transition_map = FUND_ALLOCATION_STATUS_TRANSITIONS
-    transition_url_name = 'allocation_status_transition'
 
     def get_queryset(self):
         # PRE: la vista consulta una asignación autorizada por clave primaria.
@@ -311,9 +306,3 @@ class FundAllocationDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMix
     route_prefix = 'allocation'
     page_title = _('Eliminar asignación de fondos')
     audit_summary = _('Asignación de fondos eliminada.')
-
-
-class FundAllocationStatusTransitionView(StateTransitionView):
-    permission_required = 'operations.change_fundallocation'
-    transition_service = staticmethod(transition_fund_allocation_status)
-    detail_url_name = 'allocation_detail'

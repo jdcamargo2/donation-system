@@ -35,7 +35,6 @@ from apps.operations.services import (
     create_fund_allocation,
     finish_fund_allocation,
     finish_project,
-    transition_fund_allocation_status,
 )
 from apps.operations.tests.helpers import (
     TEST_DATE,
@@ -191,18 +190,6 @@ class FinancialScopeClosureServiceTests(TestCase):
         annul_fund_allocation(other.pk, actor=self.actor, reason=VALID_ANNUL_REASON)
         with self.assertRaises(InvalidStateTransitionError):
             finish_fund_allocation(other.pk, actor=self.actor)
-
-    def test_generic_status_transition_still_rejects_finished(self):
-        allocation = create_allocation()
-        with self.assertRaises(InvalidStateTransitionError) as raised:
-            transition_fund_allocation_status(
-                allocation.pk,
-                actor=self.actor,
-                target_status=FundAllocation.Status.FINISHED,
-            )
-        self.assertIn('confirmación específica', raised.exception.messages[0])
-        allocation.refresh_from_db()
-        self.assertEqual(allocation.status, FundAllocation.Status.ACTIVE)
 
     def test_finish_project_without_allocations_succeeds(self):
         project = create_project(code='PRJ-EMPTY-CLOSE')

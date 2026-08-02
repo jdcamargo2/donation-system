@@ -11,7 +11,6 @@ from .allocations import (
     FundAllocationDetailView,
     FundAllocationFinishView,
     FundAllocationListView,
-    FundAllocationStatusTransitionView,
     FundAllocationUpdateView,
 )
 from .audit import AuditLogListView
@@ -163,7 +162,6 @@ __all__ = [
     'FundAllocationDetailView',
     'FundAllocationFinishView',
     'FundAllocationListView',
-    'FundAllocationStatusTransitionView',
     'FundAllocationUpdateView',
     'InstitutionCreateView',
     'InstitutionDeleteView',

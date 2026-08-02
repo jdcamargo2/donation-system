@@ -127,12 +127,6 @@ class EndToEndMVPFlowTests(TestCase):
         )
         self.assertRedirects(allocation_response, reverse('allocation_list'))
         allocation = FundAllocation.objects.get(donation=donation, project=project)
-        self.assertRedirects(
-            self.client.post(
-                reverse('allocation_status_transition', args=[allocation.pk, FundAllocation.Status.ACTIVE])
-            ),
-            reverse('allocation_detail', args=[allocation.pk]),
-        )
 
         available_before_request = allocation.available_balance
         self.client.force_login(self.operator)

@@ -2,8 +2,6 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib import admin
-from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
 from django.test import RequestFactory, TestCase
 from django.urls import NoReverseMatch, reverse
 
@@ -17,7 +15,6 @@ from apps.operations.services import (
     InvalidStateTransitionError,
     finish_fund_allocation,
     transition_donation_status,
-    transition_fund_allocation_status,
     validate_state_transition,
     finish_project,
 )
@@ -51,17 +48,6 @@ class StateTransitionServiceTests(TestCase):
             estimated_budget=Decimal('100.00'),
             start_date=date(2026, 1, 1),
             end_date=date(2026, 12, 31),
-            status=status,
-        )
-
-    def create_allocation(self, status):
-        number = self.next_counter()
-        return FundAllocation.objects.create(
-            donation=create_donation(code=f'DON-STATE-ALLOC-{number}'),
-            project=create_project(code=f'PRJ-STATE-ALLOC-{number}'),
-            budget_category='health_psychosocial',
-            amount=Decimal('20.00'),
-            allocation_date=TEST_DATE,
             status=status,
         )
 
@@ -108,12 +94,16 @@ class StateTransitionServiceTests(TestCase):
         with self.assertRaises(InvalidStateTransitionError):
             finish_project(project.pk, actor=self.actor)
 
-    def test_allocation_transition_matrix(self):
-        self.assert_transition_matrix(
-            transitions=FUND_ALLOCATION_STATUS_TRANSITIONS,
-            statuses=FundAllocation.Status.values,
-            factory=self.create_allocation,
-            service=transition_fund_allocation_status,
+    def test_allocation_lifecycle_map_is_terminal_only(self):
+        self.assertEqual(
+            FUND_ALLOCATION_STATUS_TRANSITIONS,
+            {
+                FundAllocation.Status.ACTIVE: frozenset(
+                    {FundAllocation.Status.FINISHED, FundAllocation.Status.ANNULLED}
+                ),
+                FundAllocation.Status.FINISHED: frozenset(),
+                FundAllocation.Status.ANNULLED: frozenset(),
+            },
         )
 
     def test_pure_validator_rejects_same_and_unknown_states(self):
@@ -160,26 +150,6 @@ class StateTransitionServiceTests(TestCase):
 
         project.refresh_from_db()
         self.assertEqual(project.status, Project.Status.ACTIVE)
-
-    def test_invalid_allocation_cannot_activate(self):
-        allocation = self.create_allocation(FundAllocation.Status.ACTIVE)
-        FundAllocation.objects.create(
-            donation=allocation.donation,
-            project=allocation.project,
-            budget_category='food_security',
-            amount=Decimal('90.00'),
-            allocation_date=TEST_DATE,
-        )
-
-        with self.assertRaises(ValidationError):
-            transition_fund_allocation_status(
-                allocation.pk,
-                actor=self.actor,
-                target_status=FundAllocation.Status.ACTIVE,
-            )
-
-        allocation.refresh_from_db()
-        self.assertEqual(allocation.status, FundAllocation.Status.ACTIVE)
 
     def test_service_uses_persisted_state_and_second_attempt_does_not_duplicate_audit(self):
         donation = self.create_donation(Donation.Status.REGISTERED)
@@ -270,6 +240,15 @@ class StateTransitionBoundaryTests(TestCase):
             reverse('project_status_transition', args=(self.project.pk, Project.Status.ACTIVE))
         with self.assertRaises(NoReverseMatch):
             reverse('project_annul', args=(self.project.pk,))
+
+    def test_removed_allocation_generic_status_transition_route_does_not_exist(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse(
+                'allocation_status_transition',
+                args=(self.allocation.pk, FundAllocation.Status.FINISHED),
+            )
+        reverse('allocation_finish', args=(self.allocation.pk,))
+        reverse('allocation_annul', args=(self.allocation.pk,))
 
     def test_detail_shows_finish_without_estado_or_annul(self):
         self.client.force_login(self.user)

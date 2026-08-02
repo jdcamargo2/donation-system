@@ -47,6 +47,8 @@ La suite cubre:
 * terminar proyecto y retiro automático de visibilidad pública;
 * rutas eliminadas de cambio genérico de estado, anulación o eliminación de
   proyecto;
+* ruta eliminada de cambio genérico de estado de asignación
+  (`allocation_status_transition`); ciclo de vida solo vía Finalizar/Anular;
 * bloqueos de eliminación en instancia, queryset y Admin (incluido superusuario);
 * acciones terminales de otras entidades (anular/eliminar donde aplique);
 * auditoría;
