@@ -597,8 +597,12 @@ impide secuencias inválidas.
     discrepancias son warnings y `linked_microprojects` permanece como snapshot
     textual, sin relaciones automáticas por nombre.
 23. El detalle del proyecto muestra datos importados de Ficha 1/10/11 y el
-    historial Kobo del proyecto. Fallos operativos e identidades sin resolver
-    se gestionan en el hub global de incidencias.
+    historial Kobo del proyecto. El detalle importado presenta campos traducidos
+    (Ficha 1 como piloto visual del patrón compartido); IDs técnicos van en
+    Registro Kobo y los datos sensibles/técnicos permanecen colapsados y
+    condicionados por permiso. El rediseño completo de Ficha 10/11 queda para
+    KD2. Fallos operativos e identidades sin resolver se gestionan en el hub
+    global de incidencias.
 
 ### POST
 

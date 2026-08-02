@@ -248,11 +248,16 @@ class KoboProjectImportedSubmissionsTests(TestCase):
                 "nucleo_code": "NV-001",
                 "communities_covered": "Comunidades visibles",
                 "estimated_households": 300,
-                "access_difficulties": "no",
+                "access_difficulties": "yes",
                 "access_difficulties_notes": None,
                 "initial_priority_perception": "medium",
                 "general_notes": "Nota visible",
-                "location": {"latitude": 10.0, "longitude": -66.0},
+                "location": {
+                    "latitude": 13.125832,
+                    "longitude": -68.515603,
+                    "altitude": None,
+                    "accuracy": None,
+                },
                 "parish_delegate": "Sensitive Delegate",
                 "contact_phone": "+58-sensitive-phone",
                 "main_informant_role": "Sensitive Informant Role",
@@ -622,20 +627,38 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         viewer_response = self.client.get(url)
 
         self.assertContains(viewer_response, "NV-001")
+        self.assertNotContains(viewer_response, "Datos internos y técnicos")
         self.assertNotContains(viewer_response, "Datos internos sensibles")
         self.assertNotContains(viewer_response, "+58-sensitive-phone")
         self.assertNotContains(viewer_response, "Sensitive Delegate")
         self.assertNotContains(viewer_response, "Sensitive Informant Role")
         self.assertNotContains(viewer_response, "Nombre del microproyecto")
+        self.assertNotContains(viewer_response, "parish_delegate")
+        self.assertNotContains(viewer_response, "contact_phone")
+        self.assertNotContains(viewer_response, "main_informant_role")
+        self.assertNotContains(viewer_response, "submitted_by")
+        self.assertNotContains(viewer_response, "device_id")
 
         self.client.force_login(self.reviewer)
         reviewer_response = self.client.get(url)
 
-        self.assertContains(reviewer_response, "Datos internos sensibles")
+        self.assertContains(reviewer_response, "Datos internos y técnicos")
+        self.assertContains(reviewer_response, "<details")
+        self.assertContains(reviewer_response, "Delegado parroquial")
+        self.assertContains(reviewer_response, "Teléfono de contacto")
+        self.assertContains(reviewer_response, "Rol del informante principal")
+        self.assertContains(reviewer_response, "Enviado por")
+        self.assertContains(reviewer_response, "ID del dispositivo")
         self.assertContains(reviewer_response, "+58-sensitive-phone")
         self.assertContains(reviewer_response, "Sensitive Delegate")
         self.assertContains(reviewer_response, "Sensitive Informant Role")
         self.assertContains(reviewer_response, "Sensitive Device")
+        self.assertNotContains(reviewer_response, "border-warning")
+        self.assertNotContains(reviewer_response, "parish_delegate")
+        self.assertNotContains(reviewer_response, "contact_phone")
+        self.assertNotContains(reviewer_response, "main_informant_role")
+        self.assertNotContains(reviewer_response, ">submitted_by<")
+        self.assertNotContains(reviewer_response, ">device_id<")
 
     def test_microproject_detail_uses_human_readable_labels(self):
         self.client.force_login(self.viewer)

@@ -22,14 +22,6 @@ from apps.integrations.kobo.forms import (
     KoboReviewForm,
     get_compatible_asset_configuration,
 )
-from apps.integrations.kobo.mappings.ficha_10 import (
-    FICHA_10_FORM_ID,
-    FICHA_10_VERSION,
-)
-from apps.integrations.kobo.mappings.ficha_11 import (
-    FICHA_11_FORM_ID,
-    FICHA_11_VERSION,
-)
 from apps.integrations.kobo.models import (
     KoboAsset,
     KoboAttachment,
@@ -73,10 +65,13 @@ from apps.integrations.kobo.hub import (
 )
 from apps.integrations.kobo.submission_presentation import (
     attachment_status_label,
+    build_imported_submission_detail_context,
     form_identity,
     present_contact_fields,
     present_processing_events,
     present_submission_fields,
+    project_submission_detail_rows,
+    project_submission_detail_title,
     should_show_retry_attachments,
     should_show_retry_normalization,
     submission_status_label,
@@ -267,140 +262,6 @@ def _can_view_sensitive_kobo_data(user) -> bool:
     # PRE: user is an authenticated request user.
     # POST: returns elevated Kobo review authorization without side effects.
     return user.is_superuser or user.has_perm("kobo.change_kobosubmission")
-
-
-MICROPROJECT_CHOICE_LABELS = {
-    "component": {
-        "infrastructure": "Infraestructura",
-        "health_psychosocial": "Salud y atención psicosocial",
-        "training": "Formación",
-        "livelihoods": "Medios de vida",
-        "communication": "Comunicación",
-        "mixed": "Mixto",
-    },
-    "beneficiary_group": {
-        "youth": "Jóvenes",
-        "women": "Mujeres",
-        "adults": "Adultos",
-        "unemployed": "Personas desempleadas",
-        "entrepreneurs": "Emprendedores",
-        "parish_volunteers": "Voluntariado parroquial",
-        "mixed": "Mixto",
-        "other": "Otro",
-    },
-    "estimated_cost_range": {
-        "under_1000": "Menos de USD 1.000",
-        "1000_5000": "USD 1.000 a 5.000",
-        "5000_15000": "USD 5.000 a 15.000",
-        "15000_50000": "USD 15.000 a 50.000",
-        "over_50000": "Más de USD 50.000",
-        "unknown": "Por determinar",
-    },
-    "implementation_urgency": {
-        "immediate": "Inmediata",
-        "short_term": "Corto plazo",
-        "medium_term": "Mediano plazo",
-        "follow_up": "Seguimiento",
-        "unknown": "Por determinar",
-    },
-    "technical_viability": {
-        "high": "Alta",
-        "medium": "Media",
-        "low": "Baja",
-        "requires_design": "Requiere diseño",
-        "not_viable": "No viable",
-    },
-}
-
-
-def _project_submission_detail_rows(submission):
-    # PRE: submission is an imported Kobo record with normalized payload data.
-    # POST: returns labelled Ficha 10/11 fields only; territorial forms return none.
-    payload = submission.normalized_payload or {}
-    if (
-        submission.form_definition.form_id == FICHA_11_FORM_ID
-        and submission.form_definition.version == FICHA_11_VERSION
-    ):
-        return (
-            ("Código del Núcleo Vital / comunidad", payload.get("nucleo_code")),
-            ("Nivel de daño físico", payload.get("physical_damage_score")),
-            ("Familias afectadas", payload.get("affected_families_score")),
-            ("Vulnerabilidad social", payload.get("social_vulnerability_score")),
-            ("Interrupción de servicios básicos", payload.get("services_interruption_score")),
-            ("Pérdida de medios de vida", payload.get("livelihood_loss_score")),
-            ("Capacidad parroquial disponible", payload.get("parish_capacity_score")),
-            ("Accesibilidad territorial", payload.get("territorial_accessibility_score")),
-            ("Existencia de aliados", payload.get("allies_availability_score")),
-            ("Potencial de impacto rápido", payload.get("rapid_impact_score")),
-            ("Viabilidad financiera", payload.get("financial_viability_score")),
-            ("Puntaje total", payload.get("priority_total")),
-            ("Semáforo sugerido", payload.get("suggested_semaphore")),
-            ("Semáforo final validado", payload.get("final_semaphore")),
-            ("Prioridad final de intervención", payload.get("final_priority")),
-            ("Síntesis de decisión", payload.get("priority_summary")),
-            ("Microproyectos vinculados", payload.get("linked_microprojects")),
-        )
-    if (
-        submission.form_definition.form_id != FICHA_10_FORM_ID
-        or submission.form_definition.version != FICHA_10_VERSION
-    ):
-        return ()
-    beneficiary_groups = payload.get("beneficiary_group", ())
-    beneficiary_labels = ", ".join(
-        MICROPROJECT_CHOICE_LABELS["beneficiary_group"].get(value, value)
-        for value in beneficiary_groups
-    )
-    return (
-        ("Código del Núcleo Vital", payload.get("nucleo_code")),
-        ("Nombre del microproyecto", payload.get("microproject_name")),
-        (
-            "Componente principal",
-            MICROPROJECT_CHOICE_LABELS["component"].get(
-                payload.get("component"), payload.get("component")
-            ),
-        ),
-        ("Problema que atiende", payload.get("problem_summary")),
-        ("Objetivo específico", payload.get("specific_objective")),
-        ("Población beneficiaria principal", beneficiary_labels),
-        ("Actividades principales", payload.get("main_activities")),
-        (
-            "Rango de costo estimado",
-            MICROPROJECT_CHOICE_LABELS["estimated_cost_range"].get(
-                payload.get("estimated_cost_range"),
-                payload.get("estimated_cost_range"),
-            ),
-        ),
-        (
-            "Urgencia de implementación",
-            MICROPROJECT_CHOICE_LABELS["implementation_urgency"].get(
-                payload.get("implementation_urgency"),
-                payload.get("implementation_urgency"),
-            ),
-        ),
-        (
-            "Viabilidad técnica inicial",
-            MICROPROJECT_CHOICE_LABELS["technical_viability"].get(
-                payload.get("technical_viability"), payload.get("technical_viability")
-            ),
-        ),
-        ("Resultado esperado verificable", payload.get("expected_result")),
-    )
-
-
-def _project_submission_detail_title(submission) -> str:
-    # PRE: submission has its form definition loaded.
-    # POST: returns a form-specific internal detail title without exposing metadata.
-    if (
-        submission.form_definition.form_id == FICHA_11_FORM_ID
-        and submission.form_definition.version == FICHA_11_VERSION
-    ):
-        return "Matriz de priorización y semáforo"
-    if (
-        submission.form_definition.form_id == FICHA_10_FORM_ID
-        and submission.form_definition.version == FICHA_10_VERSION
-    ):
-        return "Microproyecto priorizado"
-    return "Proyecto y territorio"
 
 
 def _project_submission_history_rows(project):
@@ -628,7 +489,6 @@ def project_submission_detail(request, pk):
         project__isnull=False,
         asset__is_active=True,
     )
-    normalized_payload = submission.normalized_payload or {}
     can_view_sensitive = _can_view_sensitive_kobo_data(request.user)
     evidences = submission.attachments.filter(
         status=KoboAttachment.Status.DOWNLOADED
@@ -655,22 +515,13 @@ def project_submission_detail(request, pk):
         "kobo/project_submission_detail.html",
         {
             "submission": submission,
-            "normalized_payload": normalized_payload,
-            "evidences": evidence_list,
+            "project": submission.project,
+            "presentation": build_imported_submission_detail_context(
+                submission,
+                can_view_sensitive=can_view_sensitive,
+            ),
+            "evidence_items": evidence_list,
             "can_view_sensitive": can_view_sensitive,
-            "project_submission_detail_rows": _project_submission_detail_rows(
-                submission
-            ),
-            "project_submission_detail_title": _project_submission_detail_title(
-                submission
-            ),
-            "sensitive_data": {
-                "parish_delegate": normalized_payload.get("parish_delegate"),
-                "contact_phone": normalized_payload.get("contact_phone"),
-                "main_informant_role": normalized_payload.get("main_informant_role"),
-                "submitted_by": submission.raw_payload.get("_submitted_by"),
-                "device_id": submission.raw_payload.get("deviceid"),
-            },
         },
     )
 
@@ -753,8 +604,8 @@ def project_submission_history_detail(request, project_pk, pk):
             "submission": submission,
             "normalized_payload": submission.normalized_payload or {},
             "attachments": submission.attachments.all(),
-            "project_submission_detail_rows": _project_submission_detail_rows(submission),
-            "project_submission_detail_title": _project_submission_detail_title(submission),
+            "project_submission_detail_rows": project_submission_detail_rows(submission),
+            "project_submission_detail_title": project_submission_detail_title(submission),
             "read_only": True,
             "back_to_history": True,
         },

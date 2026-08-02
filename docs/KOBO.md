@@ -464,6 +464,13 @@ deshabilitadas (`Http404`) donde aún existen. El detalle del proyecto muestra
 datos importados e historial Kobo; las incidencias operativas viven en el hub
 global.
 
+El detalle importado en proyecto usa un contrato de presentación compartido
+(`submission_presentation`): valores y etiquetas en español, geolocalización
+formateada sin representación cruda del payload, IDs técnicos agrupados bajo
+**Registro Kobo**, y datos de contacto/técnicos colapsados solo con
+`kobo.change_kobosubmission`. Ficha 1 es el piloto visual de ese patrón; Fichas
+10 y 11 conservan un fallback compatible hasta KD2.
+
 ### Permisos (histórico / rutas retenidas)
 
 La consulta ordinaria requería:

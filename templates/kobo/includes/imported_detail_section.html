@@ -1,0 +1,13 @@
+{% if fields %}
+<section class="card border-0 ops-detail-card mb-4" aria-labelledby="imported-detail-section-{{ section_id }}">
+    <div class="card-body">
+        <h2 id="imported-detail-section-{{ section_id }}" class="h5 ops-section-title">{{ title }}</h2>
+        <dl class="row mb-0">
+            {% for field in fields %}
+                <dt class="col-sm-4 ops-detail-label">{{ field.label }}</dt>
+                <dd class="col-sm-8 text-break">{{ field.value }}</dd>
+            {% endfor %}
+        </dl>
+    </div>
+</section>
+{% endif %}

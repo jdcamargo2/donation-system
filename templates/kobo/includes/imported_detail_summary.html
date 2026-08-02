@@ -1,0 +1,16 @@
+{% if summary_items %}
+<section class="mb-4" aria-label="Resumen del levantamiento">
+    <div class="row g-3 ops-metric-grid">
+        {% for item in summary_items %}
+            <div class="col-6 col-md-4 col-xl">
+                <div class="card h-100 border-0 ops-metric-card">
+                    <div class="card-body">
+                        <div class="ops-metric-label">{{ item.label }}</div>
+                        <div class="ops-metric-value text-break">{{ item.value }}</div>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
