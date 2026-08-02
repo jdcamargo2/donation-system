@@ -146,9 +146,15 @@ Notas:
 * `verify_postgres_security` debe ejecutarse con el rol runtime previsto;
 * `reconcile_operational_code_sequences` es **detect-only** (solo lectura):
   falla ante secuencias ausentes/atrasadas/inválidas y no repara automáticamente;
-* `./deploy/preflight.sh` es la puerta de readiness **después** de las mutaciones
-  y **antes** de aceptar tráfico; no aplica migraciones ni inicia Gunicorn.
+* `./deploy/preflight.sh` es la puerta de readiness **de release** (estática)
+  **después** de las mutaciones y **antes** de aceptar tráfico; no aplica
+  migraciones ni inicia Gunicorn. No sustituye a las sondas HTTP de runtime:
+  * `preflight` = validación de release/despliegue (`check --deploy`,
+    `makemigrations --check`, `migrate --check`, assets);
+  * `/healthz/` = liveness del proceso Django;
+  * `/readyz/` = readiness runtime (BD por defecto + migraciones aplicadas).
 * Runbook de roles: [Operaciones §3](OPERATIONS.md#3-sincronización-de-roles).
+* Sondas HTTP: [§6.3](#63-sondas-http-healthz-y-readyz).
 
 Variables opcionales de preflight:
 
@@ -314,8 +320,9 @@ credenciales owner de PostgreSQL en el servicio web.
   verificaciones y `./deploy/preflight.sh` **una vez**.
 * Comando **web**: solo Gunicorn (`./deploy/start_web.sh` o el comando canónico).
 * Volumen de media persistente montado **antes** del preflight.
-* La readiness HTTP se formalizará en un checkpoint posterior; el arranque del
-  proceso web debe depender igualmente de un release/preflight exitoso.
+* Tras un release/preflight exitoso, la plataforma debe sondear `/healthz/` y
+  `/readyz/` (ver §6.3). El arranque del proceso web sigue dependiendo del
+  release/preflight; las sondas no reemplazan esa puerta.
 * La plataforma envía `SIGTERM`; Gunicorn aplica apagado elegante.
 * No se añade Dockerfile en este checkpoint (el repositorio no lo exige).
 
@@ -328,6 +335,65 @@ Cliente
 → Django
 → PostgreSQL
 ```
+
+### 6.3. Sondas HTTP (`/healthz/` y `/readyz/`)
+
+Endpoints de aplicación (anónimos, mínimos, no cacheables):
+
+| Sonda | Ruta | Significado | Listo | No listo |
+| ----- | ---- | ----------- | ----- | -------- |
+| Liveness | `GET /healthz/` | el proceso Django puede responder | `200` `{"status":"ok"}` | n/a (si el proceso no responde, la plataforma lo retira) |
+| Readiness | `GET /readyz/` | BD `default` alcanzable **y** sin migraciones pendientes | `200` `{"status":"ready"}` | `503` `{"status":"not_ready"}` |
+
+Contrato:
+
+* Liveness **no** consulta BD, caché, Kobo, APIs externas, media ni migraciones.
+* Readiness **solo** comprueba conectividad de la BD por defecto y el plan de
+  migraciones (vía `MigrationExecutor`; no ejecuta `migrate`).
+* Ninguna sonda depende de Kobo, caché, object storage remoto, datos de negocio
+  ni autenticación.
+* Respuestas sin versión, entorno, host, nombre de BD, migraciones, credenciales
+  ni mensajes de excepción. Cabeceras: `Cache-Control: no-store`, `Pragma:
+  no-cache`, `X-Content-Type-Options: nosniff`, más `X-Request-ID` del middleware.
+* La validación de media persistente permanece en `check --deploy` / preflight;
+  `/readyz/` **no** escribe en el volumen de media en cada sonda.
+
+Semántica durante el despliegue:
+
+| Situación | `/healthz/` | `/readyz/` |
+| --------- | ----------- | ---------- |
+| Migraciones aún no aplicadas | puede ser `200` | `503` |
+| BD no disponible | `200` | `503` |
+| Kobo caído o deshabilitado | sin efecto | sin efecto |
+| Caché no disponible | sin efecto | sin efecto |
+| Media no escribible tras el arranque | fuera del alcance de estas sondas | fuera del alcance de estas sondas |
+
+`preflight` ≠ sondas HTTP: el preflight no arranca un servidor web temporal; las
+sondas no sustituyen `migrate --check` ni `check --deploy` en el release.
+
+#### Ejemplos de plataforma (valores orientativos, no universales)
+
+Load balancer / contenedor:
+
+* Liveness path: `/healthz/`
+* Readiness path: `/readyz/`
+* Estados esperados: liveness `200`; readiness `200` (fallo `503`)
+* Temporización sugerida (ajustar al entorno): initial delay según el despliegue;
+  period 10–30 s; timeout 2–5 s; failure threshold 3
+
+systemd / VPS (smoke post-arranque en el host, no exige `curl` dentro del
+contenedor de la app):
+
+```bash
+curl --fail --silent --show-error \
+  http://127.0.0.1:8000/healthz/ >/dev/null
+
+curl --fail --silent --show-error \
+  http://127.0.0.1:8000/readyz/ >/dev/null
+```
+
+Las comprobaciones externas de producción deben usar HTTPS a través del proxy
+inverso cuando corresponda.
 
 ## 7. Usuarios y roles
 

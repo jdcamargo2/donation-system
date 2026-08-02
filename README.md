@@ -42,6 +42,8 @@ debe actualizarse cuando el total cambie de forma estable.
 * PostgreSQL mediante Psycopg 3
 * Gunicorn (WSGI) como servidor de aplicación en producción
 * Logging de runtime a stdout/stderr con correlación `X-Request-ID` (sin SaaS)
+* Sondas de liveness/readiness: `/healthz/` y `/readyz/` (sin auth; ver
+  [Despliegue §6.3](docs/DEPLOYMENT.md#63-sondas-http-healthz-y-readyz))
 * SQLite únicamente para desarrollo local con `DEBUG=True`
 * Django Templates
 * Bootstrap 5

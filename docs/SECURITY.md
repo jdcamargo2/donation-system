@@ -295,6 +295,13 @@ deben cumplirse las siguientes condiciones:
   deben contener secretos, cabeceras sensibles, cookies, cuerpos de petición ni
   payloads Kobo; la retención y el acceso a logs son controlados por la
   plataforma, no por la aplicación.
+* las sondas `/healthz/` y `/readyz/` son intencionalmente anónimas y exponen
+  solo un estado grueso (`ok` / `ready` / `not_ready`); no incluyen versión,
+  entorno, dependencias, BD, host ni migraciones; no son un panel de estado
+  público ni deben indexarse; el proxy puede restringir orígenes de red, pero
+  la aplicación permanece segura aunque sean alcanzables; `X-Request-ID`
+  permite correlación; no sirven para diagnosticar dependencias externas
+  (Kobo, caché, object storage). No hay allowlist de IP dentro de Django.
 
 Según el entorno de despliegue, deben configurarse:
 
@@ -516,7 +523,8 @@ La protección final también depende de:
 * actualización de dependencias;
 * configuración de PostgreSQL;
 * protección del almacenamiento de archivos;
-* monitoreo;
+* monitoreo (incluidas rutas de sonda `/healthz/` y `/readyz/` y alertas ante
+  fallos sostenidos de readiness);
 * gestión segura de cuentas administrativas.
 
 La seguridad de la aplicación no sustituye la seguridad de la infraestructura donde se despliega.

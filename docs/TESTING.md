@@ -594,6 +594,16 @@ Los tests de contrato de runtime viven en `core.tests.test_runtime_startup`
 Gunicorn no es necesario para el resto de la suite unitaria. Detalle operativo:
 [DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn).
 
+### Sondas HTTP (`/healthz/` y `/readyz/`)
+
+Pruebas focalizadas: `core.tests.test_health_endpoints`.
+
+Cubren liveness sin consultas a BD, readiness con BD desechable y grafo real de
+migraciones, fallos simulados (BD / migraciones pendientes), cabeceras
+no-store/`X-Request-ID`, ausencia de cookies de sesión, aislamiento de
+Kobo/caché/media y logging seguro en `sigedon.health`. Contrato operativo:
+[DEPLOYMENT.md §6.3](DEPLOYMENT.md#63-sondas-http-healthz-y-readyz).
+
 ### Logging y correlación (`X-Request-ID`)
 
 Pruebas focalizadas:

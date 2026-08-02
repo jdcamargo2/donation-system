@@ -481,9 +481,24 @@ Durante la operación deben revisarse:
 * espacio disponible;
 * conexiones a PostgreSQL;
 * vencimiento o rotación de credenciales;
-* crecimiento de archivos y logs.
+* crecimiento de archivos y logs;
+* fallos sostenidos de readiness (`/readyz/` → `503`) frente a ventanas
+  esperadas de migración en el release.
+
+### 11.1. Sondas HTTP vs preflight
+
+* `./deploy/preflight.sh` valida el **release** (checks estáticos, migraciones
+  pendientes vía CLI, assets). No arranca el servidor web.
+* `GET /healthz/` — liveness del proceso (sin BD ni dependencias externas).
+* `GET /readyz/` — readiness runtime: BD `default` alcanzable y migraciones
+  aplicadas. No consulta Kobo, caché ni media.
+
+Detalle de contrato, cabeceras y ejemplos de plataforma:
+[DEPLOYMENT.md §6.3](DEPLOYMENT.md#63-sondas-http-healthz-y-readyz).
 
 Los logs no deben contener secretos, tokens ni payloads sensibles completos.
+Los fallos de readiness se registran de forma segura en `sigedon.health` (sin
+detalles internos en la respuesta HTTP).
 
 ## 12. Errores comunes
 
@@ -654,14 +669,15 @@ Después de desplegar:
 
 1. ejecutar migraciones;
 2. sincronizar roles;
-3. ejecutar `python manage.py check`;
-4. verificar acceso al panel interno;
-5. verificar acceso al portal público;
-6. comprobar descargas protegidas;
-7. confirmar conexión con PostgreSQL;
-8. revisar logs;
-9. verificar webhook y procesamiento Kobo, cuando esté habilitado;
-10. realizar una comprobación funcional básica sin alterar datos reales.
+3. ejecutar `python manage.py check` y `./deploy/preflight.sh`;
+4. verificar `/healthz/` (`200`) y `/readyz/` (`200`);
+5. verificar acceso al panel interno;
+6. verificar acceso al portal público;
+7. comprobar descargas protegidas;
+8. confirmar conexión con PostgreSQL;
+9. revisar logs;
+10. verificar webhook y procesamiento Kobo, cuando esté habilitado;
+11. realizar una comprobación funcional básica sin alterar datos reales.
 
 El despliegue no debe considerarse completo hasta validar el comportamiento básico del sistema.
 

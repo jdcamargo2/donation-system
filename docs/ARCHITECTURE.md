@@ -51,7 +51,11 @@ Contiene la configuración central del proyecto:
 * logging de runtime a stdout/stderr con middleware de correlación
   `X-Request-ID` (`core.request_ids.RequestIdMiddleware`) y filtros de
   redacción defensiva; distinto de `AuditLog` / `KoboProcessingEvent`
-  (trazabilidad de negocio vs diagnóstico operativo).
+  (trazabilidad de negocio vs diagnóstico operativo);
+* sondas HTTP de runtime en `core.health` (`/healthz/` liveness,
+  `/readyz/` readiness de BD + migraciones); independientes de Kobo, caché,
+  media y autenticación (detalle en
+  [DEPLOYMENT.md §6.3](DEPLOYMENT.md#63-sondas-http-healthz-y-readyz)).
 
 ### 2.2. `apps.operations`
 

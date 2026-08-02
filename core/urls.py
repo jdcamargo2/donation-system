@@ -18,7 +18,11 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 
+from core.health import healthz, readyz
+
 urlpatterns = [
+    path('healthz/', healthz, name='healthz'),
+    path('readyz/', readyz, name='readyz'),
     path('admin/', admin.site.urls),
     path('accounts/', include('django.contrib.auth.urls')),
     path('transparency/', include('apps.public_portal.urls')),
