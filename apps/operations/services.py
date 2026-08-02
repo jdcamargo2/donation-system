@@ -5,8 +5,10 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
+from django.db.models.functions import Coalesce
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy as _
 
@@ -16,6 +18,7 @@ from .models import (
     AuditLog,
     Donation,
     Expense,
+    ExpenseRequest,
     FundAllocation,
     Project,
     ProjectMilestone,
@@ -35,6 +38,12 @@ from .project_update_responsibles import (
     validate_project_update_reporter,
 )
 from .public_portal_cache import invalidate_public_portal_cache
+from .selectors import (
+    decidable_pending_expense_requests_for_user,
+    fulfillable_expense_requests_for_user,
+    tracking_expense_requests_for_user,
+    user_has_ownership_scoped_expense_requests,
+)
 
 
 class ExpenseFinalizedError(ValidationError):
@@ -1442,10 +1451,241 @@ def _dashboard_visual_width(visual_percentage: Decimal) -> str:
     return format(visual_percentage, 'f')
 
 
+DASHBOARD_EXPENSE_REQUEST_QUEUE_PREVIEW_LIMIT = 5
+_DASHBOARD_DATE_DISPLAY = 'j N Y'
+
+
+def _dashboard_expense_request_list_url(*, status=None) -> str:
+    """
+    PRE: optional status is a canonical ExpenseRequest.Status value.
+    POST: returns the list path, with a safe status query when provided.
+    """
+    url = reverse('expense_request_list')
+    if status:
+        return f'{url}?status={status}'
+    return url
+
+
+def _dashboard_expense_request_project_label(expense_request) -> str:
+    project = expense_request.fund_allocation.project
+    return f'{project.code} · {project.name}'
+
+
+def _dashboard_expense_request_date_label(*, expense_request, queue_key: str) -> str:
+    """
+    PRE: expense_request is persisted; queue_key selects the relevant date narrative.
+    POST: returns a human date label without exposing raw status codes.
+    """
+    if queue_key == 'fulfillment':
+        moment = expense_request.reserved_at or expense_request.decided_at
+        if moment is not None:
+            return f'Aprobada el {date_format(timezone.localtime(moment), _DASHBOARD_DATE_DISPLAY)}'
+    if queue_key == 'decision':
+        return f'Solicitada el {date_format(expense_request.requested_date, _DASHBOARD_DATE_DISPLAY)}'
+    if expense_request.updated_at is not None:
+        return (
+            f'Actualizada el '
+            f'{date_format(timezone.localtime(expense_request.updated_at), _DASHBOARD_DATE_DISPLAY)}'
+        )
+    return f'Solicitada el {date_format(expense_request.requested_date, _DASHBOARD_DATE_DISPLAY)}'
+
+
+def _dashboard_expense_request_row_action(*, user, expense_request, queue_key: str) -> dict:
+    """
+    PRE: expense_request is in an authorized queue for user; permissions are effective.
+    POST: returns one action label/url/style the user can execute for that row.
+    """
+    detail_url = reverse('expense_request_detail', args=[expense_request.pk])
+    if queue_key == 'fulfillment' and user.has_perm('operations.fulfill_expenserequest'):
+        return {
+            'action_label': 'Registrar gasto',
+            'action_url': reverse('expense_request_fulfill', args=[expense_request.pk]),
+            'action_style': 'primary',
+        }
+    if queue_key == 'decision' and user.has_perm('operations.decide_expenserequest'):
+        return {
+            'action_label': 'Revisar solicitud',
+            'action_url': detail_url,
+            'action_style': 'primary',
+        }
+    return {
+        'action_label': 'Ver solicitud',
+        'action_url': detail_url,
+        'action_style': 'outline',
+    }
+
+
+def _serialize_dashboard_expense_request_row(*, user, expense_request, queue_key: str) -> dict:
+    """
+    PRE: expense_request has fund_allocation__project select_related for display.
+    POST: returns a presentation dict with Decimal amount and one correct action.
+    """
+    action = _dashboard_expense_request_row_action(
+        user=user,
+        expense_request=expense_request,
+        queue_key=queue_key,
+    )
+    return {
+        'code': expense_request.code,
+        'title': expense_request.purpose,
+        'project_label': _dashboard_expense_request_project_label(expense_request),
+        'amount': expense_request.requested_amount,
+        'currency': expense_request.currency,
+        'status_label': expense_request.get_status_display(),
+        'date_label': _dashboard_expense_request_date_label(
+            expense_request=expense_request,
+            queue_key=queue_key,
+        ),
+        'action_label': action['action_label'],
+        'action_url': action['action_url'],
+        'action_style': action['action_style'],
+    }
+
+
+def _bounded_dashboard_expense_request_queue(
+    *,
+    user,
+    key: str,
+    title: str,
+    description: str,
+    empty_message: str,
+    queryset,
+    order_by,
+    list_url: str,
+):
+    """
+    PRE: queryset is already authorization-scoped; order_by is a stable tuple.
+    POST: returns one queue dict with bounded items and matching total_count.
+    """
+    scoped = queryset.select_related(
+        'fund_allocation',
+        'fund_allocation__project',
+    ).order_by(*order_by)
+    preview = list(scoped[:DASHBOARD_EXPENSE_REQUEST_QUEUE_PREVIEW_LIMIT])
+    if len(preview) < DASHBOARD_EXPENSE_REQUEST_QUEUE_PREVIEW_LIMIT:
+        total_count = len(preview)
+    else:
+        total_count = scoped.count()
+    return {
+        'key': key,
+        'title': title,
+        'description': description,
+        'items': [
+            _serialize_dashboard_expense_request_row(
+                user=user,
+                expense_request=row,
+                queue_key=key,
+            )
+            for row in preview
+        ],
+        'total_count': total_count,
+        'displayed_count': len(preview),
+        'list_url': list_url,
+        'empty_message': empty_message,
+        'show_view_all': bool(list_url) and total_count > len(preview),
+    }
+
+
+def get_dashboard_expense_request_queues(*, user) -> list:
+    """
+    PRE: user is an authenticated Django user (may lack Expense Request permissions).
+    POST: returns zero or more permission-scoped queues in stable order:
+          fulfillment → decision → personal/tracking.
+
+    Uses authoritative selectors only. Superuser/admin with both fulfill and decide
+    receives both actionable queues. Personal/tracking appears only when neither
+    actionable queue is authorized. Counts never exceed the user's accessible scope.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return []
+
+    queues = []
+    can_fulfill = user.has_perm('operations.fulfill_expenserequest')
+    can_decide = user.has_perm('operations.decide_expenserequest')
+
+    if can_fulfill:
+        queues.append(
+            _bounded_dashboard_expense_request_queue(
+                user=user,
+                key='fulfillment',
+                title='Aprobadas pendientes de registrar gasto',
+                description=(
+                    'Solicitudes aprobadas con reserva activa que aún no tienen gasto.'
+                ),
+                empty_message=(
+                    'No hay solicitudes aprobadas pendientes de registrar gasto.'
+                ),
+                queryset=fulfillable_expense_requests_for_user(user),
+                order_by=(
+                    Coalesce('reserved_at', 'decided_at', 'updated_at', 'created_at'),
+                    'updated_at',
+                    'created_at',
+                    'pk',
+                ),
+                list_url=_dashboard_expense_request_list_url(
+                    status=ExpenseRequest.Status.APPROVED_RESERVED,
+                ),
+            )
+        )
+
+    if can_decide:
+        queues.append(
+            _bounded_dashboard_expense_request_queue(
+                user=user,
+                key='decision',
+                title='Solicitudes pendientes de decisión',
+                description='Solicitudes que esperan aprobación o denegación del comité.',
+                empty_message='No hay solicitudes pendientes de decisión.',
+                queryset=decidable_pending_expense_requests_for_user(user),
+                order_by=('requested_date', 'created_at', 'pk'),
+                list_url=_dashboard_expense_request_list_url(
+                    status=ExpenseRequest.Status.PENDING_DECISION,
+                ),
+            )
+        )
+
+    # Personal/read-only only when the user cannot open actionable queues.
+    if not can_fulfill and not can_decide and user.has_perm('operations.view_expenserequest'):
+        if user_has_ownership_scoped_expense_requests(user):
+            queues.append(
+                _bounded_dashboard_expense_request_queue(
+                    user=user,
+                    key='personal',
+                    title='Mis solicitudes activas',
+                    description='Tus solicitudes de gasto que requieren seguimiento.',
+                    empty_message='No tienes solicitudes de gasto activas.',
+                    queryset=tracking_expense_requests_for_user(user),
+                    order_by=('-updated_at', '-pk'),
+                    list_url=_dashboard_expense_request_list_url(),
+                )
+            )
+        else:
+            queues.append(
+                _bounded_dashboard_expense_request_queue(
+                    user=user,
+                    key='tracking',
+                    title='Solicitudes de gasto en seguimiento',
+                    description=(
+                        'Solicitudes pendientes o aprobadas visibles para consulta.'
+                    ),
+                    empty_message=(
+                        'No hay solicitudes de gasto que requieran tu atención '
+                        'en este momento.'
+                    ),
+                    queryset=tracking_expense_requests_for_user(user),
+                    order_by=('-updated_at', '-pk'),
+                    list_url=_dashboard_expense_request_list_url(),
+                )
+            )
+
+    return queues
+
+
 def get_dashboard_metrics(*, user) -> dict:
     """
     PRE: user es un usuario autenticado de Django.
-    POST: retorna KPIs/ratios financieros y actividad reciente autorizados por permisos.
+    POST: retorna KPIs/ratios financieros, colas de solicitudes autorizadas y
+          actividad reciente filtrados por permisos.
     """
     can_view_donations = user.has_perm('operations.view_donation')
     can_view_allocations = user.has_perm('operations.view_fundallocation')
@@ -1457,6 +1697,27 @@ def get_dashboard_metrics(*, user) -> dict:
     total_assigned = None
     total_spent = None
     unallocated = None
+
+    expense_request_queues = get_dashboard_expense_request_queues(user=user)
+    expense_request_queues_have_items = any(
+        queue['total_count'] > 0 for queue in expense_request_queues
+    )
+    if any(queue['key'] in {'fulfillment', 'decision'} for queue in expense_request_queues):
+        expense_request_section_title = 'Solicitudes que requieren atención'
+        expense_request_empty_message = (
+            'No hay solicitudes de gasto que requieran tu atención en este momento.'
+        )
+    elif expense_request_queues and expense_request_queues[0]['key'] == 'personal':
+        expense_request_section_title = 'Mis solicitudes activas'
+        expense_request_empty_message = 'No tienes solicitudes de gasto activas.'
+    elif expense_request_queues:
+        expense_request_section_title = 'Solicitudes de gasto en seguimiento'
+        expense_request_empty_message = (
+            'No hay solicitudes de gasto que requieran tu atención en este momento.'
+        )
+    else:
+        expense_request_section_title = ''
+        expense_request_empty_message = ''
 
     context = {
         'can_view_donations': can_view_donations,
@@ -1470,6 +1731,10 @@ def get_dashboard_metrics(*, user) -> dict:
         'available_balance': None,
         'financial_kpis': [],
         'financial_ratios': [],
+        'expense_request_queues': expense_request_queues,
+        'expense_request_queues_have_items': expense_request_queues_have_items,
+        'expense_request_section_title': expense_request_section_title,
+        'expense_request_empty_message': expense_request_empty_message,
         'recent_donations': Donation.objects.none(),
         'recent_expenses': Expense.objects.none(),
         'recent_audit_logs': AuditLog.objects.none(),

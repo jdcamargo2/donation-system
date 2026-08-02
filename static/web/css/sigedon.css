@@ -459,6 +459,21 @@ body.sidebar-collapsed .sigedon-collapse-button i {
     font-weight: 700;
 }
 
+.ops-expense-request-queue-list {
+    margin: 0;
+}
+
+.ops-expense-request-queue-row .ops-row-actions {
+    flex-shrink: 0;
+}
+
+@media (max-width: 767.98px) {
+    .ops-expense-request-queue-row .ops-row-actions,
+    .ops-expense-request-queue-row .ops-row-actions .btn {
+        width: 100%;
+    }
+}
+
 .list-group {
     border-radius: 1rem;
     box-shadow: var(--ops-shadow-soft);

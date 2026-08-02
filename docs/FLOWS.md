@@ -366,6 +366,15 @@ rechazo.
   * Comité (`decide_expenserequest`): pendientes de decisión;
   * Auditor: sin bloque de accesos rápidos (sigue el sidebar);
   * sin contadores agregados nuevos ni CTAs de creación directa de `Expense`.
+* DASH-FIN2 añade colas de solicitudes en el panel financiero (entre ratios y
+  actividad reciente), siempre con el mismo alcance de los selectores
+  autorizados:
+  * `fulfill_expenserequest` → aprobadas pendientes de registrar gasto;
+  * `decide_expenserequest` → pendientes de decisión;
+  * superusuario → ambas colas accionables;
+  * Operador → solo solicitudes propias activas;
+  * Auditor con `view_expenserequest` → seguimiento de solo lectura;
+  * los conteos no revelan solicitudes fuera del queryset accesible.
 
 ---
 

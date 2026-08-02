@@ -208,6 +208,9 @@ class OperationServiceTests(TestCase):
         self.assertIn('recent_donations', metrics)
         self.assertIn('recent_expenses', metrics)
         self.assertIn('recent_audit_logs', metrics)
+        self.assertIn('expense_request_queues', metrics)
+        self.assertEqual(metrics['expense_request_queues'], [])
+        self.assertFalse(metrics['expense_request_queues_have_items'])
 
     def test_get_dashboard_metrics_hides_data_without_permissions(self):
         user = get_user_model().objects.create_user(
@@ -223,6 +226,8 @@ class OperationServiceTests(TestCase):
         self.assertIsNone(metrics['available_balance'])
         self.assertEqual(metrics['financial_kpis'], [])
         self.assertEqual(metrics['financial_ratios'], [])
+        self.assertEqual(metrics['expense_request_queues'], [])
+        self.assertFalse(metrics['expense_request_queues_have_items'])
         self.assertFalse(metrics['recent_donations'].exists())
         self.assertFalse(metrics['recent_expenses'].exists())
         self.assertFalse(metrics['recent_audit_logs'].exists())

@@ -615,8 +615,33 @@ view_fundallocation + view_expense
 Las reservas de solicitudes de gasto no intervienen en los cuatro KPI ni en
 las dos ratios del panel global (DASH-FIN1).
 
-Atajos de solicitudes de gasto (ER7) viven en el sidebar y en los listados,
-no en el dashboard:
+### Colas de solicitudes de gasto (DASH-FIN2)
+
+El panel muestra colas de acción/seguimiento **solo** con el alcance autorizado
+del usuario. Los contadores nunca superan el queryset accesible.
+
+```text
+fulfill_expenserequest
+→ cola «Aprobadas pendientes de registrar gasto»
+→ acción: Registrar gasto (expense_request_fulfill)
+→ Ver todas: ?status=approved_reserved
+
+decide_expenserequest
+→ cola «Solicitudes pendientes de decisión»
+→ acción: Revisar solicitud (detalle)
+→ Ver todas: ?status=pending_decision
+
+view_expenserequest sin fulfill ni decide
+→ Operador (ownership): «Mis solicitudes activas» · Ver solicitud
+→ Auditor/lectura global: «Solicitudes de gasto en seguimiento» · Ver solicitud
+```
+
+El superusuario ve ambas colas accionables cuando aplican. La sección se omite
+si el usuario carece de visibilidad de solicitudes. Con colas autorizadas vacías
+se muestra un estado positivo consolidado (sin tarjetas vacías repetidas).
+
+Atajos de navegación de solicitudes (ER7) viven en el sidebar y en los listados;
+el dashboard no restaura Accesos rápidos:
 
 ```text
 fulfill_expenserequest

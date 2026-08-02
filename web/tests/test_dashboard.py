@@ -90,6 +90,8 @@ class DashboardTests(TestCase):
         self.assertIsNone(response.context['available_balance'])
         self.assertEqual(response.context['financial_kpis'], [])
         self.assertEqual(response.context['financial_ratios'], [])
+        self.assertEqual(response.context['expense_request_queues'], [])
+        self.assertFalse(response.context['expense_request_queues_have_items'])
         self.assertNotIn('show_financial_quick_actions', response.context)
 
     def test_sidebar_links_do_not_trigger_sidebar_toggle(self):
@@ -147,6 +149,7 @@ class DashboardTests(TestCase):
         self.assertContains(response, '150,00 USD')
         self.assertContains(response, 'Actividad reciente')
         self.assertLess(html.find('Fondos recibidos'), html.find('Actividad reciente'))
+        self.assertNotContains(response, 'Solicitudes que requieren atención')
         self.assertNotContains(response, 'Accesos rápidos')
         self.assertNotContains(response, 'ops-action-panel')
         self.assertEqual(html.count('<h1'), 1)

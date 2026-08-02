@@ -476,3 +476,27 @@ def fulfillable_expense_requests_for_user(user):
         status=ExpenseRequest.Status.APPROVED_RESERVED,
         expense__isnull=True,
     )
+
+
+# Active statuses for personal/read-only dashboard tracking (awareness, not mutation).
+DASHBOARD_TRACKING_EXPENSE_REQUEST_STATUSES = (
+    ExpenseRequest.Status.PENDING_DECISION,
+    ExpenseRequest.Status.APPROVED_RESERVED,
+)
+
+
+def tracking_expense_requests_for_user(user):
+    """
+    PRE: caller gates on view_expenserequest and only when no actionable queue applies.
+    POST: returns visible pending/approved requests in the user's authoritative scope.
+
+    Ownership-scoped users see only their own rows via visible_expense_requests_for_user.
+    Does not check role names. Empty for anonymous or users without view permission.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return ExpenseRequest.objects.none()
+    if not user.has_perm('operations.view_expenserequest'):
+        return ExpenseRequest.objects.none()
+    return visible_expense_requests_for_user(user).filter(
+        status__in=DASHBOARD_TRACKING_EXPENSE_REQUEST_STATUSES,
+    )

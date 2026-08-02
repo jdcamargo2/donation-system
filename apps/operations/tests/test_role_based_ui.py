@@ -129,10 +129,16 @@ class RoleBasedUITests(TestCase):
         self.assertNotContains(response, 'Crear asignación')
         self.assertNotContains(response, 'Ver solicitudes de gasto')
         self.assertNotContains(response, 'Mis solicitudes de gasto')
-        self.assertNotContains(response, 'Solicitudes pendientes de decisión')
+        # Actionable queue card titles stay hidden when empty; tracking empty state is allowed.
+        self.assertNotContains(response, 'Aprobadas pendientes de registrar gasto')
         self.assertNotContains(
             response,
-            'Aprobadas pendientes de registrar gasto',
+            'Solicitudes pendientes de decisión',
+        )
+        self.assertContains(response, 'Solicitudes de gasto en seguimiento')
+        self.assertContains(
+            response,
+            'No hay solicitudes de gasto que requieran tu atención en este momento.',
         )
 
         self.assertContains(response, 'ops-metric-grid')
@@ -145,6 +151,8 @@ class RoleBasedUITests(TestCase):
         self.assertContains(response, 'ops-financial-progress')
         self.assertContains(response, 'Actividad reciente')
         self.assertContains(response, 'Ingresos')
+        self.assertLess(html.find('Fondos recibidos'), html.find('Solicitudes de gasto en seguimiento'))
+        self.assertLess(html.find('Solicitudes de gasto en seguimiento'), html.find('Actividad reciente'))
         self.assertLess(html.find('Fondos recibidos'), html.find('Actividad reciente'))
 
         self.assertContains(response, 'title="Proyectos"')
@@ -204,6 +212,8 @@ class RoleBasedUITests(TestCase):
         )
         self.assertNotContains(response, 'status=approved_reserved')
         self.assertNotContains(response, reverse('expense_request_create'))
+        self.assertContains(response, 'Mis solicitudes activas')
+        self.assertContains(response, 'No tienes solicitudes de gasto activas.')
         # Sidebar remains the navigation mechanism.
         self.assertContains(response, 'title="Proyectos"')
         self.assertContains(response, reverse('project_list'))
@@ -482,6 +492,11 @@ class RoleBasedUITests(TestCase):
             dashboard_response,
             'Solicitudes pendientes de decisión',
         )
+        self.assertContains(dashboard_response, 'Solicitudes que requieren atención')
+        self.assertContains(
+            dashboard_response,
+            'No hay solicitudes de gasto que requieran tu atención en este momento.',
+        )
         self.assertContains(project_response, reverse('project_create'))
         self.assertNotContains(expense_response, reverse('expense_create'))
         self.assertNotContains(expense_response, 'Nuevo gasto')
@@ -516,6 +531,11 @@ class RoleBasedUITests(TestCase):
             'Aprobadas pendientes de registrar gasto',
         )
         self.assertNotContains(response, 'status=approved_reserved')
+        self.assertContains(response, 'Solicitudes que requieren atención')
+        self.assertContains(
+            response,
+            'No hay solicitudes de gasto que requieran tu atención en este momento.',
+        )
         # Sidebar remains available for request navigation.
         self.assertContains(response, reverse('expense_request_list'))
         self.assertContains(response, 'title="Solicitudes de gasto"')
