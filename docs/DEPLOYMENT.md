@@ -839,3 +839,38 @@ El despliegue se considera completado cuando:
 * los logs no muestran errores críticos;
 * existe un respaldo verificable;
 * las comprobaciones posteriores resultan satisfactorias.
+
+## Integración continua y protección de ramas
+
+El repositorio usa GitHub Actions (`.github/workflows/ci.yml`) como CI canónico.
+No hay workflow de despliegue automático en este checkpoint.
+
+### Runtime CI
+
+* Python 3.12
+* PostgreSQL 16 (service container)
+* Credenciales ficticias (`sigedon_ci`); sin secretos de repositorio
+* `KOBO_ENABLED=False`
+
+### Checks que deben bloquear el merge
+
+Configurar branch protection manualmente (no vía workflow) con:
+
+* `CI / Static and repository checks`
+* `CI / PostgreSQL migration and artifact verification`
+* `CI / Critical PostgreSQL tests`
+* `CI / Full PostgreSQL suite`
+
+### Checks que permanecen fuera de CI (deployment-blocking)
+
+El éxito de CI **no** autoriza producción. Además se requiere, según
+[§5](#5-preparación-del-despliegue) y operación:
+
+* backup aprobado / política de restore-drill;
+* preflight de staging;
+* `verify_postgres_security` con el **rol runtime** restringido;
+* readiness de staging;
+* configuración de plataforma (proxy, volúmenes, secretos).
+
+`collectstatic` + `verify_deployment_assets` sí se ejercitan en CI sobre un
+`STATIC_ROOT` temporal (`core.ci_settings` + `SIGEDON_CI_STATIC_ROOT`).

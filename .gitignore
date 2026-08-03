@@ -46,3 +46,10 @@ sondeo_*.txt
 *.sql
 !deploy/postgresql/
 !deploy/postgresql/*.sql
+
+# Claves y artefactos de backup locales
+*.pem
+*.key
+*.backup
+.sigedon-backup-status.json
+.sigedon-restore-drill-status.json

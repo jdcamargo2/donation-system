@@ -356,6 +356,8 @@ SIGEDON aplica las siguientes medidas:
 * `transaction.atomic()`;
 * `select_for_update()`.
 
+La validación continua del repositorio vive en GitHub Actions (Python 3.12 + PostgreSQL 16): gates estáticos, migración desde cero, artefactos de `collectstatic`, suite crítica y suite completa. El despliegue permanece fuera de CI. Ver [TESTING.md §18](TESTING.md#18-integración-continua-github-actions).
+
 Además:
 
 * las vistas no deben confiar únicamente en elementos ocultos de la interfaz;

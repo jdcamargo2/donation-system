@@ -368,6 +368,8 @@ git diff --check
 
 Cuando se utilicen pruebas dependientes de PostgreSQL, deben ejecutarse contra ese motor y no asumirse como validadas únicamente con SQLite.
 
+La integración continua del repositorio (GitHub Actions) ejecuta gates estáticos, migración desde cero, suite crítica y suite completa contra PostgreSQL 16. No sustituye backups, restore-drills ni `verify_postgres_security` con rol runtime en staging. Ver [TESTING.md §18](TESTING.md#18-integración-continua-github-actions).
+
 ## 7. Gestión de archivos
 
 Directorios locales habituales:

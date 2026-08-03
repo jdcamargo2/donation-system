@@ -5,8 +5,8 @@ Este documento describe el estado de referencia de la suite automatizada, las á
 ## 1. Estado de referencia
 
 ```text
-880 tests
-880 aprobados
+1562 tests
+1562 aprobados
 ```
 
 Este número representa el estado de referencia actual de esta rama.
@@ -680,7 +680,78 @@ Pruebas focalizadas:
 Verifican generación/validación de `X-Request-ID`, configuración `LOGGING`,
 redacción defensiva y logs Kobo seguros (sin payloads/secretos).
 
-## 18. Criterio de aceptación
+## 18. Integración continua (GitHub Actions)
+
+El flujo canónico es [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+
+### Disparadores
+
+* `pull_request`
+* `push` a `main`
+* `workflow_dispatch` (manual)
+
+Las ejecuciones obsoletas del mismo ref se cancelan (`concurrency.cancel-in-progress`).
+
+### Runtime canónico
+
+* Python 3.12
+* PostgreSQL 16 (service container; sin fallback silencioso a SQLite en jobs de integración)
+* `TZ=UTC`
+* `KOBO_ENABLED=False`
+* credenciales ficticias `sigedon_ci` (sin secretos de repositorio)
+
+Matrices de compatibilidad adicionales pueden añadirse deliberadamente más adelante.
+
+### Jobs (merge-blocking)
+
+| Check name | Propósito |
+| --- | --- |
+| CI / Static and repository checks | higiene, `pip check`, `manage.py check`, `makemigrations --check`, `bash -n` |
+| CI / PostgreSQL migration and artifact verification | migrate from zero, `check --deploy`, `collectstatic` + `verify_deployment_assets` |
+| CI / Critical PostgreSQL tests | suite focalizada de integridad/despliegue |
+| CI / Full PostgreSQL suite | `python manage.py test --noinput` |
+
+CI **no** despliega, **no** ejecuta backup/restore reales, **no** corre `seed_sigedon_demo` y **no** llama a Kobo remoto.
+
+`verify_postgres_security` con éxito de rol runtime permanece como **gate de staging**: el rol propietario de CI no es una verificación runtime válida. Los tests de catálogo/triggers sí corren en CI.
+
+### Suite crítica (comando canónico)
+
+```bash
+export DATABASE_ENGINE=postgresql
+# POSTGRES_* + SIGEDON_MEDIA_ROOT apuntando a una base/media desechables
+./deploy/ci/run_critical_tests.sh
+```
+
+Equivalente documentado: módulos listados en `deploy/ci/run_critical_tests.sh`
+(settings/media, runtime/preflight, logging/request IDs, health, estáticos,
+PostgreSQL security tests, triggers append-only, constraints, ER lifecycle,
+roles/permisos, backup automation mockeado, comandos Kobo seguros, archivos
+protegidos, contrato CI/higiene).
+
+### Suite completa
+
+```bash
+python manage.py test --noinput
+```
+
+Requiere PostgreSQL. No usar SQLite para validar concurrencia ni triggers.
+
+### Reproducción local de gates estáticos
+
+```bash
+./deploy/ci/run_static_checks.sh
+```
+
+### Gates de migración/artefactos (PostgreSQL)
+
+```bash
+export DATABASE_ENGINE=postgresql
+# POSTGRES_* ficticios hacia una instancia local desechable
+./deploy/ci/run_migration_gates.sh
+```
+
+## 19. Criterio de aceptación
 
 Un cambio se considera listo cuando:
 

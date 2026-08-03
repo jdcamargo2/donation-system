@@ -573,3 +573,22 @@ La seguridad de la aplicación no sustituye la seguridad de la infraestructura d
 Las rutas mutables del Hub exigen autenticación, permiso en servidor, CSRF y
 POST. Las vistas muestran datos territoriales resumidos; no exponen payloads,
 tokens, teléfonos o coordenadas por defecto.
+
+## Integración continua
+
+El workflow `.github/workflows/ci.yml` opera con:
+
+* `permissions.contents: read` (sin write, sin `pull_request_target`);
+* cancelación de runs obsoletos;
+* credenciales PostgreSQL ficticias de job (sin `secrets.*`);
+* `KOBO_ENABLED=False` y sin tokens/webhook;
+* sin despliegue, sin backup/restore productivos, sin `seed_sigedon_demo`.
+
+La higiene del repositorio (`deploy/ci/check_repository_hygiene.sh`) rechaza
+artefactos rastreados prohibidos (`.env`, dumps, media runtime, staticfiles
+recolectados, claves, markers de backup). No es un escáner de secretos de alta
+entropía.
+
+`verify_postgres_security` con rol runtime sigue siendo un requisito de
+staging/producción; CI no debilita ese comando ni trata el rechazo de rol
+propietario como éxito.
