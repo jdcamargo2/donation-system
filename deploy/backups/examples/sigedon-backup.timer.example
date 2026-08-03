@@ -1,0 +1,12 @@
+[Unit]
+Description=SIGEDON scheduled backup timer
+Documentation=file:///path/to/sigedon/deploy/backups/README.md
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+Unit=sigedon-backup.service
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

@@ -12,65 +12,8 @@ umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-
-log() {
-  printf '%s\n' "$*" >&2
-}
-
-die() {
-  local code="${1:-1}"
-  shift || true
-  log "ERROR: $*"
-  exit "${code}"
-}
-
-require_var() {
-  local name="$1"
-  if [[ -z "${!name:-}" ]]; then
-    die 2 "variable requerida ausente: ${name}"
-  fi
-}
-
-require_cmd() {
-  local cmd="$1"
-  command -v "${cmd}" >/dev/null 2>&1 || die 3 "herramienta requerida no encontrada: ${cmd}"
-}
-
-resolve_abs() {
-  local path="$1"
-  if [[ -d "${path}" ]]; then
-    (cd "${path}" && pwd)
-    return
-  fi
-  if [[ -e "${path}" ]]; then
-    local parent base
-    parent="$(cd "$(dirname "${path}")" && pwd)"
-    base="$(basename "${path}")"
-    printf '%s/%s\n' "${parent}" "${base}"
-    return
-  fi
-  die 3 "ruta inexistente: ${path}"
-}
-
-ensure_backup_root() {
-  # PRE: path es la ruta solicitada para SIGEDON_BACKUP_ROOT (puede no existir).
-  # POST: el directorio existe con permisos restrictivos (0700), es escribible
-  #       y se imprime su ruta absoluta; falla si path existe y no es directorio
-  #       o no es escribible. No toca SIGEDON_MEDIA_ROOT.
-  local path="$1"
-  if [[ -e "${path}" && ! -d "${path}" ]]; then
-    die 3 "SIGEDON_BACKUP_ROOT existe y no es un directorio: ${path}"
-  fi
-  if [[ ! -d "${path}" ]]; then
-    mkdir -m 700 -p -- "${path}" || die 3 "no se pudo crear SIGEDON_BACKUP_ROOT: ${path}"
-    chmod 700 -- "${path}" || die 3 "no se pudieron fijar permisos 0700 en SIGEDON_BACKUP_ROOT"
-  fi
-  local resolved
-  resolved="$(resolve_abs "${path}")"
-  [[ -d "${resolved}" ]] || die 3 "SIGEDON_BACKUP_ROOT no es un directorio: ${resolved}"
-  [[ -w "${resolved}" ]] || die 3 "SIGEDON_BACKUP_ROOT no es escribible: ${resolved}"
-  printf '%s\n' "${resolved}"
-}
+# shellcheck source=lib/common.sh
+source "${SCRIPT_DIR}/lib/common.sh"
 
 sha256_file() {
   local file="$1"
@@ -120,6 +63,11 @@ require_cmd python3
 require_cmd mktemp
 
 BACKUP_ROOT="$(ensure_backup_root "${SIGEDON_BACKUP_ROOT}")"
+
+# One global deployment lock (.sigedon-ops.lock on FD 9). When invoked under
+# run_scheduled_backup.sh, FD 9 is inherited and reaffirmed; forging an env
+# var without that FD does not skip acquisition.
+acquire_backup_lock "${BACKUP_ROOT}" || exit $?
 
 # Reject relative / blank / filesystem-root media paths before resolve_abs.
 case "${SIGEDON_MEDIA_ROOT}" in

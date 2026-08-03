@@ -1,7 +1,9 @@
-# Backup y restauración manual de SIGEDON
+# Backup, restauración y automatización operativa de SIGEDON
 
-Primera versión **manual**, segura y verificable. No incluye cron, systemd,
-almacenamiento cloud ni cifrado en los scripts.
+Capa manual verificable **más** automatización operativa (lock, retención,
+markers, hook de alerta, drill aislado y ejemplos de scheduler). El formato del
+archivo de backup no cambia. La entrega de alertas y el scheduling siguen siendo
+**propiedad de la plataforma**; el repositorio aporta contratos y ejemplos.
 
 ## Artefacto
 
@@ -10,16 +12,27 @@ almacenamiento cloud ni cifrado en los scripts.
     database.dump      # pg_dump --format=custom
     media.tar.gz       # copia de MEDIA_ROOT
     manifest.json      # metadatos + checksums
+    .sigedon-verified  # opcional; escrito tras verify en el pipeline programado
 ```
 
 `media.tar.gz` contiene archivos regulares bajo `MEDIA_ROOT` (rutas relativas).
 Se omiten `staticfiles` y enlaces simbólicos (incluidos externos).
 
+### Distinguir incompletos vs verificados
+
+| Estado | Identificación |
+|---|---|
+| Incompleto / staging | directorios `.sigedon-backup.*` (temp); se eliminan en fallo |
+| Publicado no confiable | `<backup_id>/` que **falla** `verify_backup.sh` |
+| Verificado | pasa `verify_backup.sh` (y puede tener `.sigedon-verified`) |
+
+La retención **solo** puede borrar sets verificados bajo `SIGEDON_BACKUP_ROOT`.
+
 ## Consistencia
 
 Estrategia: **ventana de mantenimiento obligatoria**.
 
-Antes de `backup_sigedon.sh` debe detenerse:
+Antes de `backup_sigedon.sh` / `run_scheduled_backup.sh` debe detenerse:
 
 - procesos web;
 - workers;
@@ -27,50 +40,138 @@ Antes de `backup_sigedon.sh` debe detenerse:
 - uploads / tráfico de escritura.
 
 El script exige `SIGEDON_MAINTENANCE_CONFIRMED=YES` y no puede comprobar por sí
-solo que esos procesos estén detenidos.
+solo que esos procesos estén detenidos. El scheduler de plataforma debe
+exportar esa variable **solo** tras quietar escritores.
+
+## Scripts
+
+| Script | Rol |
+|---|---|
+| `backup_sigedon.sh` | Publica un set PostgreSQL + media (lock exclusivo) |
+| `verify_backup.sh` | Verificación de solo lectura |
+| `restore_sigedon.sh` | Restore aislado (nunca producción) |
+| `run_scheduled_backup.sh` | Pipeline: lock → backup → verify → retención → marker/alerta |
+| `apply_retention.sh` | Borra solo sets verificados fuera de política |
+| `run_restore_drill.sh` | Drill de restore aislado + marker; Django opcional |
+| `lib/common.sh` | Helpers compartidos (no ejecutar directamente) |
+| `examples/` | cron/systemd/env/hook de ejemplo (plataforma) |
 
 ## Variables
 
 | Variable | Uso |
 |---|---|
 | `SIGEDON_BACKUP_ROOT` | Destino de backups (se crea con `0700` si no existe) |
-| `SIGEDON_MEDIA_ROOT` | Raíz de media a respaldar; **debe coincidir** con el `SIGEDON_MEDIA_ROOT` de Django en producción (ruta absoluta a volumen persistente; debe existir; no se crea; se rechazan `/`, rutas relativas y el `media/` del repositorio salvo `SIGEDON_ALLOW_REPO_MEDIA=YES` en pruebas locales intencionales) |
-| `POSTGRES_DB` | Base origen del dump |
-| `POSTGRES_USER` | Usuario del cliente PostgreSQL |
-| `POSTGRES_HOST` | Host |
-| `POSTGRES_PORT` | Puerto |
+| `SIGEDON_MEDIA_ROOT` | Raíz de media a respaldar; **debe coincidir** con Django en producción |
+| `POSTGRES_DB` / `USER` / `HOST` / `PORT` | Cliente PostgreSQL |
 | `PGPASSWORD` | Opcional; preferir `~/.pgpass` |
 | `SIGEDON_MAINTENANCE_CONFIRMED` | Debe ser `YES` para backup |
+| `SIGEDON_BACKUP_KEEP_COUNT` | Conservar los N verificados más recientes |
+| `SIGEDON_BACKUP_KEEP_DAYS` | Conservar verificados con edad ≤ N días |
+| `SIGEDON_BACKUP_ALERT_HOOK` | Ejecutable local opcional (alerta acotada) |
+| `SIGEDON_BACKUP_ALERT_HOOK_TIMEOUT_SECONDS` | Timeout del hook (default 30, máx 120) |
+| `SIGEDON_BACKUP_ALERT_ON_SUCCESS` | `YES` para invocar hook también en éxito |
 | `SIGEDON_RESTORE_DB` | Base destino aislada (obligatoria) |
 | `SIGEDON_RESTORE_MEDIA_ROOT` | Destino nuevo/vacío de media |
 | `SIGEDON_RESTORE_CONFIRM` | Debe ser `YES` para recreate |
 | `SIGEDON_RESTORE_ALLOWED_PREFIXES` | Por defecto `test_restore_\|staging_restore_` |
+| `SIGEDON_RESTORE_DRILL_ENABLED` | Debe ser `YES` para `run_restore_drill.sh` |
+| `SIGEDON_RESTORE_DRILL_RUN_DJANGO` | `YES` ejecuta la cadena Django post-restore |
 
 Los scripts **no leen ni modifican** `.env`. No hay valores productivos por
 defecto.
 
-Autenticación preferida: archivo `~/.pgpass` (permisos `0600`). `PGPASSWORD`
-es aceptable en sesión interactiva controlada; nunca se imprime.
+## Lock exclusivo
+
+Un solo backup/retención a la vez por despliegue:
+
+```text
+<SIGEDON_BACKUP_ROOT>/.sigedon-ops.lock
+```
+
+**Modelo:** un lock global en FD 9, adquirido por el punto de entrada
+(`run_scheduled_backup.sh`, `backup_sigedon.sh` o `apply_retention.sh`). El
+runner lo mantiene durante todo el pipeline (backup → verify → retención).
+
+**Hijos del pipeline:** heredan el FD 9 abierto. `acquire_backup_lock` comprueba
+que `/proc/self/fd/9` apunta al lock file y reafirma `flock -n` sobre ese mismo
+open-file description. No reabre el archivo (un `exec 9>` nuevo fallaría con
+código 8 aunque el padre ya tenga el lock). No existe un atajo de operador por
+variable de entorno: sin FD 9 heredado, la adquisición es obligatoria.
+
+`flock -n` → código 8 si otro job tiene el lock. No envolver el runner con un
+`flock` externo sobre el mismo archivo (doble adquisición).
+
+## Markers de estado (monitoring)
+
+```text
+<SIGEDON_BACKUP_ROOT>/.sigedon-backup-status.json
+<SIGEDON_BACKUP_ROOT>/.sigedon-restore-drill-status.json
+```
+
+Campos: `job`, `status` (`success`|`failure`), `exit_code`, `phase`,
+`backup_id`, `message` acotado, `finished_at_utc`. Sin secretos, sin rutas
+productivas, sin contenido de dumps.
+
+Un backup fallido **nunca** escribe `status=success`.
+
+## Retención
+
+```bash
+export SIGEDON_BACKUP_KEEP_COUNT=7
+export SIGEDON_BACKUP_KEEP_DAYS=30
+./deploy/backups/apply_retention.sh
+```
+
+Reglas:
+
+- solo hijos directos de `SIGEDON_BACKUP_ROOT` con `backup_id` válido;
+- solo tras pasar `verify_backup.sh`;
+- no borra symlinks, temps `.sigedon-*`, ni el root;
+- con ambos KEEP_*: se conserva si está en los N más recientes **o** dentro de D días.
+
+## Hook de alerta
+
+Opcional. La plataforma implementa la entrega. Contrato:
+
+```text
+argv: <job> <status> <exit_code> <phase> <backup_id>
+env:  SIGEDON_ALERT_*
+```
+
+Ejemplo: `examples/sigedon-backup-alert.hook.example`. Timeout acotado; fallo del
+hook no enmascara el exit code del job.
 
 ## Uso
 
-### Backup
+### Backup manual
 
 ```bash
 export SIGEDON_MAINTENANCE_CONFIRMED=YES
 export SIGEDON_BACKUP_ROOT=/ruta/fuera/del/repo/backups
-# Si no existe, el script lo crea con permisos 0700 (no hace falta mkdir -p).
 export SIGEDON_MEDIA_ROOT=/ruta/absoluta/media
-# Debe ser el mismo volumen persistente configurado en Django
-# (SIGEDON_MEDIA_ROOT). Debe existir; el script no lo crea.
-# No use <repo>/media en producción.
 export POSTGRES_DB=...
-export POSTGRES_USER=sigedon_owner   # o rol con privilegio de dump
+export POSTGRES_USER=sigedon_owner
 export POSTGRES_HOST=...
 export POSTGRES_PORT=5432
-# Preferir ~/.pgpass en lugar de PGPASSWORD
 
 ./deploy/backups/backup_sigedon.sh
+```
+
+### Pipeline programado
+
+```bash
+export SIGEDON_MAINTENANCE_CONFIRMED=YES   # solo tras quietar escritores
+export SIGEDON_BACKUP_ROOT=...
+export SIGEDON_MEDIA_ROOT=...
+export SIGEDON_BACKUP_KEEP_COUNT=7
+export SIGEDON_BACKUP_KEEP_DAYS=30
+# export SIGEDON_BACKUP_ALERT_HOOK=/ruta/hook
+export POSTGRES_DB=...
+export POSTGRES_USER=...
+export POSTGRES_HOST=...
+export POSTGRES_PORT=5432
+
+./deploy/backups/run_scheduled_backup.sh
 ```
 
 ### Verificación
@@ -79,9 +180,10 @@ export POSTGRES_PORT=5432
 ./deploy/backups/verify_backup.sh /ruta/al/<backup_id>
 ```
 
-### Restore aislado
+### Restore aislado / drill
 
 ```bash
+export SIGEDON_RESTORE_DRILL_ENABLED=YES
 export SIGEDON_RESTORE_DB=test_restore_sigedon_20260714
 export SIGEDON_RESTORE_MEDIA_ROOT=/tmp/sigedon_restore_media
 export SIGEDON_RESTORE_CONFIRM=YES
@@ -90,20 +192,16 @@ export POSTGRES_USER=...
 export POSTGRES_HOST=...
 export POSTGRES_PORT=5432
 
-./deploy/backups/restore_sigedon.sh /ruta/al/<backup_id>
+./deploy/backups/run_restore_drill.sh
+# o: ./deploy/backups/restore_sigedon.sh /ruta/al/<backup_id>
 ```
 
-Rechazos de seguridad:
-
-- `SIGEDON_RESTORE_DB` vacío o igual a `POSTGRES_DB`;
-- nombre sin prefijo seguro;
-- media destino no vacío;
-- falta de confirmación explícita.
+**Prohibido:** automatizar restore sobre la base de producción. Los timers de
+ejemplo llaman solo a `run_restore_drill.sh` con prefijos aislados.
 
 ### Post-restore
 
-Con el entorno apuntando a la base y media restauradas bajo el **rol runtime**
-(sin tocar `.env` de producción):
+Con el entorno apuntando a la base y media restauradas bajo el **rol runtime**:
 
 ```bash
 export POSTGRES_DB=<SIGEDON_RESTORE_DB>
@@ -115,47 +213,42 @@ python manage.py reconcile_operational_code_sequences
 python manage.py verify_restored_data
 ```
 
-Fallar la aceptación si `verify_postgres_security` no sale 0 (exige PostgreSQL;
-cubre append-only de AuditLog/ExpenseRequestEvent, constraints críticos y
-postura runtime; no repara). Restaurar filas no basta si faltan triggers o grants.
+## Scheduling (ejemplos de plataforma)
 
-Secuencia esperada de restore:
+Ver `examples/`:
 
-1. provisionar el volumen persistente de media (o un destino aislado de prueba);
-2. restaurar `media.tar.gz` en el destino aislado (`SIGEDON_RESTORE_MEDIA_ROOT`);
-3. restaurar PostgreSQL en la base aislada;
-4. configurar Django `SIGEDON_MEDIA_ROOT` al path restaurado;
-5. ejecutar verificación de migraciones/seguridad/datos;
-6. comprobar spot-check de archivos protegidos;
-7. abrir tráfico solo tras readiness exitoso.
+- `sigedon-backup.cron.example`
+- `sigedon-backup.service.example` + `sigedon-backup.timer.example`
+- `sigedon-restore-drill.service.example` + `sigedon-restore-drill.timer.example`
+- `sigedon-backup.env.example`
 
-`verify_restored_data` comprueba existencia en storage de FileFields con nombre
-no vacío (incluye adjuntos Kobo `downloaded`). No valida checksums de blob ni
-contenido binario completo.
+El repositorio no instala unidades systemd ni crontab.
 
-`reconcile_operational_code_sequences` funciona en modo detect-only y es de
-solo lectura: no crea ni ajusta secuencias. El comando falla ante los estados
-`MISSING_SEQUENCE`, `LAGGING_SEQUENCE` e `INVALID_SEQUENCE`, correspondientes a
-una secuencia ausente, atrasada o inválida. No existe reparación automática;
-cualquier corrección debe revisarse y ejecutarse manualmente.
+## RPO / RTO
 
-## Pruebas trimestrales
+**No son un SLA aprobado.** Los valores siguientes son **propuestas no
+aprobadas / placeholders de decisión de despliegue**; no constituyen un
+compromiso institucional hasta aprobación explícita del entorno.
 
-Probar restauración en base con prefijo `test_restore_` o `staging_restore_`,
-verificar con `verify_backup.sh` + `verify_restored_data`, y documentar el
-tiempo real observado. **RPO/RTO no están definidos** hasta medir restauraciones
-reales.
+| Objetivo | Propuesta (no aprobada) | Notas |
+|---|---|---|
+| RPO | ≤ 24 h | alineada al ejemplo de backup diario (`examples/*.timer`); decidir en despliegue |
+| RTO | ≤ 4 h | **placeholder**; debe validarse con un restore drill representativo medido |
 
-## Infraestructura pendiente
+El RTO solo puede afirmarse tras un drill de restauración representativo con
+wall-clock documentado. Sin drill medido, no declarar RTO cumplido. Ninguno de
+los dos valores es un SLA aprobado todavía.
 
-Fuera del alcance de esta fase (requisito operativo, no implementado aquí):
+Documentar en el runbook del entorno la decisión adoptada y el tiempo real del
+último drill exitoso.
+
+## Infraestructura aún pendiente (fuera de scripts)
 
 - cifrado en reposo / en tránsito de artefactos;
 - copia off-site;
-- automatización de frecuencia y retención;
-- cron / systemd.
+- proveedor cloud de backup / SDK externo (no se introduce).
 
-## Códigos de salida (orientativos)
+## Códigos de salida
 
 | Código | Significado |
 |---|---|
@@ -166,3 +259,5 @@ Fuera del alcance de esta fase (requisito operativo, no implementado aquí):
 | 5 | Conflicto (backup existente) |
 | 6 | Fallo de dump |
 | 7 | Fallo de media |
+| 8 | Lock exclusivo no disponible |
+| 9 | Fallo / rechazo de retención |

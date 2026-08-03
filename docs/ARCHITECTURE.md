@@ -249,7 +249,9 @@ default es `BASE_DIR/media`. En producción es obligatorio
 `SIGEDON_MEDIA_ROOT` apuntando a un mount persistente (misma variable que usan
 los scripts de backup). Settings valida la forma de la ruta al importar;
 `python manage.py check --deploy` verifica existencia, tipo directorio y
-lectura/escritura. No se introduce un backend remoto en esta fase.
+lectura/escritura. No se introduce un backend remoto en esta fase. La
+automatización operativa de backup (lock, retención, markers, drills) vive en
+`deploy/backups/`; el scheduling permanece en la plataforma.
 
 La visibilidad de cada archivo debe definirse explícitamente según su naturaleza y contexto.
 El helper compartido vive en `apps/operations/file_access.py`. El contrato de UI

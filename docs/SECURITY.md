@@ -471,7 +471,7 @@ Las bases SQLite, los dumps y los respaldos:
 * deben conservarse según una política definida;
 * deben probarse periódicamente mediante restauraciones controladas (trimestral como mínimo).
 
-Los scripts en `deploy/backups/` no incluyen secretos, no leen `.env`, no imprimen contraseñas y rechazan restaurar sobre la base activa. Preferir `~/.pgpass` (permisos `0600`) frente a `PGPASSWORD`.
+Los scripts en `deploy/backups/` no incluyen secretos, no leen `.env`, no imprimen contraseñas y rechazan restaurar sobre la base activa. Preferir `~/.pgpass` (permisos `0600`) frente a `PGPASSWORD`. La retención automatizada solo elimina sets verificados bajo `SIGEDON_BACKUP_ROOT` (nunca rutas arbitrarias). Markers y el hook de alerta usan identificadores operativos acotados (sin dumps, rutas productivas ni secretos). Los timers de ejemplo no restauran producción.
 
 También deben excluirse del repositorio archivos como:
 
@@ -483,7 +483,7 @@ También deben excluirse del repositorio archivos como:
 *.backup
 ```
 
-El cifrado de artefactos y la copia off-site son requisitos de infraestructura; esta fase aún no los implementa en los scripts. La frecuencia/retención automatizadas y los objetivos RPO/RTO permanecen pendientes hasta medir restauraciones reales.
+El cifrado de artefactos y la copia off-site son requisitos de infraestructura; esta fase aún no los implementa en los scripts. RPO/RTO propuestos (no SLA; requieren decisión de despliegue y drill de RTO): `deploy/backups/README.md`.
 
 ## 15. Dependencias
 

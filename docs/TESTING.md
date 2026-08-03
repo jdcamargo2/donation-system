@@ -384,6 +384,21 @@ El contrato de exit distinto de cero se verifica con `call_command` +
 `CommandError` (el mismo mecanismo que Django usa para el código de salida del
 shell). No se requiere subprocess adicional salvo regresiones específicas.
 
+### Automatización de backup (OPS-BACKUP-AUTOMATION)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_backup_scripts \
+  apps.operations.tests.test_backup_automation \
+  --noinput
+```
+
+Cubre lock exclusivo global (FD 9; hijos reafirman FD heredado, sin atajo por
+env), pipeline programado E2E mockeado, markers de éxito/fallo, retención
+segura, runner concurrente (exit 8), rechazo de drill sobre base activa y
+contrato del alert hook. Usa mocks en PATH; no ejecuta backup/restore de
+producción ni abre red.
+
 Las rutas de módulos de prueba deben ajustarse si la organización interna cambia.
 
 ## 6. Verificación de migraciones

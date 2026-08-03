@@ -349,7 +349,11 @@ exit 99
 
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(missing_root.is_dir())
-        leftovers = list(missing_root.glob('.sigedon-backup.*'))
+        leftovers = [
+            path
+            for path in missing_root.glob('.sigedon-backup.*')
+            if path.name != '.sigedon-ops.lock'
+        ]
         self.assertEqual(leftovers, [])
 
     def test_backup_creates_manifest_and_artifacts(self):
@@ -391,7 +395,11 @@ exit 99
         second = _run(['bash', str(BACKUP_SCRIPT)], env=self.env)
         self.assertNotEqual(second.returncode, 0)
         backup_root = Path(self.env['SIGEDON_BACKUP_ROOT'])
-        leftovers = list(backup_root.glob('.sigedon-backup.*'))
+        leftovers = [
+            path
+            for path in backup_root.glob('.sigedon-backup.*')
+            if path.name != '.sigedon-ops.lock'
+        ]
         self.assertEqual(leftovers, [])
         self.assertTrue(first_dir.is_dir())
 

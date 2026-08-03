@@ -700,20 +700,26 @@ Debe existir una política de rotación y retención.
 
 ## 14. Copias de seguridad
 
-Scripts manuales: `deploy/backups/` (`backup_sigedon.sh`, `verify_backup.sh`, `restore_sigedon.sh`). Detalle operativo en `deploy/backups/README.md` y `docs/OPERATIONS.md`.
+Scripts: `deploy/backups/` (`backup_sigedon.sh`, `verify_backup.sh`,
+`restore_sigedon.sh`, `run_scheduled_backup.sh`, `apply_retention.sh`,
+`run_restore_drill.sh`). Detalle en `deploy/backups/README.md` y
+`docs/OPERATIONS.md`. Ejemplos de cron/systemd/timer/hook:
+`deploy/backups/examples/`.
 
-Esta fase entrega el procedimiento verificable; **no** fija todavía frecuencia ni retención automatizadas (sin cron/systemd).
+El repositorio formaliza lock exclusivo, retención canónica, markers de
+éxito/fallo y drills aislados. El **scheduler y la entrega de alertas** los
+posee la plataforma (instalar unidades/crontab fuera del repo).
 
-Debe definirse a nivel de infraestructura una política que incluya:
+Política de infraestructura que debe cubrirse:
 
-* frecuencia (pendiente de automatizar);
+* frecuencia (ejemplo diario en `examples/*.timer`);
 * cifrado (requisito de infraestructura; no implementado en scripts);
-* retención (pendiente);
+* retención (`SIGEDON_BACKUP_KEEP_COUNT` / `SIGEDON_BACKUP_KEEP_DAYS`);
 * almacenamiento externo / off-site (requisito de infraestructura);
 * responsables;
-* restauración probada (trimestral como mínimo);
+* restauración probada vía `run_restore_drill.sh` (trimestral como mínimo);
 * protección de acceso;
-* eliminación segura.
+* eliminación segura (solo sets verificados bajo el backup root).
 
 Los respaldos de aplicación cubren:
 
@@ -727,11 +733,18 @@ Consistencia: **ventana de mantenimiento** con `SIGEDON_MAINTENANCE_CONFIRMED=YE
 
 Un respaldo no se considera válido hasta pasar `verify_backup.sh` y una restauración aislada de prueba.
 
-**RPO/RTO no están definidos** hasta medir una restauración real.
+RPO/RTO: propuestas no aprobadas / placeholders de decisión de despliegue
+(p. ej. RPO ≤ 24 h, RTO ≤ 4 h). **No son un SLA aprobado.** El RTO debe
+validarse con un restore drill representativo y wall-clock documentado; sin
+drill medido no declarar RTO cumplido. Ver `deploy/backups/README.md`.
 
 ## 15. Restauración
 
 Restaurar solo a entornos aislados (`SIGEDON_RESTORE_DB` con prefijo `test_restore_` o `staging_restore_`), nunca sobre la base activa (`POSTGRES_DB`) ni sobre un `MEDIA_ROOT` no vacío. No modificar `.env`.
+
+Drill periódico automatizable: `deploy/backups/run_restore_drill.sh` (requiere
+`SIGEDON_RESTORE_DRILL_ENABLED=YES`). Los timers de ejemplo **no** invocan
+restore de producción.
 
 Después de restaurar un entorno aislado y aplicar cualquier migración
 requerida, **cambiar a las credenciales del rol runtime** y validar:

@@ -437,7 +437,11 @@ python manage.py check
 
 Antes de despliegues, migraciones relevantes o cambios de infraestructura, debe existir una copia de seguridad verificable.
 
-Los scripts manuales viven en `deploy/backups/` (ver `deploy/backups/README.md`). Esta fase **no** automatiza frecuencia ni retención con cron/systemd.
+Los scripts viven en `deploy/backups/` (ver `deploy/backups/README.md`). El
+formato del artefacto permanece estable. La automatización operativa
+(`run_scheduled_backup.sh`, retención, lock, markers, drill) está en el
+repositorio; el **scheduling y la entrega de alertas** son de la plataforma
+(ejemplos en `deploy/backups/examples/`).
 
 ### Ventana de mantenimiento
 
@@ -446,7 +450,7 @@ La consistencia del backup exige una **ventana de mantenimiento obligatoria**:
 * detener web, workers, comandos de procesamiento Kobo y uploads;
 * exportar `SIGEDON_MAINTENANCE_CONFIRMED=YES`;
 * exportar `SIGEDON_BACKUP_ROOT` (se crea automáticamente con permisos `0700` si no existe) y `SIGEDON_MEDIA_ROOT` (debe existir; no se crea);
-* ejecutar `deploy/backups/backup_sigedon.sh`.
+* ejecutar `deploy/backups/backup_sigedon.sh` o el pipeline `run_scheduled_backup.sh`.
 
 El script no puede comprobar por sí solo que esos procesos estén detenidos.
 
@@ -461,7 +465,23 @@ Cada backup publicado es un directorio:
   manifest.json
 ```
 
-Incluye PostgreSQL + `MEDIA_ROOT`. La configuración crítica y los secretos deben respaldarse fuera de estos scripts, en un sistema seguro.
+Incluye PostgreSQL + `MEDIA_ROOT` como un solo set operativo. Temps
+`.sigedon-backup.*` son incompletos; solo sets que pasan `verify_backup.sh`
+cuentan como verificados. La configuración crítica y los secretos deben
+respaldarse fuera de estos scripts, en un sistema seguro.
+
+### Pipeline programado, lock, retención y markers
+
+* Lock exclusivo: un global `<SIGEDON_BACKUP_ROOT>/.sigedon-ops.lock` en FD 9
+  (código 8 si ocupado); el runner lo mantiene en el pipeline y los hijos
+  reafirman el FD heredado (sin reapertura).
+* Pipeline: `run_scheduled_backup.sh` → backup → verify → retención opcional →
+  `.sigedon-backup-status.json`.
+* Retención: `SIGEDON_BACKUP_KEEP_COUNT` / `SIGEDON_BACKUP_KEEP_DAYS`; solo borra
+  sets verificados bajo el backup root configurado.
+* Alertas: exit codes fiables + hook local opcional `SIGEDON_BACKUP_ALERT_HOOK`
+  (la plataforma implementa la entrega).
+* Un fallo nunca se publica como `status=success`.
 
 ### Verificación y restore aislado
 
@@ -470,6 +490,10 @@ Incluye PostgreSQL + `MEDIA_ROOT`. La configuración crítica y los secretos deb
 ```
 
 La restauración solo está permitida hacia bases con prefijo seguro (`test_restore_` / `staging_restore_`), distintas de `POSTGRES_DB`, con `SIGEDON_RESTORE_CONFIRM=YES` y un directorio de media nuevo/vacío. Nunca sobreescribir el `MEDIA_ROOT` activo ni modificar `.env`.
+
+Drill periódico: `run_restore_drill.sh` con `SIGEDON_RESTORE_DRILL_ENABLED=YES`
+contra destinos desechables. **Prohibido** automatizar restore de producción
+con un timer.
 
 ### Post-restore
 
@@ -504,10 +528,12 @@ debe revisarse y ejecutarse manualmente. Una secuencia adelantada es válida.
 * Deben almacenarse fuera del repositorio.
 * Deben protegerse mediante controles de acceso.
 * Preferir `~/.pgpass` frente a `PGPASSWORD` en los scripts.
-* Las restauraciones deben probarse periódicamente (al menos trimestral).
+* Las restauraciones deben probarse periódicamente (drill aislado; al menos trimestral).
 * Un respaldo no se considera válido hasta comprobar que puede restaurarse.
 * Cifrado y copia off-site son requisitos de infraestructura (aún no implementados en scripts).
-* **RPO/RTO no están definidos** hasta medir restauraciones reales.
+* RPO/RTO: propuestas no aprobadas / placeholders de despliegue
+  (p. ej. RPO ≤ 24 h, RTO ≤ 4 h). **No son un SLA.** El RTO debe validarse con
+  un restore drill representativo medido. Detalle en `deploy/backups/README.md`.
 
 ## 10. Auditoría
 
@@ -535,12 +561,17 @@ Durante la operación deben revisarse:
 * fallos del webhook;
 * submissions detenidas;
 * errores de procesamiento Kobo;
-* espacio disponible;
+* espacio disponible (incluye `SIGEDON_BACKUP_ROOT`);
 * conexiones a PostgreSQL;
 * vencimiento o rotación de credenciales;
 * crecimiento de archivos y logs;
 * fallos sostenidos de readiness (`/readyz/` → `503`) frente a ventanas
-  esperadas de migración en el release.
+  esperadas de migración en el release;
+* jobs de backup: `.sigedon-backup-status.json` con `status!=success`, exit
+  code distinto de cero, o `finished_at_utc` obsoleto respecto a la frecuencia
+  programada;
+* drills de restore: `.sigedon-restore-drill-status.json` y frescura del último
+  drill exitoso (no confundir con `/healthz/`/`/readyz/`).
 
 ### 11.1. Sondas HTTP vs preflight
 

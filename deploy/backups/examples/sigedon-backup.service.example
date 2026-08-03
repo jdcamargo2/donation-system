@@ -1,0 +1,20 @@
+[Unit]
+Description=SIGEDON scheduled backup pipeline (oneshot)
+Documentation=file:///path/to/sigedon/deploy/backups/README.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sigedon-backup
+Group=sigedon-backup
+WorkingDirectory=/path/to/sigedon
+EnvironmentFile=-/etc/sigedon/backup.env
+# Maintenance confirmation must be set by the platform only after writers are quiesced.
+# Environment=SIGEDON_MAINTENANCE_CONFIRMED=YES
+ExecStart=/path/to/sigedon/deploy/backups/run_scheduled_backup.sh
+Nice=10
+# Reliable exit codes: non-zero fails the unit for monitoring/alert integration.
+
+[Install]
+WantedBy=multi-user.target

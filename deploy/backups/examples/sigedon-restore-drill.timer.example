@@ -1,0 +1,13 @@
+[Unit]
+Description=SIGEDON isolated restore drill timer (never production restore)
+Documentation=file:///path/to/sigedon/deploy/backups/README.md
+
+[Timer]
+# Quarterly example: 04:30 on the 1st day of Jan/Apr/Jul/Oct.
+OnCalendar=*-01,04,07,10-01 04:30:00
+Persistent=true
+Unit=sigedon-restore-drill.service
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target
