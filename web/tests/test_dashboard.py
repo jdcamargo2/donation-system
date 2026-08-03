@@ -62,13 +62,22 @@ class DashboardTests(TestCase):
         self.assertNotContains(response, 'data-sidebar-mobile-toggle')
         self.assertNotContains(response, 'data-sidebar-backdrop')
         self.assertNotContains(response, 'sidebar?.querySelectorAll')
-        self.assertContains(response, 'bootstrap-icons@1.11.3')
+        self.assertContains(
+            response,
+            'vendor/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css',
+        )
+        self.assertContains(response, 'vendor/bootstrap/5.3.3/css/bootstrap.min.css')
+        self.assertContains(response, 'vendor/bootstrap/5.3.3/js/bootstrap.bundle.min.js')
+        self.assertContains(
+            response,
+            'vendor/sweetalert2/11.26.25/sweetalert2.all.min.js',
+        )
+        self.assertNotContains(response, 'cdn.jsdelivr.net')
         self.assertContains(response, 'bi-speedometer2')
         self.assertContains(response, 'localStorage')
         self.assertNotContains(response, 'id="mainMenu"')
         self.assertNotContains(response, 'data-bs-toggle="offcanvas"')
         self.assertContains(response, 'id="django-messages"')
-        self.assertContains(response, 'sweetalert2@11')
         self.assertContains(response, 'Swal.fire')
         self.assertContains(response, 'Cerrar sesión')
         self.assertContains(

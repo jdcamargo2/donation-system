@@ -366,15 +366,36 @@ class VerifyDeploymentAssetsCommandTests(SimpleTestCase):
             self.assertIn('missing', str(ctx.exception).lower())
 
     def test_complete_sentinels_pass(self):
+        from core.management.commands.verify_deployment_assets import (
+            REQUIRED_RELATIVE_ASSETS,
+        )
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / 'staticfiles'
-            assets = [
-                root / 'web' / 'css' / 'sigedon.css',
-                root / 'web' / 'img' / 'logo_ilde.png',
-                root / 'web' / 'img' / 'logo_ilde_short.png',
-            ]
-            for path in assets:
+            for relative in REQUIRED_RELATIVE_ASSETS:
+                path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b'x')
             with override_settings(STATIC_ROOT=str(root)):
                 call_command('verify_deployment_assets')
+
+    def test_missing_vendor_sentinel_fails(self):
+        from core.management.commands.verify_deployment_assets import (
+            REQUIRED_RELATIVE_ASSETS,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'staticfiles'
+            for relative in REQUIRED_RELATIVE_ASSETS:
+                if relative.endswith('bootstrap.bundle.min.js'):
+                    continue
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'x')
+            with override_settings(STATIC_ROOT=str(root)):
+                with self.assertRaises(CommandError) as ctx:
+                    call_command('verify_deployment_assets')
+            self.assertIn(
+                'vendor/bootstrap/5.3.3/js/bootstrap.bundle.min.js',
+                str(ctx.exception),
+            )

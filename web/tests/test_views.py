@@ -389,6 +389,16 @@ class OperationalDetailViewTests(TestCase):
     def test_internal_base_loads_local_form_assets(self):
         source = Path('templates/base.html').read_text()
 
+        self.assertIn("vendor/bootstrap/5.3.3/css/bootstrap.min.css", source)
+        self.assertIn(
+            "vendor/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css",
+            source,
+        )
+        self.assertIn("vendor/bootstrap/5.3.3/js/bootstrap.bundle.min.js", source)
+        self.assertIn(
+            "vendor/sweetalert2/11.26.25/sweetalert2.all.min.js",
+            source,
+        )
         self.assertIn("vendor/flatpickr/flatpickr.min.css", source)
         self.assertIn("vendor/flatpickr/flatpickr.min.js", source)
         self.assertIn("vendor/flatpickr/l10n/es.js", source)
@@ -396,8 +406,17 @@ class OperationalDetailViewTests(TestCase):
         self.assertIn("web/js/ops_forms.js", source)
         self.assertIn("web/js/file_upload_preview.js", source)
         self.assertEqual(source.count("web/js/file_upload_preview.js"), 1)
+        self.assertLess(
+            source.index("vendor/bootstrap/5.3.3/css/bootstrap.min.css"),
+            source.index("web/css/sigedon.css"),
+        )
+        self.assertLess(
+            source.index("vendor/bootstrap/5.3.3/js/bootstrap.bundle.min.js"),
+            source.index("vendor/sweetalert2/11.26.25/sweetalert2.all.min.js"),
+        )
         self.assertLess(source.index("vendor/autonumeric/autoNumeric.min.js"), source.index("web/js/ops_forms.js"))
         self.assertLess(source.index("web/js/ops_forms.js"), source.index("web/js/file_upload_preview.js"))
+        self.assertNotIn("cdn.jsdelivr.net", source)
         self.assertNotIn("cdn.jsdelivr.net/npm/flatpickr", source)
         self.assertNotIn("cdn.jsdelivr.net/npm/autonumeric", source)
         self.assertNotIn("cdn.jsdelivr.net/npm/autoNumeric", source)

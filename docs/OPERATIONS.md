@@ -393,9 +393,11 @@ Estos directorios no deben versionarse.
   monta el volumen antes del arranque y `check --deploy` verifica
   existencia/permisos. Django no crea el directorio de producción.
 * Tras `collectstatic` en el release, `./deploy/preflight.sh` (vía
-  `verify_deployment_assets`) exige sentinelas bajo `STATIC_ROOT`. El proceso
-  web (Gunicorn) no ejecuta `collectstatic`. Ver
-  [DEPLOYMENT.md](DEPLOYMENT.md#5-preparación-del-despliegue).
+  `verify_deployment_assets`) exige sentinelas bajo `STATIC_ROOT`, incluidos
+  Bootstrap / Bootstrap Icons / SweetAlert2 vendorizados. El proceso web
+  (Gunicorn) no ejecuta `collectstatic`. Media privada sigue separada de
+  estáticos. Ver [DEPLOYMENT.md](DEPLOYMENT.md#5-preparación-del-despliegue)
+  y [`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
 * Los respaldos de archivos deben tratarse como información sensible y usar el
   mismo `SIGEDON_MEDIA_ROOT` que Django.
 * Debe verificarse el espacio disponible y la política de retención.

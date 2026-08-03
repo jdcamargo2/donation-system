@@ -237,6 +237,23 @@ pendiente de adjuntos de remediación (`ProjectUpdateRemediationAttachmentForm.f
 * en `ProjectUpdateRemediationAttachmentForm.file`, la vista previa no altera permisos ni
   las reglas de estado de remediación (borrador) validadas en dominio/servicio.
 
+### 6.2. Estáticos públicos versus media privada
+
+Los CSS/JS/fuentes del panel (incluidos Bootstrap, Bootstrap Icons y
+SweetAlert2 vendorizados) son activos públicos bajo `STATIC_ROOT` tras
+`collectstatic`: no contienen secretos. La media operativa privada permanece
+en `MEDIA_ROOT` / `SIGEDON_MEDIA_ROOT` y solo se expone por endpoints
+autorizados. Vendorizar elimina la dependencia de disponibilidad/DNS de CDN
+públicos para esas librerías; no sustituye el monitoreo de avisos de seguridad
+ni implica integridad automática frente a compromiso de la cadena de suministro
+en el momento de obtener el artefacto. Actualizar vendor debe ser deliberado,
+versionado, probado y documentado en
+[`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
+Para assets same-origin del repositorio, la integridad del despliegue y del
+control de cambios sustituye SRI de CDN; CSP debe permitir CSS/JS/fuentes
+same-origin según la política vigente (los scripts inline existentes ya
+condicionan CSP).
+
 ## 7. Seguridad de KoboToolbox
 
 La integración con KoboToolbox protege:

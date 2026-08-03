@@ -179,10 +179,12 @@ Variables opcionales de preflight:
 * Montar el volumen persistente y exportar `SIGEDON_MEDIA_ROOT` **antes** del
   preflight (`check --deploy` valida existencia/permisos).
 * `collectstatic` debe haber poblado `STATIC_ROOT` (por defecto
-  `<BASE_DIR>/staticfiles`) con sentinelas locales (`web/css/sigedon.css`,
-  logos ILDE). El comando `verify_deployment_assets` lo comprueba sin mutar
-  archivos. Assets CDN externos (p. ej. Bootstrap) no forman parte de esta
-  puerta.
+  `<BASE_DIR>/staticfiles`) con sentinelas locales: CSS de aplicación,
+  logos ILDE y vendor UI (Bootstrap 5.3.3, Bootstrap Icons 1.11.3,
+  SweetAlert2 11.26.25). El comando `verify_deployment_assets` lo comprueba
+  sin mutar archivos. El panel interno no requiere CDN públicos en runtime
+  para estas dependencias; inventario y licencias en
+  [`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
 
 ### Orden recomendado
 

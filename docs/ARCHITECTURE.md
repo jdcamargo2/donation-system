@@ -155,6 +155,12 @@ Responsabilidades:
 
 La capa de presentación no debe contener reglas financieras críticas ni lógica transaccional compleja.
 
+Los activos UI del panel interno (Bootstrap 5.3.3, Bootstrap Icons 1.11.3,
+SweetAlert2 11.26.25) se sirven desde `static/vendor/` mediante el contrato
+estático de Django (`{% static %}` + `collectstatic`). El portal público usa
+su propio CSS y no depende de ese stack. Inventario y licencias:
+[`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
+
 ### 3.2. Dominio
 
 Componentes principales:

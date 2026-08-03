@@ -15,19 +15,27 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 
-# Application CSS and ILDE brand logos expected after collectstatic.
+# Application CSS, ILDE brand logos, and vendored core UI libraries expected
+# after collectstatic. Paths are relative to STATIC_ROOT / static finders.
 REQUIRED_RELATIVE_ASSETS = (
     'web/css/sigedon.css',
     'web/img/logo_ilde.png',
     'web/img/logo_ilde_short.png',
+    'vendor/bootstrap/5.3.3/css/bootstrap.min.css',
+    'vendor/bootstrap/5.3.3/js/bootstrap.bundle.min.js',
+    'vendor/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css',
+    'vendor/bootstrap-icons/1.11.3/font/fonts/bootstrap-icons.woff',
+    'vendor/bootstrap-icons/1.11.3/font/fonts/bootstrap-icons.woff2',
+    'vendor/sweetalert2/11.26.25/sweetalert2.min.css',
+    'vendor/sweetalert2/11.26.25/sweetalert2.all.min.js',
 )
 
 
 class Command(BaseCommand):
     help = (
         'Verifica que STATIC_ROOT exista y contenga activos locales canónicos '
-        'tras collectstatic (CSS de aplicación y logos ILDE). No ejecuta '
-        'collectstatic ni falla por assets CDN externos (p. ej. Bootstrap).'
+        'tras collectstatic (CSS de aplicación, logos ILDE y vendor UI: '
+        'Bootstrap, Bootstrap Icons, SweetAlert2). No ejecuta collectstatic.'
     )
 
     def handle(self, *args, **options):

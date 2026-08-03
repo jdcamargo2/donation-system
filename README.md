@@ -46,7 +46,9 @@ debe actualizarse cuando el total cambie de forma estable.
   [Despliegue §6.3](docs/DEPLOYMENT.md#63-sondas-http-healthz-y-readyz))
 * SQLite únicamente para desarrollo local con `DEBUG=True`
 * Django Templates
-* Bootstrap 5
+* Bootstrap 5.3.3, Bootstrap Icons 1.11.3 y SweetAlert2 11.26.25 vendorizados
+  en `static/vendor/` (sin CDN en runtime; ver
+  [`static/vendor/THIRD_PARTY_ASSETS.md`](static/vendor/THIRD_PARTY_ASSETS.md))
 * `django-bootstrap5`
 * HTMX 2.0.10 vendorizado, limitado al componente interno de hitos
 * `django-countries`

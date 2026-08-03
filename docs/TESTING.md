@@ -649,6 +649,15 @@ Los tests de contrato de runtime viven en `core.tests.test_runtime_startup`
 Gunicorn no es necesario para el resto de la suite unitaria. Detalle operativo:
 [DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn).
 
+### Resiliencia de estáticos UI (sin CDN)
+
+Pruebas focalizadas: `core.tests.test_static_resilience` y
+`web.tests.test_base_template`.
+
+Cubren resolución por static finders de Bootstrap / Bootstrap Icons /
+SweetAlert2 vendorizados, ausencia de CDN en plantillas base, alineación con
+sentinelas de `verify_deployment_assets` y versiones en
+`static/vendor/THIRD_PARTY_ASSETS.md`.
 ### Sondas HTTP (`/healthz/` y `/readyz/`)
 
 Pruebas focalizadas: `core.tests.test_health_endpoints`.
