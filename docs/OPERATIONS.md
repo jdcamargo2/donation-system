@@ -473,7 +473,8 @@ La restauración solo está permitida hacia bases con prefijo seguro (`test_rest
 
 ### Post-restore
 
-Con el entorno apuntando a la base y media restauradas:
+Con el entorno apuntando a la base y media restauradas, y con las
+**credenciales del rol runtime** (no el propietario de migraciones):
 
 ```bash
 python manage.py migrate --check
@@ -483,6 +484,13 @@ python manage.py reconcile_operational_code_sequences
 python manage.py verify_restored_data
 python manage.py sync_sigedon_roles
 ```
+
+`verify_postgres_security` exige PostgreSQL, comprueba append-only de
+`AuditLog` y `ExpenseRequestEvent`, constraints críticos y postura del rol
+runtime; las sondas hacen rollback y no reparan. Fallar el restore si este
+comando no sale 0: restaurar filas no basta si faltan triggers o grants.
+`verify_restored_data` es complementario (conteos, archivos, secuencias
+observables), no un reemplazo.
 
 `reconcile_operational_code_sequences` funciona en modo detect-only y es de
 solo lectura: no crea ni ajusta secuencias. El comando falla ante una secuencia

@@ -102,8 +102,8 @@ Rechazos de seguridad:
 
 ### Post-restore
 
-Con el entorno apuntando a la base y media restauradas (sin tocar `.env` de
-producción):
+Con el entorno apuntando a la base y media restauradas bajo el **rol runtime**
+(sin tocar `.env` de producción):
 
 ```bash
 export POSTGRES_DB=<SIGEDON_RESTORE_DB>
@@ -114,6 +114,10 @@ python manage.py verify_postgres_security
 python manage.py reconcile_operational_code_sequences
 python manage.py verify_restored_data
 ```
+
+Fallar la aceptación si `verify_postgres_security` no sale 0 (exige PostgreSQL;
+cubre append-only de AuditLog/ExpenseRequestEvent, constraints críticos y
+postura runtime; no repara). Restaurar filas no basta si faltan triggers o grants.
 
 Secuencia esperada de restore:
 

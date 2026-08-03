@@ -156,5 +156,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE sigedon_owner IN SCHEMA public
 --   \dp public.operations_auditlog
 --   \du sigedon_app
 --
--- O bien, desde Django ya configurado con las credenciales de sigedon_app:
+-- O bien, desde Django ya configurado con las credenciales de sigedon_app
+-- (rol runtime final; un éxito bajo sigedon_owner no valida la separación):
 --   python manage.py verify_postgres_security
+--
+-- El comando exige PostgreSQL, verifica AuditLog y ExpenseRequestEvent
+-- append-only (catálogo + sondas con rollback), constraints críticos y
+-- privilegios runtime sobre operations_auditlog. No repara grants.
+-- Ver deploy/postgresql/README.md.

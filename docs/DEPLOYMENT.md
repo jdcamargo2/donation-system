@@ -143,7 +143,13 @@ Notas:
 * `migrate` corre una vez bajo el propietario del esquema;
 * `collectstatic` debe completarse antes de reemplazar el proceso web;
 * `sync_sigedon_roles` corre una vez por release;
-* `verify_postgres_security` debe ejecutarse con el rol runtime previsto;
+* `verify_postgres_security` **debe** ejecutarse con el rol runtime final
+  (`sigedon_app`); un éxito bajo `sigedon_owner`/superusuario no valida el
+  contrato. Exige PostgreSQL (otro motor → código distinto de 0). Verifica
+  append-only de `AuditLog` y `ExpenseRequestEvent` (catálogo + sondas con
+  rollback), constraints financieros críticos y privilegios runtime sobre
+  `operations_auditlog`. No repara nada; el fallo bloquea tráfico.
+  `preflight.sh` no lo invoca (sigue siendo solo lectura de release);
 * `reconcile_operational_code_sequences` es **detect-only** (solo lectura):
   falla ante secuencias ausentes/atrasadas/inválidas y no repara automáticamente;
 * `./deploy/preflight.sh` es la puerta de readiness **de release** (estática)
@@ -585,13 +591,19 @@ python manage.py migrate
 
 * Nunca usar `postgres` como usuario runtime en producción.
 * No almacenar credenciales de `sigedon_owner` en el servicio web ni en los workers.
-* El trigger append-only instalado en `operations_auditlog` (migración `0018_auditlog_append_only_trigger`) es una defensa adicional, no un sustituto de la separación de roles.
-* Un superusuario de PostgreSQL puede administrar o desactivar el trigger o los privilegios; esa capacidad se reserva para administración técnica explícita.
-* Verificar la configuración runtime con:
+* Los triggers append-only de `operations_auditlog` (migración `0018`) y
+  `operations_expenserequestevent` (migración `0029`) son defensa adicional,
+  no un sustituto de la separación de roles.
+* Un superusuario de PostgreSQL puede administrar o desactivar triggers o
+  privilegios; esa capacidad se reserva para administración técnica explícita.
+* Tras aplicar grants, cambiar a credenciales runtime y verificar:
 
 ```bash
 python manage.py verify_postgres_security
 ```
+
+Un éxito con el rol propietario no sustituye esta pasada bajo el rol runtime.
+Ver `deploy/postgresql/README.md`.
 
 ## 10. Proxy inverso
 
@@ -721,7 +733,8 @@ Un respaldo no se considera válido hasta pasar `verify_backup.sh` y una restaur
 
 Restaurar solo a entornos aislados (`SIGEDON_RESTORE_DB` con prefijo `test_restore_` o `staging_restore_`), nunca sobre la base activa (`POSTGRES_DB`) ni sobre un `MEDIA_ROOT` no vacío. No modificar `.env`.
 
-Después de restaurar un entorno aislado:
+Después de restaurar un entorno aislado y aplicar cualquier migración
+requerida, **cambiar a las credenciales del rol runtime** y validar:
 
 ```bash
 export POSTGRES_DB=<SIGEDON_RESTORE_DB>
@@ -734,10 +747,15 @@ python manage.py verify_restored_data
 python manage.py sync_sigedon_roles
 ```
 
+Fallar la aceptación del restore si `verify_postgres_security` no sale 0.
+Restaurar filas con éxito es insuficiente si faltan triggers append-only,
+constraints críticos o grants del rol runtime.
+
 Provisionar el volumen de media, restaurar el archivo `media.tar.gz`, restaurar
 PostgreSQL, apuntar `SIGEDON_MEDIA_ROOT` al árbol restaurado y solo entonces
 abrir tráfico. `verify_restored_data` valida correspondencia FileField↔blob por
-existencia en storage (no checksums de contenido).
+existencia en storage (no checksums de contenido); **no** sustituye
+`verify_postgres_security`.
 `reconcile_operational_code_sequences` funciona en modo detect-only y es de
 solo lectura: no crea ni ajusta secuencias. El comando falla ante una secuencia
 ausente (`MISSING_SEQUENCE`), atrasada (`LAGGING_SEQUENCE`) o inválida

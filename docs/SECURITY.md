@@ -73,17 +73,31 @@ Esta defensa complementa, no sustituye, la inmutabilidad ya aplicada en el
 modelo, el queryset, el admin y la UI. Un superusuario de PostgreSQL puede
 administrar o desactivar el trigger; esa capacidad debe reservarse para
 administración técnica explícita, nunca para el uso cotidiano de la
-aplicación. `python manage.py verify_postgres_security` verifica, de forma
-solo de lectura, que el rol runtime conectado no tenga esos privilegios y
-que el trigger esté instalado.
+aplicación. `python manage.py verify_postgres_security` verifica el contrato
+PostgreSQL antes de aceptar tráfico o un entorno restaurado:
+
+* exige motor PostgreSQL (SQLite u otro backend → salida distinta de 0);
+* debe ejecutarse con el **rol runtime final** (un éxito bajo el propietario
+  o un superusuario no valida la separación de roles);
+* comprueba función/trigger habilitado y sondas UPDATE/DELETE (con rollback)
+  para `AuditLog` y `ExpenseRequestEvent`;
+* comprueba constraints financieros críticos (USD, montos, reservas, unicidad
+  de códigos operativos) y la postura de privilegios del rol runtime sobre
+  `operations_auditlog` según `deploy/postgresql/harden_runtime_role.sql`;
+* no repara grants, triggers ni datos; la remediación corresponde al
+  propietario autorizado de la base.
+
+Detalle operativo: `deploy/postgresql/README.md`, `docs/DEPLOYMENT.md` y
+`docs/OPERATIONS.md`.
 
 ### Eventos de solicitud de gasto
 
 `ExpenseRequestEvent` es append-only en ORM (QuerySet/manager + `save`/`delete`)
 y, en PostgreSQL, mediante el trigger
 `operations_expenserequestevent_append_only` (migración
-`0029_expense_request_event_append_only`). Ningún rol canónico recibe permisos
-de mutación de eventos. Complementa `AuditLog`; no lo sustituye.
+`0029_expense_request_event_append_only`). Ningún rol canónico de aplicación
+recibe permisos Django de mutación de eventos. Complementa `AuditLog`; no lo
+sustituye. La verificación operativa cubre ambas familias append-only.
 
 Los adjuntos de solicitud (`ExpenseRequestAttachment`) son evidencia privada del
 flujo de solicitud de gasto. Solo el solicitante original puede mutarlos mientras

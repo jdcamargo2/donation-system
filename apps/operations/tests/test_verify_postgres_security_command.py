@@ -1,3 +1,5 @@
+"""Unit tests for verify_postgres_security (mocked connection / helpers)."""
+
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
@@ -6,215 +8,469 @@ from django.core.management.base import CommandError
 from django.test import SimpleTestCase
 
 from apps.operations.management.commands.verify_postgres_security import (
+    ACCEPTED_TRIGGER_ENABLED_STATES,
+    CategoryResult,
+    Command,
+    CRITICAL_CHECK_CONSTRAINTS,
     DANGEROUS_PRIVILEGES,
     REPORTED_PRIVILEGES,
+    REQUIRED_PRIVILEGES,
+    UNSUPPORTED_BACKEND_MESSAGE,
 )
 
 COMMAND_MODULE = 'apps.operations.management.commands.verify_postgres_security'
 
 
-def build_mock_connection(
-    *,
-    vendor='postgresql',
-    current_user='sigedon_app',
-    is_superuser=False,
-    table_owner='sigedon_owner',
-    privileges=None,
-    trigger_installed=True,
-):
-    """
-    PRE: privileges maps privilege names to booleans for the six reported
-    privileges; missing entries default to False.
-    POST: returns a MagicMock standing in for django.db.connection whose
-    cursor yields fetchone() results in the exact order _collect_report
-    issues its queries (current_user, rolsuper, owner, 6 privileges, trigger).
-    """
-    privileges = privileges or {}
-    ordered_privileges = ('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER')
-
-    fetchone_results = [
-        (current_user,),
-        (is_superuser,),
-        (table_owner,),
-        *[(bool(privileges.get(name, False)),) for name in ordered_privileges],
-        (trigger_installed,),
-    ]
-
-    mock_cursor = MagicMock()
-    mock_cursor.fetchone.side_effect = fetchone_results
-
-    mock_connection = MagicMock()
-    mock_connection.vendor = vendor
-    mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
-    mock_connection.cursor.return_value.__exit__.return_value = False
-    return mock_connection
-
-
-class VerifyPostgresSecurityCommandTests(SimpleTestCase):
-    """
-    PRE: the command under test never touches a real database; the
-    connection is fully mocked so results are deterministic.
-    POST: verifies exit-code semantics and that no sensitive value leaks.
-    """
-
-    def run_command(self, mock_connection):
+class VerifyPostgresSecurityBackendTests(SimpleTestCase):
+    def test_non_postgresql_backend_raises_command_error(self):
+        mock_connection = MagicMock()
+        mock_connection.vendor = 'sqlite'
         out = StringIO()
-        with patch(f'{COMMAND_MODULE}.connection', mock_connection):
-            call_command('verify_postgres_security', stdout=out)
-        return out.getvalue()
-
-    def test_non_postgresql_backend_reports_not_applicable_without_error(self):
-        mock_connection = build_mock_connection(vendor='sqlite')
-
-        output = self.run_command(mock_connection)
-
-        self.assertIn('no aplica', output)
-        self.assertIn('sqlite', output)
-        mock_connection.cursor.assert_not_called()
-
-    def test_secure_runtime_role_requires_select_and_insert(self):
-        mock_connection = build_mock_connection(
-            current_user='sigedon_app',
-            is_superuser=False,
-            table_owner='sigedon_owner',
-            privileges={'SELECT': True, 'INSERT': True},
-            trigger_installed=True,
-        )
-
-        output = self.run_command(mock_connection)
-
-        self.assertIn('Configuracion runtime de PostgreSQL segura.', output)
-        self.assertIn('Usuario runtime: sigedon_app', output)
-        self.assertIn('Privilegio SELECT sobre operations_auditlog: si', output)
-        self.assertIn('Privilegio INSERT sobre operations_auditlog: si', output)
-
-    def test_missing_select_raises_command_error(self):
-        mock_connection = build_mock_connection(
-            current_user='sigedon_app',
-            is_superuser=False,
-            table_owner='sigedon_owner',
-            privileges={'SELECT': False, 'INSERT': True},
-            trigger_installed=True,
-        )
+        err = StringIO()
 
         with patch(f'{COMMAND_MODULE}.connection', mock_connection):
             with self.assertRaises(CommandError) as raised:
-                call_command('verify_postgres_security', stdout=StringIO())
-
-        self.assertIn('SELECT', str(raised.exception))
-        self.assertIn('no posee', str(raised.exception))
-
-    def test_missing_insert_raises_command_error(self):
-        mock_connection = build_mock_connection(
-            current_user='sigedon_app',
-            is_superuser=False,
-            table_owner='sigedon_owner',
-            privileges={'SELECT': True, 'INSERT': False},
-            trigger_installed=True,
-        )
-
-        with patch(f'{COMMAND_MODULE}.connection', mock_connection):
-            with self.assertRaises(CommandError) as raised:
-                call_command('verify_postgres_security', stdout=StringIO())
-
-        self.assertIn('INSERT', str(raised.exception))
-        self.assertIn('no posee', str(raised.exception))
-
-    def test_references_is_not_part_of_exit_criteria(self):
-        # Decision: REFERENCES is intentionally outside the exit-code contract.
-        # Role hardening may still REVOKE it in SQL, but this command neither
-        # reports nor fails on REFERENCES, to keep the verified privilege set
-        # limited to REPORTED_PRIVILEGES / DANGEROUS_PRIVILEGES.
-        self.assertNotIn('REFERENCES', REPORTED_PRIVILEGES)
-        self.assertNotIn('REFERENCES', DANGEROUS_PRIVILEGES)
-
-        mock_connection = build_mock_connection(
-            current_user='sigedon_app',
-            is_superuser=False,
-            table_owner='sigedon_owner',
-            privileges={'SELECT': True, 'INSERT': True},
-            trigger_installed=True,
-        )
-
-        output = self.run_command(mock_connection)
-
-        self.assertIn('Configuracion runtime de PostgreSQL segura.', output)
-        self.assertNotIn('REFERENCES', output)
-
-    def test_superuser_runtime_role_raises_command_error(self):
-        mock_connection = build_mock_connection(
-            current_user='postgres',
-            is_superuser=True,
-            table_owner='sigedon_owner',
-            privileges={'SELECT': True, 'INSERT': True},
-            trigger_installed=True,
-        )
-
-        with patch(f'{COMMAND_MODULE}.connection', mock_connection):
-            with self.assertRaises(CommandError) as raised:
-                call_command('verify_postgres_security', stdout=StringIO())
-
-        self.assertIn('superusuario', str(raised.exception))
-
-    def test_table_owner_runtime_role_raises_command_error(self):
-        mock_connection = build_mock_connection(
-            current_user='sigedon_owner',
-            is_superuser=False,
-            table_owner='sigedon_owner',
-            privileges={'SELECT': True, 'INSERT': True},
-            trigger_installed=True,
-        )
-
-        with patch(f'{COMMAND_MODULE}.connection', mock_connection):
-            with self.assertRaises(CommandError) as raised:
-                call_command('verify_postgres_security', stdout=StringIO())
-
-        self.assertIn('propietario', str(raised.exception))
-
-    def test_dangerous_privilege_raises_command_error(self):
-        for dangerous in ('UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER'):
-            with self.subTest(privilege=dangerous):
-                mock_connection = build_mock_connection(
-                    current_user='sigedon_app',
-                    is_superuser=False,
-                    table_owner='sigedon_owner',
-                    privileges={'SELECT': True, 'INSERT': True, dangerous: True},
-                    trigger_installed=True,
+                call_command(
+                    'verify_postgres_security',
+                    stdout=out,
+                    stderr=err,
                 )
 
-                with patch(f'{COMMAND_MODULE}.connection', mock_connection):
-                    with self.assertRaises(CommandError) as raised:
-                        call_command('verify_postgres_security', stdout=StringIO())
+        self.assertEqual(str(raised.exception), UNSUPPORTED_BACKEND_MESSAGE)
+        combined = out.getvalue() + err.getvalue()
+        self.assertNotIn('all categories ok', combined)
+        self.assertNotIn('Configuracion runtime de PostgreSQL segura', combined)
+        mock_connection.cursor.assert_not_called()
 
-                self.assertIn(dangerous, str(raised.exception))
-
-    def test_missing_trigger_raises_command_error(self):
-        mock_connection = build_mock_connection(
-            current_user='sigedon_app',
-            is_superuser=False,
-            table_owner='sigedon_owner',
-            privileges={'SELECT': True, 'INSERT': True},
-            trigger_installed=False,
-        )
+    def test_non_postgresql_does_not_claim_success(self):
+        mock_connection = MagicMock()
+        mock_connection.vendor = 'mysql'
+        out = StringIO()
 
         with patch(f'{COMMAND_MODULE}.connection', mock_connection):
-            with self.assertRaises(CommandError) as raised:
-                call_command('verify_postgres_security', stdout=StringIO())
+            with self.assertRaises(CommandError):
+                call_command('verify_postgres_security', stdout=out)
 
-        self.assertIn('trigger append-only no esta instalado', str(raised.exception))
+        self.assertNotIn('all categories ok', out.getvalue())
+        self.assertNotIn('backend: ok', out.getvalue())
 
-    def test_report_never_prints_password_or_connection_string(self):
-        mock_connection = build_mock_connection(
-            current_user='sigedon_app',
-            privileges={'SELECT': True, 'INSERT': True},
+
+class VerifyPostgresSecuritySummaryTests(SimpleTestCase):
+    def test_success_summary_is_concise_and_secret_free(self):
+        command = Command()
+        out = StringIO()
+        command.stdout = out
+        command.style = MagicMock()
+        command.style.SUCCESS = lambda text: text
+        command.style.ERROR = lambda text: text
+
+        results = [
+            CategoryResult(name='backend', ok=True),
+            CategoryResult(name='runtime role', ok=True),
+            CategoryResult(name='AuditLog append-only', ok=True),
+            CategoryResult(name='ExpenseRequestEvent append-only', ok=True),
+            CategoryResult(name='critical constraints', ok=True),
+        ]
+        command._print_summary(results, verbosity=1)
+        output = out.getvalue()
+
+        self.assertIn('PostgreSQL security verification:', output)
+        self.assertIn('backend: ok', output)
+        self.assertIn('runtime role: ok', output)
+        self.assertIn('AuditLog append-only: ok', output)
+        self.assertIn('ExpenseRequestEvent append-only: ok', output)
+        self.assertIn('critical constraints: ok', output)
+        self.assertNotIn('PASSWORD', output)
+        self.assertNotIn('localhost', output)
+        self.assertNotIn('sigedon_app', output)
+
+    def test_failure_raises_command_error_with_categories(self):
+        mock_connection = MagicMock()
+        mock_connection.vendor = 'postgresql'
+        out = StringIO()
+
+        with patch(f'{COMMAND_MODULE}.connection', mock_connection):
+            with patch.object(
+                Command,
+                '_verify_backend',
+                return_value=CategoryResult(name='backend', ok=True),
+            ):
+                with patch.object(
+                    Command,
+                    '_verify_runtime_role',
+                    return_value=CategoryResult(
+                        name='runtime role',
+                        ok=False,
+                        failures=[
+                            'Current database role is too privileged '
+                            'for runtime verification.'
+                        ],
+                    ),
+                ):
+                    with patch.object(
+                        Command,
+                        '_verify_append_only',
+                        side_effect=[
+                            CategoryResult(name='AuditLog append-only', ok=True),
+                            CategoryResult(
+                                name='ExpenseRequestEvent append-only', ok=True
+                            ),
+                        ],
+                    ):
+                        with patch.object(
+                            Command,
+                            '_verify_critical_constraints',
+                            return_value=CategoryResult(
+                                name='critical constraints', ok=True
+                            ),
+                        ):
+                            with self.assertRaises(CommandError) as raised:
+                                call_command(
+                                    'verify_postgres_security', stdout=out
+                                )
+
+        self.assertIn('runtime role', str(raised.exception))
+        self.assertNotIn('PASSWORD', str(raised.exception))
+        self.assertIn('runtime role: FAILED', out.getvalue())
+
+
+class VerifyPostgresSecurityFailureClassificationTests(SimpleTestCase):
+    """Catalog/privilege failure classification with fully mocked DB access."""
+
+    def _patched_connection(self):
+        mock_conn = MagicMock()
+        mock_conn.vendor = 'postgresql'
+        mock_conn.cursor.return_value.__enter__.return_value = MagicMock()
+        mock_conn.cursor.return_value.__exit__.return_value = False
+        return patch(f'{COMMAND_MODULE}.connection', mock_conn)
+
+    def test_missing_auditlog_trigger_fails(self):
+        command = Command()
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.function_exists', return_value=True):
+                with patch(
+                    f'{COMMAND_MODULE}.get_trigger_state',
+                    return_value=None,
+                ):
+                    result = command._verify_append_only('AuditLog', verbosity=1)
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('Missing trigger' in item for item in result.failures)
         )
-        mock_connection.settings_dict = {
-            'PASSWORD': 'super-secret-password',
-            'NAME': 'db_sigedon',
-            'HOST': 'db.internal',
+
+    def test_disabled_auditlog_trigger_fails(self):
+        command = Command()
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.function_exists', return_value=True):
+                with patch(
+                    f'{COMMAND_MODULE}.get_trigger_state',
+                    return_value={
+                        'exists': True,
+                        'tgenabled': 'D',
+                        'enabled': False,
+                        'function_matches': True,
+                        'function_name': 'operations_auditlog_reject_mutation',
+                    },
+                ):
+                    result = command._verify_append_only('AuditLog', verbosity=1)
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('not active' in item for item in result.failures)
+        )
+
+    def test_missing_expense_request_event_trigger_fails(self):
+        command = Command()
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.function_exists', return_value=True):
+                with patch(
+                    f'{COMMAND_MODULE}.get_trigger_state',
+                    return_value=None,
+                ):
+                    result = command._verify_append_only(
+                        'ExpenseRequestEvent', verbosity=1
+                    )
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('Missing trigger' in item for item in result.failures)
+        )
+
+    def test_disabled_expense_request_event_trigger_fails(self):
+        command = Command()
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.function_exists', return_value=True):
+                with patch(
+                    f'{COMMAND_MODULE}.get_trigger_state',
+                    return_value={
+                        'exists': True,
+                        'tgenabled': 'R',
+                        'enabled': False,
+                        'function_matches': True,
+                        'function_name': (
+                            'operations_expenserequestevent_reject_mutation'
+                        ),
+                    },
+                ):
+                    result = command._verify_append_only(
+                        'ExpenseRequestEvent', verbosity=1
+                    )
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('not active' in item for item in result.failures)
+        )
+
+    def test_missing_function_fails(self):
+        command = Command()
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.function_exists', return_value=False):
+                with patch(
+                    f'{COMMAND_MODULE}.get_trigger_state',
+                    return_value={
+                        'exists': True,
+                        'tgenabled': 'O',
+                        'enabled': True,
+                        'function_matches': True,
+                        'function_name': 'operations_auditlog_reject_mutation',
+                    },
+                ):
+                    with patch.object(
+                        Command, '_probe_append_only_mutations', return_value=[]
+                    ):
+                        result = command._verify_append_only(
+                            'AuditLog', verbosity=1
+                        )
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('Missing trigger function' in item for item in result.failures)
+        )
+
+    def test_update_unexpectedly_succeeds_fails(self):
+        command = Command()
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.function_exists', return_value=True):
+                with patch(
+                    f'{COMMAND_MODULE}.get_trigger_state',
+                    return_value={
+                        'exists': True,
+                        'tgenabled': 'O',
+                        'enabled': True,
+                        'function_matches': True,
+                        'function_name': 'operations_auditlog_reject_mutation',
+                    },
+                ):
+                    with patch.object(
+                        Command,
+                        '_probe_append_only_mutations',
+                        return_value=[
+                            'Protected mutation unexpectedly succeeds '
+                            '(UPDATE on AuditLog).'
+                        ],
+                    ):
+                        result = command._verify_append_only(
+                            'AuditLog', verbosity=1
+                        )
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('UPDATE' in item for item in result.failures)
+        )
+
+    def test_delete_unexpectedly_succeeds_fails(self):
+        command = Command()
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.function_exists', return_value=True):
+                with patch(
+                    f'{COMMAND_MODULE}.get_trigger_state',
+                    return_value={
+                        'exists': True,
+                        'tgenabled': 'O',
+                        'enabled': True,
+                        'function_matches': True,
+                        'function_name': (
+                            'operations_expenserequestevent_reject_mutation'
+                        ),
+                    },
+                ):
+                    with patch.object(
+                        Command,
+                        '_probe_append_only_mutations',
+                        return_value=[
+                            'Protected mutation unexpectedly succeeds '
+                            '(DELETE on ExpenseRequestEvent).'
+                        ],
+                    ):
+                        result = command._verify_append_only(
+                            'ExpenseRequestEvent', verbosity=1
+                        )
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('DELETE' in item for item in result.failures)
+        )
+
+    def test_missing_critical_constraint_fails(self):
+        command = Command()
+        with self._patched_connection():
+            with patch(
+                f'{COMMAND_MODULE}.constraint_exists',
+                return_value=None,
+            ):
+                with patch(
+                    f'{COMMAND_MODULE}.unique_column_constraint_exists',
+                    return_value=True,
+                ):
+                    result = command._verify_critical_constraints(verbosity=1)
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('Missing critical constraint' in item for item in result.failures)
+        )
+        self.assertGreaterEqual(
+            len(result.failures), len(CRITICAL_CHECK_CONSTRAINTS)
+        )
+
+    def test_unvalidated_critical_constraint_fails(self):
+        command = Command()
+
+        def fake_constraint_exists(*_args, **_kwargs):
+            return {
+                'exists': True,
+                'contype': 'c',
+                'convalidated': False,
+                'type_matches': True,
+            }
+
+        with self._patched_connection():
+            with patch(
+                f'{COMMAND_MODULE}.constraint_exists',
+                side_effect=fake_constraint_exists,
+            ):
+                with patch(
+                    f'{COMMAND_MODULE}.unique_column_constraint_exists',
+                    return_value=True,
+                ):
+                    result = command._verify_critical_constraints(verbosity=1)
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                'Unvalidated critical constraint' in item
+                for item in result.failures
+            )
+        )
+
+    def test_superuser_runtime_role_fails(self):
+        command = Command()
+        role = {
+            'current_user': 'postgres',
+            'session_user': 'postgres',
+            'session_replication_role': 'origin',
+            'is_superuser': True,
+            'has_replication': False,
+            'rolinherit': True,
+        }
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.current_role_info', return_value=role):
+                with patch(
+                    f'{COMMAND_MODULE}.table_owner', return_value='sigedon_owner'
+                ):
+                    with patch(
+                        f'{COMMAND_MODULE}.has_table_privilege',
+                        return_value=True,
+                    ):
+                        result = command._verify_runtime_role(verbosity=1)
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('too privileged' in item for item in result.failures)
+        )
+
+    def test_protected_table_owner_fails(self):
+        command = Command()
+        role = {
+            'current_user': 'sigedon_owner',
+            'session_user': 'sigedon_owner',
+            'session_replication_role': 'origin',
+            'is_superuser': False,
+            'has_replication': False,
+            'rolinherit': True,
+        }
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.current_role_info', return_value=role):
+                with patch(
+                    f'{COMMAND_MODULE}.table_owner', return_value='sigedon_owner'
+                ):
+                    with patch(
+                        f'{COMMAND_MODULE}.has_table_privilege',
+                        return_value=True,
+                    ):
+                        result = command._verify_runtime_role(verbosity=1)
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('owns protected tables' in item for item in result.failures)
+        )
+
+    def test_non_origin_replication_role_fails(self):
+        command = Command()
+        role = {
+            'current_user': 'sigedon_app',
+            'session_user': 'sigedon_app',
+            'session_replication_role': 'replica',
+            'is_superuser': False,
+            'has_replication': False,
+            'rolinherit': True,
         }
 
-        output = self.run_command(mock_connection)
+        def privilege(*_args, **kwargs):
+            if kwargs.get('table') == 'operations_donation':
+                return True
+            return kwargs.get('privilege') in REQUIRED_PRIVILEGES
 
-        self.assertNotIn('super-secret-password', output)
-        self.assertNotIn('db.internal', output)
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.current_role_info', return_value=role):
+                with patch(
+                    f'{COMMAND_MODULE}.table_owner', return_value='sigedon_owner'
+                ):
+                    with patch(
+                        f'{COMMAND_MODULE}.has_table_privilege',
+                        side_effect=privilege,
+                    ):
+                        result = command._verify_runtime_role(verbosity=1)
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('session_replication_role' in item for item in result.failures)
+        )
+
+    def test_excessive_update_privilege_fails(self):
+        command = Command()
+        role = {
+            'current_user': 'sigedon_app',
+            'session_user': 'sigedon_app',
+            'session_replication_role': 'origin',
+            'is_superuser': False,
+            'has_replication': False,
+            'rolinherit': True,
+        }
+        operational_privs = ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+
+        def privilege(*_args, **kwargs):
+            if kwargs.get('table') == 'operations_auditlog':
+                return kwargs.get('privilege') in ('SELECT', 'INSERT', 'UPDATE')
+            return kwargs.get('privilege') in operational_privs
+
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.current_role_info', return_value=role):
+                with patch(
+                    f'{COMMAND_MODULE}.table_owner', return_value='sigedon_owner'
+                ):
+                    with patch(
+                        f'{COMMAND_MODULE}.has_table_privilege',
+                        side_effect=privilege,
+                    ):
+                        result = command._verify_runtime_role(verbosity=1)
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any('excessive UPDATE' in item for item in result.failures)
+        )
+
+    def test_accepted_trigger_states_only_origin(self):
+        self.assertEqual(ACCEPTED_TRIGGER_ENABLED_STATES, frozenset({'O'}))
+
+    def test_privilege_contract_includes_references(self):
+        self.assertIn('REFERENCES', REPORTED_PRIVILEGES)
+        self.assertIn('REFERENCES', DANGEROUS_PRIVILEGES)
+        self.assertEqual(REQUIRED_PRIVILEGES, ('SELECT', 'INSERT'))

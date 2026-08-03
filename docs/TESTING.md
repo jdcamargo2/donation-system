@@ -181,6 +181,26 @@ Los tests de trigger PostgreSQL y concurrencia de códigos `SGS` se omiten de
 forma limpia bajo SQLite (`skipUnless`); deben ejecutarse contra una base
 PostgreSQL desechable para validar la defensa append-only.
 
+### Verificación operativa PostgreSQL (`verify_postgres_security`)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_verify_postgres_security \
+  apps.operations.tests.test_verify_postgres_security_command \
+  --noinput
+```
+
+* Exige PostgreSQL; contra otro motor el comando sale distinto de 0.
+* Debe ejecutarse en despliegue/restore con el rol runtime final; un éxito
+  bajo el propietario no valida la separación de roles.
+* Cubre catálogo (funciones/triggers/`O`), sondas UPDATE/DELETE con rollback,
+  constraints críticos y (en staging) privilegios runtime.
+* En la suite automatizada, la postura de rol runtime suele **mockearse**
+  porque la base de prueba conecta como propietario; la verificación real de
+  grants permanece como requisito de staging.
+* No repara; no sustituye a `verify_restored_data` ni a
+  `reconcile_operational_code_sequences`.
+
 ### Solicitudes de gasto — reservas, cumplimiento y anulación (ER2A–ER2E)
 
 ```bash

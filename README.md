@@ -214,7 +214,14 @@ python manage.py register_kobo_forms
 python manage.py discover_kobo_assets
 python manage.py process_kobo_submissions
 python manage.py reconcile_kobo_submissions
+python manage.py verify_postgres_security
 ```
+
+> [!NOTE]
+> `verify_postgres_security` exige PostgreSQL y las credenciales del rol
+> runtime final. Verifica append-only de `AuditLog`/`ExpenseRequestEvent`,
+> constraints críticos y postura de privilegios; no repara. Obligatorio antes
+> de aceptar tráfico o un restore. Detalle: `deploy/postgresql/README.md`.
 
 > [!WARNING]
 > `seed_sigedon_demo` es exclusivamente local (`DEBUG=True`): usa ORM directo,

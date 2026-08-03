@@ -336,7 +336,9 @@ SIGEDON aplica las siguientes medidas:
 * autenticación de Django;
 * permisos por modelo y acción;
 * separación entre permisos operativos y permisos `kobo.*`;
-* auditoría append-only;
+* auditoría append-only (`AuditLog` y `ExpenseRequestEvent`) con defensa
+  PostgreSQL (triggers) verificable mediante
+  `python manage.py verify_postgres_security` bajo el rol runtime;
 * archivos protegidos;
 * acciones terminales mediante solicitudes `POST`;
 * protección CSRF;
