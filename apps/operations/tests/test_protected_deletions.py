@@ -1,10 +1,12 @@
 from decimal import Decimal
 
+from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
-from apps.operations.models import AuditLog, Expense, FundAllocation
+from apps.operations.admin import DonationAdmin
+from apps.operations.models import AuditLog, Donation, Expense, FundAllocation
 from apps.operations.tests.helpers import (
     create_allocation,
     create_donation,
@@ -119,15 +121,31 @@ class ProtectedDeleteViewTests(TestCase):
         self.client.force_login(self.user)
         self.assertEqual(self.client.post(reverse('institution_delete', args=[999999])).status_code, 404)
 
-    def test_admin_protected_delete_returns_confirmation_instead_of_traceback(self):
+    def test_admin_donation_delete_is_forbidden_and_preserves_record(self):
+        """
+        DonationAdmin is fully read-only, including delete.
+
+        Direct admin delete must return 403 — not a protected-relation confirmation —
+        so financial/audit history cannot be bypassed through Django admin.
+        """
         donation = create_donation(amount=Decimal('100.00'))
         create_allocation(donation=donation, amount=Decimal('20.00'))
         delete_url = reverse('admin:operations_donation_delete', args=[donation.pk])
+        change_url = reverse('admin:operations_donation_change', args=[donation.pk])
+        model_admin = DonationAdmin(Donation, django_admin.site)
+        request = RequestFactory().get(delete_url)
+        request.user = self.user
+
+        self.assertFalse(model_admin.has_delete_permission(request, donation))
+        self.assertNotIn('delete_selected', model_admin.get_actions(request))
 
         get_response = self.client.get(delete_url)
         post_response = self.client.post(delete_url, {'post': 'yes'})
+        change = self.client.get(change_url)
 
-        self.assertEqual(get_response.status_code, 200)
-        self.assertEqual(post_response.status_code, 200)
-        self.assertTrue(type(donation).objects.filter(pk=donation.pk).exists())
-        self.assertNotContains(post_response, 'Traceback')
+        self.assertEqual(get_response.status_code, 403)
+        self.assertEqual(post_response.status_code, 403)
+        self.assertTrue(Donation.objects.filter(pk=donation.pk).exists())
+        self.assertEqual(change.status_code, 200)
+        self.assertContains(change, donation.code)
+        self.assertNotContains(change, 'deletelink')

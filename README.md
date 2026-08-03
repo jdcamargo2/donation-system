@@ -264,7 +264,9 @@ GitHub Actions (`.github/workflows/ci.yml`) es el CI canónico del repositorio.
 * Disparadores: `pull_request`, `push` a `main`, `workflow_dispatch`.
 * Runtime: Python 3.12 + PostgreSQL 16 (`TZ=UTC`); sin fallback a SQLite en jobs de integración.
 * Jobs bloqueantes de merge: static/hygiene, migrate-from-zero + artefactos, suite crítica, suite completa.
+  La suite completa espera **ambos** jobs previos (`postgres-migrations` y `critical-tests`) tras `static`.
 * No despliega, no requiere secretos reales, no ejecuta backup/restore/seed ni llamadas Kobo remotas.
+* No declara producción aprobada; gates de staging/runtime (p. ej. `verify_postgres_security` con rol restringido) permanecen fuera de CI.
 * Reproducción local: `./deploy/ci/run_static_checks.sh`, `./deploy/ci/run_critical_tests.sh` (PostgreSQL), `python manage.py test --noinput`.
 * Detalle: [Pruebas](docs/TESTING.md#18-integración-continua-github-actions) y [Despliegue](docs/DEPLOYMENT.md).
 

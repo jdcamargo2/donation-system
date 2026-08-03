@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.integrations.kobo.client import KoboApiClient
 from apps.integrations.kobo.errors import (
     KoboAttachmentError,
+    KoboAttachmentTooLargeError,
 )
 from apps.integrations.kobo.models import KoboAttachment, KoboSubmission
 
@@ -330,11 +331,14 @@ def download_and_store_attachment(
 
         unlocked = KoboAttachment.objects.get(pk=claim.attachment_id)
         validate_attachment_metadata(unlocked)
-        downloaded = client.download_attachment(claim.source_url)
+        downloaded = client.download_attachment(
+            claim.source_url,
+            max_bytes=max_bytes,
+        )
         if downloaded.content_length is not None and downloaded.content_length > max_bytes:
-            raise KoboAttachmentError("Attachment exceeds the allowed size.")
+            raise KoboAttachmentTooLargeError("Attachment exceeds the allowed size.")
         if len(downloaded.content) > max_bytes:
-            raise KoboAttachmentError("Attachment exceeds the allowed size.")
+            raise KoboAttachmentTooLargeError("Attachment exceeds the allowed size.")
 
         detected_mime = _normalized_mime_type(downloaded.content_type)
         if detected_mime not in ALLOWED_MIME_TYPES:

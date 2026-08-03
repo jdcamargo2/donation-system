@@ -112,8 +112,7 @@ APPEND_ONLY_TARGETS = (
         table=EXPENSEREQUESTEVENT_TABLE,
         function=EXPENSEREQUESTEVENT_FUNCTION,
         trigger=EXPENSEREQUESTEVENT_TRIGGER,
-        # harden_runtime_role.sql currently hardens only operations_auditlog.
-        harden_privileges=False,
+        harden_privileges=True,
     ),
 )
 
@@ -439,25 +438,29 @@ class Command(BaseCommand):
                     'owner-role success is not a valid runtime verification.'
                 )
 
-            # Hardened AuditLog privilege contract.
-            audit = next(t for t in APPEND_ONLY_TARGETS if t.harden_privileges)
+            # Hardened append-only privilege contracts (AuditLog + ExpenseRequestEvent).
             role_name = role['current_user']
-            privileges = {
-                priv: has_table_privilege(
-                    cursor, role=role_name, table=audit.table, privilege=priv
-                )
-                for priv in REPORTED_PRIVILEGES
-            }
-            for priv in REQUIRED_PRIVILEGES:
-                if not privileges.get(priv):
-                    failures.append(
-                        f'Runtime role lacks required {priv} on append-only AuditLog.'
+            for target in APPEND_ONLY_TARGETS:
+                if not target.harden_privileges:
+                    continue
+                privileges = {
+                    priv: has_table_privilege(
+                        cursor, role=role_name, table=target.table, privilege=priv
                     )
-            for priv in DANGEROUS_PRIVILEGES:
-                if privileges.get(priv):
-                    failures.append(
-                        f'Runtime role has excessive {priv} on append-only AuditLog.'
-                    )
+                    for priv in REPORTED_PRIVILEGES
+                }
+                for priv in REQUIRED_PRIVILEGES:
+                    if not privileges.get(priv):
+                        failures.append(
+                            f'Runtime role lacks required {priv} on append-only '
+                            f'{target.label}.'
+                        )
+                for priv in DANGEROUS_PRIVILEGES:
+                    if privileges.get(priv):
+                        failures.append(
+                            f'Runtime role has excessive {priv} on append-only '
+                            f'{target.label}.'
+                        )
 
             # Ordinary operational privileges still required for app runtime.
             for priv in RUNTIME_REQUIRED_TABLE_PRIVILEGES:

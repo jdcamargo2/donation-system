@@ -1002,6 +1002,10 @@ Configurar branch protection manualmente (no vía workflow) con:
 * `CI / Critical PostgreSQL tests`
 * `CI / Full PostgreSQL suite`
 
+Grafo: `static` → (`postgres-migrations` ∥ `critical-tests`) → `full-suite`.
+La suite completa no puede ponerse verde si falla la verificación de
+migraciones/artefactos o la suite crítica.
+
 ### Checks que permanecen fuera de CI (deployment-blocking)
 
 El éxito de CI **no** autoriza producción. Además se requiere, según

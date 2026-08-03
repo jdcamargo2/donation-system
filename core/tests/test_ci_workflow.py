@@ -159,7 +159,11 @@ class CiWorkflowContractTests(SimpleTestCase):
         self.assertNotIn('continue-on-error', job)
         for step in job['steps']:
             self.assertNotIn('continue-on-error', step)
-        self.assertEqual(job['needs'], 'critical-tests')
+        needs = job['needs']
+        if isinstance(needs, str):
+            needs = [needs]
+        self.assertCountEqual(needs, ['postgres-migrations', 'critical-tests'])
+        self.assertNotIn('if', job)
 
     def test_no_sqlite_in_integration_job_database_engine(self):
         for job_id in ('postgres-migrations', 'critical-tests', 'full-suite'):
@@ -223,4 +227,32 @@ class CiWorkflowContractTests(SimpleTestCase):
             self.data['jobs']['postgres-migrations']['needs'], 'static'
         )
         self.assertEqual(self.data['jobs']['critical-tests']['needs'], 'static')
-        self.assertEqual(self.data['jobs']['full-suite']['needs'], 'critical-tests')
+        full_needs = self.data['jobs']['full-suite']['needs']
+        if isinstance(full_needs, str):
+            full_needs = [full_needs]
+        self.assertCountEqual(
+            full_needs, ['postgres-migrations', 'critical-tests']
+        )
+        # Parallel after static; full-suite cannot become green if either fails.
+        for prior in ('postgres-migrations', 'critical-tests'):
+            prior_job = self.data['jobs'][prior]
+            self.assertNotIn('continue-on-error', prior_job)
+            self.assertNotIn('if', prior_job)
+            for step in prior_job.get('steps', []):
+                self.assertNotIn('continue-on-error', step)
+        self.assertNotIn('if', self.data['jobs']['full-suite'])
+
+    def test_merge_blocking_check_names_documented(self):
+        required = (
+            'CI / Static and repository checks',
+            'CI / PostgreSQL migration and artifact verification',
+            'CI / Critical PostgreSQL tests',
+            'CI / Full PostgreSQL suite',
+        )
+        for path in (
+            REPO_ROOT / 'docs' / 'TESTING.md',
+            REPO_ROOT / 'docs' / 'DEPLOYMENT.md',
+        ):
+            text = path.read_text(encoding='utf-8')
+            for name in required:
+                self.assertIn(name, text, msg=f'{path.name}: {name}')

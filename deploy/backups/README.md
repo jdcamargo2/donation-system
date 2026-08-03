@@ -32,6 +32,10 @@ Filesystem conserva `format_version: 1` por compatibilidad; object mode usa
 ```
 
 `media.tar.gz` contiene archivos regulares bajo `MEDIA_ROOT` (rutas relativas).
+Antes de extraer un backup v1, `restore_sigedon.sh` valida cada miembro con
+`validate_media_archive.py` (rechaza rutas absolutas, `..`, symlinks, hard
+links, dispositivos y FIFOs) y extrae con `--no-same-owner` /
+`--no-same-permissions`. No confiar solo en el strip de GNU tar.
 Se omiten `staticfiles` y enlaces simbólicos (incluidos externos).
 
 ### Object storage (`SIGEDON_PRIVATE_STORAGE=r2`) — `format_version: 2`

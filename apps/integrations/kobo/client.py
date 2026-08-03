@@ -12,6 +12,7 @@ from django.conf import settings
 
 from apps.integrations.kobo.errors import (
     KoboAttachmentError,
+    KoboAttachmentTooLargeError,
     KoboAuthenticationError,
     KoboAuthorizationError,
     KoboConfigurationError,
@@ -55,6 +56,7 @@ class KoboRemoteAsset:
 
 
 KOBO_MAX_ASSET_PAGES = 100
+ATTACHMENT_READ_CHUNK_BYTES = 64 * 1024
 SAFE_ASSET_METADATA_FIELDS = (
     "uid",
     "name",
@@ -75,6 +77,7 @@ class _HttpTransport(Protocol):
         headers: dict[str, str],
         params: dict[str, int],
         timeout: float,
+        max_bytes: int | None = None,
     ) -> _HttpResponse: ...
 
 
@@ -85,6 +88,47 @@ class _NoRedirectHandler(request.HTTPRedirectHandler):
         return None
 
 
+def _parse_content_length(value: str | None) -> int | None:
+    # PRE: value is an optional HTTP Content-Length header.
+    # POST: returns a non-negative integer or None for absent/invalid metadata.
+    if value is None:
+        return None
+    try:
+        parsed_value = int(value)
+    except ValueError:
+        return None
+    return parsed_value if parsed_value >= 0 else None
+
+
+def _read_bounded_body(response_fp, *, max_bytes: int | None, content_length: int | None) -> bytes:
+    """
+    PRE: response_fp supports read(size); max_bytes is None (unlimited) or positive.
+    POST: returns the body, or raises KoboAttachmentTooLargeError without retaining
+          more than max_bytes + one chunk. Declared Content-Length over the cap
+          rejects before reading body bytes.
+    """
+    if max_bytes is not None:
+        if max_bytes <= 0:
+            raise KoboAttachmentError("Attachment size limit is invalid.")
+        if content_length is not None and content_length > max_bytes:
+            raise KoboAttachmentTooLargeError("Attachment exceeds the allowed size.")
+
+    if max_bytes is None:
+        return response_fp.read()
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = response_fp.read(ATTACHMENT_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise KoboAttachmentTooLargeError("Attachment exceeds the allowed size.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 class _UrllibTransport:
     def get(
         self,
@@ -93,9 +137,11 @@ class _UrllibTransport:
         headers: dict[str, str],
         params: dict[str, int],
         timeout: float,
+        max_bytes: int | None = None,
     ) -> _HttpResponse:
         # PRE: url, headers, params and timeout describe a valid GET request.
-        # POST: returns status and body for HTTP responses; network errors propagate.
+        # POST: returns status and body for HTTP responses; size failures are
+        #       permanent; network errors propagate; response is always closed.
         query = parse.urlencode(params)
         request_url = url
         if query:
@@ -109,33 +155,40 @@ class _UrllibTransport:
         try:
             opener = request.build_opener(_NoRedirectHandler())
             with opener.open(http_request, timeout=timeout) as response:
+                content_length = _parse_content_length(
+                    response.headers.get("Content-Length")
+                )
+                body = _read_bounded_body(
+                    response,
+                    max_bytes=max_bytes,
+                    content_length=content_length,
+                )
                 return _HttpResponse(
                     response.status,
-                    response.read(),
+                    body,
                     response.headers.get("Content-Type", ""),
-                    _parse_content_length(response.headers.get("Content-Length")),
+                    content_length,
                     dict(response.headers.items()),
                 )
         except error.HTTPError as exc:
-            return _HttpResponse(
-                exc.code,
-                exc.read(),
-                exc.headers.get("Content-Type", ""),
-                _parse_content_length(exc.headers.get("Content-Length")),
-                dict(exc.headers.items()),
-            )
-
-
-def _parse_content_length(value: str | None) -> int | None:
-    # PRE: value is an optional HTTP Content-Length header.
-    # POST: returns a non-negative integer or None for absent/invalid metadata.
-    if value is None:
-        return None
-    try:
-        parsed_value = int(value)
-    except ValueError:
-        return None
-    return parsed_value if parsed_value >= 0 else None
+            try:
+                content_length = _parse_content_length(
+                    exc.headers.get("Content-Length")
+                )
+                body = _read_bounded_body(
+                    exc,
+                    max_bytes=max_bytes,
+                    content_length=content_length,
+                )
+                return _HttpResponse(
+                    exc.code,
+                    body,
+                    exc.headers.get("Content-Type", ""),
+                    content_length,
+                    dict(exc.headers.items()),
+                )
+            finally:
+                exc.close()
 
 
 class KoboApiClient:
@@ -286,15 +339,19 @@ class KoboApiClient:
             "version": version.strip() if isinstance(version, str) else None,
         }
 
-    def download_attachment(self, url: str) -> DownloadedContent:
+    def download_attachment(self, url: str, *, max_bytes: int) -> DownloadedContent:
         """
-        PRE: url is non-empty HTTPS on the configured Kobo host; timeout and
-        token were validated by construction.
+        PRE: url is non-empty HTTPS on the configured Kobo host; max_bytes is
+        positive; timeout and token were validated by construction.
         POST: returns attachment bytes without persistence, redirects to external
-        hosts, or credential disclosure; failures use Kobo exceptions.
+        hosts, or credential disclosure; enforces max_bytes during transport
+        read; size failures are permanent (not retried); failures use Kobo
+        exceptions.
         """
         if not url or not url.strip():
             raise KoboAttachmentError("Attachment URL is required.")
+        if max_bytes <= 0:
+            raise KoboAttachmentError("Attachment size limit is invalid.")
         attachment_url = parse.urlsplit(url)
         base_url = parse.urlsplit(self._base_url)
         if attachment_url.scheme.lower() != "https":
@@ -302,9 +359,13 @@ class KoboApiClient:
         if not attachment_url.hostname or attachment_url.hostname != base_url.hostname:
             raise KoboAttachmentError("Attachment URL host is not allowed.")
 
-        response = self._request(url, params={})
+        response = self._request(url, params={}, max_bytes=max_bytes)
         if not response.body:
             raise KoboAttachmentError("Kobo attachment body is empty.")
+        if response.content_length is not None and response.content_length > max_bytes:
+            raise KoboAttachmentTooLargeError("Attachment exceeds the allowed size.")
+        if len(response.body) > max_bytes:
+            raise KoboAttachmentTooLargeError("Attachment exceeds the allowed size.")
         return DownloadedContent(
             content=response.body,
             content_type=getattr(response, "content_type", ""),
@@ -317,13 +378,27 @@ class KoboApiClient:
         response = self._request(url, params=params)
         return self._decode_payload(response.body)
 
-    def _request(self, url: str, *, params: dict[str, int]) -> _HttpResponse:
+    def _request(
+        self,
+        url: str,
+        *,
+        params: dict[str, int],
+        max_bytes: int | None = None,
+    ) -> _HttpResponse:
         """PRE: URL is Kobo-controlled. POST: returns success or a typed, secret-free error."""
         for attempt in range(1, self._max_attempts + 1):
             response = None
             try:
-                response = self._transport.get(url, headers={"Authorization": f"Token {self._api_token}"}, params=params, timeout=self._timeout_seconds)
+                response = self._transport.get(
+                    url,
+                    headers={"Authorization": f"Token {self._api_token}"},
+                    params=params,
+                    timeout=self._timeout_seconds,
+                    max_bytes=max_bytes,
+                )
                 failure = self._status_error(response.status_code)
+            except KoboAttachmentTooLargeError:
+                raise
             except (TimeoutError, socket.timeout):
                 failure = KoboTimeoutError("Kobo request timed out.")
             except (OSError, error.URLError):

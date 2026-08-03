@@ -106,9 +106,14 @@ del payload. Una revisión de una submission aprobada, importada o rechazada nun
 sobrescribe staging ni materialización: queda privada, marcada como pendiente y
 requiere inspección técnica posterior en el hub. Solo una ejecución completa avanza el cursor;
 una ejecución parcial conserva el cursor anterior y libera su lease.
-* `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
-* `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900).
-* `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging.
+* `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos
+  (1–104857600). El cliente descarga en streaming con tope duro; un cuerpo
+  demasiado grande falla de forma permanente (sin reintento).
+* Los ajustes numéricos Kobo se validan al arranque con rangos estrictos
+  (ver `.env.example`); valores fuera de rango o no finitos fallan el startup
+  sin eco del valor fuente.
+* `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900; rango 1–86400).
+* `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging (1–10485760).
 
 ## Sincronización remota segura
 

@@ -10,8 +10,8 @@ class StubAttachmentClient:
         self.calls = []
         self.in_atomic_flags = []
 
-    def download_attachment(self, url):
-        # PRE: a pending attachment supplies its source URL.
+    def download_attachment(self, url, *, max_bytes=None):
+        # PRE: a pending attachment supplies its source URL and size cap.
         # POST: records the URL and returns or raises the next configured outcome.
         self.calls.append(url)
         self.in_atomic_flags.append(connection.in_atomic_block)
@@ -46,10 +46,18 @@ class SequenceTransport:
         self.outcomes = list(outcomes)
         self.calls = []
 
-    def get(self, url, *, headers, params, timeout):
+    def get(self, url, *, headers, params, timeout, max_bytes=None):
         # PRE: one configured response or exception exists for this request.
         # POST: records the request and returns or raises exactly one outcome.
-        self.calls.append({"url": url, "headers": headers, "params": params, "timeout": timeout})
+        self.calls.append(
+            {
+                "url": url,
+                "headers": headers,
+                "params": params,
+                "timeout": timeout,
+                "max_bytes": max_bytes,
+            }
+        )
         if not self.outcomes:
             raise AssertionError("Unexpected Kobo transport request.")
         outcome = self.outcomes.pop(0)

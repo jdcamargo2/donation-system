@@ -1,6 +1,7 @@
 """Unit tests for verify_postgres_security (mocked connection / helpers)."""
 
 from io import StringIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.core.management import call_command
@@ -450,6 +451,8 @@ class VerifyPostgresSecurityFailureClassificationTests(SimpleTestCase):
         def privilege(*_args, **kwargs):
             if kwargs.get('table') == 'operations_auditlog':
                 return kwargs.get('privilege') in ('SELECT', 'INSERT', 'UPDATE')
+            if kwargs.get('table') == 'operations_expenserequestevent':
+                return kwargs.get('privilege') in REQUIRED_PRIVILEGES
             return kwargs.get('privilege') in operational_privs
 
         with self._patched_connection():
@@ -466,6 +469,113 @@ class VerifyPostgresSecurityFailureClassificationTests(SimpleTestCase):
         self.assertTrue(
             any('excessive UPDATE' in item for item in result.failures)
         )
+
+    def test_expense_request_event_privilege_contract_included(self):
+        from apps.operations.management.commands.verify_postgres_security import (
+            APPEND_ONLY_TARGETS,
+        )
+
+        target = next(
+            item for item in APPEND_ONLY_TARGETS if item.label == 'ExpenseRequestEvent'
+        )
+        self.assertTrue(target.harden_privileges)
+        sql = (
+            Path(__file__).resolve().parents[3]
+            / 'deploy'
+            / 'postgresql'
+            / 'harden_runtime_role.sql'
+        ).read_text(encoding='utf-8')
+        self.assertIn('operations_expenserequestevent', sql)
+        self.assertIn('operations_auditlog', sql)
+
+    def test_excessive_delete_truncate_trigger_on_expense_event_fail(self):
+        command = Command()
+        role = {
+            'current_user': 'sigedon_app',
+            'session_user': 'sigedon_app',
+            'session_replication_role': 'origin',
+            'is_superuser': False,
+            'has_replication': False,
+            'rolinherit': True,
+        }
+        operational_privs = ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+
+        for dangerous in ('DELETE', 'TRUNCATE', 'TRIGGER', 'UPDATE'):
+            with self.subTest(dangerous=dangerous):
+
+                dangerous_priv = dangerous
+
+                def privilege(*_args, **kwargs):
+                    table = kwargs.get('table')
+                    priv = kwargs.get('privilege')
+                    if table == 'operations_auditlog':
+                        return priv in REQUIRED_PRIVILEGES
+                    if table == 'operations_expenserequestevent':
+                        return priv in (*REQUIRED_PRIVILEGES, dangerous_priv)
+                    return priv in operational_privs
+
+                with self._patched_connection():
+                    with patch(
+                        f'{COMMAND_MODULE}.current_role_info', return_value=role
+                    ):
+                        with patch(
+                            f'{COMMAND_MODULE}.table_owner',
+                            return_value='sigedon_owner',
+                        ):
+                            with patch(
+                                f'{COMMAND_MODULE}.has_table_privilege',
+                                side_effect=privilege,
+                            ):
+                                result = command._verify_runtime_role(verbosity=1)
+                self.assertFalse(result.ok)
+                self.assertTrue(
+                    any(
+                        f'excessive {dangerous}' in item
+                        and 'ExpenseRequestEvent' in item
+                        for item in result.failures
+                    )
+                )
+
+    def test_missing_required_insert_on_expense_event_fails(self):
+        command = Command()
+        role = {
+            'current_user': 'sigedon_app',
+            'session_user': 'sigedon_app',
+            'session_replication_role': 'origin',
+            'is_superuser': False,
+            'has_replication': False,
+            'rolinherit': True,
+        }
+        operational_privs = ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+
+        def privilege(*_args, **kwargs):
+            table = kwargs.get('table')
+            priv = kwargs.get('privilege')
+            if table == 'operations_auditlog':
+                return priv in REQUIRED_PRIVILEGES
+            if table == 'operations_expenserequestevent':
+                return priv == 'SELECT'
+            return priv in operational_privs
+
+        with self._patched_connection():
+            with patch(f'{COMMAND_MODULE}.current_role_info', return_value=role):
+                with patch(
+                    f'{COMMAND_MODULE}.table_owner', return_value='sigedon_owner'
+                ):
+                    with patch(
+                        f'{COMMAND_MODULE}.has_table_privilege',
+                        side_effect=privilege,
+                    ):
+                        result = command._verify_runtime_role(verbosity=1)
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                'lacks required INSERT' in item and 'ExpenseRequestEvent' in item
+                for item in result.failures
+            )
+        )
+        combined = ' '.join(result.failures)
+        self.assertNotIn('sigedon_app', combined)
 
     def test_accepted_trigger_states_only_origin(self):
         self.assertEqual(ACCEPTED_TRIGGER_ENABLED_STATES, frozenset({'O'}))

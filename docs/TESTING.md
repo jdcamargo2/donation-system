@@ -745,6 +745,10 @@ Matrices de compatibilidad adicionales pueden añadirse deliberadamente más ade
 | CI / Critical PostgreSQL tests | suite focalizada de integridad/despliegue |
 | CI / Full PostgreSQL suite | `python manage.py test --noinput` |
 
+Grafo: `static` → (`postgres-migrations` ∥ `critical-tests`) → `full-suite`.
+La suite completa **espera ambos** jobs previos; no hay `continue-on-error` ni
+enmascaramiento de fallos.
+
 CI **no** despliega, **no** ejecuta backup/restore reales, **no** corre `seed_sigedon_demo` y **no** llama a Kobo remoto.
 
 `verify_postgres_security` con éxito de rol runtime permanece como **gate de staging**: el rol propietario de CI no es una verificación runtime válida. Los tests de catálogo/triggers sí corren en CI.

@@ -33,6 +33,7 @@ from .role_services import (
     set_user_functional_role,
 )
 from .selectors import eligible_donation_donors
+from .upload_limits import attach_private_upload_validator
 
 
 SELECT_PLACEHOLDER = _('Seleccione una opción')
@@ -103,9 +104,14 @@ class PrivateClearableFileInput(forms.ClearableFileInput):
 
 
 class MultipleFileField(forms.FileField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        attach_private_upload_validator(self)
+
     def clean(self, data, initial=None):
         # PRE: data contiene cero o más archivos enviados por el navegador.
-        # POST: devuelve una lista cuyos archivos fueron validados individualmente;
+        # POST: devuelve una lista cuyos archivos fueron validados individualmente
+        #       (incluye el tope compartido SIGEDON_MAX_PRIVATE_UPLOAD_BYTES);
         #       si required=True y no hay archivos, propaga el ValidationError de FileField.
         files = data if isinstance(data, (list, tuple)) else [data]
         cleaned = [super(MultipleFileField, self).clean(item, initial) for item in files if item]
@@ -203,6 +209,11 @@ class TerminalActionConfirmationForm(forms.Form):
 
 
 class BootstrapFormMixin:
+    def _attach_private_upload_validators(self):
+        for field in self.fields.values():
+            if isinstance(field, forms.FileField):
+                attach_private_upload_validator(field)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for _field_name, field in self.fields.items():
@@ -227,6 +238,7 @@ class BootstrapFormMixin:
             field.widget.attrs['class'] = ' '.join(current_classes)
             if isinstance(field.widget, forms.Textarea):
                 field.widget.attrs['rows'] = 3
+        self._attach_private_upload_validators()
 
 
 class ProjectUpdateRemediationForm(BootstrapFormMixin, forms.ModelForm):
@@ -286,9 +298,11 @@ class InstitutionForm(BootstrapFormMixin, forms.ModelForm):
         # PrivateClearableFileInput keeps clear controls without storage .url.
         self.fields['legal_document'].widget = PrivateClearableFileInput(
             attrs={
+                'class': 'form-control',
                 'data-file-upload-preview': 'true',
             }
         )
+        attach_private_upload_validator(self.fields['legal_document'])
 
 
 class ProjectForm(BootstrapFormMixin, forms.ModelForm):

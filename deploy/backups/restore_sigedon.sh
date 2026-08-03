@@ -103,6 +103,7 @@ MEDIA_ARCHIVE="${BACKUP_DIR}/media.tar.gz"
 MANIFEST_FILE="${BACKUP_DIR}/manifest.json"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 MANAGE_PY="${REPO_ROOT}/manage.py"
+VALIDATE_MEDIA_ARCHIVE="${SCRIPT_DIR}/validate_media_archive.py"
 
 FORMAT_VERSION="$(
   python3 -c '
@@ -127,6 +128,7 @@ case "${FORMAT_VERSION}" in
   1)
     require_cmd tar
     [[ -f "${MEDIA_ARCHIVE}" ]] || die 3 "falta media.tar.gz"
+    [[ -f "${VALIDATE_MEDIA_ARCHIVE}" ]] || die 3 "falta validate_media_archive.py"
     ;;
   2)
     if [[ "${PRIVATE_MODE}" != "object" ]]; then
@@ -198,8 +200,15 @@ PGPASSWORD="${PGPASSWORD:-}" pg_restore \
   -- "${DUMP_FILE}"
 
 if [[ "${FORMAT_VERSION}" -eq 1 ]]; then
+  log "INFO: validando miembros de media.tar.gz antes de extraer"
+  python3 "${VALIDATE_MEDIA_ARCHIVE}" "${MEDIA_ARCHIVE}" "${RESTORE_MEDIA_ROOT}" \
+    || die 3 "media.tar.gz rechazo por miembros inseguros (path/tipo)"
   log "INFO: restaurando media filesystem en directorio aislado"
-  tar -C "${RESTORE_MEDIA_ROOT}" -xzf "${MEDIA_ARCHIVE}"
+  # Defensive extraction flags; member paths were already validated above.
+  tar -C "${RESTORE_MEDIA_ROOT}" \
+    --no-same-owner \
+    --no-same-permissions \
+    -xzf "${MEDIA_ARCHIVE}"
   CREATED_MEDIA_ROOT=""
   log "OK: restauracion aislada completada (format_version=1 filesystem)"
   log "POST-RESTORE (usar variables del entorno restaurado; no modificar .env de produccion):"

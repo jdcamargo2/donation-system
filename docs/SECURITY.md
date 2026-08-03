@@ -163,7 +163,11 @@ Los documentos operativos privados:
 * verifican permisos canónicos del modelo (no nombres de rol);
 * validan la pertenencia del archivo a la entidad padre solicitada (rutas anidadas);
 * separan explícitamente la información pública de la privada;
-* no se montan vía `static(MEDIA_URL, …)` ni siquiera en `DEBUG`.
+* no se montan vía `static(MEDIA_URL, …)` ni siquiera en `DEBUG`;
+* se limitan por archivo con `SIGEDON_MAX_PRIVATE_UPLOAD_BYTES` (default 10 MiB,
+  rango 1–100 MiB), validado en forms/admin antes del save. Independiente de
+  `KOBO_MAX_ATTACHMENT_BYTES`. El escaneo antimalware es una decisión
+  de infraestructura/política aparte; SIGEDON no lo afirma.
 
 En producción con `SIGEDON_PRIVATE_STORAGE=filesystem` (`DJANGO_DEBUG=False`)
 el directorio de media privada debe ser un volumen persistente explícito

@@ -69,13 +69,18 @@ class Command(BaseCommand):
         default_timezone = timezone.get_current_timezone()
         submission_id = options["submission_id"]
         download_attachments = options["download_attachments"]
+        # Validate fatal option errors before constructing the remote client.
+        if (
+            submission_id is None
+            and download_attachments
+            and options["limit"] <= 0
+        ):
+            raise CommandError("Limit must be positive.")
         client = None
         if download_attachments:
             client = build_kobo_api_client()
         if submission_id is None:
             if download_attachments:
-                if options["limit"] <= 0:
-                    raise CommandError("Limit must be positive.")
                 submissions = list(
                     KoboSubmission.objects.filter(
                         Q(status__in=PROCESSABLE_STATUSES)

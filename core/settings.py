@@ -22,7 +22,12 @@ from core.private_storage import resolve_private_storage_settings
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-load_dotenv(BASE_DIR / '.env')
+# Optional local overrides. Unreadable/missing .env must not block startup
+# (CI and sandboxed worktrees may mount a non-readable placeholder).
+try:
+    load_dotenv(BASE_DIR / '.env')
+except (PermissionError, OSError):
+    pass
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -46,18 +51,54 @@ def env_bool(name, default=False):
     raise ImproperlyConfigured(f'{name} debe ser un valor booleano válido.')
 
 
-def env_int(name, default, *, minimum=0):
+def env_int(name, default, *, minimum=0, maximum=None):
     """
-    PRE: name identifies an optional integer variable and default/minimum are integers.
-    POST: returns an integer at least minimum or raises ImproperlyConfigured safely.
+    PRE: name identifies an optional integer variable; default/minimum/maximum
+         are integers when provided.
+    POST: returns an integer within [minimum, maximum] or raises
+          ImproperlyConfigured without echoing the source value.
     """
     raw_value = os.getenv(name)
     try:
         value = default if raw_value is None or not raw_value.strip() else int(raw_value)
     except ValueError as exc:
-        raise ImproperlyConfigured(f'{name} debe ser un entero válido.') from exc
+        raise ImproperlyConfigured(f'{name} debe ser un entero válido.') from None
     if value < minimum:
-        raise ImproperlyConfigured(f'{name} debe ser mayor o igual a {minimum}.')
+        raise ImproperlyConfigured(
+            f'{name} debe estar entre {minimum} y {maximum}.'
+            if maximum is not None
+            else f'{name} debe ser mayor o igual a {minimum}.'
+        )
+    if maximum is not None and value > maximum:
+        raise ImproperlyConfigured(
+            f'{name} debe estar entre {minimum} y {maximum}.'
+        )
+    return value
+
+
+def env_float(name, default, *, minimum, maximum):
+    """
+    PRE: name identifies an optional float variable; bounds are finite floats.
+    POST: returns a finite float within [minimum, maximum] or raises
+          ImproperlyConfigured without echoing the source value.
+    """
+    raw_value = os.getenv(name)
+    try:
+        value = (
+            float(default)
+            if raw_value is None or not raw_value.strip()
+            else float(raw_value)
+        )
+    except (TypeError, ValueError):
+        raise ImproperlyConfigured(f'{name} debe ser un número válido.') from None
+    if value != value or value in (float('inf'), float('-inf')):
+        raise ImproperlyConfigured(
+            f'{name} debe estar entre {minimum} y {maximum}.'
+        )
+    if value < minimum or value > maximum:
+        raise ImproperlyConfigured(
+            f'{name} debe estar entre {minimum} y {maximum}.'
+        )
     return value
 
 
@@ -132,27 +173,66 @@ KOBO_ENABLED = os.getenv("KOBO_ENABLED", "False").strip().lower() in {
     "on",
 }
 
-KOBO_HTTP_CONNECT_TIMEOUT = float(os.getenv("KOBO_HTTP_CONNECT_TIMEOUT", "5"))
-KOBO_HTTP_READ_TIMEOUT = float(os.getenv("KOBO_HTTP_READ_TIMEOUT", "15"))
-KOBO_HTTP_MAX_ATTEMPTS = int(os.getenv("KOBO_HTTP_MAX_ATTEMPTS", "3"))
-KOBO_HTTP_RETRY_BASE_DELAY = float(os.getenv("KOBO_HTTP_RETRY_BASE_DELAY", "0.5"))
-KOBO_HTTP_RETRY_MAX_DELAY = float(os.getenv("KOBO_HTTP_RETRY_MAX_DELAY", "8"))
-KOBO_HTTP_RETRY_AFTER_MAX_DELAY = float(
-    os.getenv("KOBO_HTTP_RETRY_AFTER_MAX_DELAY", "60")
+KOBO_HTTP_CONNECT_TIMEOUT = env_float(
+    "KOBO_HTTP_CONNECT_TIMEOUT", 5, minimum=0.1, maximum=60
 )
-KOBO_HTTP_MAX_PAGES = int(os.getenv("KOBO_HTTP_MAX_PAGES", "100"))
-KOBO_SYNC_OVERLAP_SECONDS = int(os.getenv("KOBO_SYNC_OVERLAP_SECONDS", "300"))
-KOBO_SYNC_LEASE_SECONDS = int(os.getenv("KOBO_SYNC_LEASE_SECONDS", "900"))
+KOBO_HTTP_READ_TIMEOUT = env_float(
+    "KOBO_HTTP_READ_TIMEOUT", 15, minimum=0.1, maximum=300
+)
+KOBO_HTTP_MAX_ATTEMPTS = env_int(
+    "KOBO_HTTP_MAX_ATTEMPTS", 3, minimum=1, maximum=10
+)
+KOBO_HTTP_RETRY_BASE_DELAY = env_float(
+    "KOBO_HTTP_RETRY_BASE_DELAY", 0.5, minimum=0, maximum=30
+)
+KOBO_HTTP_RETRY_MAX_DELAY = env_float(
+    "KOBO_HTTP_RETRY_MAX_DELAY", 8, minimum=0.1, maximum=300
+)
+KOBO_HTTP_RETRY_AFTER_MAX_DELAY = env_float(
+    "KOBO_HTTP_RETRY_AFTER_MAX_DELAY", 60, minimum=0.1, maximum=900
+)
+if KOBO_HTTP_RETRY_MAX_DELAY < KOBO_HTTP_RETRY_BASE_DELAY:
+    raise ImproperlyConfigured(
+        'KOBO_HTTP_RETRY_MAX_DELAY debe ser mayor o igual a '
+        'KOBO_HTTP_RETRY_BASE_DELAY.'
+    )
+KOBO_HTTP_MAX_PAGES = env_int(
+    "KOBO_HTTP_MAX_PAGES", 100, minimum=1, maximum=1000
+)
+KOBO_SYNC_OVERLAP_SECONDS = env_int(
+    "KOBO_SYNC_OVERLAP_SECONDS", 300, minimum=0, maximum=86400
+)
+KOBO_SYNC_LEASE_SECONDS = env_int(
+    "KOBO_SYNC_LEASE_SECONDS", 900, minimum=1, maximum=86400
+)
 
-KOBO_MAX_ATTACHMENT_BYTES = int(
-    os.getenv("KOBO_MAX_ATTACHMENT_BYTES", "10485760")
+KOBO_MAX_ATTACHMENT_BYTES = env_int(
+    "KOBO_MAX_ATTACHMENT_BYTES", 10485760, minimum=1, maximum=104857600
 )
-KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS = int(
-    os.getenv("KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS", "900")
+KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS = env_int(
+    "KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS",
+    900,
+    minimum=1,
+    maximum=86400,
 )
-KOBO_WEBHOOK_MAX_BYTES = int(
-    os.getenv("KOBO_WEBHOOK_MAX_BYTES", "1048576")
+KOBO_WEBHOOK_MAX_BYTES = env_int(
+    "KOBO_WEBHOOK_MAX_BYTES", 1048576, minimum=1, maximum=10485760
 )
+
+# Operational private uploads (forms/admin). Independent of Kobo attachment policy.
+SIGEDON_MAX_PRIVATE_UPLOAD_BYTES = env_int(
+    'SIGEDON_MAX_PRIVATE_UPLOAD_BYTES',
+    10485760,
+    minimum=1,
+    maximum=104857600,
+)
+# Coarse request-body ceiling: up to 20 files at the per-file cap plus form fields.
+_PRIVATE_UPLOAD_REQUEST_FILE_BUDGET = 20
+DATA_UPLOAD_MAX_MEMORY_SIZE = (
+    SIGEDON_MAX_PRIVATE_UPLOAD_BYTES * _PRIVATE_UPLOAD_REQUEST_FILE_BUDGET
+    + 2_097_152
+)
+FILE_UPLOAD_MAX_MEMORY_SIZE = SIGEDON_MAX_PRIVATE_UPLOAD_BYTES
 
 # Application definition
 

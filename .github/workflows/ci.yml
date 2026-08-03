@@ -222,7 +222,9 @@ jobs:
 
   full-suite:
     name: Full PostgreSQL suite
-    needs: critical-tests
+    needs:
+      - postgres-migrations
+      - critical-tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:

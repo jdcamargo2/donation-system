@@ -533,9 +533,12 @@ python manage.py sync_sigedon_roles
 ```
 
 `verify_postgres_security` exige PostgreSQL, comprueba append-only de
-`AuditLog` y `ExpenseRequestEvent`, constraints críticos y postura del rol
-runtime; las sondas hacen rollback y no reparan. Fallar el restore si este
-comando no sale 0: restaurar filas no basta si faltan triggers o grants.
+`AuditLog` y `ExpenseRequestEvent` (triggers + privilegios runtime
+`SELECT`/`INSERT` sobre ambas tablas tras `harden_runtime_role.sql`),
+constraints críticos y postura del rol runtime; las sondas hacen rollback y
+no reparan. Fallar el restore si este comando no sale 0: restaurar filas no
+basta si faltan triggers o grants. El éxito bajo el rol propietario de CI no
+valida la separación; la verificación runtime real es gate de staging.
 `verify_restored_data` es complementario (conteos, archivos, secuencias
 observables), no un reemplazo.
 

@@ -549,14 +549,45 @@ class ExpenseRequestFulfillmentUITests(TestCase):
         self.assertContains(response, 'Ver solicitudes de gasto')
         self.assertContains(response, reverse('expense_request_list'))
 
-    def test_dashboard_retires_crear_gasto(self):
+    def test_dashboard_retires_direct_expense_create_and_keeps_scoped_queues(self):
+        """
+        Direct Expense creation CTAs stay retired on the dashboard.
+
+        Expense Request navigation lives in the permission-gated sidebar and in
+        scoped queue cards — not as the expense-list CTA "Ver solicitudes de gasto".
+        Administrators see the fulfillment queue (not committee decision).
+        """
+        approved = self._approve()
         self.client.force_login(self.admin)
         response = self.client.get(reverse('dashboard'))
+        self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'Crear gasto')
         self.assertNotContains(response, reverse('expense_create'))
-        self.assertContains(response, 'Ver solicitudes de gasto')
+        self.assertNotContains(response, 'Ver solicitudes de gasto')
+        self.assertContains(response, 'title="Solicitudes de gasto"')
+        self.assertContains(response, reverse('expense_request_list'))
+        self.assertContains(response, 'Solicitudes que requieren atención')
         self.assertContains(response, 'Aprobadas pendientes de registrar gasto')
-        self.assertContains(response, 'status=approved_reserved')
+        self.assertContains(response, approved.code)
+        self.assertNotContains(response, 'Solicitudes pendientes de decisión')
+        fulfillment = next(
+            queue
+            for queue in response.context['expense_request_queues']
+            if queue['key'] == 'fulfillment'
+        )
+        self.assertIn('status=approved_reserved', fulfillment['list_url'])
+
+        expense_list = self.client.get(reverse('expense_list'))
+        self.assertContains(expense_list, 'Ver solicitudes de gasto')
+        self.assertContains(expense_list, reverse('expense_request_list'))
+
+        self.client.force_login(self.auditor)
+        auditor_dashboard = self.client.get(reverse('dashboard'))
+        self.assertNotContains(auditor_dashboard, 'Aprobadas pendientes de registrar gasto')
+        self.assertNotContains(auditor_dashboard, 'Crear gasto')
+        self.assertNotContains(auditor_dashboard, reverse('expense_create'))
+        self.assertContains(auditor_dashboard, 'title="Solicitudes de gasto"')
+        self.assertContains(auditor_dashboard, reverse('expense_request_list'))
 
     def test_allocation_detail_points_to_request_creation(self):
         self.client.force_login(self.admin)

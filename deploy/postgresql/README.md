@@ -6,7 +6,8 @@ Plantilla de endurecimiento del rol runtime y contrato de verificación.
 
 * `harden_runtime_role.sql` — plantilla comentada para crear/ajustar
   `sigedon_owner` (migraciones) y `sigedon_app` (runtime), y limitar
-  privilegios de `sigedon_app` sobre `operations_auditlog` a `SELECT`/`INSERT`.
+  privilegios de `sigedon_app` sobre `operations_auditlog` y
+  `operations_expenserequestevent` a `SELECT`/`INSERT`.
 
 ## Orden operativo
 
@@ -42,8 +43,8 @@ al rol runtime.
 
 ## Alcance de grants
 
-La plantilla actual endurece privilegios SQL de mutación sobre
-`operations_auditlog`. `operations_expenserequestevent` queda protegida por el
-trigger de la migración `0029`; el endurecimiento adicional de grants sobre
-esa tabla es responsabilidad de infraestructura si se decide alinear el SQL
-con el mismo contrato append-only.
+La plantilla endurece privilegios SQL de mutación sobre
+`operations_auditlog` y `operations_expenserequestevent` (append-only:
+`SELECT`/`INSERT`; sin `UPDATE`/`DELETE`/`TRUNCATE`/`TRIGGER`).
+La verificación exitosa con el **rol runtime** restringido permanece como
+gate de staging; el éxito bajo el rol propietario de CI no la sustituye.

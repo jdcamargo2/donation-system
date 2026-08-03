@@ -24,6 +24,19 @@ from .services import (
     ensure_operational_entity_is_editable,
 )
 from .project_update_responsibles import eligible_project_update_reporters, validate_project_update_reporter
+from .upload_limits import attach_private_upload_validator
+
+
+def _configure_private_file_formfield(formfield):
+    """
+    PRE: formfield is a Django FileField form field for private operational media.
+    POST: applies PrivateClearableFileInput and the shared upload size validator.
+    """
+    from .forms import PrivateClearableFileInput
+
+    formfield.widget = PrivateClearableFileInput()
+    attach_private_upload_validator(formfield)
+    return formfield
 
 
 def _is_canonical_sigedon_group(group):
@@ -249,9 +262,7 @@ class InstitutionAdmin(admin.ModelAdmin):
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
         if db_field.name == 'legal_document' and formfield is not None:
-            from .forms import PrivateClearableFileInput
-
-            formfield.widget = PrivateClearableFileInput()
+            return _configure_private_file_formfield(formfield)
         return formfield
 
 
@@ -437,9 +448,7 @@ class ProjectDocumentAdmin(admin.ModelAdmin):
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
         if db_field.name == 'file' and formfield is not None:
-            from .forms import PrivateClearableFileInput
-
-            formfield.widget = PrivateClearableFileInput()
+            return _configure_private_file_formfield(formfield)
         return formfield
 
 
@@ -451,9 +460,7 @@ class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
         if db_field.name == 'file' and formfield is not None:
-            from .forms import PrivateClearableFileInput
-
-            formfield.widget = PrivateClearableFileInput()
+            return _configure_private_file_formfield(formfield)
         return formfield
 
     def save_model(self, request, obj, form, change):
@@ -518,9 +525,7 @@ class ProjectUpdateRemediationAttachmentAdmin(admin.ModelAdmin):
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
         if db_field.name == 'file' and formfield is not None:
-            from .forms import PrivateClearableFileInput
-
-            formfield.widget = PrivateClearableFileInput()
+            return _configure_private_file_formfield(formfield)
         return formfield
 
     def has_add_permission(self, request):
