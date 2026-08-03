@@ -172,6 +172,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'core.request_ids.RequestIdMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -289,10 +290,36 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
+#
+# Production (DEBUG=False): WhiteNoise serves collected files from STATIC_ROOT
+# via CompressedManifestStaticFilesStorage (hashed + gzip). Private media is
+# never served by WhiteNoise. Development keeps plain StaticFilesStorage so
+# `{% static %}` works without a prior collectstatic.
+# Object storage for private media is deferred (RENDER-2); no persistent disk is
+# required for static assets on Render (collectstatic during build).
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+STORAGES = {
+    'default': {
+        # Private operational media: filesystem FileField storage (unchanged).
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': (
+            'whitenoise.storage.CompressedManifestStaticFilesStorage'
+            if not DEBUG
+            else 'django.contrib.staticfiles.storage.StaticFilesStorage'
+        ),
+    },
+}
+
+# Production-safe WhiteNoise defaults. Do not enable finders/autorefresh in
+# production; collected STATIC_ROOT is the only static source at runtime.
+WHITENOISE_USE_FINDERS = False
+WHITENOISE_AUTOREFRESH = False
 
 MEDIA_URL = 'media/'
 # Private operational media uses Django's default filesystem storage.

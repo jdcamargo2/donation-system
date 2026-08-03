@@ -651,13 +651,16 @@ Gunicorn no es necesario para el resto de la suite unitaria. Detalle operativo:
 
 ### Resiliencia de estáticos UI (sin CDN)
 
-Pruebas focalizadas: `core.tests.test_static_resilience` y
-`web.tests.test_base_template`.
+Pruebas focalizadas: `core.tests.test_static_resilience`,
+`core.tests.test_whitenoise_static` y `web.tests.test_base_template`.
 
 Cubren resolución por static finders de Bootstrap / Bootstrap Icons /
 SweetAlert2 vendorizados, ausencia de CDN en plantillas base, alineación con
-sentinelas de `verify_deployment_assets` y versiones en
-`static/vendor/THIRD_PARTY_ASSETS.md`.
+sentinelas de `verify_deployment_assets`, contrato WhiteNoise (middleware,
+`CompressedManifestStaticFilesStorage`, collectstatic+manifest, separación
+de media privada) y versiones en `static/vendor/THIRD_PARTY_ASSETS.md`.
+CI ejercita `collectstatic` + `verify_deployment_assets` bajo
+`core.ci_settings` (STATIC_ROOT temporal + storage de manifest).
 ### Sondas HTTP (`/healthz/` y `/readyz/`)
 
 Pruebas focalizadas: `core.tests.test_health_endpoints`.

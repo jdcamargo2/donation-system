@@ -157,9 +157,17 @@ La capa de presentación no debe contener reglas financieras críticas ni lógic
 
 Los activos UI del panel interno (Bootstrap 5.3.3, Bootstrap Icons 1.11.3,
 SweetAlert2 11.26.25) se sirven desde `static/vendor/` mediante el contrato
-estático de Django (`{% static %}` + `collectstatic`). El portal público usa
-su propio CSS y no depende de ese stack. Inventario y licencias:
+estático de Django (`{% static %}` + `collectstatic`). En producción,
+**WhiteNoise** sirve `STATIC_ROOT` con storage de manifest comprimido; Gunicorn
+sigue siendo el proceso WSGI canónico (`./deploy/start_web.sh`). El portal
+público usa su propio CSS y no depende de ese stack vendor. Media privada
+permanece fuera de WhiteNoise (filesystem / futuro R2 en RENDER-2). Inventario
+y licencias:
 [`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
+
+Despliegue inicial previsto: runtime Python nativo en Render (sin Docker en
+este checkpoint). Build = dependencias + `collectstatic`; start = Gunicorn;
+migraciones = pre-deploy/release (RENDER-3).
 
 ### 3.2. Dominio
 

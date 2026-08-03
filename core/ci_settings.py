@@ -1,7 +1,9 @@
 """CI-only Django settings: isolate STATIC_ROOT to a runner temp directory.
 
 PRE: SIGEDON_CI_STATIC_ROOT is set to an absolute writable temp path.
-POST: imports the production settings module and overrides STATIC_ROOT only.
+POST: imports the production settings module, overrides STATIC_ROOT, and forces
+      WhiteNoise CompressedManifestStaticFilesStorage so CI artifact gates
+      exercise the production static contract regardless of DJANGO_DEBUG.
 Do not use this module in production or staging runtimes.
 """
 
@@ -25,3 +27,19 @@ if not os.path.isabs(_raw):
     )
 
 STATIC_ROOT = Path(_raw)
+
+# Always exercise production WhiteNoise manifest storage in CI collectstatic /
+# verify_deployment_assets gates (independent of DJANGO_DEBUG inherited above).
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': (
+            'whitenoise.storage.CompressedManifestStaticFilesStorage'
+        ),
+    },
+}
+
+WHITENOISE_USE_FINDERS = False
+WHITENOISE_AUTOREFRESH = False

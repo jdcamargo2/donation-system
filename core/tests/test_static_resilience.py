@@ -95,7 +95,18 @@ class StaticResilienceFinderTests(SimpleTestCase):
             self.assertGreater(font.stat().st_size, 0)
 
     def test_vendor_assets_have_no_unresolved_sourcemap(self):
-        for logical in (BOOTSTRAP_CSS, BOOTSTRAP_JS, ICONS_CSS, SWAL_CSS, SWAL_JS):
+        checked = (
+            BOOTSTRAP_CSS,
+            BOOTSTRAP_JS,
+            ICONS_CSS,
+            SWAL_CSS,
+            SWAL_JS,
+            'vendor/autonumeric/autoNumeric.min.js',
+            'vendor/flatpickr/flatpickr.min.js',
+            'vendor/flatpickr/flatpickr.min.css',
+            'vendor/htmx/htmx.min.js',
+        )
+        for logical in checked:
             with self.subTest(logical=logical):
                 text = _finder_path(logical).read_text(encoding='utf-8', errors='replace')
                 self.assertNotIn('sourceMappingURL', text)

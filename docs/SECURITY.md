@@ -241,18 +241,25 @@ pendiente de adjuntos de remediación (`ProjectUpdateRemediationAttachmentForm.f
 
 Los CSS/JS/fuentes del panel (incluidos Bootstrap, Bootstrap Icons y
 SweetAlert2 vendorizados) son activos públicos bajo `STATIC_ROOT` tras
-`collectstatic`: no contienen secretos. La media operativa privada permanece
-en `MEDIA_ROOT` / `SIGEDON_MEDIA_ROOT` y solo se expone por endpoints
-autorizados. Vendorizar elimina la dependencia de disponibilidad/DNS de CDN
-públicos para esas librerías; no sustituye el monitoreo de avisos de seguridad
-ni implica integridad automática frente a compromiso de la cadena de suministro
-en el momento de obtener el artefacto. Actualizar vendor debe ser deliberado,
-versionado, probado y documentado en
+`collectstatic`: no contienen secretos. En producción los sirve
+**WhiteNoise** (`WhiteNoiseMiddleware` inmediatamente después de
+`SecurityMiddleware`) con
+`CompressedManifestStaticFilesStorage` (nombres hashed, gzip, caché
+immutable en assets versionados). La media operativa privada permanece en
+`MEDIA_ROOT` / `SIGEDON_MEDIA_ROOT` y solo se expone por endpoints
+autorizados; WhiteNoise no la sirve y no existe ruta
+`static(MEDIA_URL, …)` en producción. Vendorizar elimina la dependencia de
+disponibilidad/DNS de CDN públicos para esas librerías; no sustituye el
+monitoreo de avisos de seguridad ni implica integridad automática frente a
+compromiso de la cadena de suministro en el momento de obtener el artefacto.
+Actualizar vendor debe ser deliberado, versionado, probado (`collectstatic`
++ `verify_deployment_assets` + tests) y documentado en
 [`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
 Para assets same-origin del repositorio, la integridad del despliegue y del
 control de cambios sustituye SRI de CDN; CSP debe permitir CSS/JS/fuentes
 same-origin según la política vigente (los scripts inline existentes ya
-condicionan CSP).
+condicionan CSP). Un CDN/proxy de borde no debe cachear HTML autenticado ni
+media privada.
 
 ## 7. Seguridad de KoboToolbox
 

@@ -9,11 +9,42 @@ El entorno de producción requiere:
 * Python 3.12;
 * PostgreSQL;
 * Gunicorn sirviendo `core.wsgi:application` (contrato WSGI canónico);
+* WhiteNoise sirviendo estáticos recopilados desde `STATIC_ROOT` (sin Nginx
+  dedicado ni disco persistente para estáticos);
 * un proxy inverso con HTTPS;
-* almacenamiento persistente para archivos;
+* almacenamiento persistente para **media privada** (no para estáticos);
 * variables de entorno seguras;
 * acceso controlado a logs y respaldos;
 * un mecanismo de supervisión y reinicio del proceso de aplicación.
+
+### Destino inicial en Render (runtime Python nativo)
+
+El despliegue inicial en Render usa el **runtime Python nativo** (sin Docker
+en este checkpoint). La arquitectura canónica se conserva:
+
+```text
+Render build
+  → instalar dependencias
+  → collectstatic
+
+Render pre-deploy (RENDER-3; no forma parte de build/start)
+  → migraciones / release de esquema
+
+Render web process
+  → ./deploy/start_web.sh
+  → Gunicorn (deploy/gunicorn.conf.py)
+  → Django
+  → WhiteNoise sirve STATIC_ROOT
+
+Media privada
+  → filesystem actual (SIGEDON_MEDIA_ROOT)
+  → Cloudflare R2 diferido a RENDER-2
+```
+
+WhiteNoise **no** sirve media privada. No se requiere disco persistente para
+archivos estáticos: `collectstatic` en el build deja los artefactos en el
+filesystem del deploy. R2, `django-storages` y `boto3` no forman parte de
+este checkpoint.
 
 ## 2. Variables obligatorias
 
@@ -114,11 +145,43 @@ pasos de **release**, no del proceso web.
 ### 5.1. Instalar dependencias
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 `requirements.txt` incluye Gunicorn (`gunicorn==23.0.0`) como servidor WSGI
-de producción. No se declara Uvicorn/Daphne ni workers async/gevent.
+de producción y WhiteNoise (`whitenoise==6.12.0`) para servir estáticos
+recopilados. No se declara Uvicorn/Daphne, workers async/gevent,
+`django-storages` ni `boto3`.
+
+#### Build canónico en Render (sin migraciones)
+
+El build de plataforma **solo** instala dependencias y recopila estáticos.
+No ejecuta migraciones, seeds, sync de roles, backup/restore, Gunicorn ni
+`verify_postgres_security`.
+
+```bash
+python -m pip install -r requirements.txt
+python manage.py collectstatic --noinput
+```
+
+No actualizar `pip` de forma no acotada en el build salvo política explícita
+del repositorio. `collectstatic` usa
+`whitenoise.storage.CompressedManifestStaticFilesStorage` cuando
+`DJANGO_DEBUG=False` (y siempre bajo `core.ci_settings` en CI). Fallar el
+build si faltan referencias estáticas es intencional (manifest estricto).
+
+#### Start canónico (sin collectstatic ni migrate)
+
+```bash
+./deploy/start_web.sh
+```
+
+Equivale a `gunicorn core.wsgi:application --config deploy/gunicorn.conf.py`.
+Bind `0.0.0.0` y puerto desde `PORT`. No ejecuta migraciones ni
+`collectstatic`.
+
+Las migraciones pertenecen a la fase **pre-deploy/release** (detalle en
+RENDER-3), no al build ni al start.
 
 ### 5.2. Secuencia de release (mutaciones controladas)
 
@@ -177,14 +240,26 @@ Variables opcionales de preflight:
 ### 5.3. Prerrequisitos de media y estáticos
 
 * Montar el volumen persistente y exportar `SIGEDON_MEDIA_ROOT` **antes** del
-  preflight (`check --deploy` valida existencia/permisos).
+  preflight (`check --deploy` valida existencia/permisos). En el despliegue
+  inicial en Render, la media privada sigue el contrato filesystem actual;
+  R2 se define en RENDER-2.
 * `collectstatic` debe haber poblado `STATIC_ROOT` (por defecto
   `<BASE_DIR>/staticfiles`) con sentinelas locales: CSS de aplicación,
   logos ILDE y vendor UI (Bootstrap 5.3.3, Bootstrap Icons 1.11.3,
-  SweetAlert2 11.26.25). El comando `verify_deployment_assets` lo comprueba
-  sin mutar archivos. El panel interno no requiere CDN públicos en runtime
-  para estas dependencias; inventario y licencias en
+  SweetAlert2 11.26.25). En producción, WhiteNoise sirve esos artefactos
+  con nombres hashed (`CompressedManifestStaticFilesStorage`) y compresión
+  gzip; no se necesita disco persistente ni Nginx para estáticos.
+* El comando `verify_deployment_assets` comprueba rutas **lógicas** vía
+  staticfiles storage (compatible con manifest) sin mutar archivos. Es
+  puerta de release/preflight tras `collectstatic`.
+* El panel interno no requiere CDN públicos en runtime para estas
+  dependencias; inventario y licencias en
   [`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
+* La plataforma/CDN de borde **no** debe cachear HTML autenticado ni media
+  privada. WhiteNoise aplica caché immutable a assets hashed; las
+  respuestas HTML de la aplicación no las cachea WhiteNoise.
+* Actualizaciones futuras de vendor siguen exigiendo `collectstatic` +
+  tests/preflight.
 
 ### Orden recomendado
 

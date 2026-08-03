@@ -33,4 +33,5 @@ urlpatterns = [
 
 # Private operational media is never mounted via static() — not even in DEBUG.
 # Access files only through authenticated protected preview/download endpoints.
-# Public STATIC assets continue to be served by Django's staticfiles app in DEBUG.
+# Public STATIC assets: Django staticfiles in DEBUG; WhiteNoise from STATIC_ROOT
+# in production (see core.settings STORAGES / WhiteNoiseMiddleware).

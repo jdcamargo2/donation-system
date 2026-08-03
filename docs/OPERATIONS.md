@@ -383,23 +383,28 @@ Estos directorios no deben versionarse.
 
 ### Reglas de operación
 
-* `staticfiles/` contiene archivos estáticos recopilados.
+* `staticfiles/` contiene archivos estáticos recopilados (`collectstatic`).
+  En producción los sirve **WhiteNoise** desde `STATIC_ROOT` (manifest
+  hashed + gzip). No se requiere disco persistente para estáticos en el
+  runtime Python nativo de Render.
 * `MEDIA_ROOT` (`media/` por defecto en desarrollo; en producción
   `SIGEDON_MEDIA_ROOT` absoluto a volumen persistente) almacena archivos
   operativos privados (documentos, evidencias, soportes, adjuntos Kobo).
-* Los archivos privados **nunca** se montan con `static(MEDIA_URL, document_root=MEDIA_ROOT)`,
-  ni siquiera con `DEBUG=True`.
+* WhiteNoise **no** sirve media privada. Los archivos privados **nunca** se
+  montan con `static(MEDIA_URL, document_root=MEDIA_ROOT)`, ni siquiera con
+  `DEBUG=True`.
 * El acceso en desarrollo y producción ocurre solo mediante endpoints protegidos
   de preview/download autenticados (`apps/operations/file_access.py`).
 * Producción exige `SIGEDON_MEDIA_ROOT` fuera del repositorio; el despliegue
   monta el volumen antes del arranque y `check --deploy` verifica
   existencia/permisos. Django no crea el directorio de producción.
-* Tras `collectstatic` en el release, `./deploy/preflight.sh` (vía
-  `verify_deployment_assets`) exige sentinelas bajo `STATIC_ROOT`, incluidos
-  Bootstrap / Bootstrap Icons / SweetAlert2 vendorizados. El proceso web
-  (Gunicorn) no ejecuta `collectstatic`. Media privada sigue separada de
-  estáticos. Ver [DEPLOYMENT.md](DEPLOYMENT.md#5-preparación-del-despliegue)
-  y [`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
+  Cloudflare R2 queda diferido a RENDER-2.
+* Tras `collectstatic` en el build/release, `./deploy/preflight.sh` (vía
+  `verify_deployment_assets`) exige sentinelas lógicos bajo el storage de
+  staticfiles, incluidos Bootstrap / Bootstrap Icons / SweetAlert2
+  vendorizados. El proceso web (Gunicorn) no ejecuta `collectstatic`.
+* Un CDN/proxy de borde no debe cachear HTML autenticado ni media privada;
+  solo los assets hashed públicos son candidatos a caché larga.
 * Los respaldos de archivos deben tratarse como información sensible y usar el
   mismo `SIGEDON_MEDIA_ROOT` que Django.
 * Debe verificarse el espacio disponible y la política de retención.

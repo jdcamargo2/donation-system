@@ -19,8 +19,9 @@ template reference `sweetalert2@11` at the time of vendoring.
 Official npm distributables (`bootstrap@5.3.3`, `bootstrap-icons@1.11.3`,
 `sweetalert2@11.26.25`). Only minified runtime files and upstream license
 notices are committed. Source maps are not committed; trailing
-`sourceMappingURL` comments were removed from minified CSS/JS to avoid browser
-404s.
+`sourceMappingURL` comments were removed from minified CSS/JS (including
+`vendor/autonumeric/autoNumeric.min.js`) so Manifest/WhiteNoise collectstatic
+does not fail on missing `.map` files and browsers do not request 404 maps.
 
 ## Already-local vendors (unchanged)
 

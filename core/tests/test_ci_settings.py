@@ -18,7 +18,13 @@ CI_SETTINGS_PROBE = """
 import json
 from pathlib import Path
 from core import ci_settings
-print(json.dumps({'static_root': str(ci_settings.STATIC_ROOT)}))
+print(json.dumps({
+    'static_root': str(ci_settings.STATIC_ROOT),
+    'static_backend': ci_settings.STORAGES['staticfiles']['BACKEND'],
+    'default_backend': ci_settings.STORAGES['default']['BACKEND'],
+    'use_finders': ci_settings.WHITENOISE_USE_FINDERS,
+    'autorefresh': ci_settings.WHITENOISE_AUTOREFRESH,
+}))
 """
 
 
@@ -70,3 +76,20 @@ class CiSettingsTests(SimpleTestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(result.stdout)
             self.assertEqual(payload['static_root'], static_root)
+
+    def test_forces_whitenoise_compressed_manifest_storage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            static_root = str(Path(tmp) / 'collected')
+            result = self._run({'SIGEDON_CI_STATIC_ROOT': static_root})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(
+                payload['static_backend'],
+                'whitenoise.storage.CompressedManifestStaticFilesStorage',
+            )
+            self.assertEqual(
+                payload['default_backend'],
+                'django.core.files.storage.FileSystemStorage',
+            )
+            self.assertFalse(payload['use_finders'])
+            self.assertFalse(payload['autorefresh'])

@@ -1,10 +1,12 @@
 """
 Verify collected static deployment assets under settings.STATIC_ROOT.
 
-PRE: collectstatic has already run during the release phase when the deployment
-     serves files from STATIC_ROOT (proxy or local).
-POST: exits 0 when STATIC_ROOT exists and required sentinel assets are present
-      and non-empty; otherwise raises CommandError. Never collects or mutates files.
+PRE: collectstatic has already run during the release/build phase when the
+     deployment serves files from STATIC_ROOT (WhiteNoise or equivalent).
+POST: exits 0 when STATIC_ROOT exists and required sentinel assets resolve
+      through Django's staticfiles storage (including hashed manifest names)
+      and are non-empty; otherwise raises CommandError. Never collects or
+      mutates files. Error messages report logical paths only.
 """
 
 from __future__ import annotations
@@ -12,11 +14,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from django.conf import settings
+from django.contrib.staticfiles.storage import staticfiles_storage
 from django.core.management.base import BaseCommand, CommandError
 
 
 # Application CSS, ILDE brand logos, and vendored core UI libraries expected
-# after collectstatic. Paths are relative to STATIC_ROOT / static finders.
+# after collectstatic. Paths are logical static names (not hashed filenames).
 REQUIRED_RELATIVE_ASSETS = (
     'web/css/sigedon.css',
     'web/img/logo_ilde.png',
@@ -31,17 +34,55 @@ REQUIRED_RELATIVE_ASSETS = (
 )
 
 
+def resolve_collected_name(logical: str) -> str | None:
+    """
+    PRE: logical is a staticfiles logical path; collectstatic already ran
+         (or tests planted collected sentinels under STATIC_ROOT).
+    POST: returns the storage name to open (hashed when using manifest storage)
+          or None when the asset cannot be resolved.
+    """
+    # Django 6 FileSystemStorage/StaticFilesStorage has no stored_name;
+    # Manifest/WhiteNoise hashed backends do (HashedFilesMixin).
+    stored_name = getattr(staticfiles_storage, 'stored_name', None)
+    if callable(stored_name):
+        try:
+            name = stored_name(logical)
+        except ValueError:
+            name = None
+        else:
+            if staticfiles_storage.exists(name):
+                return name
+            if name != logical and staticfiles_storage.exists(logical):
+                return logical
+    # Plain storage, or unhashed sentinels under STATIC_ROOT (tests / non-hash).
+    if staticfiles_storage.exists(logical):
+        return logical
+    return None
+
+
+def asset_is_nonempty(storage_name: str) -> bool:
+    """
+    PRE: storage_name resolves under the active staticfiles storage.
+    POST: True when at least one byte can be read.
+    """
+    with staticfiles_storage.open(storage_name, 'rb') as handle:
+        return bool(handle.read(1))
+
+
 class Command(BaseCommand):
     help = (
         'Verifica que STATIC_ROOT exista y contenga activos locales canónicos '
         'tras collectstatic (CSS de aplicación, logos ILDE y vendor UI: '
-        'Bootstrap, Bootstrap Icons, SweetAlert2). No ejecuta collectstatic.'
+        'Bootstrap, Bootstrap Icons, SweetAlert2). Resuelve rutas lógicas vía '
+        'staticfiles storage (compatible con manifest hashed). '
+        'No ejecuta collectstatic.'
     )
 
     def handle(self, *args, **options):
         """
-        PRE: Django settings expose STATIC_ROOT.
-        POST: succeeds when the directory and sentinel files exist; else CommandError.
+        PRE: Django settings expose STATIC_ROOT and staticfiles storage.
+        POST: succeeds when the directory and sentinel assets resolve; else
+              CommandError with logical paths only (no absolute filesystem leaks).
         """
         static_root = Path(settings.STATIC_ROOT)
         if not static_root.exists():
@@ -55,12 +96,15 @@ class Command(BaseCommand):
         missing: list[str] = []
         empty: list[str] = []
         for relative in REQUIRED_RELATIVE_ASSETS:
-            path = static_root / relative
-            if not path.is_file():
+            resolved = resolve_collected_name(relative)
+            if resolved is None:
                 missing.append(relative)
                 continue
-            if path.stat().st_size <= 0:
-                empty.append(relative)
+            try:
+                if not asset_is_nonempty(resolved):
+                    empty.append(relative)
+            except (OSError, ValueError, FileNotFoundError):
+                missing.append(relative)
 
         if missing or empty:
             parts: list[str] = []

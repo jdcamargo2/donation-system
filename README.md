@@ -41,6 +41,8 @@ debe actualizarse cuando el total cambie de forma estable.
 * Django 6.0.6
 * PostgreSQL mediante Psycopg 3
 * Gunicorn (WSGI) como servidor de aplicación en producción
+* WhiteNoise para servir estáticos recopilados en producción (`STATIC_ROOT`;
+  sin Nginx dedicado ni disco persistente para estáticos)
 * Logging de runtime a stdout/stderr con correlación `X-Request-ID` (sin SaaS)
 * Sondas de liveness/readiness: `/healthz/` y `/readyz/` (sin auth; ver
   [Despliegue §6.3](docs/DEPLOYMENT.md#63-sondas-http-healthz-y-readyz))
@@ -54,6 +56,7 @@ debe actualizarse cuando el total cambie de forma estable.
 * `django-countries`
 * `python-dotenv`
 * HTML, CSS y JavaScript sin proceso de compilación con Node.js
+* Despliegue inicial: runtime Python nativo en Render (sin Docker); R2 diferido
 
 ## Módulos implementados
 

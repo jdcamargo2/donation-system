@@ -115,11 +115,26 @@ class CiWorkflowContractTests(SimpleTestCase):
             'collectstatic',
             'verify_deployment_assets',
             'reconcile_operational_code_sequences',
+            'core.ci_settings',
+            'SIGEDON_CI_STATIC_ROOT',
         ):
             self.assertIn(needle, script)
         # Owner-role verify_postgres_security is intentionally not a CI gate.
         self.assertNotIn('verify_postgres_security\n', script)
         self.assertNotIn('manage.py verify_postgres_security', script)
+        # WhiteNoise is a runtime dependency; CI collectstatic uses ci_settings
+        # which forces CompressedManifestStaticFilesStorage.
+        requirements = (REPO_ROOT / 'requirements.txt').read_text(encoding='utf-8')
+        self.assertIn('whitenoise==', requirements)
+        ci_settings = (REPO_ROOT / 'core' / 'ci_settings.py').read_text(
+            encoding='utf-8'
+        )
+        self.assertIn(
+            'whitenoise.storage.CompressedManifestStaticFilesStorage',
+            ci_settings,
+        )
+        self.assertNotIn('django-storages', requirements)
+        self.assertNotIn('boto3', requirements)
 
     def test_critical_and_full_suite_jobs_exist(self):
         self.assertIn('critical-tests', self.data['jobs'])
