@@ -1,9 +1,12 @@
 # Runbook: Cloudflare R2 (media privada)
 
-Preparación RENDER-2: el soporte R2 está **implementado en código**. No hay
+Preparación RENDER-2/3: el soporte R2 está **implementado en código**. No hay
 cuenta Cloudflare, bucket ni credenciales provisionadas todavía. No se ha
-completado una prueba real de conectividad. El default operativo sigue siendo
-`SIGEDON_PRIVATE_STORAGE=filesystem`. Activar R2 es una tarea de
+completado una prueba real de conectividad. El default de desarrollo local
+sigue siendo `SIGEDON_PRIVATE_STORAGE=filesystem`. En el **destino Render
+final**, filesystem no es un modo aceptado para documentos productivos: R2
+solo se activa tras la puerta documentada en
+[RENDER_FIRST_DEPLOY.md](RENDER_FIRST_DEPLOY.md). Activar R2 es
 **configuración** (cuenta, bucket, secretos, verificaciones), no otro rewrite.
 
 ## Estado actual vs futuro
@@ -11,10 +14,12 @@ completado una prueba real de conectividad. El default operativo sigue siendo
 | Estado | Realidad |
 | --- | --- |
 | Código | `core.private_storage`, `django-storages` / `boto3`, checks, comandos |
-| Default | `SIGEDON_PRIVATE_STORAGE=filesystem` |
+| Default local | `SIGEDON_PRIVATE_STORAGE=filesystem` |
+| Render final | `r2` tras probe + aceptación (verificador rechaza filesystem) |
 | Cuenta / bucket / token | **No** provisionados |
 | `verify_private_storage --probe` real | **No** ejecutado contra Cloudflare |
 | Archivos productivos en R2 | Ninguno |
+| Staging / go-no-go | **No** ejecutados |
 
 ### Pasos futuros de provisionamiento (orden)
 

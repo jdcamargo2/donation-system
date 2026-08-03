@@ -56,10 +56,11 @@ debe actualizarse cuando el total cambie de forma estable.
 * `django-countries`
 * `python-dotenv`
 * HTML, CSS y JavaScript sin proceso de compilación con Node.js
-* Despliegue inicial: runtime Python nativo en Render (sin Docker). Media
-  privada: filesystem por defecto; R2 implementado en código, pendiente de
-  provisionar cuenta/bucket/credenciales (ver
-  [runbook R2](docs/runbooks/CLOUDFLARE_R2.md))
+* Despliegue inicial: runtime Python nativo en Render (sin Docker). Scripts y
+  runbooks RENDER-3 preparados (`deploy/render/`,
+  [primer deploy](docs/runbooks/RENDER_FIRST_DEPLOY.md)); **ningún** servicio
+  Render/Cloudflare/R2/dominio provisionado aún. Media privada final en Render:
+  R2 tras probe real (ver [runbook R2](docs/runbooks/CLOUDFLARE_R2.md))
 
 ## Módulos implementados
 
@@ -225,6 +226,7 @@ python manage.py reconcile_kobo_submissions
 python manage.py verify_postgres_security
 python manage.py verify_private_storage
 python manage.py verify_private_storage --probe   # staging/release con infra real
+python manage.py verify_render_configuration      # contrato Render (sin red)
 python manage.py migrate_private_media            # migración filesystem → storage destino
 python manage.py export_private_objects           # export portable de objetos privados
 ```
@@ -290,6 +292,10 @@ git diff --check
 * [Pruebas](docs/TESTING.md)
 * [Portal público](docs/PUBLIC_PORTAL.md)
 * [Despliegue](docs/DEPLOYMENT.md)
+* [Primer deploy Render](docs/runbooks/RENDER_FIRST_DEPLOY.md)
+* [Registro de entorno Render](docs/runbooks/RENDER_ENVIRONMENT.md)
+* [Aceptación staging](docs/runbooks/STAGING_ACCEPTANCE.md)
+* [Go/no-go producción](docs/runbooks/PRODUCTION_GO_NO_GO.md)
 * [Runbook Cloudflare R2](docs/runbooks/CLOUDFLARE_R2.md)
 * [Decisiones técnicas](docs/DECISIONS.md)
 * [Instrucciones para agentes](docs/AGENTS.md)

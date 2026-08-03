@@ -165,16 +165,19 @@ estático de Django (`{% static %}` + `collectstatic`). En producción,
 **WhiteNoise** sirve `STATIC_ROOT` con storage de manifest comprimido; Gunicorn
 sigue siendo el proceso WSGI canónico (`./deploy/start_web.sh`). El portal
 público usa su propio CSS y no depende de ese stack vendor. Media privada
-permanece fuera de WhiteNoise (`SIGEDON_PRIVATE_STORAGE=filesystem` por
-defecto; R2 opcional cuando se provisionen cuenta/bucket/secretos — ver
-[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md)). Inventario
+permanece fuera de WhiteNoise. En el destino Render final, la media privada
+aceptada es R2 tras probe real; filesystem no es modo final en Render (ver
+[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md) y
+[RENDER_FIRST_DEPLOY.md](runbooks/RENDER_FIRST_DEPLOY.md)). Inventario
 y licencias:
 [`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
 
-Despliegue inicial previsto: runtime Python nativo en Render (sin Docker en
-este checkpoint). Build = dependencias + `collectstatic`; start = Gunicorn;
-migraciones = pre-deploy/release (RENDER-3). El soporte R2 está en código;
-activar R2 es configuración, no otro rewrite.
+Despliegue inicial previsto: runtime Python nativo en Render (sin Docker).
+Contrato RENDER-3 preparado (`./deploy/render/build.sh`,
+`./deploy/render/pre_deploy.sh`, `./deploy/start_web.sh`, health `/readyz/`);
+**ningún** servicio provisionado aún. Build = collectstatic + asset verify;
+migraciones = pre-deploy/one-off owner; start = Gunicorn existente. Activar R2
+es configuración + verificación, no otro rewrite.
 
 ### 3.2. Dominio
 

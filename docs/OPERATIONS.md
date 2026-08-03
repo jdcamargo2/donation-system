@@ -399,11 +399,16 @@ Estos directorios no deben versionarse.
 * Producción en modo filesystem exige `SIGEDON_MEDIA_ROOT` fuera del
   repositorio; el despliegue monta el volumen antes del arranque y
   `check --deploy` verifica existencia/permisos.
-* **R2 (preparación):** el código acepta `SIGEDON_PRIVATE_STORAGE=r2` con
+* **R2 / Render:** el código acepta `SIGEDON_PRIVATE_STORAGE=r2` con
   secretos `R2_*`. Aún no hay cuenta/bucket/credenciales provisionadas ni
-  sonda real de conectividad. Activarlo es configuración +
-  `verify_private_storage` / `--probe`, no un rewrite. Runbook:
-  [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+  sonda real de conectividad. En Render, filesystem **no** es el modo final
+  aceptado para documentos productivos. Activarlo es configuración +
+  `verify_private_storage` / `--probe` + aceptación staging. Runbooks:
+  [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md),
+  [RENDER_FIRST_DEPLOY.md](runbooks/RENDER_FIRST_DEPLOY.md).
+* Los ejemplos systemd/cron de `deploy/backups/examples/` **no** se asumen
+  dentro de un Web Service Render; programar backup con Cron Job / scheduler
+  externo y copiar el artefacto off-host (disco efímero ≠ respaldo durable).
 * Tras `collectstatic` en el build/release, `./deploy/preflight.sh` (vía
   `verify_deployment_assets`) exige sentinelas lógicos bajo el storage de
   staticfiles, incluidos Bootstrap / Bootstrap Icons / SweetAlert2

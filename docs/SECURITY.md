@@ -181,8 +181,12 @@ stream o de emitir URL firmada. Las URL firmadas son de corta vida
 URL no expirada puede usarla hasta el expiry; **nunca** registrarlas en
 logs. WhiteNoise permanece solo para estáticos; staticfiles no usan R2.
 `/readyz/` no llama a R2. Estado actual: sin cuenta/bucket/credenciales
-provisionadas y sin sonda real de conectividad. Runbook:
-[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+provisionadas y sin sonda real de conectividad. En Render, el modo final
+aceptado para documentos productivos es R2 tras la puerta de activación
+documentada en [RENDER_FIRST_DEPLOY.md](runbooks/RENDER_FIRST_DEPLOY.md).
+Runbook R2: [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+Contrato de entorno: [RENDER_ENVIRONMENT.md](runbooks/RENDER_ENVIRONMENT.md).
+Go/no-go: [PRODUCTION_GO_NO_GO.md](runbooks/PRODUCTION_GO_NO_GO.md).
 
 No debe utilizarse directamente:
 

@@ -19,36 +19,34 @@ El entorno de producción requiere:
 
 ### Destino inicial en Render (runtime Python nativo)
 
-El despliegue inicial en Render usa el **runtime Python nativo** (sin Docker
-en este checkpoint). La arquitectura canónica se conserva:
+El despliegue inicial en Render usa el **runtime Python nativo** (sin Docker).
+Scripts y runbooks RENDER-3 están **preparados**; **no** hay Web Service,
+PostgreSQL, bucket R2, dominio ni credenciales reales provisionados. No se ha
+ejecutado staging ni go/no-go de producción.
 
 ```text
-Render build
-  → instalar dependencias
-  → collectstatic
+./deploy/render/build.sh
+  → (Render ya instaló requirements.txt en runtime nativo)
+  → collectstatic + verify_deployment_assets
+  → private storage de build: filesystem temporal (sin secretos R2)
 
-Render pre-deploy (RENDER-3; no forma parte de build/start)
-  → migraciones / release de esquema
+./deploy/render/pre_deploy.sh   # owner/migrator; preferir one-off shell
+  → check --deploy → migrate → sync_sigedon_roles → reconcile → preflight
 
-Render web process
-  → ./deploy/start_web.sh
-  → Gunicorn (deploy/gunicorn.conf.py)
-  → Django
-  → WhiteNoise sirve STATIC_ROOT
+./deploy/start_web.sh
+  → Gunicorn (deploy/gunicorn.conf.py) + WhiteNoise
+  → Health check de plataforma: /readyz/
 
-Media privada
-  → default local: filesystem (SIGEDON_PRIVATE_STORAGE=filesystem,
-    SIGEDON_MEDIA_ROOT)
-  → R2 opcional (código listo; cuenta/bucket/credenciales aún no
-    provisionados; sin prueba real de conectividad)
+./deploy/render/post_deploy_verify.sh   # credenciales runtime
+  → verify_postgres_security + verify_render_configuration (+ probe opcional)
 ```
 
-WhiteNoise **no** sirve media privada. No se requiere disco persistente para
-archivos estáticos: `collectstatic` en el build deja los artefactos en el
-filesystem del deploy. El soporte R2 (`django-storages` / `boto3`) está
-implementado en código; activarlo es una tarea de **configuración** (cuenta
-Cloudflare, bucket privado, secretos en Render), no un rewrite. Estado actual
-y runbook: [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+Media privada **final** aceptada en Render: `SIGEDON_PRIVATE_STORAGE=r2` tras
+probe y aceptación. Filesystem no es modo final en Render. Detalle:
+[RENDER_FIRST_DEPLOY.md](runbooks/RENDER_FIRST_DEPLOY.md),
+[RENDER_ENVIRONMENT.md](runbooks/RENDER_ENVIRONMENT.md),
+[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md),
+[deploy/render/README.md](../deploy/render/README.md).
 
 ## 2. Variables obligatorias
 
@@ -161,20 +159,26 @@ La presencia de esas dependencias **no** activa R2: el default sigue siendo
 
 #### Build canónico en Render (sin migraciones)
 
-El build de plataforma **solo** instala dependencias y recopila estáticos.
+```bash
+./deploy/render/build.sh
+```
+
+Render nativo instala `requirements.txt` **antes** del Build Command. El
+script vuelve a instalar solo si `SIGEDON_RENDER_INSTALL_DEPS=YES` (harness
+local). Ejecuta `pip check`, `collectstatic --noinput` y
+`verify_deployment_assets`. Fuerza storage de build en filesystem temporal.
 No ejecuta migraciones, seeds, sync de roles, backup/restore, Gunicorn ni
 `verify_postgres_security`.
 
+#### Pre-deploy / release (owner)
+
 ```bash
-python -m pip install -r requirements.txt
-python manage.py collectstatic --noinput
+./deploy/render/pre_deploy.sh
 ```
 
-No actualizar `pip` de forma no acotada en el build salvo política explícita
-del repositorio. `collectstatic` usa
-`whitenoise.storage.CompressedManifestStaticFilesStorage` cuando
-`DJANGO_DEBUG=False` (y siempre bajo `core.ci_settings` en CI). Fallar el
-build si faltan referencias estáticas es intencional (manifest estricto).
+Preferir one-off con credenciales owner; no dejar secretos migrator en el
+Web Service si la plataforma no puede acotarlos por proceso. No incluye
+`verify_postgres_security` ni `--probe` de R2.
 
 #### Start canónico (sin collectstatic ni migrate)
 
@@ -183,34 +187,39 @@ build si faltan referencias estáticas es intencional (manifest estricto).
 ```
 
 Equivale a `gunicorn core.wsgi:application --config deploy/gunicorn.conf.py`.
-Bind `0.0.0.0` y puerto desde `PORT`. No ejecuta migraciones ni
-`collectstatic`.
-
-Las migraciones pertenecen a la fase **pre-deploy/release** (detalle en
-RENDER-3), no al build ni al start.
+Bind `0.0.0.0` y puerto desde `PORT`. Health check de Render: `/readyz/`.
 
 ### 5.2. Secuencia de release (mutaciones controladas)
 
-Ejecutar **una vez por despliegue**, con las credenciales apropiadas
-(`sigedon_owner` para migraciones; runtime `sigedon_app` donde corresponda).
-Los workers de Gunicorn **nunca** ejecutan estos pasos.
+En Render, preferir el wrapper canónico (owner credentials):
+
+```bash
+./deploy/render/pre_deploy.sh
+```
+
+Orden equivalente (Gunicorn **nunca** ejecuta estos pasos; `collectstatic`
+pertenece al **build**):
 
 ```bash
 python manage.py check --deploy
 python manage.py makemigrations --check --dry-run
 python manage.py migrate --plan
-python manage.py migrate
-python manage.py collectstatic --noinput
+python manage.py migrate --noinput
+python manage.py migrate --check
 python manage.py sync_sigedon_roles
-python manage.py verify_postgres_security
 python manage.py reconcile_operational_code_sequences
 ./deploy/preflight.sh
+# Tras cambiar a credenciales runtime:
+python manage.py verify_postgres_security
+python manage.py verify_render_configuration
+# Opcional explícito: verify_private_storage --probe
 ```
 
 Notas:
 
 * `migrate` corre una vez bajo el propietario del esquema;
-* `collectstatic` debe completarse antes de reemplazar el proceso web;
+* `collectstatic` corre en **build** (`./deploy/render/build.sh`), no en
+  pre-deploy ni en Gunicorn;
 * `sync_sigedon_roles` corre una vez por release;
 * `verify_postgres_security` **debe** ejecutarse con el rol runtime final
   (`sigedon_app`); un éxito bajo `sigedon_owner`/superusuario no valida el
@@ -218,7 +227,12 @@ Notas:
   append-only de `AuditLog` y `ExpenseRequestEvent` (catálogo + sondas con
   rollback), constraints financieros críticos y privilegios runtime sobre
   `operations_auditlog`. No repara nada; el fallo bloquea tráfico.
-  `preflight.sh` no lo invoca (sigue siendo solo lectura de release);
+  `preflight.sh` y `pre_deploy.sh` no lo invocan; usar
+  `./deploy/render/post_deploy_verify.sh`;
+* `verify_render_configuration` valida el contrato Render sin red;
+* Aceptación staging / go-no-go:
+  [STAGING_ACCEPTANCE.md](runbooks/STAGING_ACCEPTANCE.md),
+  [PRODUCTION_GO_NO_GO.md](runbooks/PRODUCTION_GO_NO_GO.md);
 * `reconcile_operational_code_sequences` es **detect-only** (solo lectura):
   falla ante secuencias ausentes/atrasadas/inválidas y no repara automáticamente;
 * `./deploy/preflight.sh` es la puerta de readiness **de release** (estática)
@@ -556,12 +570,13 @@ Solo debe contener archivos autorizados para exposición directa.
   (`filesystem` | `r2`); cambiar de ubicación **no** debilita la autorización;
 * deben incluirse en la estrategia de respaldo.
 
-**Estado actual (RENDER-2 preparación):** el código soporta R2; el default
-operativo sigue siendo `SIGEDON_PRIVATE_STORAGE=filesystem`. No hay cuenta
-Cloudflare, bucket ni credenciales provisionadas; no se ha completado una
-prueba real de conectividad. Provisionar R2 es configuración + secretos +
-verificaciones, no otro rewrite. Runbook:
-[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+**Estado actual (RENDER-3 preparación):** scripts/runbooks Render listos; el
+código soporta R2. Default local: `SIGEDON_PRIVATE_STORAGE=filesystem`. Destino
+Render final: R2 tras probe. No hay cuenta Cloudflare, bucket ni credenciales
+provisionadas; no se ha completado una prueba real de conectividad ni staging.
+Provisionar R2/Render es configuración + secretos + verificaciones, no otro
+rewrite. Runbooks: [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md),
+[RENDER_FIRST_DEPLOY.md](runbooks/RENDER_FIRST_DEPLOY.md).
 
 Variables (sin valores reales):
 
@@ -998,7 +1013,13 @@ El éxito de CI **no** autoriza producción. Además se requiere, según
 * readiness de staging;
 * configuración de plataforma (proxy, volúmenes, secretos);
 * si se activa R2: secretos `R2_*`, `verify_private_storage` y
-  `verify_private_storage --probe` en staging (no en `/readyz/`).
+  `verify_private_storage --probe` en staging (no en `/readyz/`);
+* `verify_render_configuration`;
+* [STAGING_ACCEPTANCE.md](runbooks/STAGING_ACCEPTANCE.md) y
+  [PRODUCTION_GO_NO_GO.md](runbooks/PRODUCTION_GO_NO_GO.md).
 
 `collectstatic` + `verify_deployment_assets` sí se ejercitan en CI sobre un
 `STATIC_ROOT` temporal (`core.ci_settings` + `SIGEDON_CI_STATIC_ROOT`).
+Los tests de contrato Render viven en
+`core.tests.test_render_deployment_contract` y
+`core.tests.test_render_configuration` (incluidos en la suite crítica).

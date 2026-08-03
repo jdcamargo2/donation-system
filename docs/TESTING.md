@@ -663,13 +663,21 @@ git diff --check
 
 Cuando el cambio afecte concurrencia o comportamiento específico de PostgreSQL, la suite correspondiente debe ejecutarse contra PostgreSQL.
 
-### Arranque de producción (Gunicorn / preflight)
+### Arranque de producción (Gunicorn / preflight / Render)
 
-Los tests de contrato de runtime viven en `core.tests.test_runtime_startup`
-(config Gunicorn, `deploy/start_web.sh`, `deploy/preflight.sh`,
-`verify_deployment_assets`). No requieren iniciar el servidor ni abrir puertos.
-Gunicorn no es necesario para el resto de la suite unitaria. Detalle operativo:
-[DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn).
+Los tests de contrato de runtime viven en:
+
+* `core.tests.test_runtime_startup` — Gunicorn, `deploy/start_web.sh`,
+  `deploy/preflight.sh`, `verify_deployment_assets`
+* `core.tests.test_render_deployment_contract` — scripts `deploy/render/`,
+  registro de entorno, runbooks (staging / go-no-go / first deploy)
+* `core.tests.test_render_configuration` — `verify_render_configuration`
+
+No requieren iniciar el servidor ni abrir puertos ni contactar Render.
+Gunicorn no es necesario para el resto de la suite unitaria. Detalle:
+[DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn),
+[deploy/render/README.md](../deploy/render/README.md),
+[RENDER_FIRST_DEPLOY.md](runbooks/RENDER_FIRST_DEPLOY.md).
 
 ### Resiliencia de estáticos UI (sin CDN)
 

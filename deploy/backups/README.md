@@ -6,6 +6,15 @@ markers, hook de alerta, drill aislado y ejemplos de scheduler). Soporta
 La entrega de alertas y el scheduling siguen siendo **propiedad de la
 plataforma**; el repositorio aporta contratos y ejemplos.
 
+### Render
+
+Los ejemplos systemd/cron **no** se asumen dentro de un Web Service Render
+(disco efímero). Programar con un Cron Job Render autorizado o un scheduler
+externo; invocar el runner existente con credenciales runtime DB + R2;
+destino off-host/persistente; no solapar gracias al lock; monitorear exit
+status y markers. No se crea un cron de pago en este checkpoint. Ver
+[RENDER_FIRST_DEPLOY.md](../../docs/runbooks/RENDER_FIRST_DEPLOY.md).
+
 ## Artefacto
 
 Dos layouts según `SIGEDON_PRIVATE_STORAGE` en el momento del backup.

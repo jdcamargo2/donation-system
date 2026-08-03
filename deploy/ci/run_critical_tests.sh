@@ -28,6 +28,8 @@ exec "$PY" manage.py test \
   core.tests.test_repository_hygiene \
   core.tests.test_ci_settings \
   core.tests.test_runtime_startup \
+  core.tests.test_render_deployment_contract \
+  core.tests.test_render_configuration \
   core.tests.test_whitenoise_static \
   core.tests.test_static_resilience \
   core.tests.test_settings \
