@@ -1,39 +1,23 @@
 #!/usr/bin/env bash
 # PRE: backup verificado; SIGEDON_RESTORE_DB obligatorio con prefijo seguro;
 #      distinto de POSTGRES_DB; SIGEDON_RESTORE_CONFIRM=YES; destino de media
-#      nuevo y vacio; herramientas psql/pg_restore/tar disponibles.
-# POST: restaura dump y media solo en entorno aislado; no toca .env ni el
+#      nuevo y vacio; herramientas psql/pg_restore disponibles (tar para v1).
+# POST: restaura dump y private data solo en entorno aislado; no toca .env ni el
 #       MEDIA_ROOT activo; documenta validaciones posteriores.
+#       format_version 1 → extrae media.tar.gz a SIGEDON_RESTORE_MEDIA_ROOT.
+#       format_version 2 object → restore_private_objects hacia storage
+#       filesystem aislado (SIGEDON_PRIVATE_STORAGE=filesystem +
+#       SIGEDON_MEDIA_ROOT=SIGEDON_RESTORE_MEDIA_ROOT). Drill R2 real queda
+#       pendiente de infraestructura.
 set -Eeuo pipefail
 
 umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
+# shellcheck source=lib/common.sh
+source "${SCRIPT_DIR}/lib/common.sh"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_backup.sh"
-
-log() {
-  printf '%s\n' "$*" >&2
-}
-
-die() {
-  local code="${1:-1}"
-  shift || true
-  log "ERROR: $*"
-  exit "${code}"
-}
-
-require_var() {
-  local name="$1"
-  if [[ -z "${!name:-}" ]]; then
-    die 2 "variable requerida ausente: ${name}"
-  fi
-}
-
-require_cmd() {
-  local cmd="$1"
-  command -v "${cmd}" >/dev/null 2>&1 || die 3 "herramienta requerida no encontrada: ${cmd}"
-}
 
 assert_safe_ident() {
   local name="$1"
@@ -108,7 +92,6 @@ fi
 require_cmd bash
 require_cmd psql
 require_cmd pg_restore
-require_cmd tar
 require_cmd python3
 
 [[ -f "${VERIFY_SCRIPT}" ]] || die 3 "no se encuentra verify_backup.sh"
@@ -117,6 +100,46 @@ bash "${VERIFY_SCRIPT}" "${BACKUP_PATH_RAW}" || die 3 "verify_backup.sh rechazo 
 BACKUP_DIR="$(cd -- "${BACKUP_PATH_RAW}" && pwd)"
 DUMP_FILE="${BACKUP_DIR}/database.dump"
 MEDIA_ARCHIVE="${BACKUP_DIR}/media.tar.gz"
+MANIFEST_FILE="${BACKUP_DIR}/manifest.json"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+MANAGE_PY="${REPO_ROOT}/manage.py"
+
+FORMAT_VERSION="$(
+  python3 -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+print(int(data.get("format_version", 0)))
+' "${MANIFEST_FILE}"
+)" || die 3 "no se pudo leer format_version del manifiesto"
+
+PRIVATE_MODE="$(
+  python3 -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+ps = data.get("private_storage") or {}
+print(ps.get("mode", ""))
+' "${MANIFEST_FILE}"
+)"
+
+case "${FORMAT_VERSION}" in
+  1)
+    require_cmd tar
+    [[ -f "${MEDIA_ARCHIVE}" ]] || die 3 "falta media.tar.gz"
+    ;;
+  2)
+    if [[ "${PRIVATE_MODE}" != "object" ]]; then
+      die 3 "format_version 2 requiere private_storage.mode=object"
+    fi
+    [[ -f "${MANAGE_PY}" ]] || die 3 "manage.py ausente para restore de objetos"
+    [[ -f "${BACKUP_DIR}/object-manifest.json" ]] || die 3 "falta object-manifest.json"
+    [[ -d "${BACKUP_DIR}/objects" ]] || die 3 "falta objects/"
+    ;;
+  *)
+    die 3 "format_version no soportado: ${FORMAT_VERSION}"
+    ;;
+esac
 
 RESTORE_MEDIA_ROOT="$(resolve_abs_parent_create "${SIGEDON_RESTORE_MEDIA_ROOT}")"
 
@@ -174,17 +197,42 @@ PGPASSWORD="${PGPASSWORD:-}" pg_restore \
   --exit-on-error \
   -- "${DUMP_FILE}"
 
-log "INFO: restaurando media en directorio aislado"
-tar -C "${RESTORE_MEDIA_ROOT}" -xzf "${MEDIA_ARCHIVE}"
-CREATED_MEDIA_ROOT=""
+if [[ "${FORMAT_VERSION}" -eq 1 ]]; then
+  log "INFO: restaurando media filesystem en directorio aislado"
+  tar -C "${RESTORE_MEDIA_ROOT}" -xzf "${MEDIA_ARCHIVE}"
+  CREATED_MEDIA_ROOT=""
+  log "OK: restauracion aislada completada (format_version=1 filesystem)"
+  log "POST-RESTORE (usar variables del entorno restaurado; no modificar .env de produccion):"
+  log "  export POSTGRES_DB=<SIGEDON_RESTORE_DB>"
+  log "  export SIGEDON_MEDIA_ROOT=<SIGEDON_RESTORE_MEDIA_ROOT>   # mismo arbol restaurado"
+  log "  export SIGEDON_PRIVATE_STORAGE=filesystem"
+else
+  # Portable offline target: filesystem-backed isolated storage.
+  # Real R2 restore drill awaits provisioned infrastructure; do not claim it here.
+  log "INFO: restaurando objetos privados hacia filesystem aislado (drill offline; no R2 real)"
+  export SIGEDON_PRIVATE_STORAGE=filesystem
+  export SIGEDON_MEDIA_ROOT="${RESTORE_MEDIA_ROOT}"
+  export POSTGRES_DB="${SIGEDON_RESTORE_DB}"
+  (
+    cd "${REPO_ROOT}"
+    python3 "${MANAGE_PY}" restore_private_objects \
+      --input-directory "${BACKUP_DIR}" \
+      --apply \
+      --verify
+  ) || die 3 "restore_private_objects fallo"
+  CREATED_MEDIA_ROOT=""
+  log "OK: restauracion aislada completada (format_version=2 object → filesystem target)"
+  log "NOTE: destino portable filesystem; drill R2 real pendiente de infraestructura."
+  log "POST-RESTORE (usar variables del entorno restaurado; no modificar .env de produccion):"
+  log "  export POSTGRES_DB=<SIGEDON_RESTORE_DB>"
+  log "  export SIGEDON_PRIVATE_STORAGE=filesystem"
+  log "  export SIGEDON_MEDIA_ROOT=<SIGEDON_RESTORE_MEDIA_ROOT>"
+fi
 
-log "OK: restauracion aislada completada"
-log "POST-RESTORE (usar variables del entorno restaurado; no modificar .env de produccion):"
-log "  export POSTGRES_DB=<SIGEDON_RESTORE_DB>"
-log "  export SIGEDON_MEDIA_ROOT=<SIGEDON_RESTORE_MEDIA_ROOT>   # mismo arbol restaurado"
 log "  python manage.py migrate --check"
 log "  python manage.py check --deploy"
 log "  python manage.py verify_postgres_security"
 log "  python manage.py verify_restored_data"
+log "  python manage.py verify_private_storage --configuration-only"
 printf '%s\n' "${SIGEDON_RESTORE_DB}"
 exit 0

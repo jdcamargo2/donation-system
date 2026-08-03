@@ -34,6 +34,38 @@ require_cmd() {
   command -v "${cmd}" >/dev/null 2>&1 || die 3 "herramienta requerida no encontrada: ${cmd}"
 }
 
+resolve_private_storage_mode() {
+  # PRE: SIGEDON_PRIVATE_STORAGE may be unset (defaults to filesystem).
+  # POST: prints filesystem|r2; dies on unknown values. Never prints secrets.
+  local raw="${SIGEDON_PRIVATE_STORAGE:-}"
+  # Trim and lowercase without echoing credentials from other vars.
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+  raw="$(printf '%s' "${raw}" | tr '[:upper:]' '[:lower:]')"
+  if [[ -z "${raw}" ]]; then
+    printf 'filesystem\n'
+    return 0
+  fi
+  case "${raw}" in
+    filesystem|r2)
+      printf '%s\n' "${raw}"
+      ;;
+    *)
+      die 2 "SIGEDON_PRIVATE_STORAGE debe ser filesystem o r2"
+      ;;
+  esac
+}
+
+repo_manage_py() {
+  # PRE: SCRIPT_DIR is set to deploy/backups (caller responsibility).
+  # POST: prints absolute path to manage.py or dies.
+  local repo_root manage
+  repo_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+  manage="${repo_root}/manage.py"
+  [[ -f "${manage}" ]] || die 3 "manage.py ausente en ${repo_root}"
+  printf '%s\n' "${manage}"
+}
+
 resolve_abs() {
   local path="$1"
   if [[ -d "${path}" ]]; then

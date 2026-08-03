@@ -1,22 +1,51 @@
 # Backup, restauración y automatización operativa de SIGEDON
 
 Capa manual verificable **más** automatización operativa (lock, retención,
-markers, hook de alerta, drill aislado y ejemplos de scheduler). El formato del
-archivo de backup no cambia. La entrega de alertas y el scheduling siguen siendo
-**propiedad de la plataforma**; el repositorio aporta contratos y ejemplos.
+markers, hook de alerta, drill aislado y ejemplos de scheduler). Soporta
+`format_version` 1 (filesystem) y 2 (object/r2) sin romper sets existentes.
+La entrega de alertas y el scheduling siguen siendo **propiedad de la
+plataforma**; el repositorio aporta contratos y ejemplos.
 
 ## Artefacto
+
+Dos layouts según `SIGEDON_PRIVATE_STORAGE` en el momento del backup.
+Filesystem conserva `format_version: 1` por compatibilidad; object mode usa
+`format_version: 2`.
+
+### Filesystem (default) — `format_version: 1`
 
 ```text
 <SIGEDON_BACKUP_ROOT>/<backup_id>/
     database.dump      # pg_dump --format=custom
     media.tar.gz       # copia de MEDIA_ROOT
-    manifest.json      # metadatos + checksums
+    manifest.json      # format_version 1 + checksums
     .sigedon-verified  # opcional; escrito tras verify en el pipeline programado
 ```
 
 `media.tar.gz` contiene archivos regulares bajo `MEDIA_ROOT` (rutas relativas).
 Se omiten `staticfiles` y enlaces simbólicos (incluidos externos).
+
+### Object storage (`SIGEDON_PRIVATE_STORAGE=r2`) — `format_version: 2`
+
+```text
+<SIGEDON_BACKUP_ROOT>/<backup_id>/
+    database.dump
+    objects/                 # export_private_objects (claves FileField)
+    object-manifest.json     # path/size/sha256 por objeto
+    manifest.json            # format_version 2; private_storage.mode=object
+    .sigedon-verified
+```
+
+El manifiesto v2 referencia checksums/conteos de `object-manifest.json` (**sin**
+credenciales, endpoint ni bucket). No se empaqueta `media.tar.gz` ni se exige
+`SIGEDON_MEDIA_ROOT` para el backup en modo r2. `verify_backup.sh` despacha por
+`format_version` (v1 nunca se reinterpreta como object). Restore de v2 object
+usa `restore_private_objects` hacia filesystem aislado para drills offline; un
+drill R2 real queda pendiente de infraestructura.
+
+Estado: R2 está implementado en código; **no** hay cuenta/bucket/credenciales
+provisionadas. Default operativo: filesystem. Detalle:
+[`docs/runbooks/CLOUDFLARE_R2.md`](../../docs/runbooks/CLOUDFLARE_R2.md).
 
 ### Distinguir incompletos vs verificados
 
@@ -43,16 +72,19 @@ El script exige `SIGEDON_MAINTENANCE_CONFIRMED=YES` y no puede comprobar por sí
 solo que esos procesos estén detenidos. El scheduler de plataforma debe
 exportar esa variable **solo** tras quietar escritores.
 
+En modo object (r2), la ventana reduce el drift entre PostgreSQL y el storage
+privado; **no** es un snapshot atómico perfecto entre proveedores.
+
 ## Scripts
 
 | Script | Rol |
 |---|---|
-| `backup_sigedon.sh` | Publica un set PostgreSQL + media (lock exclusivo) |
-| `verify_backup.sh` | Verificación de solo lectura |
-| `restore_sigedon.sh` | Restore aislado (nunca producción) |
+| `backup_sigedon.sh` | Publica PostgreSQL + media (v1) u objects (v2 r2); lock exclusivo |
+| `verify_backup.sh` | Verificación de solo lectura (despacha por format_version) |
+| `restore_sigedon.sh` | Restore aislado (v1 media / v2 objects→filesystem; nunca producción) |
 | `run_scheduled_backup.sh` | Pipeline: lock → backup → verify → retención → marker/alerta |
 | `apply_retention.sh` | Borra solo sets verificados fuera de política |
-| `run_restore_drill.sh` | Drill de restore aislado + marker; Django opcional |
+| `run_restore_drill.sh` | Drill aislado + marker; Django opcional; no afirma drill R2 real |
 | `lib/common.sh` | Helpers compartidos (no ejecutar directamente) |
 | `examples/` | cron/systemd/env/hook de ejemplo (plataforma) |
 
@@ -61,7 +93,8 @@ exportar esa variable **solo** tras quietar escritores.
 | Variable | Uso |
 |---|---|
 | `SIGEDON_BACKUP_ROOT` | Destino de backups (se crea con `0700` si no existe) |
-| `SIGEDON_MEDIA_ROOT` | Raíz de media a respaldar; **debe coincidir** con Django en producción |
+| `SIGEDON_PRIVATE_STORAGE` | `filesystem` (default) o `r2`; selecciona layout del set |
+| `SIGEDON_MEDIA_ROOT` | Obligatorio en modo filesystem; **debe coincidir** con Django. No requerido para empaquetar backup en modo r2 |
 | `POSTGRES_DB` / `USER` / `HOST` / `PORT` | Cliente PostgreSQL |
 | `PGPASSWORD` | Opcional; preferir `~/.pgpass` |
 | `SIGEDON_MAINTENANCE_CONFIRMED` | Debe ser `YES` para backup |
@@ -246,7 +279,9 @@ Documentar en el runbook del entorno la decisión adoptada y el tiempo real del
 
 - cifrado en reposo / en tránsito de artefactos;
 - copia off-site;
-- proveedor cloud de backup / SDK externo (no se introduce).
+- proveedor cloud de backup / SDK externo (no se introduce);
+- backup/restore de objetos R2 vía scripts (export/restore implementados;
+  cuenta/bucket aún no provisionados; drill R2 real pendiente).
 
 ## Códigos de salida
 
@@ -258,6 +293,6 @@ Documentar en el runbook del entorno la decisión adoptada y el tiempo real del
 | 4 | Rechazo de seguridad / confirmación |
 | 5 | Conflicto (backup existente) |
 | 6 | Fallo de dump |
-| 7 | Fallo de media |
+| 7 | Fallo de media / export de objetos privados |
 | 8 | Lock exclusivo no disponible |
 | 9 | Fallo / rechazo de retención |

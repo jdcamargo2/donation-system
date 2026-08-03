@@ -17,19 +17,17 @@ from apps.operations.operational_code_sequences import (
     inspect_operational_code_sequences,
 )
 
+from apps.operations.private_file_fields import PRIVATE_FILE_FIELD_SPECS
+
 AUDITLOG_SCHEMA = 'public'
 AUDITLOG_TABLE = 'operations_auditlog'
 AUDITLOG_QUALIFIED_NAME = f'{AUDITLOG_SCHEMA}.{AUDITLOG_TABLE}'
 AUDITLOG_TRIGGER_NAME = 'operations_auditlog_append_only'
 
-# (app_label, model_name, field_name) — FileField con nombre no vacio debe existir.
-FILE_FIELD_SPECS = (
-    ('operations', 'Institution', 'legal_document'),
-    ('operations', 'ProjectDocument', 'file'),
-    ('operations', 'ProjectUpdateAttachment', 'file'),
-    ('operations', 'ProjectUpdateRemediationAttachment', 'file'),
-    ('operations', 'SupportingDocument', 'document'),
-    ('kobo', 'KoboAttachment', 'file'),
+# Canonical private FileField inventory (includes ExpenseRequestAttachment).
+FILE_FIELD_SPECS = tuple(
+    (spec.app_label, spec.model_name, spec.field_name)
+    for spec in PRIVATE_FILE_FIELD_SPECS
 )
 
 MAIN_TABLE_SPECS = (

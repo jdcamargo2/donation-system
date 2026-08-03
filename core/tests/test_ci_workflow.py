@@ -133,8 +133,10 @@ class CiWorkflowContractTests(SimpleTestCase):
             'whitenoise.storage.CompressedManifestStaticFilesStorage',
             ci_settings,
         )
-        self.assertNotIn('django-storages', requirements)
-        self.assertNotIn('boto3', requirements)
+        # RENDER-2: private media may use django-storages/boto3; static stays WhiteNoise.
+        self.assertIn('django-storages', requirements)
+        self.assertIn('boto3==', requirements)
+        self.assertIn('whitenoise==', requirements)
 
     def test_critical_and_full_suite_jobs_exist(self):
         self.assertIn('critical-tests', self.data['jobs'])

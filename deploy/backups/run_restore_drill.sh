@@ -6,8 +6,9 @@
 # POST: restores only into disposable targets via restore_sigedon.sh; optional
 #       Django verify chain when SIGEDON_RESTORE_DRILL_RUN_DJANGO=YES (repoints
 #       POSTGRES_DB/SIGEDON_MEDIA_ROOT to the isolated restore targets for that
-#       phase only); writes .sigedon-restore-drill-status.json; exit non-zero
-#       on any failed stage.
+#       phase only; forces SIGEDON_PRIVATE_STORAGE=filesystem for portable
+#       offline verify — never claims a real R2 drill); writes
+#       .sigedon-restore-drill-status.json; exit non-zero on any failed stage.
 # NOTE: must not be used to restore production. Timer examples must call this
 #       script only with isolated prefixes.
 set -Eeuo pipefail
@@ -119,8 +120,28 @@ fi
 }
 BACKUP_ID="$(basename -- "${BACKUP_DIR}")"
 
+BACKUP_FORMAT_VERSION="$(
+  python3 -c '
+import json, sys
+path = sys.argv[1] + "/manifest.json"
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+print(int(data.get("format_version", 0)))
+' "${BACKUP_DIR}" 2>/dev/null || printf '0'
+)"
+BACKUP_PRIVATE_MODE="$(
+  python3 -c '
+import json, sys
+path = sys.argv[1] + "/manifest.json"
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+ps = data.get("private_storage") or {}
+print(ps.get("mode", ""))
+' "${BACKUP_DIR}" 2>/dev/null || true
+)"
+
 PHASE="restore"
-log "INFO: iniciando restore drill sobre backup_id=${BACKUP_ID}"
+log "INFO: iniciando restore drill sobre backup_id=${BACKUP_ID} format_version=${BACKUP_FORMAT_VERSION}"
 # Keep POSTGRES_DB as the active DB name so restore_sigedon.sh refuses it.
 export POSTGRES_DB="${ACTIVE_POSTGRES_DB}"
 if ! bash "${RESTORE_SCRIPT}" "${BACKUP_DIR}"; then
@@ -138,8 +159,14 @@ if [[ "${SIGEDON_RESTORE_DRILL_RUN_DJANGO:-}" == "YES" ]]; then
     exit 3
   }
   # Point Django at the isolated restore targets only for verification.
+  # Always use filesystem-backed portable target for drills — including object
+  # backups restored offline. This does NOT prove a real R2 restore drill.
   export POSTGRES_DB="${SIGEDON_RESTORE_DB}"
+  export SIGEDON_PRIVATE_STORAGE=filesystem
   export SIGEDON_MEDIA_ROOT="${RESTORE_MEDIA_ROOT}"
+  if [[ "${BACKUP_FORMAT_VERSION}" -eq 2 && "${BACKUP_PRIVATE_MODE}" == "object" ]]; then
+    log "INFO: object-mode backup verificado contra filesystem aislado (no es drill R2 real)"
+  fi
   (
     cd "${REPO_ROOT}"
     python3 manage.py migrate --check
@@ -147,6 +174,7 @@ if [[ "${SIGEDON_RESTORE_DRILL_RUN_DJANGO:-}" == "YES" ]]; then
     python3 manage.py verify_postgres_security
     python3 manage.py reconcile_operational_code_sequences
     python3 manage.py verify_restored_data
+    python3 manage.py verify_private_storage --configuration-only
   ) || {
     cleanup_marker 3 "django_verify" "cadena Django de verificacion fallo"
     exit 3
@@ -154,11 +182,18 @@ if [[ "${SIGEDON_RESTORE_DRILL_RUN_DJANGO:-}" == "YES" ]]; then
 else
   log "INFO: verificacion Django omitida (SIGEDON_RESTORE_DRILL_RUN_DJANGO!=YES)"
   log "INFO: post-restore manual: migrate --check, check --deploy, verify_postgres_security,"
-  log "INFO: reconcile_operational_code_sequences, verify_restored_data"
+  log "INFO: reconcile_operational_code_sequences, verify_restored_data,"
+  log "INFO: verify_private_storage --configuration-only"
+  if [[ "${BACKUP_FORMAT_VERSION}" -eq 2 && "${BACKUP_PRIVATE_MODE}" == "object" ]]; then
+    log "INFO: object-mode restore uso filesystem aislado; drill R2 real pendiente de infraestructura"
+  fi
 fi
 
 PHASE="done"
 cleanup_marker 0 "done" "restore drill completado"
 log "OK: restore drill completado (${BACKUP_ID})"
+if [[ "${BACKUP_FORMAT_VERSION}" -eq 2 && "${BACKUP_PRIVATE_MODE}" == "object" ]]; then
+  log "NOTE: exito del drill no implica restore R2 real (infraestructura no provisionada)."
+fi
 printf '%s\n' "${BACKUP_ID}"
 exit 0

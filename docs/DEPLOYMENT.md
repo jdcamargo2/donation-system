@@ -37,14 +37,18 @@ Render web process
   → WhiteNoise sirve STATIC_ROOT
 
 Media privada
-  → filesystem actual (SIGEDON_MEDIA_ROOT)
-  → Cloudflare R2 diferido a RENDER-2
+  → default local: filesystem (SIGEDON_PRIVATE_STORAGE=filesystem,
+    SIGEDON_MEDIA_ROOT)
+  → R2 opcional (código listo; cuenta/bucket/credenciales aún no
+    provisionados; sin prueba real de conectividad)
 ```
 
 WhiteNoise **no** sirve media privada. No se requiere disco persistente para
 archivos estáticos: `collectstatic` en el build deja los artefactos en el
-filesystem del deploy. R2, `django-storages` y `boto3` no forman parte de
-este checkpoint.
+filesystem del deploy. El soporte R2 (`django-storages` / `boto3`) está
+implementado en código; activarlo es una tarea de **configuración** (cuenta
+Cloudflare, bucket privado, secretos en Render), no un rewrite. Estado actual
+y runbook: [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
 
 ## 2. Variables obligatorias
 
@@ -149,9 +153,11 @@ python -m pip install -r requirements.txt
 ```
 
 `requirements.txt` incluye Gunicorn (`gunicorn==23.0.0`) como servidor WSGI
-de producción y WhiteNoise (`whitenoise==6.12.0`) para servir estáticos
-recopilados. No se declara Uvicorn/Daphne, workers async/gevent,
-`django-storages` ni `boto3`.
+de producción, WhiteNoise (`whitenoise==6.12.0`) para estáticos recopilados,
+y `django-storages[s3]` / `boto3` para el backend opcional de media privada
+en Cloudflare R2. No se declara Uvicorn/Daphne ni workers async/gevent.
+La presencia de esas dependencias **no** activa R2: el default sigue siendo
+`SIGEDON_PRIVATE_STORAGE=filesystem`.
 
 #### Build canónico en Render (sin migraciones)
 
@@ -239,10 +245,15 @@ Variables opcionales de preflight:
 
 ### 5.3. Prerrequisitos de media y estáticos
 
-* Montar el volumen persistente y exportar `SIGEDON_MEDIA_ROOT` **antes** del
-  preflight (`check --deploy` valida existencia/permisos). En el despliegue
-  inicial en Render, la media privada sigue el contrato filesystem actual;
-  R2 se define en RENDER-2.
+* Con `SIGEDON_PRIVATE_STORAGE=filesystem` (default): montar el volumen
+  persistente y exportar `SIGEDON_MEDIA_ROOT` **antes** del preflight
+  (`check --deploy` valida existencia/permisos).
+* Con `SIGEDON_PRIVATE_STORAGE=r2`: provisionar bucket privado + secretos
+  `R2_*` en la plataforma **antes** de aceptar tráfico; ejecutar
+  `python manage.py verify_private_storage` y, en staging/release,
+  `verify_private_storage --probe`. `/readyz/` **no** llama a R2.
+  Ver [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md). Hoy no hay cuenta R2
+  provisionada ni sonda real completada.
 * `collectstatic` debe haber poblado `STATIC_ROOT` (por defecto
   `<BASE_DIR>/staticfiles`) con sentinelas locales: CSS de aplicación,
   logos ILDE y vendor UI (Bootstrap 5.3.3, Bootstrap Icons 1.11.3,
@@ -442,13 +453,14 @@ Contrato:
 * Liveness **no** consulta BD, caché, Kobo, APIs externas, media ni migraciones.
 * Readiness **solo** comprueba conectividad de la BD por defecto y el plan de
   migraciones (vía `MigrationExecutor`; no ejecuta `migrate`).
-* Ninguna sonda depende de Kobo, caché, object storage remoto, datos de negocio
-  ni autenticación.
+* Ninguna sonda depende de Kobo, caché, object storage remoto (R2), datos de
+  negocio ni autenticación. `/readyz/` **no** llama a R2 en cada probe.
 * Respuestas sin versión, entorno, host, nombre de BD, migraciones, credenciales
   ni mensajes de excepción. Cabeceras: `Cache-Control: no-store`, `Pragma:
   no-cache`, `X-Content-Type-Options: nosniff`, más `X-Request-ID` del middleware.
-* La validación de media persistente permanece en `check --deploy` / preflight;
-  `/readyz/` **no** escribe en el volumen de media en cada sonda.
+* La validación de media persistente (filesystem) permanece en
+  `check --deploy` / preflight; la conectividad R2 se verifica con
+  `verify_private_storage --probe` en staging/release, no en `/readyz/`.
 
 Semántica durante el despliegue:
 
@@ -523,7 +535,8 @@ Archivos privados
 
 ### Archivos estáticos
 
-Pueden ser servidos por el proxy o por un servicio de almacenamiento adecuado después de ejecutar:
+Los sirve **WhiteNoise** desde `STATIC_ROOT` tras `collectstatic`. WhiteNoise
+es solo estáticos: **nunca** usa R2 ni el storage privado.
 
 ```bash
 python manage.py collectstatic --noinput
@@ -535,23 +548,55 @@ Solo debe contener archivos autorizados para exposición directa.
 
 ### Archivos privados
 
-* no deben exponerse directamente mediante el proxy;
-* deben descargarse mediante endpoints autorizados;
+* no deben exponerse directamente mediante el proxy ni `FileField.url`;
+* deben descargarse mediante endpoints autorizados (autorización **antes**
+  de stream o de generar URL firmada);
 * requieren autenticación y permisos cuando corresponda;
-* deben almacenarse de forma persistente fuera del árbol efímero de la aplicación;
+* el backend de almacenamiento se selecciona con `SIGEDON_PRIVATE_STORAGE`
+  (`filesystem` | `r2`); cambiar de ubicación **no** debilita la autorización;
 * deben incluirse en la estrategia de respaldo.
 
+**Estado actual (RENDER-2 preparación):** el código soporta R2; el default
+operativo sigue siendo `SIGEDON_PRIVATE_STORAGE=filesystem`. No hay cuenta
+Cloudflare, bucket ni credenciales provisionadas; no se ha completado una
+prueba real de conectividad. Provisionar R2 es configuración + secretos +
+verificaciones, no otro rewrite. Runbook:
+[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+
+Variables (sin valores reales):
+
+```env
+SIGEDON_PRIVATE_STORAGE=filesystem   # o r2
+SIGEDON_PRIVATE_FILE_DELIVERY=stream # o signed_redirect
+# Solo si SIGEDON_PRIVATE_STORAGE=r2:
+# R2_ACCOUNT_ID=
+# R2_ACCESS_KEY_ID=
+# R2_SECRET_ACCESS_KEY=
+# R2_BUCKET_NAME=
+# R2_ENDPOINT_URL=          # opcional; si falta se deriva de R2_ACCOUNT_ID
+# R2_REGION_NAME=auto
+# R2_SIGNED_URL_EXPIRY_SECONDS=300   # 60–900
+# R2_ADDRESSING_STYLE=path
+```
+
+Contrato R2 cuando se active: bucket privado (sin URL pública / r2.dev);
+`default_acl=None`; `querystring_auth=True`; `file_overwrite=False`. Las URL
+firmadas son de corta vida; quien las tenga puede usarlas hasta el expiry;
+nunca registrarlas en logs. Con objetos reales en R2, volver a un filesystem
+vacío hace que los documentos parezcan ausentes.
+
 El proxy no debe mapear públicamente el directorio de media privada
-(`SIGEDON_MEDIA_ROOT` / `MEDIA_ROOT`). La ruta histórica `private_media/`
-describe la intención de aislamiento; el código actual usa `MEDIA_ROOT` no
-público + endpoints autorizados.
+(`SIGEDON_MEDIA_ROOT` / `MEDIA_ROOT`) ni el bucket R2. La ruta histórica
+`private_media/` describe la intención de aislamiento; el código usa storage
+privado + endpoints autorizados.
 
 ### Contrato de volumen persistente (`SIGEDON_MEDIA_ROOT`)
 
-Cuando `DJANGO_DEBUG=False`, Django exige la variable de entorno
-`SIGEDON_MEDIA_ROOT` con una ruta absoluta a un volumen de filesystem
+Cuando `SIGEDON_PRIVATE_STORAGE=filesystem` y `DJANGO_DEBUG=False`, Django
+exige `SIGEDON_MEDIA_ROOT` con una ruta absoluta a un volumen de filesystem
 persistente. No se acepta el valor por defecto `BASE_DIR/media` ni rutas
-dentro del repositorio.
+dentro del repositorio. En modo `r2`, `MEDIA_ROOT` es un placeholder local
+no servido; la persistencia vive en el bucket.
 
 Ejemplo genérico:
 
@@ -801,8 +846,14 @@ Política de infraestructura que debe cubrirse:
 Los respaldos de aplicación cubren:
 
 * PostgreSQL (`pg_dump --format=custom`);
-* `MEDIA_ROOT` (`media.tar.gz`);
+* `MEDIA_ROOT` (`media.tar.gz`) cuando el storage privado es filesystem;
 * manifiesto con checksums (`manifest.json`).
+
+Con `SIGEDON_PRIVATE_STORAGE=r2`, `media.tar.gz` del volumen local **no**
+sustituye el backup de objetos del bucket. Usar
+`export_private_objects` / procedimiento del runbook R2 además del dump de
+BD. Ver [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md) y
+`deploy/backups/README.md`.
 
 La configuración crítica y los secretos deben respaldarse mediante un sistema seguro aparte. Preferir `~/.pgpass` para autenticación de cliente.
 
@@ -945,7 +996,9 @@ El éxito de CI **no** autoriza producción. Además se requiere, según
 * preflight de staging;
 * `verify_postgres_security` con el **rol runtime** restringido;
 * readiness de staging;
-* configuración de plataforma (proxy, volúmenes, secretos).
+* configuración de plataforma (proxy, volúmenes, secretos);
+* si se activa R2: secretos `R2_*`, `verify_private_storage` y
+  `verify_private_storage --probe` en staging (no en `/readyz/`).
 
 `collectstatic` + `verify_deployment_assets` sí se ejercitan en CI sobre un
 `STATIC_ROOT` temporal (`core.ci_settings` + `SIGEDON_CI_STATIC_ROOT`).

@@ -56,7 +56,10 @@ debe actualizarse cuando el total cambie de forma estable.
 * `django-countries`
 * `python-dotenv`
 * HTML, CSS y JavaScript sin proceso de compilación con Node.js
-* Despliegue inicial: runtime Python nativo en Render (sin Docker); R2 diferido
+* Despliegue inicial: runtime Python nativo en Render (sin Docker). Media
+  privada: filesystem por defecto; R2 implementado en código, pendiente de
+  provisionar cuenta/bucket/credenciales (ver
+  [runbook R2](docs/runbooks/CLOUDFLARE_R2.md))
 
 ## Módulos implementados
 
@@ -220,7 +223,17 @@ python manage.py discover_kobo_assets
 python manage.py process_kobo_submissions
 python manage.py reconcile_kobo_submissions
 python manage.py verify_postgres_security
+python manage.py verify_private_storage
+python manage.py verify_private_storage --probe   # staging/release con infra real
+python manage.py migrate_private_media            # migración filesystem → storage destino
+python manage.py export_private_objects           # export portable de objetos privados
 ```
+
+> [!NOTE]
+> `verify_private_storage` valida el contrato del storage privado. Con R2,
+> `--probe` requiere cuenta/bucket reales y **aún no** forma parte del
+> entorno actual (sin Cloudflare provisionado). Ver
+> [runbook R2](docs/runbooks/CLOUDFLARE_R2.md).
 
 > [!NOTE]
 > `verify_postgres_security` exige PostgreSQL y las credenciales del rol
@@ -277,6 +290,7 @@ git diff --check
 * [Pruebas](docs/TESTING.md)
 * [Portal público](docs/PUBLIC_PORTAL.md)
 * [Despliegue](docs/DEPLOYMENT.md)
+* [Runbook Cloudflare R2](docs/runbooks/CLOUDFLARE_R2.md)
 * [Decisiones técnicas](docs/DECISIONS.md)
 * [Instrucciones para agentes](docs/AGENTS.md)
 

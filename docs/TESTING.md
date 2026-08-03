@@ -530,7 +530,10 @@ Las pruebas de archivos privados deben comprobar:
 * cabeceras `X-Content-Type-Options: nosniff` y `Cache-Control: private, no-store`;
 * respuesta ante un archivo inexistente (fila o almacenamiento);
 * protección frente a URLs directas y ausencia de montaje DEBUG de `MEDIA_ROOT`;
-* contrato de producción `SIGEDON_MEDIA_ROOT` (settings + `check --deploy`);
+* contrato de producción `SIGEDON_MEDIA_ROOT` (settings + `check --deploy`)
+  en modo filesystem;
+* contrato de modo R2 en settings/checks (backend privado, bucket no público,
+  staticfiles en WhiteNoise) — **sin** afirmar conectividad real a Cloudflare;
 * separación entre archivos públicos y privados;
 * privacidad de adjuntos Kobo (preview + download separados);
 * comportamiento de archivos asociados a entidades anuladas o no publicadas;
@@ -561,6 +564,25 @@ Las pruebas de archivos privados deben comprobar:
 * rechazo de altas o bajas de adjuntos cuando el avance ya está `PUBLISHED`.
 
 Módulo dedicado de preview/download: `apps.operations.tests.test_protected_file_preview`.
+Helpers de storage remoto simulado (sin red): `core.tests.storage_backends`.
+
+### 13.1. Storage privado R2 (preparación vs conectividad real)
+
+El código soporta `SIGEDON_PRIVATE_STORAGE=r2`, pero **no** se ha provisionado
+cuenta/bucket/credenciales ni se ha completado una sonda real contra
+Cloudflare. La suite automatizada valida contratos locales y doubles de
+storage; no sustituye:
+
+```bash
+python manage.py verify_private_storage
+python manage.py verify_private_storage --probe
+```
+
+en staging con secretos reales (sin imprimir claves ni URL firmadas). Tras
+activar R2: smoke de upload autorizado, download autorizado, rechazo no
+autorizado, backup y restore drill aislado **antes** de aceptar archivos
+reales. `/readyz/` no llama a R2. Runbook:
+[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
 
 La vista previa client-side de selección (fusión incremental o reemplazo de un solo archivo,
 miniaturas, `DataTransfer`, enfoque tras quitar y limpieza de object URLs) no está cubierta
@@ -668,8 +690,9 @@ Pruebas focalizadas: `core.tests.test_health_endpoints`.
 Cubren liveness sin consultas a BD, readiness con BD desechable y grafo real de
 migraciones, fallos simulados (BD / migraciones pendientes), cabeceras
 no-store/`X-Request-ID`, ausencia de cookies de sesión, aislamiento de
-Kobo/caché/media y logging seguro en `sigedon.health`. Contrato operativo:
+Kobo/caché/media/R2 y logging seguro en `sigedon.health`. Contrato operativo:
 [DEPLOYMENT.md §6.3](DEPLOYMENT.md#63-sondas-http-healthz-y-readyz).
+`/readyz/` no sustituye `verify_private_storage --probe`.
 
 ### Logging y correlación (`X-Request-ID`)
 

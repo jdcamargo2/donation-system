@@ -246,6 +246,14 @@ class InstitutionAdmin(admin.ModelAdmin):
     search_fields = ('name', 'responsible_person', 'contact_email')
     list_filter = ('role', 'status')
 
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == 'legal_document' and formfield is not None:
+            from .forms import PrivateClearableFileInput
+
+            formfield.widget = PrivateClearableFileInput()
+        return formfield
+
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
@@ -426,11 +434,27 @@ class ProjectDocumentAdmin(admin.ModelAdmin):
     list_filter = ('document_type', 'created_at')
     search_fields = ('title', 'project__code', 'project__name')
 
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == 'file' and formfield is not None:
+            from .forms import PrivateClearableFileInput
+
+            formfield.widget = PrivateClearableFileInput()
+        return formfield
+
 
 @admin.register(ProjectUpdateAttachment)
 class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
     list_display = ('project_update', 'title', 'created_at', 'uploaded_by')
     search_fields = ('title', 'project_update__title')
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == 'file' and formfield is not None:
+            from .forms import PrivateClearableFileInput
+
+            formfield.widget = PrivateClearableFileInput()
+        return formfield
 
     def save_model(self, request, obj, form, change):
         # PRE: el formulario admin contiene un adjunto nuevo o modificado.
@@ -490,6 +514,14 @@ class ProjectUpdateRemediationAdmin(admin.ModelAdmin):
 @admin.register(ProjectUpdateRemediationAttachment)
 class ProjectUpdateRemediationAttachmentAdmin(admin.ModelAdmin):
     list_display = ('remediation', 'title', 'created_at', 'uploaded_by')
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == 'file' and formfield is not None:
+            from .forms import PrivateClearableFileInput
+
+            formfield.widget = PrivateClearableFileInput()
+        return formfield
 
     def has_add_permission(self, request):
         return False

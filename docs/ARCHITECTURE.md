@@ -54,8 +54,12 @@ Contiene la configuración central del proyecto:
   (trazabilidad de negocio vs diagnóstico operativo);
 * sondas HTTP de runtime en `core.health` (`/healthz/` liveness,
   `/readyz/` readiness de BD + migraciones); independientes de Kobo, caché,
-  media y autenticación (detalle en
+  media, R2 y autenticación (detalle en
   [DEPLOYMENT.md §6.3](DEPLOYMENT.md#63-sondas-http-healthz-y-readyz)).
+* contrato de storage privado en `core.private_storage`
+  (`SIGEDON_PRIVATE_STORAGE=filesystem|r2`); default filesystem. R2 usa
+  `django-storages` S3Storage con bucket privado; staticfiles siguen en
+  WhiteNoise.
 
 ### 2.2. `apps.operations`
 
@@ -161,13 +165,16 @@ estático de Django (`{% static %}` + `collectstatic`). En producción,
 **WhiteNoise** sirve `STATIC_ROOT` con storage de manifest comprimido; Gunicorn
 sigue siendo el proceso WSGI canónico (`./deploy/start_web.sh`). El portal
 público usa su propio CSS y no depende de ese stack vendor. Media privada
-permanece fuera de WhiteNoise (filesystem / futuro R2 en RENDER-2). Inventario
+permanece fuera de WhiteNoise (`SIGEDON_PRIVATE_STORAGE=filesystem` por
+defecto; R2 opcional cuando se provisionen cuenta/bucket/secretos — ver
+[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md)). Inventario
 y licencias:
 [`static/vendor/THIRD_PARTY_ASSETS.md`](../static/vendor/THIRD_PARTY_ASSETS.md).
 
 Despliegue inicial previsto: runtime Python nativo en Render (sin Docker en
 este checkpoint). Build = dependencias + `collectstatic`; start = Gunicorn;
-migraciones = pre-deploy/release (RENDER-3).
+migraciones = pre-deploy/release (RENDER-3). El soporte R2 está en código;
+activar R2 es configuración, no otro rewrite.
 
 ### 3.2. Dominio
 
@@ -249,7 +256,7 @@ Tipos principales de archivos:
 
 Los archivos privados:
 
-* no se publican mediante `FileField.url`;
+* no se publican mediante `FileField.url` (esa URL no es autorización);
 * se previsualizan (`disposition=inline`, lista blanca estricta) y se descargan
   (`disposition=attachment`) mediante vistas autorizadas y acotadas al padre;
 * requieren autenticación y permisos cuando corresponda;
@@ -258,14 +265,32 @@ Los archivos privados:
 * en desarrollo local tampoco se monta `MEDIA_ROOT` vía `static()`; el acceso
   ocurre solo por los endpoints protegidos.
 
-Almacenamiento: Django filesystem storage (`MEDIA_ROOT`). En desarrollo el
-default es `BASE_DIR/media`. En producción es obligatorio
-`SIGEDON_MEDIA_ROOT` apuntando a un mount persistente (misma variable que usan
-los scripts de backup). Settings valida la forma de la ruta al importar;
-`python manage.py check --deploy` verifica existencia, tipo directorio y
-lectura/escritura. No se introduce un backend remoto en esta fase. La
-automatización operativa de backup (lock, retención, markers, drills) vive en
-`deploy/backups/`; el scheduling permanece en la plataforma.
+Almacenamiento privado (`core.private_storage`):
+
+* **Default actual:** `SIGEDON_PRIVATE_STORAGE=filesystem` →
+  `FileSystemStorage` + `MEDIA_ROOT` (`SIGEDON_MEDIA_ROOT` obligatorio en
+  producción).
+* **Opcional (código listo):** `SIGEDON_PRIVATE_STORAGE=r2` →
+  `storages.backends.s3.S3Storage` hacia Cloudflare R2. Bucket privado:
+  `default_acl=None`, `querystring_auth=True`, `file_overwrite=False`.
+  Entrega: `SIGEDON_PRIVATE_FILE_DELIVERY=stream|signed_redirect`.
+* WhiteNoise / staticfiles **nunca** usan R2.
+* Cambiar de filesystem a R2 (o al revés) no debilita la autorización de
+  preview/download; sí cambia dónde viven los blobs. Con objetos productivos
+  en R2, volver a un filesystem vacío hace que los documentos parezcan
+  ausentes.
+* **Estado de preparación:** no hay cuenta Cloudflare, bucket ni
+  credenciales provisionadas; no hay sonda real de conectividad completada.
+  Provisionar es configuración + secretos +
+  `verify_private_storage` / `--probe` + pruebas de acceso; no un rewrite.
+  Runbook: [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+
+Settings valida la forma de la configuración al importar;
+`python manage.py check --deploy` verifica el contrato según el modo.
+Comandos: `verify_private_storage`, `migrate_private_media`,
+`export_private_objects`. La automatización operativa de backup (lock,
+retención, markers, drills) vive en `deploy/backups/`; el scheduling
+permanece en la plataforma.
 
 La visibilidad de cada archivo debe definirse explícitamente según su naturaleza y contexto.
 El helper compartido vive en `apps/operations/file_access.py`. El contrato de UI

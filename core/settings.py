@@ -17,6 +17,7 @@ from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 from core.media_paths import resolve_media_root
+from core.private_storage import resolve_private_storage_settings
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -295,18 +296,28 @@ USE_TZ = True
 # via CompressedManifestStaticFilesStorage (hashed + gzip). Private media is
 # never served by WhiteNoise. Development keeps plain StaticFilesStorage so
 # `{% static %}` works without a prior collectstatic.
-# Object storage for private media is deferred (RENDER-2); no persistent disk is
-# required for static assets on Render (collectstatic during build).
+# No persistent disk is required for static assets on Render (collectstatic
+# during build). Private media uses SIGEDON_PRIVATE_STORAGE (filesystem|r2).
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 
+# Private storage mode is explicit. Presence of R2_* alone never selects R2.
+# R2 never auto-falls back to filesystem — incomplete production config fails.
+_PRIVATE_STORAGE = resolve_private_storage_settings(
+    env=os.environ,
+    debug=DEBUG,
+    base_dir=BASE_DIR,
+    static_root=STATIC_ROOT,
+    resolve_media_root=resolve_media_root,
+)
+SIGEDON_PRIVATE_STORAGE = _PRIVATE_STORAGE.mode
+SIGEDON_PRIVATE_FILE_DELIVERY = _PRIVATE_STORAGE.delivery_mode
+SIGEDON_R2_CONFIG = _PRIVATE_STORAGE.r2
+
 STORAGES = {
-    'default': {
-        # Private operational media: filesystem FileField storage (unchanged).
-        'BACKEND': 'django.core.files.storage.FileSystemStorage',
-    },
+    'default': _PRIVATE_STORAGE.storages_default,
     'staticfiles': {
         'BACKEND': (
             'whitenoise.storage.CompressedManifestStaticFilesStorage'
@@ -322,16 +333,10 @@ WHITENOISE_USE_FINDERS = False
 WHITENOISE_AUTOREFRESH = False
 
 MEDIA_URL = 'media/'
-# Private operational media uses Django's default filesystem storage.
-# Development defaults to BASE_DIR/media; production requires an absolute
-# persistent mount via SIGEDON_MEDIA_ROOT (validated at import time for shape;
-# existence/permissions are verified by check --deploy).
-MEDIA_ROOT = resolve_media_root(
-    debug=DEBUG,
-    media_root_raw=os.getenv('SIGEDON_MEDIA_ROOT', ''),
-    base_dir=BASE_DIR,
-    static_root=STATIC_ROOT,
-)
+# Filesystem mode: development defaults to BASE_DIR/media; production requires
+# absolute SIGEDON_MEDIA_ROOT (shape at import; existence via check --deploy).
+# R2 mode: MEDIA_ROOT is an unused placeholder; default storage is S3Storage.
+MEDIA_ROOT = _PRIVATE_STORAGE.media_root
 
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'dashboard'

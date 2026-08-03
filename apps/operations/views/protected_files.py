@@ -42,6 +42,7 @@ class ProtectedFileDispositionMixin:
             self.get_file_field(obj),
             disposition=self.disposition,
             missing_message=self.missing_message,
+            request=request,
         )
 
 

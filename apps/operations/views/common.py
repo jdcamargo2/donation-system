@@ -483,13 +483,20 @@ class DeleteAuditMixin:
         return response
 
 
-def _protected_file_response(file_field, *, missing_message, disposition=DISPOSITION_ATTACHMENT):
+def _protected_file_response(
+    file_field,
+    *,
+    missing_message,
+    disposition=DISPOSITION_ATTACHMENT,
+    request=None,
+):
     """
     PRE: file_field belongs to an authorized object and missing_message is safe.
-    POST: streams via protected_file_response (inline preview or attachment).
+    POST: delivers via protected_file_response (stream or signed_redirect).
     """
     return protected_file_response(
         file_field,
         disposition=disposition,
         missing_message=missing_message,
+        request=request,
     )

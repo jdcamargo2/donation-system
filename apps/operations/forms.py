@@ -53,6 +53,55 @@ class MultipleFileInput(forms.ClearableFileInput):
     allow_multiple_selected = True
 
 
+class PrivateClearableFileInput(forms.ClearableFileInput):
+    """Clearable file widget that never renders storage .url links."""
+
+    def get_context(self, name, value, attrs):
+        context = super().get_context(name, value, attrs)
+        # Defense in depth: blank any storage URL before render.
+        context['widget']['url'] = ''
+        return context
+
+    def render(self, name, value, attrs=None, renderer=None):
+        """
+        PRE: value may be a FieldFile; attrs are optional HTML attributes.
+        POST: returns clearable markup with filename text only (no href/url).
+        """
+        from django.forms.utils import flatatt
+        from django.utils.html import format_html
+        from django.utils.safestring import mark_safe
+
+        context = self.get_context(name, value, attrs)
+        widget = context['widget']
+        parts = []
+        if widget.get('is_initial'):
+            parts.append(
+                format_html(
+                    '<p class="file-upload">{}: <strong>{}</strong>',
+                    widget.get('initial_text') or '',
+                    widget.get('value') or '',
+                )
+            )
+            if not widget.get('required'):
+                parts.append(
+                    format_html(
+                        '<span class="clearable-file-input">'
+                        '<input type="checkbox" name="{}" id="{}">'
+                        '<label for="{}">{}</label></span>',
+                        widget['checkbox_name'],
+                        widget['checkbox_id'],
+                        widget['checkbox_id'],
+                        widget['clear_checkbox_label'],
+                    )
+                )
+            parts.append(mark_safe('</p>'))
+        final_attrs = dict(widget.get('attrs') or {})
+        final_attrs['type'] = self.input_type
+        final_attrs['name'] = name
+        parts.append(format_html('<input{}>', flatatt(final_attrs)))
+        return mark_safe(''.join(str(part) for part in parts))
+
+
 class MultipleFileField(forms.FileField):
     def clean(self, data, initial=None):
         # PRE: data contiene cero o más archivos enviados por el navegador.
@@ -234,9 +283,12 @@ class InstitutionForm(BootstrapFormMixin, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['legal_document'].widget.attrs[
-            'data-file-upload-preview'
-        ] = 'true'
+        # PrivateClearableFileInput keeps clear controls without storage .url.
+        self.fields['legal_document'].widget = PrivateClearableFileInput(
+            attrs={
+                'data-file-upload-preview': 'true',
+            }
+        )
 
 
 class ProjectForm(BootstrapFormMixin, forms.ModelForm):

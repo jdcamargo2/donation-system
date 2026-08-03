@@ -90,7 +90,9 @@ class InstitutionLegalDocumentPreviewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Actualmente:')
-        self.assertContains(response, institution.legal_document.url)
+        # Storage URLs must never appear; filename metadata is fine.
+        self.assertNotContains(response, institution.legal_document.url)
+        self.assertContains(response, filename)
         self.assertContains(response, 'name="legal_document-clear"')
         self.assertContains(response, 'id="legal_document-clear_id"')
         self.assertContains(response, 'for="legal_document-clear_id"')

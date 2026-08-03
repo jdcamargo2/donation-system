@@ -615,6 +615,7 @@ def project_submission_evidence(request, pk, attachment_pk):
         attachment.file,
         disposition=DISPOSITION_INLINE,
         missing_message="La evidencia solicitada no está disponible.",
+        request=request,
     )
 
 
@@ -632,6 +633,7 @@ def project_submission_evidence_download(request, pk, attachment_pk):
         attachment.file,
         disposition=DISPOSITION_ATTACHMENT,
         missing_message="La evidencia solicitada no está disponible.",
+        request=request,
     )
 
 

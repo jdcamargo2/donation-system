@@ -389,28 +389,35 @@ Estos directorios no deben versionarse.
   runtime Python nativo de Render.
 * `MEDIA_ROOT` (`media/` por defecto en desarrollo; en producción
   `SIGEDON_MEDIA_ROOT` absoluto a volumen persistente) almacena archivos
-  operativos privados (documentos, evidencias, soportes, adjuntos Kobo).
+  operativos privados cuando `SIGEDON_PRIVATE_STORAGE=filesystem` (default).
 * WhiteNoise **no** sirve media privada. Los archivos privados **nunca** se
   montan con `static(MEDIA_URL, document_root=MEDIA_ROOT)`, ni siquiera con
   `DEBUG=True`.
 * El acceso en desarrollo y producción ocurre solo mediante endpoints protegidos
   de preview/download autenticados (`apps/operations/file_access.py`).
-* Producción exige `SIGEDON_MEDIA_ROOT` fuera del repositorio; el despliegue
-  monta el volumen antes del arranque y `check --deploy` verifica
-  existencia/permisos. Django no crea el directorio de producción.
-  Cloudflare R2 queda diferido a RENDER-2.
+  `FileField.url` no es autorización.
+* Producción en modo filesystem exige `SIGEDON_MEDIA_ROOT` fuera del
+  repositorio; el despliegue monta el volumen antes del arranque y
+  `check --deploy` verifica existencia/permisos.
+* **R2 (preparación):** el código acepta `SIGEDON_PRIVATE_STORAGE=r2` con
+  secretos `R2_*`. Aún no hay cuenta/bucket/credenciales provisionadas ni
+  sonda real de conectividad. Activarlo es configuración +
+  `verify_private_storage` / `--probe`, no un rewrite. Runbook:
+  [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
 * Tras `collectstatic` en el build/release, `./deploy/preflight.sh` (vía
   `verify_deployment_assets`) exige sentinelas lógicos bajo el storage de
   staticfiles, incluidos Bootstrap / Bootstrap Icons / SweetAlert2
   vendorizados. El proceso web (Gunicorn) no ejecuta `collectstatic`.
+  Staticfiles **nunca** usan R2.
 * Un CDN/proxy de borde no debe cachear HTML autenticado ni media privada;
   solo los assets hashed públicos son candidatos a caché larga.
-* Los respaldos de archivos deben tratarse como información sensible y usar el
-  mismo `SIGEDON_MEDIA_ROOT` que Django.
+* Los respaldos de archivos filesystem deben tratarse como información
+  sensible y usar el mismo `SIGEDON_MEDIA_ROOT` que Django. Con R2 activo,
+  complementar con export de objetos privados (ver runbook / backups README).
 * Debe verificarse el espacio disponible y la política de retención.
 * La documentación histórica que menciona `private_media/` como ruta montada
-  separada describe la intención de aislamiento; el código actual usa `MEDIA_ROOT`
-  no público + endpoints autorizados.
+  separada describe la intención de aislamiento; el código actual usa storage
+  privado + endpoints autorizados.
 
 ## 8. Base de datos
 
@@ -474,10 +481,12 @@ Cada backup publicado es un directorio:
   manifest.json
 ```
 
-Incluye PostgreSQL + `MEDIA_ROOT` como un solo set operativo. Temps
-`.sigedon-backup.*` son incompletos; solo sets que pasan `verify_backup.sh`
-cuentan como verificados. La configuración crítica y los secretos deben
-respaldarse fuera de estos scripts, en un sistema seguro.
+Incluye PostgreSQL + `MEDIA_ROOT` como un solo set operativo cuando el storage
+es filesystem. Con R2 activo, complementar con export de objetos privados
+(`export_private_objects`); ver [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+Temps `.sigedon-backup.*` son incompletos; solo sets que pasan
+`verify_backup.sh` cuentan como verificados. La configuración crítica y los
+secretos deben respaldarse fuera de estos scripts, en un sistema seguro.
 
 ### Pipeline programado, lock, retención y markers
 
@@ -588,7 +597,7 @@ Durante la operación deben revisarse:
   pendientes vía CLI, assets). No arranca el servidor web.
 * `GET /healthz/` — liveness del proceso (sin BD ni dependencias externas).
 * `GET /readyz/` — readiness runtime: BD `default` alcanzable y migraciones
-  aplicadas. No consulta Kobo, caché ni media.
+  aplicadas. No consulta Kobo, caché, media ni R2.
 
 Detalle de contrato, cabeceras y ejemplos de plataforma:
 [DEPLOYMENT.md §6.3](DEPLOYMENT.md#63-sondas-http-healthz-y-readyz).
@@ -701,15 +710,18 @@ Los datos anulados quedan excluidos deliberadamente; toda operación monetaria v
 
 #### Verificar
 
-* existencia física del archivo;
-* ruta configurada;
+* modo de storage (`SIGEDON_PRIVATE_STORAGE`: filesystem | r2);
+* existencia del objeto (volumen local o bucket);
+* ruta / clave configurada;
 * permisos del usuario;
 * relación con la entidad;
 * clasificación pública o privada;
-* configuración de almacenamiento;
+* configuración de almacenamiento y, si aplica, `verify_private_storage`;
 * tamaño y metadatos del adjunto Kobo.
 
 Los archivos privados no deben corregirse exponiendo directamente `FileField.url`.
+Con R2 y objetos productivos, no cambiar a filesystem vacío: los documentos
+parecerán ausentes. Ver [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
 
 ---
 

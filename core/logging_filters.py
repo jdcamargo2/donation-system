@@ -28,11 +28,23 @@ _SENSITIVE_KEY_VALUE = re.compile(
     r'(?i)\b('
     r'password|passwd|secret|token|api_token|webhook_secret|'
     r'csrf(?:middlewaretoken)?|database_url|postgres_password|'
-    r'authorization|cookie|set-cookie'
+    r'authorization|cookie|set-cookie|'
+    r'aws_access_key_id|aws_secret_access_key|r2_secret_access_key|'
+    r'r2_access_key_id|secret_access_key|access_key_id'
     r')\b(\s*[:=]\s*)([^\s&;\'",}]+)'
 )
 _DATABASE_URL_PASSWORD = re.compile(
     r'(?i)((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^:\s/]+:)([^@\s]+)(@)'
+)
+_AWS_SIGNED_QUERY = re.compile(
+    r'(?i)((?:[?&]|\b)(?:'
+    r'X-Amz-Credential|X-Amz-Signature|X-Amz-Security-Token|'
+    r'X-Amz-SignedHeaders|X-Amz-Date|X-Amz-Expires|AWSAccessKeyId|'
+    r'Signature|Security-Token'
+    r')=)([^&\s]+)'
+)
+_PRESIGNED_URL = re.compile(
+    r'(?i)(https?://[^\s]+[?&](?:X-Amz-Signature|AWSAccessKeyId|Signature)=)([^\s]+)'
 )
 
 
@@ -70,6 +82,22 @@ def redact_sensitive_text(message: str) -> str:
     redacted = _COOKIE_HEADER.sub(_replace_cookie, redacted)
     redacted = _DATABASE_URL_PASSWORD.sub(_replace_db, redacted)
     redacted = _SENSITIVE_KEY_VALUE.sub(_replace_kv, redacted)
+    redacted = _AWS_SIGNED_QUERY.sub(
+        lambda match: (
+            match.group(0)
+            if match.group(2) == REDACTED
+            else f'{match.group(1)}{REDACTED}'
+        ),
+        redacted,
+    )
+    redacted = _PRESIGNED_URL.sub(
+        lambda match: (
+            match.group(0)
+            if match.group(2) == REDACTED
+            else f'{match.group(1)}{REDACTED}'
+        ),
+        redacted,
+    )
     return redacted
 
 

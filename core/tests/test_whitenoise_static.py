@@ -109,17 +109,22 @@ class WhiteNoiseStorageContractTests(SimpleTestCase):
         text = settings_path.read_text(encoding='utf-8')
         self.assertIn(COMPRESSED_MANIFEST, text)
         self.assertIn('if not DEBUG', text)
-        self.assertIn(FILESYSTEM_DEFAULT, text)
         self.assertNotIn('WHITENOISE_USE_FINDERS = True', text)
         self.assertNotIn('WHITENOISE_AUTOREFRESH = True', text)
         self.assertEqual(settings.WHITENOISE_USE_FINDERS, False)
         self.assertEqual(settings.WHITENOISE_AUTOREFRESH, False)
-        # No cloud object-storage backend wired (RENDER-2 deferred).
-        self.assertNotIn("storages.backends", text)
-        self.assertNotIn('boto3', text)
-        self.assertNotIn("BACKEND': 'storages", text)
+        # Private default storage is selected via private_storage contract;
+        # filesystem remains the default backend implementation.
+        private_storage = (
+            REPO_ROOT / 'core' / 'private_storage.py'
+        ).read_text(encoding='utf-8')
+        self.assertIn(FILESYSTEM_DEFAULT, private_storage)
+        self.assertIn('storages.backends.s3.S3Storage', private_storage)
+        # Staticfiles must never be wired to S3/R2 in settings.py.
+        self.assertNotIn("staticfiles'] = {\n        'BACKEND': 'storages", text)
         self.assertNotIn('AWS_STORAGE', text)
-        self.assertNotIn("import boto", text)
+        self.assertNotIn('import boto', text)
+        self.assertIn('resolve_private_storage_settings', text)
 
     def test_static_root_does_not_overlap_source_or_media(self):
         static_root = Path(settings.STATIC_ROOT).resolve()
@@ -393,12 +398,22 @@ class WhiteNoisePrivateMediaSeparationTests(SimpleTestCase):
         self.assertIn('never mounted via static()', urls_source)
 
     def test_no_r2_configuration_in_settings(self):
+        """Staticfiles stay WhiteNoise; R2 is opt-in for private default only."""
         text = (REPO_ROOT / 'core' / 'settings.py').read_text(encoding='utf-8')
-        self.assertNotIn('storages.backends', text)
-        self.assertNotIn('boto3', text)
+        self.assertIn('SIGEDON_PRIVATE_STORAGE', text)
+        self.assertIn('resolve_private_storage_settings', text)
+        # settings.py must not hardcode S3 as the staticfiles backend.
         self.assertNotIn('AWS_STORAGE', text)
-        self.assertNotIn("BACKEND': 'storages", text)
-        self.assertNotIn('django_storages', text.lower())
+        self.assertNotIn('import boto', text)
         requirements = (REPO_ROOT / 'requirements.txt').read_text(encoding='utf-8')
-        self.assertNotIn('django-storages', requirements)
-        self.assertNotIn('boto3', requirements)
+        self.assertIn('django-storages', requirements)
+        self.assertIn('boto3==', requirements)
+        # Live default in this process remains filesystem (R2 not selected).
+        self.assertEqual(
+            settings.STORAGES['default']['BACKEND'],
+            FILESYSTEM_DEFAULT,
+        )
+        self.assertNotIn(
+            'storages.backends.s3',
+            settings.STORAGES['staticfiles']['BACKEND'],
+        )

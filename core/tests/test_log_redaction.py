@@ -79,6 +79,56 @@ class LogRedactionTests(SimpleTestCase):
         message = 'Kobo normalization failed submission_id=42 stage=normalize'
         self.assertEqual(redact_sensitive_text(message), message)
 
+    def test_x_amz_credential_redacted(self):
+        text = (
+            'https://bucket.example.test/obj?'
+            'X-Amz-Credential=FAKEACCESSKEY%2F20260803%2Fauto%2Fs3%2Faws4_request'
+        )
+        result = redact_sensitive_text(text)
+        self.assertIn(REDACTED, result)
+        self.assertNotIn('FAKEACCESSKEY', result)
+
+    def test_x_amz_signature_redacted(self):
+        text = 'download X-Amz-Signature=abcdef0123456789deadbeef'
+        result = redact_sensitive_text(text)
+        self.assertIn(REDACTED, result)
+        self.assertNotIn('abcdef0123456789deadbeef', result)
+
+    def test_x_amz_security_token_redacted(self):
+        text = 'qs&X-Amz-Security-Token=FwoGZXIvYXdzEJr%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEa'
+        result = redact_sensitive_text(text)
+        self.assertIn(REDACTED, result)
+        self.assertNotIn('FwoGZXIvYXdzEJr', result)
+
+    def test_aws_access_key_id_query_redacted(self):
+        text = 'https://example.test/file?AWSAccessKeyId=AKIATESTFAKEKEY99&Expires=1'
+        result = redact_sensitive_text(text)
+        self.assertIn(REDACTED, result)
+        self.assertNotIn('AKIATESTFAKEKEY99', result)
+
+    def test_presigned_url_query_strings_redacted(self):
+        url = (
+            'https://fictitiousaccount01.r2.cloudflarestorage.com/bucket/path/doc.pdf'
+            '?X-Amz-Algorithm=AWS4-HMAC-SHA256'
+            '&X-Amz-Credential=AKIAPRESIGN%2F20260803%2Fauto%2Fs3%2Faws4_request'
+            '&X-Amz-Date=20260803T120000Z'
+            '&X-Amz-Expires=300'
+            '&X-Amz-SignedHeaders=host'
+            '&X-Amz-Signature=presigned-signature-value-should-vanish'
+        )
+        result = redact_sensitive_text(url)
+        self.assertNotIn('AKIAPRESIGN', result)
+        self.assertNotIn('presigned-signature-value-should-vanish', result)
+        self.assertIn(REDACTED, result)
+        self.assertIn('cloudflarestorage.com', result)
+
+    def test_r2_secret_access_key_assignment_redacted(self):
+        text = 'R2_SECRET_ACCESS_KEY=fictitious-r2-secret-value-99'
+        result = redact_sensitive_text(text)
+        self.assertIn(REDACTED, result)
+        self.assertNotIn('fictitious-r2-secret-value-99', result)
+        self.assertIn('R2_SECRET_ACCESS_KEY', result)
+
     def test_filter_redacts_message_and_args(self):
         record = logging.LogRecord(
             name='sigedon',

@@ -165,12 +165,24 @@ Los documentos operativos privados:
 * separan explícitamente la información pública de la privada;
 * no se montan vía `static(MEDIA_URL, …)` ni siquiera en `DEBUG`.
 
-En producción (`DJANGO_DEBUG=False`) el directorio de media privada debe ser un
-volumen persistente explícito (`SIGEDON_MEDIA_ROOT` absoluto). Un `MEDIA_ROOT`
-implícito bajo el repositorio no es aceptable: los blobs privados sobrevivirían
-solo al ciclo de vida del contenedor/instancia. Los respaldos de base de datos
-no sustituyen la copia de esos archivos. El proxy no debe servir ese path;
-solo los endpoints autorizados de preview/download deben leer el storage.
+En producción con `SIGEDON_PRIVATE_STORAGE=filesystem` (`DJANGO_DEBUG=False`)
+el directorio de media privada debe ser un volumen persistente explícito
+(`SIGEDON_MEDIA_ROOT` absoluto). Un `MEDIA_ROOT` implícito bajo el repositorio
+no es aceptable. Los respaldos de base de datos no sustituyen la copia de
+esos archivos. El proxy no debe servir ese path; solo los endpoints
+autorizados de preview/download deben leer el storage.
+
+**Cloudflare R2 (preparación):** el código soporta
+`SIGEDON_PRIVATE_STORAGE=r2` con bucket privado (`default_acl=None`,
+`querystring_auth=True`, `file_overwrite=False`). Cambiar la ubicación del
+storage no debilita la autorización: se autoriza en Django **antes** de
+stream o de emitir URL firmada. Las URL firmadas son de corta vida
+(`R2_SIGNED_URL_EXPIRY_SECONDS`, 60–900, default 300); cualquiera con una
+URL no expirada puede usarla hasta el expiry; **nunca** registrarlas en
+logs. WhiteNoise permanece solo para estáticos; staticfiles no usan R2.
+`/readyz/` no llama a R2. Estado actual: sin cuenta/bucket/credenciales
+provisionadas y sin sonda real de conectividad. Runbook:
+[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
 
 No debe utilizarse directamente:
 
@@ -246,10 +258,12 @@ SweetAlert2 vendorizados) son activos públicos bajo `STATIC_ROOT` tras
 `SecurityMiddleware`) con
 `CompressedManifestStaticFilesStorage` (nombres hashed, gzip, caché
 immutable en assets versionados). La media operativa privada permanece en
-`MEDIA_ROOT` / `SIGEDON_MEDIA_ROOT` y solo se expone por endpoints
+el storage seleccionado (`filesystem` vía `MEDIA_ROOT` /
+`SIGEDON_MEDIA_ROOT`, u opcionalmente R2) y solo se expone por endpoints
 autorizados; WhiteNoise no la sirve y no existe ruta
-`static(MEDIA_URL, …)` en producción. Vendorizar elimina la dependencia de
-disponibilidad/DNS de CDN públicos para esas librerías; no sustituye el
+`static(MEDIA_URL, …)` en producción. Staticfiles **nunca** usan R2.
+Vendorizar elimina la dependencia de disponibilidad/DNS de CDN públicos
+para esas librerías; no sustituye el
 monitoreo de avisos de seguridad ni implica integridad automática frente a
 compromiso de la cadena de suministro en el momento de obtener el artefacto.
 Actualizar vendor debe ser deliberado, versionado, probado (`collectstatic`
@@ -294,6 +308,8 @@ DJANGO_SECRET_KEY
 POSTGRES_PASSWORD
 KOBO_API_TOKEN
 KOBO_WEBHOOK_SECRET
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
 ```
 
 El archivo `.env` debe estar ignorado por Git.
@@ -301,11 +317,12 @@ El archivo `.env` debe estar ignorado por Git.
 También deben mantenerse fuera del repositorio:
 
 * credenciales de base de datos;
-* tokens de servicios externos;
+* tokens de servicios externos (incluidos tokens R2 de alcance de bucket);
 * claves privadas;
 * secretos de despliegue;
 * credenciales de correo;
-* respaldos con información real.
+* respaldos con información real;
+* URL firmadas de object storage (nunca en logs).
 
 El archivo `.env.example` puede incluir nombres de variables, pero no valores secretos reales.
 
@@ -339,7 +356,8 @@ deben cumplirse las siguientes condiciones:
   público ni deben indexarse; el proxy puede restringir orígenes de red, pero
   la aplicación permanece segura aunque sean alcanzables; `X-Request-ID`
   permite correlación; no sirven para diagnosticar dependencias externas
-  (Kobo, caché, object storage). No hay allowlist de IP dentro de Django.
+  (Kobo, caché, R2/object storage). `/readyz/` **no** llama a R2. No hay
+  allowlist de IP dentro de Django.
 * `seed_sigedon_demo` está **deshabilitado** cuando `DEBUG=False` y se rechaza
   antes de cualquier mutación; no existe bypass operativo. Es exclusivo de
   desarrollo local/efímero y no forma parte de release, preflight ni arranque
