@@ -132,11 +132,12 @@ class ProtectedFilePreviewEndpointTests(TestCase):
             reverse('project_update_attachment_download', args=args),
         )
 
-    def test_authorized_preview_png_and_pdf(self):
+    def test_authorized_preview_png_pdf_and_text_have_csp(self):
         self.client.force_login(self.admin)
         for filename, content, mime in (
             ('shot.png', PNG_BYTES, 'image/png'),
             ('doc.pdf', PDF_BYTES, 'application/pdf'),
+            ('notes.txt', TXT_BYTES, 'text/plain; charset=utf-8'),
         ):
             attachment = self._attachment(filename, content)
             preview_url, download_url = self._urls(attachment)
@@ -147,12 +148,20 @@ class ProtectedFilePreviewEndpointTests(TestCase):
                 self.assertEqual(preview['Content-Type'], mime)
                 self.assertEqual(preview['X-Content-Type-Options'], 'nosniff')
                 self.assertEqual(preview['Cache-Control'], 'private, no-store')
+                csp = preview['Content-Security-Policy']
+                self.assertIn("default-src 'none'", csp)
+                self.assertIn('sandbox', csp)
+                self.assertNotIn('unsafe-inline', csp)
+                self.assertNotIn('unsafe-eval', csp)
+                b''.join(preview.streaming_content)
 
                 download = self.client.get(download_url)
                 self.assertEqual(download.status_code, 200)
                 self.assertIn('attachment;', download['Content-Disposition'])
                 self.assertEqual(download['X-Content-Type-Options'], 'nosniff')
                 self.assertEqual(download['Cache-Control'], 'private, no-store')
+                self.assertNotIn('Content-Security-Policy', download)
+                b''.join(download.streaming_content)
 
     def test_unsupported_preview_returns_404_but_download_works(self):
         self.client.force_login(self.admin)

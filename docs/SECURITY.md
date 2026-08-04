@@ -230,8 +230,15 @@ ejecutables ni binarios desconocidos. Esos tipos conservan descarga protegida.
 
 Cabeceras obligatorias en preview y download:
 
-* `X-Content-Type-Options: nosniff`
 * `Cache-Control: private, no-store`
+* `X-Content-Type-Options: nosniff`
+* preview inline: `Content-Security-Policy` con `default-src 'none'` y
+  `sandbox` (sin `unsafe-inline` / `unsafe-eval`); HTML/SVG no son
+  previsualizables
+* las vistas previas inline **siempre** pasan por stream Django (CSP
+  controlable). `signed_redirect` solo aplica a descargas attachment y exige
+  parámetros de respuesta en la URL firmada; no puede inyectar CSP en la
+  respuesta final del proveedor de objetos
 
 Implementación compartida: `apps/operations/file_access.py`
 (`get_safe_persisted_file_preview_type`, `protected_file_response`).
@@ -297,9 +304,13 @@ La integración con KoboToolbox protege:
 
 El webhook:
 
-* acepta únicamente las credenciales configuradas;
-* valida la solicitud antes de procesarla;
-* no debe registrar secretos en logs;
+* autentica con **HTTP Basic** (`KOBO_WEBHOOK_USERNAME` /
+  `KOBO_WEBHOOK_SECRET`) como contrato canónico;
+* la cabecera legacy `X-Kobo-Webhook-Secret` está **deshabilitada por defecto**
+  (`KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER=False`); solo se habilita de forma
+  temporal y documentada durante una migración de clientes;
+* valida la solicitud antes de procesar el cuerpo;
+* no debe registrar secretos, cabeceras de autenticación ni el cuerpo en logs;
 * no debe exponer mensajes internos sensibles;
 * debe conservar el payload original únicamente en almacenamiento autorizado.
 

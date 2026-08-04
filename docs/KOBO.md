@@ -77,6 +77,7 @@ KOBO_BASE_URL=
 KOBO_API_TOKEN=
 KOBO_WEBHOOK_USERNAME=sigedon-kobo
 KOBO_WEBHOOK_SECRET=
+# KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER=False
 KOBO_HTTP_CONNECT_TIMEOUT=5
 KOBO_HTTP_READ_TIMEOUT=15
 KOBO_HTTP_MAX_ATTEMPTS=3
@@ -94,8 +95,14 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 * `KOBO_ENABLED` activa o desactiva la integración.
 * `KOBO_BASE_URL` define la URL base de la instancia KoboToolbox.
 * `KOBO_API_TOKEN` contiene el token utilizado para acceder a la API.
-* `KOBO_WEBHOOK_USERNAME` define el usuario esperado por el webhook.
-* `KOBO_WEBHOOK_SECRET` contiene el secreto utilizado para autenticar solicitudes entrantes.
+* `KOBO_WEBHOOK_USERNAME` define el usuario esperado por el webhook (Basic auth).
+* `KOBO_WEBHOOK_SECRET` es la contraseña Basic (y, solo si el flag legacy está
+  habilitado, el valor de `X-Kobo-Webhook-Secret`).
+* Basic authentication es el contrato canónico. La cabecera legacy
+  `X-Kobo-Webhook-Secret` está deshabilitada por defecto
+  (`KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER=False`). Habilitarla solo durante
+  una ventana de migración temporal documentada; el staging canónico la deja
+  en `False`.
 * `KOBO_HTTP_READ_TIMEOUT` define el timeout de `urllib`; el transporte actual no separa conexión y lectura, por lo que `KOBO_HTTP_CONNECT_TIMEOUT` se reserva para un transporte futuro.
 * `KOBO_HTTP_MAX_ATTEMPTS`, `KOBO_HTTP_RETRY_BASE_DELAY`, `KOBO_HTTP_RETRY_MAX_DELAY` y `KOBO_HTTP_RETRY_AFTER_MAX_DELAY` controlan reintentos transitorios con backoff.
 * `KOBO_HTTP_MAX_PAGES` limita la paginación remota para evitar recorridos no acotados.

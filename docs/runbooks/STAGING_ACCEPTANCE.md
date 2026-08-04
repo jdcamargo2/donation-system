@@ -102,7 +102,10 @@ states, and private downloads.
 | P4 | Replacement | | | | |
 | P5 | Missing object handled | | | | |
 | P6 | Forbidden access fails | | | | |
-| P7 | Signed URL expiry (if `signed_redirect`) | | | | |
+| P7 | Signed URL expiry for downloads (if `signed_redirect`; requires response parameters) | | | | |
+| P7b | Inline preview streams with CSP sandbox even under `signed_redirect` | | | | |
+| P7c | Cloudflare R2 endpoint strict (`R2_ALLOW_CUSTOM_ENDPOINT=False`) | | | | |
+| P7d | Kobo webhook Basic auth; legacy header disabled | | | | |
 | P8 | Backup + isolated restore drill | | | | |
 | P9 | Real `verify_private_storage --probe` (when claiming R2) | | | | |
 

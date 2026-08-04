@@ -45,8 +45,10 @@ debe actualizarse cuando el total cambie de forma estable.
   sin Nginx dedicado ni disco persistente para estáticos)
 * Logging de runtime a stdout/stderr con correlación `X-Request-ID` (sin SaaS)
 * Sondas de liveness/readiness: `/healthz/` y `/readyz/` (sin auth; ver
-  [Despliegue §6.3](docs/DEPLOYMENT.md#63-sondas-http-healthz-y-readyz))
-* SQLite únicamente para desarrollo local con `DEBUG=True`
+  [Despliegue §6.3](docs/DEPLOYMENT.md#63-sondas-http-healthz-y-readyz)).
+  Media privada: preview inline siempre vía stream + CSP; `signed_redirect`
+  solo para descargas con parámetros de respuesta. Endpoint R2 estricto a
+  Cloudflare por defecto.* SQLite únicamente para desarrollo local con `DEBUG=True`
 * Django Templates
 * Bootstrap 5.3.3, Bootstrap Icons 1.11.3 y SweetAlert2 11.26.25 vendorizados
   en `static/vendor/` (sin CDN en runtime; ver

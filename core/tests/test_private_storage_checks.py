@@ -27,6 +27,8 @@ FICTITIOUS_R2 = R2StorageConfig(
     region_name='auto',
     signed_url_expiry_seconds=300,
     addressing_style='path',
+    allow_custom_endpoint=False,
+    endpoint_is_custom=False,
 )
 
 WHITENOISE_STATIC = {

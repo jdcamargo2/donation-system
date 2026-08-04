@@ -137,8 +137,9 @@ class HealthzLivenessTests(TestCase):
 
 class ReadyzReadinessTests(TestCase):
     def setUp(self):
-        # Reset process-local log suppression between tests.
+        # Reset process-local log suppression and migration cache between tests.
         health_module._last_failure_log_at = 0.0
+        health_module.reset_migration_readiness_cache()
 
     def test_reverse_readyz(self):
         self.assertEqual(reverse('readyz'), '/readyz/')
@@ -273,9 +274,100 @@ class ReadyzReadinessTests(TestCase):
         self.assertEqual(failed[REQUEST_ID_HEADER], inbound)
 
 
-class HealthLoggingTests(TestCase):
+@override_settings(SIGEDON_READINESS_MIGRATION_CACHE_SECONDS=15)
+class ReadyzMigrationCacheTests(TestCase):
     def setUp(self):
         health_module._last_failure_log_at = 0.0
+        health_module.reset_migration_readiness_cache()
+
+    def test_second_request_reuses_migration_plan_within_ttl(self):
+        with mock.patch.object(
+            health_module,
+            'check_migrations_applied',
+            wraps=health_module.check_migrations_applied,
+        ) as plan_probe:
+            first = self.client.get(reverse('readyz'))
+            second = self.client.get(reverse('readyz'))
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(plan_probe.call_count, 1)
+
+    def test_db_probe_still_runs_on_cached_migration_hit(self):
+        # Prime cache.
+        self.assertEqual(self.client.get(reverse('readyz')).status_code, 200)
+        with mock.patch.object(
+            health_module,
+            'check_database_connection',
+            wraps=health_module.check_database_connection,
+        ) as db_probe:
+            response = self.client.get(reverse('readyz'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(db_probe.call_count, 1)
+
+    def test_ttl_zero_always_recomputes(self):
+        with override_settings(SIGEDON_READINESS_MIGRATION_CACHE_SECONDS=0):
+            health_module.reset_migration_readiness_cache()
+            with mock.patch.object(
+                health_module,
+                'check_migrations_applied',
+                wraps=health_module.check_migrations_applied,
+            ) as plan_probe:
+                self.client.get(reverse('readyz'))
+                self.client.get(reverse('readyz'))
+            self.assertEqual(plan_probe.call_count, 2)
+
+    def test_after_ttl_plan_recomputes(self):
+        with override_settings(SIGEDON_READINESS_MIGRATION_CACHE_SECONDS=30):
+            health_module.reset_migration_readiness_cache()
+            with mock.patch.object(
+                health_module,
+                'check_migrations_applied',
+                wraps=health_module.check_migrations_applied,
+            ) as plan_probe:
+                self.client.get(reverse('readyz'))
+                # Expire cache by rewinding stored timestamp.
+                with health_module._migration_cache_lock:
+                    cached = health_module._migration_cache
+                    self.assertIsNotNone(cached)
+                    cached['at'] = cached['at'] - 31
+                self.client.get(reverse('readyz'))
+            self.assertEqual(plan_probe.call_count, 2)
+
+    def test_db_failure_overrides_cached_migration_ready(self):
+        self.assertEqual(self.client.get(reverse('readyz')).status_code, 200)
+        with mock.patch.object(
+            health_module,
+            'check_database_connection',
+            side_effect=OperationalError('down'),
+        ):
+            response = self.client.get(reverse('readyz'))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {'status': 'not_ready'})
+
+    def test_pending_migration_cached_within_ttl(self):
+        with mock.patch.object(
+            health_module,
+            'check_migrations_applied',
+            return_value=False,
+        ) as plan_probe:
+            first = self.client.get(reverse('readyz'))
+            second = self.client.get(reverse('readyz'))
+        self.assertEqual(first.status_code, 503)
+        self.assertEqual(second.status_code, 503)
+        self.assertEqual(plan_probe.call_count, 1)
+        with health_module._migration_cache_lock:
+            cached = health_module._migration_cache
+        self.assertEqual(cached['category'], 'pending')
+        self.assertFalse(cached['ready'])
+        self.assertNotIn('exception', cached)
+        self.assertNotIn('password', str(cached).lower())
+
+    def test_cache_contains_no_secrets(self):
+        self.client.get(reverse('readyz'))
+        with health_module._migration_cache_lock:
+            cached = dict(health_module._migration_cache or {})
+        self.assertEqual(set(cached.keys()), {'at', 'ttl', 'ready', 'category', 'alias'})
+        self.assertIn(cached['category'], {'ready', 'pending'})
 
     def test_success_emits_no_health_log(self):
         with self.assertNoLogs('sigedon.health', level='WARNING'):

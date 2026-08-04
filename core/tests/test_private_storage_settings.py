@@ -22,7 +22,10 @@ from core.private_storage import (
     build_filesystem_storages_default,
     build_r2_storage_config,
     build_r2_storages_default,
+    cloudflare_r2_endpoint_for_account,
+    derive_r2_endpoint_url,
     resolve_private_storage_mode,
+    resolve_r2_allow_custom_endpoint,
     validate_r2_endpoint_url,
     validate_signed_url_expiry,
 )
@@ -86,6 +89,101 @@ class PrivateStorageHelperUnitTests(SimpleTestCase):
             validate_r2_endpoint_url('https://user:pass@example.test')
         self.assertIn('usuario ni contraseña', str(cred_err.exception))
 
+    def test_strict_cloudflare_endpoint_policy(self):
+        account = FICTITIOUS_R2['R2_ACCOUNT_ID']
+        derived = cloudflare_r2_endpoint_for_account(account)
+        self.assertEqual(
+            derived, f'https://{account}.r2.cloudflarestorage.com'
+        )
+        endpoint, is_custom = derive_r2_endpoint_url(
+            account_id=account, endpoint_url_raw='', allow_custom=False
+        )
+        self.assertEqual(endpoint, derived)
+        self.assertFalse(is_custom)
+
+        matching, is_custom = derive_r2_endpoint_url(
+            account_id=account,
+            endpoint_url_raw=derived,
+            allow_custom=False,
+        )
+        self.assertEqual(matching, derived)
+        self.assertFalse(is_custom)
+
+        with self.assertRaises(ImproperlyConfigured):
+            derive_r2_endpoint_url(
+                account_id=account,
+                endpoint_url_raw='https://foreign.example.test',
+                allow_custom=False,
+            )
+
+        with self.assertRaises(ImproperlyConfigured):
+            derive_r2_endpoint_url(
+                account_id=account,
+                endpoint_url_raw='https://otheraccount.r2.cloudflarestorage.com',
+                allow_custom=False,
+            )
+
+        for bad in (
+            f'{derived}?x=1',
+            f'{derived}#frag',
+            'https://user:pass@fictitiousaccount01.r2.cloudflarestorage.com',
+            f'{derived}/path',
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ImproperlyConfigured):
+                    derive_r2_endpoint_url(
+                        account_id=account,
+                        endpoint_url_raw=bad,
+                        allow_custom=False,
+                    )
+
+    def test_custom_endpoint_requires_explicit_flag(self):
+        account = FICTITIOUS_R2['R2_ACCOUNT_ID']
+        custom = 'https://s3-compatible.example.test'
+        with self.assertRaises(ImproperlyConfigured):
+            derive_r2_endpoint_url(
+                account_id=account,
+                endpoint_url_raw=custom,
+                allow_custom=False,
+            )
+        endpoint, is_custom = derive_r2_endpoint_url(
+            account_id=account,
+            endpoint_url_raw=custom,
+            allow_custom=True,
+        )
+        self.assertEqual(endpoint, custom)
+        self.assertTrue(is_custom)
+
+        for blocked in (
+            'https://localhost',
+            'https://127.0.0.1',
+            'https://10.0.0.1',
+            'https://192.168.1.1',
+            'https://169.254.169.254',
+            'https://[::1]',
+            'https://metadata.google.internal',
+            'https://something.local',
+        ):
+            with self.subTest(blocked=blocked):
+                with self.assertRaises(ImproperlyConfigured) as err:
+                    derive_r2_endpoint_url(
+                        account_id=account,
+                        endpoint_url_raw=blocked,
+                        allow_custom=True,
+                    )
+                self.assertNotIn('fictitious', str(err.exception).lower())
+
+        with self.assertRaises(ImproperlyConfigured):
+            resolve_r2_allow_custom_endpoint('maybe')
+
+        env = dict(FICTITIOUS_R2)
+        env['R2_ENDPOINT_URL'] = custom
+        env['R2_ALLOW_CUSTOM_ENDPOINT'] = 'True'
+        config = build_r2_storage_config(env)
+        self.assertTrue(config.allow_custom_endpoint)
+        self.assertTrue(config.endpoint_is_custom)
+        self.assertEqual(config.endpoint_url, custom)
+
     def test_invalid_expiry_fail(self):
         with self.assertRaises(ImproperlyConfigured):
             validate_signed_url_expiry('nope')
@@ -117,6 +215,8 @@ class PrivateStorageHelperUnitTests(SimpleTestCase):
 
     def test_bucket_private_config(self):
         config = build_r2_storage_config(FICTITIOUS_R2)
+        self.assertFalse(config.allow_custom_endpoint)
+        self.assertFalse(config.endpoint_is_custom)
         options = build_r2_storages_default(config)['OPTIONS']
         self.assertIsNone(options['default_acl'])
         self.assertTrue(options['querystring_auth'])
@@ -152,12 +252,16 @@ class IsolatedPrivateStorageSettingsTests(SimpleTestCase):
             'R2_SECRET_ACCESS_KEY',
             'R2_BUCKET_NAME',
             'R2_ENDPOINT_URL',
+            'R2_ALLOW_CUSTOM_ENDPOINT',
             'R2_REGION_NAME',
             'R2_ADDRESSING_STYLE',
             'R2_SIGNED_URL_EXPIRY_SECONDS',
             'R2_PUBLIC_URL',
             'AWS_S3_CUSTOM_DOMAIN',
             'AWS_S3_URL_PROTOCOL',
+            'KOBO_ENABLED',
+            'KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER',
+            'SIGEDON_READINESS_MIGRATION_CACHE_SECONDS',
         }
         for name in controlled_names:
             environment[name] = ''
@@ -280,6 +384,30 @@ class IsolatedPrivateStorageSettingsTests(SimpleTestCase):
             )
         )
         self.assert_configuration_error(result, 'HTTPS')
+
+    def test_foreign_https_endpoint_rejected_by_default(self):
+        result = self.run_settings(
+            **self.production_env(
+                SIGEDON_PRIVATE_STORAGE='r2',
+                SIGEDON_MEDIA_ROOT='',
+                R2_ENDPOINT_URL='https://s3-compatible.example.test',
+                **FICTITIOUS_R2,
+            )
+        )
+        self.assertNotEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn('R2_ALLOW_CUSTOM_ENDPOINT', result.stderr)
+        self.assertNotIn('fictitious-r2-secret', result.stderr)
+
+    def test_malformed_custom_endpoint_flag_fails(self):
+        result = self.run_settings(
+            **self.production_env(
+                SIGEDON_PRIVATE_STORAGE='r2',
+                SIGEDON_MEDIA_ROOT='',
+                R2_ALLOW_CUSTOM_ENDPOINT='maybe',
+                **FICTITIOUS_R2,
+            )
+        )
+        self.assert_configuration_error(result, 'R2_ALLOW_CUSTOM_ENDPOINT')
 
     def test_invalid_expiry_fail(self):
         result = self.run_settings(

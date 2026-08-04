@@ -14,7 +14,12 @@ from urllib.parse import urlparse
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse
 
-from core.private_storage import PRIVATE_STORAGE_FILESYSTEM, PRIVATE_STORAGE_R2
+from core.private_storage import (
+    PRIVATE_FILE_DELIVERY_SIGNED_REDIRECT,
+    PRIVATE_FILE_DELIVERY_STREAM,
+    PRIVATE_STORAGE_FILESYSTEM,
+    PRIVATE_STORAGE_R2,
+)
 
 WHITENOISE_MANIFEST_BACKEND = (
     'whitenoise.storage.CompressedManifestStaticFilesStorage'
@@ -66,6 +71,7 @@ RENDER_DOCUMENTED_VARIABLES = frozenset(
         'R2_SECRET_ACCESS_KEY',
         'R2_BUCKET_NAME',
         'R2_ENDPOINT_URL',
+        'R2_ALLOW_CUSTOM_ENDPOINT',
         'R2_REGION_NAME',
         'R2_SIGNED_URL_EXPIRY_SECONDS',
         'R2_ADDRESSING_STYLE',
@@ -74,6 +80,7 @@ RENDER_DOCUMENTED_VARIABLES = frozenset(
         'KOBO_API_TOKEN',
         'KOBO_WEBHOOK_USERNAME',
         'KOBO_WEBHOOK_SECRET',
+        'KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER',
         'KOBO_HTTP_CONNECT_TIMEOUT',
         'KOBO_HTTP_READ_TIMEOUT',
         'KOBO_HTTP_MAX_ATTEMPTS',
@@ -86,6 +93,7 @@ RENDER_DOCUMENTED_VARIABLES = frozenset(
         'KOBO_MAX_ATTACHMENT_BYTES',
         'KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS',
         'KOBO_WEBHOOK_MAX_BYTES',
+        'SIGEDON_READINESS_MIGRATION_CACHE_SECONDS',
         'PORT',
         'GUNICORN_BIND',
         'GUNICORN_WORKERS',
@@ -443,12 +451,70 @@ def verify_render_configuration(
                     ok=True,
                 )
             )
+        # Canonical Render uses Cloudflare R2 endpoint only.
+        if r2 is not None and getattr(r2, 'endpoint_is_custom', False):
+            findings.append(
+                RenderConfigFinding(
+                    code='r2_custom_endpoint',
+                    message=(
+                        'R2_ALLOW_CUSTOM_ENDPOINT enables a nonstandard '
+                        'S3-compatible endpoint; canonical Render requires '
+                        'Cloudflare R2 (<account-id>.r2.cloudflarestorage.com).'
+                    ),
+                    ok=False,
+                )
+            )
+        elif r2 is not None and getattr(r2, 'allow_custom_endpoint', False):
+            findings.append(
+                RenderConfigFinding(
+                    code='r2_custom_endpoint',
+                    message=(
+                        'R2_ALLOW_CUSTOM_ENDPOINT is True; disable for '
+                        'canonical Cloudflare R2 Render deployments.'
+                    ),
+                    ok=False,
+                )
+            )
+        else:
+            findings.append(
+                RenderConfigFinding(
+                    code='r2_custom_endpoint',
+                    message='R2 endpoint policy is Cloudflare-strict.',
+                    ok=True,
+                )
+            )
     else:
         findings.append(
             RenderConfigFinding(
                 code='private_storage_mode',
                 message=f'Unknown SIGEDON_PRIVATE_STORAGE={mode!r}.',
                 ok=False,
+            )
+        )
+
+    delivery = getattr(
+        settings, 'SIGEDON_PRIVATE_FILE_DELIVERY', PRIVATE_FILE_DELIVERY_STREAM
+    )
+    if delivery not in (
+        PRIVATE_FILE_DELIVERY_STREAM,
+        PRIVATE_FILE_DELIVERY_SIGNED_REDIRECT,
+    ):
+        findings.append(
+            RenderConfigFinding(
+                code='private_file_delivery',
+                message='SIGEDON_PRIVATE_FILE_DELIVERY must be stream or signed_redirect.',
+                ok=False,
+            )
+        )
+    else:
+        findings.append(
+            RenderConfigFinding(
+                code='private_file_delivery',
+                message=(
+                    'SIGEDON_PRIVATE_FILE_DELIVERY is valid '
+                    '(inline previews always stream for CSP control).'
+                ),
+                ok=True,
             )
         )
 
@@ -496,6 +562,52 @@ def verify_render_configuration(
             RenderConfigFinding(
                 code='kobo_required',
                 message='KOBO_ENABLED is False; Kobo secrets not required.',
+                ok=True,
+            )
+        )
+
+    if bool(getattr(settings, 'KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER', False)):
+        findings.append(
+            RenderConfigFinding(
+                code='kobo_legacy_webhook_header',
+                message=(
+                    'KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER must be False for '
+                    'normal production; Basic auth is canonical.'
+                ),
+                ok=False,
+            )
+        )
+    else:
+        findings.append(
+            RenderConfigFinding(
+                code='kobo_legacy_webhook_header',
+                message='Legacy Kobo webhook secret header is disabled.',
+                ok=True,
+            )
+        )
+
+    cache_seconds = getattr(
+        settings, 'SIGEDON_READINESS_MIGRATION_CACHE_SECONDS', 15
+    )
+    try:
+        cache_value = int(cache_seconds)
+    except (TypeError, ValueError):
+        cache_value = -1
+    if cache_value < 0 or cache_value > 300:
+        findings.append(
+            RenderConfigFinding(
+                code='readiness_migration_cache',
+                message=(
+                    'SIGEDON_READINESS_MIGRATION_CACHE_SECONDS must be 0–300.'
+                ),
+                ok=False,
+            )
+        )
+    else:
+        findings.append(
+            RenderConfigFinding(
+                code='readiness_migration_cache',
+                message='SIGEDON_READINESS_MIGRATION_CACHE_SECONDS is valid.',
                 ok=True,
             )
         )

@@ -30,6 +30,7 @@ from threading import Event
 from threading import Thread
 from unittest import skipUnless
 from unittest.mock import patch
+import base64
 import json
 
 
@@ -346,11 +347,12 @@ class KoboWebhookConcurrencyTests(TransactionTestCase):
             close_old_connections()
             try:
                 barrier.wait(timeout=10)
+                token = base64.b64encode(b'sigedon-kobo:test-webhook-secret').decode()
                 response = Client().post(
                     reverse("kobo:webhook_submission"),
                     data=json.dumps(payload),
                     content_type="application/json",
-                    HTTP_X_KOBO_WEBHOOK_SECRET="test-webhook-secret",
+                    HTTP_AUTHORIZATION=f"Basic {token}",
                 )
                 results.put(response.status_code)
             finally:

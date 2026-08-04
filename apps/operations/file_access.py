@@ -4,7 +4,8 @@ PRE: callers authorize the parent object and model permission before invoking
      response builders.
 POST: streams or signed-redirects only authorized storage objects with hardened
       headers; never exposes absolute paths or trusts upload MIME for inline
-      safety. Storage backends without .path are supported.
+      safety. Inline previews always stream (CSP). Storage backends without
+      .path are supported.
 """
 
 from __future__ import annotations

@@ -3,10 +3,13 @@
 PRE: callers pass raw environment values; no network I/O occurs here.
 POST: returns validated configuration or raises ImproperlyConfigured without
       embedding secrets in messages. R2 mode never auto-falls back to filesystem.
+      Explicit endpoints default to Cloudflare R2 host matching; custom endpoints
+      require R2_ALLOW_CUSTOM_ENDPOINT=True (nonstandard).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,8 +43,22 @@ _R2_REQUIRED_VARS = (
     'R2_BUCKET_NAME',
 )
 
+_TRUE_VALUES = frozenset({'1', 'true', 'yes', 'on'})
+_FALSE_VALUES = frozenset({'0', 'false', 'no', 'off'})
+
+# Obvious metadata / link-local metadata hosts rejected without DNS lookups.
+_BLOCKED_ENDPOINT_HOSTS = frozenset(
+    {
+        'localhost',
+        'metadata.google.internal',
+        'metadata.google.com',
+        'instance-data',
+    }
+)
+
 # S3-compatible bucket naming (DNS-label subset; length 3–63).
 _BUCKET_NAME_RE = re.compile(r'^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
+_ACCOUNT_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 
 # Unused local path when R2 is the default storage; never a public mount.
 R2_UNUSED_MEDIA_DIRNAME = '.sigedon-unused-media-r2'
@@ -59,6 +76,8 @@ class R2StorageConfig:
     region_name: str
     signed_url_expiry_seconds: int
     addressing_style: str
+    allow_custom_endpoint: bool
+    endpoint_is_custom: bool
 
 
 @dataclass(frozen=True)
@@ -98,31 +117,71 @@ def resolve_private_file_delivery_mode(raw: str | None) -> str:
     return value
 
 
-def derive_r2_endpoint_url(*, account_id: str, endpoint_url_raw: str) -> str:
+def resolve_r2_allow_custom_endpoint(raw: str | None) -> bool:
     """
-    PRE: account_id is non-empty when endpoint is blank; endpoint_url_raw may
-         be an explicit HTTPS endpoint.
-    POST: returns a validated HTTPS endpoint without credentials in the URL.
+    PRE: raw is R2_ALLOW_CUSTOM_ENDPOINT or empty for default False.
+    POST: returns a strict boolean; malformed values fail closed.
     """
-    explicit = (endpoint_url_raw or '').strip()
-    if explicit:
-        return validate_r2_endpoint_url(explicit)
-    aid = (account_id or '').strip()
-    if not aid:
-        raise ImproperlyConfigured(
-            'R2_ACCOUNT_ID es obligatorio cuando R2_ENDPOINT_URL no está definido.'
-        )
-    if '/' in aid or ':' in aid or '@' in aid or ' ' in aid:
-        raise ImproperlyConfigured('R2_ACCOUNT_ID tiene un formato inválido.')
-    return validate_r2_endpoint_url(
-        f'https://{aid}.r2.cloudflarestorage.com'
+    if raw is None or not str(raw).strip():
+        return False
+    normalized = str(raw).strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise ImproperlyConfigured(
+        'R2_ALLOW_CUSTOM_ENDPOINT debe ser un valor booleano válido.'
     )
 
 
-def validate_r2_endpoint_url(endpoint_url: str) -> str:
+def cloudflare_r2_endpoint_for_account(account_id: str) -> str:
     """
-    PRE: endpoint_url is a candidate R2/S3 endpoint string.
-    POST: returns the stripped URL when it is HTTPS without embedded credentials.
+    PRE: account_id is a non-empty validated Cloudflare account identifier.
+    POST: returns https://<account-id>.r2.cloudflarestorage.com
+    """
+    aid = (account_id or '').strip()
+    if not aid or not _ACCOUNT_ID_RE.match(aid):
+        raise ImproperlyConfigured('R2_ACCOUNT_ID tiene un formato inválido.')
+    if '/' in aid or ':' in aid or '@' in aid or ' ' in aid:
+        raise ImproperlyConfigured('R2_ACCOUNT_ID tiene un formato inválido.')
+    return f'https://{aid}.r2.cloudflarestorage.com'
+
+
+def _endpoint_hostname_blocked(hostname: str) -> bool:
+    """
+    PRE: hostname is a URL host without credentials (may be a literal IP).
+    POST: True when the host is localhost, private/link-local/loopback IP,
+          .local, or an obvious cloud metadata endpoint. Performs no DNS.
+    """
+    host = (hostname or '').strip().lower().rstrip('.')
+    if not host:
+        return True
+    if host in _BLOCKED_ENDPOINT_HOSTS or host.endswith('.local'):
+        return True
+    if host == '169.254.169.254':
+        return True
+    # Strip IPv6 brackets if present.
+    if host.startswith('[') and host.endswith(']'):
+        host = host[1:-1]
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return bool(
+        ip.is_loopback
+        or ip.is_link_local
+        or ip.is_private
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _validate_endpoint_shape(endpoint_url: str) -> tuple[str, str]:
+    """
+    PRE: endpoint_url is a candidate HTTPS endpoint string.
+    POST: returns (normalized_url_without_trailing_slash, hostname) or raises.
+          Rejects credentials, query, fragment, and non-root paths.
     """
     value = (endpoint_url or '').strip()
     if not value:
@@ -140,8 +199,103 @@ def validate_r2_endpoint_url(endpoint_url: str) -> str:
         raise ImproperlyConfigured(
             'R2_ENDPOINT_URL no debe incluir usuario ni contraseña.'
         )
-    return value.rstrip('/')
+    if parsed.query:
+        raise ImproperlyConfigured(
+            'R2_ENDPOINT_URL no debe incluir parámetros de consulta.'
+        )
+    if parsed.fragment:
+        raise ImproperlyConfigured(
+            'R2_ENDPOINT_URL no debe incluir fragmento.'
+        )
+    path = parsed.path or ''
+    if path not in ('', '/'):
+        raise ImproperlyConfigured(
+            'R2_ENDPOINT_URL no debe incluir una ruta distinta de /.'
+        )
+    hostname = parsed.hostname
+    if not hostname:
+        raise ImproperlyConfigured('R2_ENDPOINT_URL debe incluir un host válido.')
+    return value.rstrip('/'), hostname
 
+
+def validate_r2_endpoint_url(
+    endpoint_url: str,
+    *,
+    account_id: str = '',
+    allow_custom: bool = False,
+) -> str:
+    """
+    PRE: endpoint_url is a candidate R2/S3 endpoint; account_id is required for
+         strict Cloudflare matching when allow_custom is False.
+    POST: returns the stripped URL when policy checks pass. No DNS or network.
+    """
+    normalized, hostname = _validate_endpoint_shape(endpoint_url)
+    aid = (account_id or '').strip()
+
+    if not allow_custom:
+        if not aid:
+            raise ImproperlyConfigured(
+                'R2_ACCOUNT_ID es obligatorio para validar R2_ENDPOINT_URL.'
+            )
+        expected_host = f'{aid}.r2.cloudflarestorage.com'.lower()
+        if hostname.lower() != expected_host:
+            raise ImproperlyConfigured(
+                'R2_ENDPOINT_URL debe coincidir con el host Cloudflare R2 '
+                'derivado de R2_ACCOUNT_ID '
+                '(<account-id>.r2.cloudflarestorage.com), o bien '
+                'R2_ALLOW_CUSTOM_ENDPOINT=True para un endpoint S3-compatible '
+                'no estándar.'
+            )
+        return normalized
+
+    # Custom / nonstandard S3-compatible endpoint (explicit operator override).
+    if _endpoint_hostname_blocked(hostname):
+        raise ImproperlyConfigured(
+            'R2_ENDPOINT_URL personalizado rechazado: host no permitido.'
+        )
+    return normalized
+
+
+def derive_r2_endpoint_url(
+    *,
+    account_id: str,
+    endpoint_url_raw: str,
+    allow_custom: bool = False,
+) -> tuple[str, bool]:
+    """
+    PRE: account_id is non-empty when endpoint is blank; endpoint_url_raw may
+         be an explicit HTTPS endpoint; allow_custom gates non-Cloudflare hosts.
+    POST: returns (validated_endpoint, endpoint_is_custom). No network I/O.
+    """
+    aid = (account_id or '').strip()
+    if not aid:
+        raise ImproperlyConfigured(
+            'R2_ACCOUNT_ID es obligatorio cuando SIGEDON_PRIVATE_STORAGE=r2.'
+        )
+    if not _ACCOUNT_ID_RE.match(aid) or '/' in aid or ':' in aid or '@' in aid:
+        raise ImproperlyConfigured('R2_ACCOUNT_ID tiene un formato inválido.')
+
+    explicit = (endpoint_url_raw or '').strip()
+    if not explicit:
+        return cloudflare_r2_endpoint_for_account(aid), False
+
+    expected = cloudflare_r2_endpoint_for_account(aid)
+    _, hostname = _validate_endpoint_shape(explicit)
+    expected_host = urlparse(expected).hostname or ''
+    is_cloudflare = hostname.lower() == expected_host.lower()
+    if is_cloudflare:
+        return validate_r2_endpoint_url(
+            explicit, account_id=aid, allow_custom=False
+        ), False
+    if not allow_custom:
+        raise ImproperlyConfigured(
+            'R2_ENDPOINT_URL no es el endpoint Cloudflare R2 del account ID. '
+            'Active R2_ALLOW_CUSTOM_ENDPOINT=True solo para despliegues '
+            'S3-compatible no estándar (no es conformidad Cloudflare R2).'
+        )
+    return validate_r2_endpoint_url(
+        explicit, account_id=aid, allow_custom=True
+    ), True
 
 def validate_r2_bucket_name(bucket_name: str) -> str:
     """
@@ -195,9 +349,13 @@ def build_r2_storage_config(env: Mapping[str, str]) -> R2StorageConfig:
     access_key_id = env['R2_ACCESS_KEY_ID'].strip()
     secret_access_key = env['R2_SECRET_ACCESS_KEY'].strip()
     bucket_name = validate_r2_bucket_name(env['R2_BUCKET_NAME'])
-    endpoint_url = derive_r2_endpoint_url(
+    allow_custom = resolve_r2_allow_custom_endpoint(
+        env.get('R2_ALLOW_CUSTOM_ENDPOINT')
+    )
+    endpoint_url, endpoint_is_custom = derive_r2_endpoint_url(
         account_id=account_id,
         endpoint_url_raw=env.get('R2_ENDPOINT_URL', ''),
+        allow_custom=allow_custom,
     )
     region_name = (env.get('R2_REGION_NAME') or '').strip() or DEFAULT_R2_REGION_NAME
     addressing_style = (
@@ -229,6 +387,8 @@ def build_r2_storage_config(env: Mapping[str, str]) -> R2StorageConfig:
         region_name=region_name,
         signed_url_expiry_seconds=expiry,
         addressing_style=addressing_style,
+        allow_custom_endpoint=allow_custom,
+        endpoint_is_custom=endpoint_is_custom,
     )
 
 

@@ -33,6 +33,7 @@ R2_PUBLIC_DOMAIN_CONFIGURED = 'sigedon.E012'
 R2_QUERYSTRING_AUTH_DISABLED = 'sigedon.E013'
 R2_DEFAULT_ACL_PUBLIC = 'sigedon.E014'
 UNKNOWN_PRIVATE_STORAGE_MODE = 'sigedon.E015'
+R2_CUSTOM_ENDPOINT_ENABLED = 'sigedon.E016'
 
 _PROBE_PREFIX = '.sigedon-media-write-probe-'
 
@@ -212,6 +213,23 @@ def _check_r2_private_storage() -> list[Error]:
                 'STORAGES["staticfiles"] must remain WhiteNoise; static assets '
                 'must not use R2.',
                 error_id=R2_STATIC_BACKEND_INVALID,
+            )
+        )
+
+    if getattr(r2, 'allow_custom_endpoint', False) or getattr(
+        r2, 'endpoint_is_custom', False
+    ):
+        errors.append(
+            Error(
+                'R2_ALLOW_CUSTOM_ENDPOINT enables a nonstandard S3-compatible '
+                'endpoint. Canonical deployments must use Cloudflare R2 '
+                '(<account-id>.r2.cloudflarestorage.com).',
+                hint=(
+                    'Set R2_ALLOW_CUSTOM_ENDPOINT=False and use the derived '
+                    'Cloudflare endpoint, or accept this as a nonstandard '
+                    'deployment outside the Render R2 contract.'
+                ),
+                id=R2_CUSTOM_ENDPOINT_ENABLED,
             )
         )
 

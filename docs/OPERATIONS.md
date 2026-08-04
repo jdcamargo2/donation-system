@@ -260,7 +260,8 @@ Después del descubrimiento se debe:
 2. asociarlo con una definición soportada;
 3. configurar la zona pastoral hacia un proyecto;
 4. activar el activo;
-5. verificar las credenciales del webhook;
+5. verificar las credenciales del webhook (Basic auth canónico;
+   `KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER=False` en staging);
 6. comprobar la recepción de submissions;
 7. comprobar que el webhook materializa automáticamente una submission de prueba.
 
@@ -605,7 +606,9 @@ Durante la operación deben revisarse:
   pendientes vía CLI, assets). No arranca el servidor web.
 * `GET /healthz/` — liveness del proceso (sin BD ni dependencias externas).
 * `GET /readyz/` — readiness runtime: BD `default` alcanzable y migraciones
-  aplicadas. No consulta Kobo, caché, media ni R2.
+  aplicadas (`SELECT 1` cada probe; plan de migraciones cacheable con
+  `SIGEDON_READINESS_MIGRATION_CACHE_SECONDS`). No consulta Kobo, caché, media
+  ni R2.
 
 Detalle de contrato, cabeceras y ejemplos de plataforma:
 [DEPLOYMENT.md §6.3](DEPLOYMENT.md#63-sondas-http-healthz-y-readyz).

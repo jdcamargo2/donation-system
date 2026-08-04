@@ -4,11 +4,13 @@ PRE: callers completed authentication and domain authorization before invoking
      deliver_private_file. Storage credentials must never reach responses/logs.
 POST: returns a hardened HttpResponse, or raises Http404 / returns safe 503
       for distinguishable provider outages. Signed URLs are generated only after
-      authorization and are never logged.
+      authorization and are never logged. Inline previews always stream so
+      Django can apply CSP; signed redirects require response-parameter support.
 """
 
 from __future__ import annotations
 
+import inspect
 import logging
 from pathlib import PurePosixPath
 
@@ -43,6 +45,21 @@ _PROTECTED_NOSNIFF = 'nosniff'
 _FALLBACK_DOWNLOAD_MIME = 'application/octet-stream'
 _FALLBACK_FILENAME = 'documento'
 
+# Applied to every inline preview response Django controls (stream mode).
+# Signed redirects cannot inject CSP into the provider object response, so
+# inline disposition always streams through Django.
+PROTECTED_PREVIEW_CSP = (
+    "default-src 'none'; "
+    "sandbox; "
+    "img-src 'self' data:; "
+    "style-src 'none'; "
+    "script-src 'none'; "
+    "connect-src 'none'; "
+    "form-action 'none'; "
+    "base-uri 'none'; "
+    "frame-ancestors 'none'"
+)
+
 # Provider outages / permission errors that should not become 404.
 _PROVIDER_UNAVAILABLE_EXC_NAMES = frozenset(
     {
@@ -60,6 +77,22 @@ _PROVIDER_UNAVAILABLE_EXC_NAMES = frozenset(
 
 class PrivateStorageUnavailable(Exception):
     """Raised when object storage is temporarily unavailable after authorization."""
+
+
+def storage_supports_response_parameters(storage: Storage) -> bool:
+    """
+    PRE: storage is the FieldFile's storage backend.
+    POST: True only when storage.url explicitly accepts a ``parameters`` argument
+          (required for Content-Disposition / Content-Type response overrides).
+    """
+    url_method = getattr(storage, 'url', None)
+    if url_method is None:
+        return False
+    try:
+        signature = inspect.signature(url_method)
+    except (TypeError, ValueError):
+        return False
+    return 'parameters' in signature.parameters
 
 
 def _normalized_extension(file_field) -> str:
@@ -119,14 +152,14 @@ def _safe_operational_error_response() -> HttpResponse:
     return response
 
 
-def _apply_protected_headers(response: HttpResponse, *, content_type: str, disposition: str) -> None:
+def _apply_protected_headers(
+    response: HttpResponse, *, content_type: str, disposition: str
+) -> None:
     response['Content-Type'] = content_type
     response['X-Content-Type-Options'] = _PROTECTED_NOSNIFF
     response['Cache-Control'] = _PROTECTED_CACHE_CONTROL
-    if disposition == DISPOSITION_INLINE and content_type.startswith('image/'):
-        response['Content-Security-Policy'] = (
-            "default-src 'none'; img-src 'self' data:; sandbox"
-        )
+    if disposition == DISPOSITION_INLINE:
+        response['Content-Security-Policy'] = PROTECTED_PREVIEW_CSP
 
 
 def _resolve_delivery_mode() -> str:
@@ -195,9 +228,27 @@ def _signed_redirect_private_file(
     content_type: str,
     safe_filename: str,
     missing_message,
-) -> HttpResponseRedirect:
+) -> HttpResponse:
+    """
+    PRE: disposition is attachment; authorization already succeeded.
+    POST: redirects to a signed URL with response overrides when the backend
+          supports parameters; otherwise streams without generating a bare URL.
+    """
     storage: Storage = file_field.storage
     name = file_field.name
+
+    if not storage_supports_response_parameters(storage):
+        logger.info(
+            'private_file_signed_redirect_fallback category=parameters_unsupported'
+        )
+        return _stream_private_file(
+            file_field,
+            disposition=disposition,
+            content_type=content_type,
+            safe_filename=safe_filename,
+            missing_message=missing_message,
+        )
+
     try:
         exists = storage.exists(name)
     except Exception as exc:  # noqa: BLE001
@@ -207,16 +258,26 @@ def _signed_redirect_private_file(
     if not exists:
         raise Http404(missing_message)
 
-    # Prefer backend parameters for disposition when supported; fall back to plain url.
     parameters = {
-        'ResponseContentDisposition': _content_disposition_header(disposition, safe_filename),
+        'ResponseContentDisposition': _content_disposition_header(
+            disposition, safe_filename
+        ),
         'ResponseContentType': content_type,
     }
     try:
-        try:
-            signed_url = storage.url(name, parameters=parameters)
-        except TypeError:
-            signed_url = storage.url(name)
+        signed_url = storage.url(name, parameters=parameters)
+    except TypeError:
+        # Capability advertised but call rejected — never drop parameters.
+        logger.info(
+            'private_file_signed_redirect_fallback category=parameters_typeerror'
+        )
+        return _stream_private_file(
+            file_field,
+            disposition=disposition,
+            content_type=content_type,
+            safe_filename=safe_filename,
+            missing_message=missing_message,
+        )
     except Exception as exc:  # noqa: BLE001
         if _is_provider_unavailable(exc):
             logger.error(
@@ -246,6 +307,8 @@ def deliver_private_file(
     PRE: request is authorized for this field_file; disposition is inline|attachment.
     POST: streams via storage API or redirects to a short-lived signed URL.
           Unauthorized callers must never reach this function.
+          Inline always streams (CSP control). Signed redirect only for
+          attachments when the backend supports response parameters.
     """
     if disposition not in (DISPOSITION_INLINE, DISPOSITION_ATTACHMENT):
         raise ValueError(f'Unsupported disposition: {disposition!r}')
@@ -272,8 +335,14 @@ def deliver_private_file(
         resolved_type = content_type or preview_mime or _FALLBACK_DOWNLOAD_MIME
 
     delivery = _resolve_delivery_mode()
+    # Inline previews always stream: Django must set CSP; signed redirects
+    # cannot inject CSP into the final provider object response.
+    use_signed_redirect = (
+        delivery == PRIVATE_FILE_DELIVERY_SIGNED_REDIRECT
+        and disposition == DISPOSITION_ATTACHMENT
+    )
     try:
-        if delivery == PRIVATE_FILE_DELIVERY_SIGNED_REDIRECT:
+        if use_signed_redirect:
             return _signed_redirect_private_file(
                 field_file,
                 disposition=disposition,

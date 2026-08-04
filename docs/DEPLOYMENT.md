@@ -465,8 +465,12 @@ Endpoints de aplicación (anónimos, mínimos, no cacheables):
 Contrato:
 
 * Liveness **no** consulta BD, caché, Kobo, APIs externas, media ni migraciones.
-* Readiness **solo** comprueba conectividad de la BD por defecto y el plan de
-  migraciones (vía `MigrationExecutor`; no ejecuta `migrate`).
+* Readiness **solo** comprueba conectividad de la BD por defecto (`SELECT 1` en
+  cada probe) y el plan de migraciones (vía `MigrationExecutor`; no ejecuta
+  `migrate`). El resultado del plan puede cachearse en proceso durante
+  `SIGEDON_READINESS_MIGRATION_CACHE_SECONDS` (default 15; rango 0–300; `0`
+  desactiva el caché). Tras aplicar migraciones, un worker puede retener un
+  resultado «pending» como máximo el TTL.
 * Ninguna sonda depende de Kobo, caché, object storage remoto (R2), datos de
   negocio ni autenticación. `/readyz/` **no** llama a R2 en cada probe.
 * Respuestas sin versión, entorno, host, nombre de BD, migraciones, credenciales
@@ -582,16 +586,18 @@ Variables (sin valores reales):
 
 ```env
 SIGEDON_PRIVATE_STORAGE=filesystem   # o r2
-SIGEDON_PRIVATE_FILE_DELIVERY=stream # o signed_redirect
+SIGEDON_PRIVATE_FILE_DELIVERY=stream # o signed_redirect (descargas; inline siempre stream)
 # Solo si SIGEDON_PRIVATE_STORAGE=r2:
 # R2_ACCOUNT_ID=
 # R2_ACCESS_KEY_ID=
 # R2_SECRET_ACCESS_KEY=
 # R2_BUCKET_NAME=
-# R2_ENDPOINT_URL=          # opcional; si falta se deriva de R2_ACCOUNT_ID
+# R2_ENDPOINT_URL=          # opcional; debe coincidir con Cloudflare R2 del account
+# R2_ALLOW_CUSTOM_ENDPOINT=False
 # R2_REGION_NAME=auto
 # R2_SIGNED_URL_EXPIRY_SECONDS=300   # 60–900
 # R2_ADDRESSING_STYLE=path
+# SIGEDON_READINESS_MIGRATION_CACHE_SECONDS=15
 ```
 
 Contrato R2 cuando se active: bucket privado (sin URL pública / r2.dev);

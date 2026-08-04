@@ -37,10 +37,15 @@ class NoPathPrivateStorage(Storage):
         self.base_url = base_url.rstrip('/') + '/'
         self.url_generation_count = 0
         self.last_url_name = None
+        self.last_url_parameters = None
+        self.reject_url_parameters = False
         self.fail_open_names: set[str] = set()
         self.fail_save = False
         self.fail_exists = False
         self.signed_url_expiry = 300
+        self.provider_unavailable_open = False
+        self.provider_unavailable_exists = False
+        self.provider_unavailable_url = False
 
     def _path(self, name: str) -> Path:
         # Internal only — never expose via .path property.
@@ -50,6 +55,8 @@ class NoPathPrivateStorage(Storage):
         return self.location / clean
 
     def _open(self, name, mode='rb'):
+        if getattr(self, 'provider_unavailable_open', False):
+            raise ConnectionError('simulated provider outage')
         if name in self.fail_open_names:
             raise StorageReadError('simulated storage read failure')
         path = self._path(name)
@@ -85,6 +92,8 @@ class NoPathPrivateStorage(Storage):
             path.unlink()
 
     def exists(self, name):
+        if getattr(self, 'provider_unavailable_exists', False):
+            raise ConnectionError('simulated provider outage')
         if self.fail_exists:
             raise StorageReadError('simulated exists failure')
         return self._path(name).is_file()
@@ -96,8 +105,13 @@ class NoPathPrivateStorage(Storage):
         return path.stat().st_size
 
     def url(self, name, parameters=None, expire=None):
+        if getattr(self, 'provider_unavailable_url', False):
+            raise ConnectionError('simulated provider outage')
+        if getattr(self, 'reject_url_parameters', False) and parameters is not None:
+            raise TypeError('url() got an unexpected keyword argument parameters')
         self.url_generation_count += 1
         self.last_url_name = name
+        self.last_url_parameters = parameters
         expiry = expire if expire is not None else self.signed_url_expiry
         # Fake signed URL — never a real credential.
         qs = f'X-Amz-Expires={expiry}&X-Amz-Signature=fake-test-signature'
@@ -118,6 +132,21 @@ class NoPathPrivateStorage(Storage):
 
     def save_bytes(self, name: str, data: bytes) -> str:
         return self.save(name, ContentFile(data))
+
+
+@deconstructible
+class BareUrlPrivateStorage(NoPathPrivateStorage):
+    """Test double whose url() cannot accept response override parameters."""
+
+    def url(self, name):  # type: ignore[override]
+        self.url_generation_count += 1
+        self.last_url_name = name
+        self.last_url_parameters = None
+        qs = (
+            f'X-Amz-Expires={self.signed_url_expiry}'
+            f'&X-Amz-Signature=fake-test-signature'
+        )
+        return f'{self.base_url}{name}?{qs}'
 
 
 def PurePosixSegments(name: str) -> list[str]:

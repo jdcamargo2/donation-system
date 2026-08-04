@@ -12,6 +12,7 @@ from django.http import FileResponse
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from apps.operations.private_files import PROTECTED_PREVIEW_CSP
 from apps.operations.models import Project, ProjectUpdateAttachment
 from apps.operations.services import register_advance
 from apps.operations.tests.helpers import create_project, create_user
@@ -105,13 +106,17 @@ class PrivateFileDeliveryNoPathTests(TestCase):
         self.assertIn('inline;', preview['Content-Disposition'])
         self.assertEqual(preview['Content-Type'], 'image/png')
         self.assertEqual(preview['Cache-Control'], 'private, no-store')
+        self.assertEqual(preview['Content-Security-Policy'], PROTECTED_PREVIEW_CSP)
         self.assertIsInstance(preview, FileResponse)
+        b''.join(preview.streaming_content)
 
         download = self.client.get(download_url)
         self.assertEqual(download.status_code, 200)
         self.assertIn('attachment;', download['Content-Disposition'])
         self.assertEqual(download['Cache-Control'], 'private, no-store')
+        self.assertNotIn('Content-Security-Policy', download)
         self.assertIsInstance(download, FileResponse)
+        b''.join(download.streaming_content)
 
     def test_forbidden_access(self):
         attachment = self._attachment('secret.pdf', PDF_BYTES)
@@ -298,4 +303,134 @@ class PrivateFileSignedRedirectTests(TestCase):
         location = authorized['Location']
         self.assertIn('fake-private-storage.test', location)
         self.assertIn('X-Amz-Signature=', location)
+        self.assertIn('ResponseContentDisposition=', location)
+        self.assertIn('ResponseContentType=', location)
+        self.assertIsNotNone(storage.last_url_parameters)
+        self.assertIn('ResponseContentDisposition', storage.last_url_parameters)
+        self.assertIn('ResponseContentType', storage.last_url_parameters)
         self.assertEqual(authorized['Cache-Control'], 'private, no-store')
+
+    def test_parameters_passed_to_backend(self):
+        self.client.force_login(self.admin)
+        attachment = self._attachment()
+        storage = self._storage()
+        storage.url_generation_count = 0
+        download_url = reverse(
+            'project_update_attachment_download',
+            args=[self.project.pk, self.update.pk, attachment.pk],
+        )
+        response = self.client.get(download_url)
+        self.assertEqual(response.status_code, 302)
+        params = storage.last_url_parameters
+        self.assertEqual(params['ResponseContentType'], 'application/pdf')
+        self.assertIn('attachment;', params['ResponseContentDisposition'])
+        self.assertIn('filename="', params['ResponseContentDisposition'])
+
+    def test_typeerror_falls_back_to_stream_without_bare_url(self):
+        self.client.force_login(self.admin)
+        attachment = self._attachment()
+        storage = self._storage()
+        storage.reject_url_parameters = True
+        storage.url_generation_count = 0
+        download_url = reverse(
+            'project_update_attachment_download',
+            args=[self.project.pk, self.update.pk, attachment.pk],
+        )
+        with self.assertLogs('sigedon.storage', level='INFO') as captured:
+            response = self.client.get(download_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response, FileResponse)
+        self.assertIn('attachment;', response['Content-Disposition'])
+        self.assertNotIn('Location', response)
+        self.assertEqual(storage.url_generation_count, 0)
+        joined = '\n'.join(captured.output)
+        self.assertIn('parameters_typeerror', joined)
+        self.assertNotIn('X-Amz-Signature', joined)
+        self.assertNotIn('fake-private-storage.test', joined)
+        b''.join(response.streaming_content)
+
+    def test_unsupported_parameters_backend_streams(self):
+        bare_backend = 'core.tests.storage_backends.BareUrlPrivateStorage'
+        with override_settings(
+            STORAGES={
+                'default': {
+                    'BACKEND': bare_backend,
+                    'OPTIONS': {
+                        'location': self.media.name,
+                        'base_url': 'https://fake-private-storage.test/',
+                    },
+                },
+                'staticfiles': {
+                    'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+                },
+            },
+            SIGEDON_PRIVATE_FILE_DELIVERY='signed_redirect',
+        ):
+            from django.core.files.storage import storages
+
+            attachment = ProjectUpdateAttachment.objects.create(
+                project_update=self.update,
+                file=SimpleUploadedFile('bare.pdf', PDF_BYTES),
+                uploaded_by=self.admin,
+            )
+            storage = storages['default']
+            if hasattr(storage, '_wrapped'):
+                storage = storage._wrapped
+            storage.url_generation_count = 0
+            self.client.force_login(self.admin)
+            download_url = reverse(
+                'project_update_attachment_download',
+                args=[self.project.pk, self.update.pk, attachment.pk],
+            )
+            response = self.client.get(download_url)
+            self.assertEqual(response.status_code, 200)
+            self.assertIsInstance(response, FileResponse)
+            self.assertEqual(storage.url_generation_count, 0)
+            b''.join(response.streaming_content)
+
+    def test_inline_preview_always_streams_under_signed_redirect(self):
+        self.client.force_login(self.admin)
+        attachment = ProjectUpdateAttachment.objects.create(
+            project_update=self.update,
+            file=SimpleUploadedFile('preview.png', PNG_BYTES),
+            uploaded_by=self.admin,
+        )
+        storage = self._storage()
+        storage.url_generation_count = 0
+        preview_url = reverse(
+            'project_update_attachment_preview',
+            args=[self.project.pk, self.update.pk, attachment.pk],
+        )
+        response = self.client.get(preview_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response, FileResponse)
+        self.assertIn('inline;', response['Content-Disposition'])
+        self.assertIn('sandbox', response['Content-Security-Policy'])
+        self.assertNotIn('unsafe-inline', response['Content-Security-Policy'])
+        self.assertNotIn('unsafe-eval', response['Content-Security-Policy'])
+        self.assertEqual(storage.url_generation_count, 0)
+        self.assertNotIn('Location', response)
+        b''.join(response.streaming_content)
+
+    def test_signed_missing_object_404_and_provider_outage_503(self):
+        self.client.force_login(self.admin)
+        attachment = self._attachment()
+        storage = self._storage()
+        download_url = reverse(
+            'project_update_attachment_download',
+            args=[self.project.pk, self.update.pk, attachment.pk],
+        )
+        storage.delete(attachment.file.name)
+        self.assertEqual(self.client.get(download_url).status_code, 404)
+
+        attachment2 = self._attachment()
+        storage.provider_unavailable_exists = True
+        storage.url_generation_count = 0
+        download_url2 = reverse(
+            'project_update_attachment_download',
+            args=[self.project.pk, self.update.pk, attachment2.pk],
+        )
+        response = self.client.get(download_url2)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(storage.url_generation_count, 0)
+        self.assertNotIn('X-Amz-Signature', response.content.decode())

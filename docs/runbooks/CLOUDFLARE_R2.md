@@ -40,12 +40,14 @@ solo se activa tras la puerta documentada en
 
 ```env
 SIGEDON_PRIVATE_STORAGE=r2
-SIGEDON_PRIVATE_FILE_DELIVERY=stream   # o signed_redirect
+SIGEDON_PRIVATE_FILE_DELIVERY=stream   # o signed_redirect (descargas)
 R2_ACCOUNT_ID=
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 R2_BUCKET_NAME=
 # R2_ENDPOINT_URL=                     # opcional; si falta se deriva del account id
+#                                      # estricto: https://<account-id>.r2.cloudflarestorage.com
+# R2_ALLOW_CUSTOM_ENDPOINT=False       # True solo para S3-compatible no estándar
 R2_REGION_NAME=auto
 R2_SIGNED_URL_EXPIRY_SECONDS=300       # 60–900
 R2_ADDRESSING_STYLE=path
@@ -54,6 +56,13 @@ R2_ADDRESSING_STYLE=path
 La sola presencia de `R2_*` **no** selecciona R2: hace falta
 `SIGEDON_PRIVATE_STORAGE=r2` explícito. En modo filesystem,
 `SIGEDON_MEDIA_ROOT` sigue siendo obligatorio en producción.
+
+Por defecto el endpoint debe ser Cloudflare R2 del account ID configurado.
+`R2_ALLOW_CUSTOM_ENDPOINT=True` permite un host S3-compatible HTTPS público
+(sin credenciales embebidas, sin query/fragment/ruta, sin localhost/IP
+privada/metadata). Ese modo **no** es conformidad Cloudflare R2 y
+`verify_render_configuration` lo marca como fallo para el despliegue canónico
+Render.
 
 Rechazadas si están definidas: `R2_PUBLIC_URL`, `AWS_S3_CUSTOM_DOMAIN`,
 `AWS_S3_URL_PROTOCOL`.
@@ -93,7 +102,13 @@ Rechazadas si están definidas: `R2_PUBLIC_URL`, `AWS_S3_CUSTOM_DOMAIN`,
 ## URL firmadas
 
 * Modo `SIGEDON_PRIVATE_FILE_DELIVERY=signed_redirect`: Django autoriza y
-  redirige a una URL firmada de corta vida.
+  redirige a una URL firmada de corta vida **solo para descargas
+  (attachment)**. El backend debe soportar `storage.url(..., parameters=...)`
+  con `ResponseContentDisposition` / `ResponseContentType`; si no puede,
+  la entrega hace fallback a stream autorizado (nunca a una URL sin overrides).
+* Las **vistas previas inline** siempre se entregan en stream por Django para
+  aplicar CSP (`default-src 'none'; sandbox; …`). Un redirect firmado no puede
+  inyectar CSP en la respuesta final del proveedor de objetos.
 * Modo `stream` (default): el contenido pasa por la aplicación tras autorizar.
 * Expiry: `R2_SIGNED_URL_EXPIRY_SECONDS` (default 300; rango 60–900).
 * Tratar URL firmadas como secretos temporales: no logs, no tickets, no

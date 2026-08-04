@@ -166,12 +166,12 @@ KOBO_BASE_URL = os.getenv("KOBO_BASE_URL", "")
 KOBO_API_TOKEN = os.getenv("KOBO_API_TOKEN", "")
 KOBO_WEBHOOK_USERNAME = os.getenv("KOBO_WEBHOOK_USERNAME", "")
 KOBO_WEBHOOK_SECRET = os.getenv("KOBO_WEBHOOK_SECRET", "")
-KOBO_ENABLED = os.getenv("KOBO_ENABLED", "False").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
+KOBO_ENABLED = env_bool("KOBO_ENABLED", False)
+# Legacy X-Kobo-Webhook-Secret is disabled by default. Enable only for a
+# temporary migration window; Basic auth is canonical.
+KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER = env_bool(
+    "KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER", False
+)
 
 KOBO_HTTP_CONNECT_TIMEOUT = env_float(
     "KOBO_HTTP_CONNECT_TIMEOUT", 5, minimum=0.1, maximum=60
@@ -225,6 +225,14 @@ SIGEDON_MAX_PRIVATE_UPLOAD_BYTES = env_int(
     10485760,
     minimum=1,
     maximum=104857600,
+)
+# Readiness (/readyz/): SELECT 1 every probe; migration graph briefly cached.
+# 0 disables caching (diagnostics/tests). Bound 0–300 seconds.
+SIGEDON_READINESS_MIGRATION_CACHE_SECONDS = env_int(
+    'SIGEDON_READINESS_MIGRATION_CACHE_SECONDS',
+    15,
+    minimum=0,
+    maximum=300,
 )
 # Coarse request-body ceiling: up to 20 files at the per-file cap plus form fields.
 _PRIVATE_UPLOAD_REQUEST_FILE_BUDGET = 20

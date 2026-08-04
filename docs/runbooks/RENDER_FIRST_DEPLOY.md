@@ -212,7 +212,10 @@ Webhook route (actual): `/integrations/kobo/webhook/`
 1. Keep `KOBO_ENABLED=False` during initial web/database validation.
 2. Enable configuration against staging/temporary HTTPS domain when supported.
 3. Configure final HTTPS webhook endpoint in Kobo.
-4. Verify method/authentication; send a controlled test submission.
+4. Verify method/authentication (**HTTP Basic** with
+   `KOBO_WEBHOOK_USERNAME` / `KOBO_WEBHOOK_SECRET`; keep
+   `KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER=False`); send a controlled test
+   submission.
 5. Verify idempotent replay and malformed payload rejection.
 6. Verify logs redact token/secret.
 7. Verify Cloudflare does not challenge/block the webhook.

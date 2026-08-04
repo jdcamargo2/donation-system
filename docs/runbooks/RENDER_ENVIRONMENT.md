@@ -71,15 +71,18 @@ pre-deploy secrets from the web process on a single service.
 | `R2_ACCESS_KEY_ID` | runtime when r2 | **yes** | API token id | Required in r2 mode |
 | `R2_SECRET_ACCESS_KEY` | runtime when r2 | **yes** | API token secret | Required in r2 mode |
 | `R2_BUCKET_NAME` | runtime when r2 | no | private bucket name | Required in r2 mode |
-| `R2_ENDPOINT_URL` | optional | no | `https://<account>.r2.cloudflarestorage.com` | HTTPS; else derived |
+| `R2_ENDPOINT_URL` | optional | no | `https://<account>.r2.cloudflarestorage.com` | HTTPS; else derived; must match account host unless custom flag |
+| `R2_ALLOW_CUSTOM_ENDPOINT` | optional | no | `False` | Nonstandard S3-compatible only; fails canonical Render verify |
 | `R2_REGION_NAME` | runtime when r2 | no | `auto` | Default `auto` |
 | `R2_SIGNED_URL_EXPIRY_SECONDS` | runtime when r2 | no | `300` | 60–900 |
 | `R2_ADDRESSING_STYLE` | runtime when r2 | no | `path` | `path` or `virtual` |
 | `KOBO_ENABLED` | runtime | no | `False` then `True` | Keep False until webhook ready |
 | `KOBO_BASE_URL` | when Kobo enabled | no | `https://…` | Required if enabled |
 | `KOBO_API_TOKEN` | when Kobo enabled | **yes** | token | Required if enabled |
-| `KOBO_WEBHOOK_USERNAME` | when Kobo enabled | no | username | Required if enabled |
-| `KOBO_WEBHOOK_SECRET` | when Kobo enabled | **yes** | secret | Required if enabled |
+| `KOBO_WEBHOOK_USERNAME` | when Kobo enabled | no | username | Basic auth (canonical) |
+| `KOBO_WEBHOOK_SECRET` | when Kobo enabled | **yes** | secret | Basic password |
+| `KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER` | optional | no | `False` | Temporary only; False for staging/prod |
+| `SIGEDON_READINESS_MIGRATION_CACHE_SECONDS` | optional | no | `15` | 0–300; migration-plan TTL for `/readyz/` |
 | `KOBO_HTTP_CONNECT_TIMEOUT` | optional | no | `5` | Float seconds |
 | `KOBO_HTTP_READ_TIMEOUT` | optional | no | `15` | Float seconds |
 | `KOBO_HTTP_MAX_ATTEMPTS` | optional | no | `3` | Integer |

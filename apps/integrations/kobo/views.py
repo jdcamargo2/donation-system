@@ -3,6 +3,7 @@ import binascii
 import json
 import logging
 import secrets
+import threading
 
 from django.conf import settings
 from django.contrib import messages
@@ -81,22 +82,17 @@ from apps.integrations.kobo.submission_presentation import (
 WEBHOOK_BASIC_REALM = "SIGEDON Kobo Webhook"
 logger = logging.getLogger("sigedon.kobo.webhook")
 
+_legacy_header_warned = False
+_legacy_header_warn_lock = threading.Lock()
 
-def _has_valid_webhook_credentials(request) -> bool:
+
+def _basic_webhook_credentials_valid(
+    request, *, configured_username: str, configured_secret: str
+) -> bool:
     """
-    PRE: request is an HTTP request directed to the Kobo webhook.
-    POST: returns True only for non-empty configured Basic credentials or the
-    legacy secret header, without logging or raising for malformed input.
+    PRE: configured_secret is non-empty; request may carry Authorization.
+    POST: True only for valid Basic auth matching configured username/secret.
     """
-    configured_username = settings.KOBO_WEBHOOK_USERNAME
-    configured_secret = settings.KOBO_WEBHOOK_SECRET
-    if not configured_secret:
-        return False
-
-    supplied_secret = request.headers.get("X-Kobo-Webhook-Secret", "")
-    if supplied_secret and secrets.compare_digest(supplied_secret, configured_secret):
-        return True
-
     authorization = request.headers.get("Authorization", "")
     try:
         scheme, encoded_credentials = authorization.split(None, 1)
@@ -116,6 +112,53 @@ def _has_valid_webhook_credentials(request) -> bool:
         and secrets.compare_digest(supplied_username, configured_username)
         and secrets.compare_digest(supplied_password, configured_secret)
     )
+
+
+def _warn_legacy_webhook_header_once() -> None:
+    """Emit one process-local deprecation warning without secret/header content."""
+    global _legacy_header_warned
+    with _legacy_header_warn_lock:
+        if _legacy_header_warned:
+            return
+        _legacy_header_warned = True
+    logger.warning(
+        "Kobo webhook accepted legacy X-Kobo-Webhook-Secret header; "
+        "Basic authentication is canonical. Disable "
+        "KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER after callers migrate."
+    )
+
+
+def _has_valid_webhook_credentials(request) -> bool:
+    """
+    PRE: request is an HTTP request directed to the Kobo webhook.
+    POST: returns True for valid Basic credentials (canonical). Legacy
+          X-Kobo-Webhook-Secret is accepted only when
+          KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER is explicitly True.
+          Never logs credential or header values.
+    """
+    configured_username = settings.KOBO_WEBHOOK_USERNAME
+    configured_secret = settings.KOBO_WEBHOOK_SECRET
+    if not configured_secret:
+        return False
+
+    if _basic_webhook_credentials_valid(
+        request,
+        configured_username=configured_username,
+        configured_secret=configured_secret,
+    ):
+        return True
+
+    allow_legacy = bool(
+        getattr(settings, "KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER", False)
+    )
+    if not allow_legacy:
+        return False
+
+    supplied_secret = request.headers.get("X-Kobo-Webhook-Secret", "")
+    if supplied_secret and secrets.compare_digest(supplied_secret, configured_secret):
+        _warn_legacy_webhook_header_once()
+        return True
+    return False
 
 
 def _webhook_unauthorized_response():
@@ -147,7 +190,8 @@ def _declared_webhook_payload_exceeds_limit(request) -> bool:
 @csrf_exempt
 @require_POST
 def webhook_submission(request):
-    # PRE: Kobo POSTs JSON with configured Basic credentials or legacy secret.
+    # PRE: Kobo POSTs JSON with configured Basic credentials (canonical);
+    #      legacy X-Kobo-Webhook-Secret only when explicitly enabled.
     # POST: safely stages and processes one configured asset submission idempotently.
     if not settings.KOBO_ENABLED:
         logger.info("Kobo webhook rejected: integration disabled")

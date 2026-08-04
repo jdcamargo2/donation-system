@@ -21,8 +21,8 @@ from core.render_configuration import (
 from core.private_storage import R2StorageConfig
 
 
-def _fictitious_r2() -> R2StorageConfig:
-    return R2StorageConfig(
+def _fictitious_r2(**overrides) -> R2StorageConfig:
+    values = dict(
         account_id='fictitiousaccount01',
         access_key_id='fictitious-access-key',
         secret_access_key='fictitious-r2-secret',
@@ -31,7 +31,11 @@ def _fictitious_r2() -> R2StorageConfig:
         region_name='auto',
         signed_url_expiry_seconds=300,
         addressing_style='path',
+        allow_custom_endpoint=False,
+        endpoint_is_custom=False,
     )
+    values.update(overrides)
+    return R2StorageConfig(**values)
 
 
 HEALTHY_STORAGES = {
@@ -77,6 +81,24 @@ class VerifyRenderConfigurationHealthyTests(SimpleTestCase):
         self.assertIn('verify_render_configuration=ok', output)
         self.assertNotIn('fictitious-r2-secret', output)
         self.assertNotIn('fictitious-access-key', output)
+
+    def test_custom_r2_endpoint_fails_canonical_render(self):
+        with override_settings(
+            SIGEDON_R2_CONFIG=_fictitious_r2(
+                allow_custom_endpoint=True,
+                endpoint_is_custom=True,
+                endpoint_url='https://s3-compatible.example.test',
+            )
+        ):
+            findings = verify_render_configuration(environ={})
+        codes = {item.code for item in findings if not item.ok}
+        self.assertIn('r2_custom_endpoint', codes)
+
+    def test_legacy_kobo_header_fails_canonical_render(self):
+        with override_settings(KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER=True):
+            findings = verify_render_configuration(environ={})
+        codes = {item.code for item in findings if not item.ok}
+        self.assertIn('kobo_legacy_webhook_header', codes)
 
 
 @override_settings(

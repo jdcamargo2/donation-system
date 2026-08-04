@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import logging
@@ -90,7 +91,10 @@ class KoboLoggingTests(TestCase):
         self.client = Client()
 
     def _auth_headers(self):
-        return {'HTTP_X_KOBO_WEBHOOK_SECRET': 'test-webhook-secret-FAKE'}
+        token = base64.b64encode(
+            b'sigedon-kobo:test-webhook-secret-FAKE'
+        ).decode()
+        return {'HTTP_AUTHORIZATION': f'Basic {token}'}
 
     def create_submission(self, **overrides):
         values = {
