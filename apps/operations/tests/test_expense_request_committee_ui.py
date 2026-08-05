@@ -95,8 +95,30 @@ class ExpenseRequestCommitteeUITests(TestCase):
         self.assertEqual(response.context['approval_available_balance'], Decimal('200.00'))
         self.assertEqual(response.context['approval_balance_after'], Decimal('150.00'))
         self.assertFalse(response.context['approval_balance_insufficient'])
+        self.assertContains(response, 'no registra un gasto')
+        self.assertNotContains(response, 'Expense')
         self.request_obj.refresh_from_db()
         self.assertEqual(self.request_obj.status, ExpenseRequest.Status.PENDING_DECISION)
+
+    def test_approve_page_uses_spanish_gasto_not_expense_on_both_balance_branches(self):
+        self.client.force_login(self.committee)
+        sufficient = self.client.get(self._approve_url())
+        self.assertEqual(sufficient.status_code, 200)
+        self.assertFalse(sufficient.context['approval_balance_insufficient'])
+        self.assertContains(sufficient, 'no registra un gasto')
+        self.assertNotContains(sufficient, 'Expense')
+        self.assertContains(sufficient, 'se reservarán USD 50,00')
+
+        oversized = self._create(amount=Decimal('250.00'), purpose='Saldo insuficiente i18n')
+        insufficient = self.client.get(self._approve_url(oversized.pk))
+        self.assertEqual(insufficient.status_code, 200)
+        self.assertTrue(insufficient.context['approval_balance_insufficient'])
+        self.assertContains(
+            insufficient,
+            'El saldo disponible actual no permite aprobar esta solicitud.',
+        )
+        self.assertNotContains(insufficient, 'Expense')
+        self.assertContains(insufficient, 'no registra un gasto')
 
     def test_committee_post_approve_succeeds_with_reservation(self):
         self.client.force_login(self.committee)
@@ -484,3 +506,12 @@ class ExpenseRequestCommitteeUITests(TestCase):
         self.assertNotIn('status', form.fields)
         self.assertNotIn('actor', form.fields)
         self.assertNotIn('reserved_amount', form.fields)
+
+
+class BudgetCategoryLabelTests(TestCase):
+    def test_infrastructure_supply_label_uses_sentence_case(self):
+        from apps.operations.choices import BUDGET_CATEGORY_CHOICES
+
+        labels = {value: str(label) for value, label in BUDGET_CATEGORY_CHOICES}
+        self.assertEqual(labels['infrastructure_supply'], 'Infraestructura y abasto local')
+        self.assertNotIn('Infraestructura y Abasto local', labels.values())

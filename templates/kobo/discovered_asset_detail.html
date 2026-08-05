@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load kobo_presentation %}
 {% block title %}Activo Kobo descubierto | SIGEDON{% endblock %}
 {% block content %}
 <div class="container py-3">
@@ -15,7 +16,7 @@
     <dt class="col-sm-3">Modificado remotamente</dt><dd class="col-sm-9">{{ discovered.remote_modified_at|default:"—" }}</dd></dl>
   {% if asset %}
     <p><a class="btn btn-primary" href="{% url 'kobo:asset_configuration' asset.pk %}">Ver configuración</a></p>
-    <p>Definición: {{ asset.form_definition }} · Rol: {{ asset.get_form_role_display }} · {% if asset.is_active %}Activo{% else %}Inactivo{% endif %}</p>
+    <p>Definición: {{ asset.form_definition }} · Rol: {{ asset.form_role|kobo_label }} · {% if asset.is_active %}Activo{% else %}Inactivo{% endif %}</p>
     <p>El proyecto se determina por zona pastoral e identidad territorial.</p>
   {% elif discovered.is_available and not compatible_configuration %}
     <div class="alert alert-warning">Este activo fue descubierto, pero todavía no tiene una definición soportada en SIGEDON.</div>

@@ -24,7 +24,7 @@
             <dt class="col-sm-4">Notas generales</dt><dd class="col-sm-8">{{ normalized_payload.general_notes|default:"—" }}</dd>
         {% endif %}
     </dl></section>
-    <section class="card card-body mb-3"><h2 class="h5">Adjuntos</h2><ul class="mb-0">{% for attachment in attachments %}<li>{{ attachment.original_filename|default:attachment.field_name }} · {{ attachment.get_privacy_level_display }} · {{ attachment.get_status_display }}</li>{% empty %}<li class="text-muted">No hay adjuntos disponibles.</li>{% endfor %}</ul></section>
+    <section class="card card-body mb-3"><h2 class="h5">Adjuntos</h2><ul class="mb-0">{% for attachment in attachments %}<li>{{ attachment.original_filename|default:attachment.field_name }} · {{ attachment.privacy_level|kobo_label }} · {{ attachment.status|kobo_label }}</li>{% empty %}<li class="text-muted">No hay adjuntos disponibles.</li>{% endfor %}</ul></section>
     {% if not read_only %}<p class="text-muted mb-0">Esta incidencia se procesa automáticamente cuando se corrige su causa.</p>{% endif %}
 </div>
 {% endblock %}

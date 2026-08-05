@@ -63,6 +63,7 @@ from apps.integrations.kobo.hub import (
     sync_asset,
     sync_history,
 )
+from apps.integrations.kobo.presentation import presentation_label
 from apps.integrations.kobo.submission_presentation import (
     attachment_status_label,
     build_imported_submission_detail_context,
@@ -478,7 +479,10 @@ def submission_list(request):
         {
             "submissions": submissions,
             "filters": filters,
-            "status_choices": KoboSubmission.Status.choices,
+            "status_choices": [
+                (value, presentation_label(value) or label)
+                for value, label in KoboSubmission.Status.choices
+            ],
             "form_ids": KoboSubmission.objects.values_list(
                 "form_definition__form_id", flat=True
             ).distinct(),

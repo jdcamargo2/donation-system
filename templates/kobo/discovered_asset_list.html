@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load kobo_presentation %}
 {% block title %}Activos Kobo descubiertos | SIGEDON{% endblock %}
 {% block content %}
 <div class="container py-3">
@@ -10,7 +11,7 @@
       <td>{{ row.short_uid }}{% if row.discovered.asset_uid|length > 12 %}…{% endif %}</td>
       <td>{{ row.discovered.asset_type|default:"—" }}</td><td>{{ row.discovered.deployment_status|default:"—" }}</td>
       <td>{% if row.discovered.is_available %}Disponible{% else %}No disponible{% endif %}</td>
-      <td>{{ row.discovered.last_seen_at }}</td><td>{{ row.local_state }}</td>
+      <td>{{ row.discovered.last_seen_at }}</td><td>{{ row.local_state|kobo_label }}</td>
     </tr>{% empty %}<tr><td colspan="7">No hay activos descubiertos.</td></tr>{% endfor %}</tbody>
   </table></div>
 </div>

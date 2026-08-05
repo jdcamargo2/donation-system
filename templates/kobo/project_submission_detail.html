@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load kobo_presentation %}
 
 {% block title %}{{ presentation.page_title }} | SIGEDON{% endblock %}
 
@@ -73,7 +74,7 @@
                             <div class="small text-muted">
                                 {{ evidence.content_type }}
                                 · {{ evidence.size_bytes|default_if_none:"—" }} bytes
-                                · {{ evidence.get_privacy_level_display }}
+                                · {{ evidence.privacy_level|kobo_label }}
                             </div>
                         </div>
                         {% include "web/includes/protected_file_item.html" with file_actions=evidence.file_actions %}

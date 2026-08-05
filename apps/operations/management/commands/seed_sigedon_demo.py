@@ -74,15 +74,15 @@ class Command(BaseCommand):
         """
         problems = verify_sigedon_demo()
         if problems:
-            self.stderr.write(self.style.ERROR('Demo verification failed:'))
+            self.stderr.write(self.style.ERROR('La verificación de la demo falló:'))
             for problem in problems:
                 self.stderr.write(f'  - {problem}')
             raise CommandError(
-                f'Demo verification failed with {len(problems)} issue(s).'
+                f'La verificación de la demo falló con {len(problems)} problema(s).'
             )
 
         counts = collect_demo_counts()
-        self.stdout.write(self.style.SUCCESS('Demo verification OK.'))
+        self.stdout.write(self.style.SUCCESS('Verificación de la demo correcta.'))
         for label, value in counts.items():
             self.stdout.write(f'{label}: {value}')
 

@@ -429,3 +429,29 @@ class KoboReviewPanelTests(TestCase):
         self.assertNotContains(response, "remote-personal-name.jpg")
         self.assertNotContains(response, "href=\"/media/")
         self.assertContains(response, "csrfmiddlewaretoken")
+
+    def test_submission_list_uses_spanish_operator_labels(self):
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Formularios Kobo")
+        self.assertContains(response, "Identificador externo")
+        self.assertContains(response, "Pendiente de revisión")
+        self.assertNotContains(response, "Submissions Kobo")
+        self.assertNotContains(response, "External ID")
+        self.assertNotContains(response, "No hay submissions")
+        self.assertNotContains(response, "Ready for review")
+        self.assertNotContains(response, "Received")
+
+    def test_submission_list_empty_state_is_spanish(self):
+        KoboSubmission.objects.all().delete()
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No hay formularios.")
+        self.assertNotContains(response, "No hay submissions")
+        self.assertNotContains(response, "Submissions Kobo")

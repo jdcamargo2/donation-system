@@ -33,7 +33,7 @@ OPERATING_CURRENCY_CHOICES = ((OPERATING_CURRENCY, OPERATING_CURRENCY),)
 CURRENCY_CHOICES = OPERATING_CURRENCY_CHOICES
 
 BUDGET_CATEGORY_CHOICES = [
-    ('infrastructure_supply', _('Infraestructura y Abasto local')),
+    ('infrastructure_supply', _('Infraestructura y abasto local')),
     ('health_psychosocial', _('Salud y apoyo psicosocial')),
     ('training_entrepreneurship', _('Formación y emprendimiento')),
     ('communication_networks', _('Redes de comunicación')),

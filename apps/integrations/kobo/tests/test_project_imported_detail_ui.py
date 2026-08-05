@@ -1192,3 +1192,31 @@ class ImportedProjectDetailUITests(TestCase):
         self.assertNotContains(response, "Territorio y población")
         self.assertNotContains(response, "Diagnóstico y objetivo")
         self.assertNotContains(response, "Puntajes de evaluación")
+
+    def test_evidence_privacy_uses_spanish_presentation_label(self):
+        self.client.force_login(self.viewer)
+        response = self.client.get(
+            reverse("kobo:project_submission_detail", args=(self.imported.pk,))
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Revisión interna")
+        self.assertNotContains(response, "Internal review")
+        self.assertNotContains(response, "Public candidate")
+        self.assertNotContains(response, "Private")
+
+    def test_history_detail_attachment_labels_are_spanish(self):
+        self.client.force_login(self.viewer)
+        response = self.client.get(
+            reverse(
+                "kobo:project_submission_history_detail",
+                args=(self.project.pk, self.imported.pk),
+            )
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Revisión interna")
+        self.assertContains(response, "Disponible")
+        self.assertNotContains(response, "Internal review")
+        self.assertNotContains(response, "Downloaded")
+        self.assertNotContains(response, "Pending")
+        self.assertContains(response, "Registro territorial")
+        self.assertNotContains(response, "Territorial profile")

@@ -287,8 +287,20 @@ class SeedSigedonDemoCommandTests(TestCase):
         before = verify_sigedon_demo()
         self.assertTrue(before)
 
-        with self.assertRaises(CommandError):
-            call_command('seed_sigedon_demo', verify=True, stdout=StringIO())
+        fail_stdout = StringIO()
+        fail_stderr = StringIO()
+        with self.assertRaises(CommandError) as raised:
+            call_command(
+                'seed_sigedon_demo',
+                verify=True,
+                stdout=fail_stdout,
+                stderr=fail_stderr,
+            )
+        fail_combined = fail_stdout.getvalue() + fail_stderr.getvalue() + str(raised.exception)
+        self.assertIn('La verificación de la demo falló:', fail_combined)
+        self.assertNotIn('Demo verification', fail_combined)
+        self.assertNotIn('demo-test-12345', fail_combined)
+        self.assertNotIn('SIGEDON_DEMO_PASSWORD', fail_combined)
 
         self.run_seed()
         problems = verify_sigedon_demo()
@@ -296,7 +308,10 @@ class SeedSigedonDemoCommandTests(TestCase):
 
         stdout = StringIO()
         call_command('seed_sigedon_demo', verify=True, stdout=stdout)
-        self.assertIn('Demo verification OK.', stdout.getvalue())
+        success_output = stdout.getvalue()
+        self.assertIn('Verificación de la demo correcta.', success_output)
+        self.assertNotIn('Demo verification', success_output)
+        self.assertNotIn('demo-test-12345', success_output)
 
     def test_verify_performs_zero_writes(self):
         self.run_seed()
