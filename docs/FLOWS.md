@@ -642,9 +642,17 @@ filtros `workflow` acotados.
 * El portal publica únicamente información autorizada.
 * No se exponen datos privados, financieros individuales ni técnicos.
 * La capa pública no modifica información operativa.
+* Las métricas financieras públicas se limitan a proyectos `ACTIVE` y visibles:
+  «Donaciones vinculadas» suma montos completos de donaciones `RECEIVED`
+  ligadas a al menos un proyecto visible; «Asignado» y «Recursos ejecutados»
+  usan asignaciones/gastos de ese alcance; «Disponible por ejecutar» =
+  asignado − ejecutado (sin restar reservas de solicitudes).
+* Esas cifras **no** deben coincidir con los totales institucionales del
+  dashboard interno.
 * Tras publicar, retirar del portal o terminar un proyecto previamente público,
-  la aplicación invalida la caché del portal (invalidación amplia del cache
-  por defecto; no se garantiza invalidación por clave individual).
+  y tras mutaciones financieras relevantes que afectan métricas visibles, la
+  aplicación invalida la caché del portal tras el commit (invalidación amplia
+  del cache por defecto; no se garantiza invalidación por clave individual).
 
 ---
 

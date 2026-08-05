@@ -263,18 +263,29 @@ def get_public_transparency_summary():
     """
     PRE: Los modelos operativos están migrados.
     POST: Retorna métricas agregadas públicas sin datos privados.
+
+    linked_received_donations_total: full amount of each distinct RECEIVED USD
+    donation linked to at least one eligible public allocation (not the sum of
+    those allocations). total_assigned / total_executed / available_balance use
+    public allocation and expense scope only (assigned − executed).
     """
     allocations = _get_public_allocations()
     expenses = _get_public_expenses(allocations)
+    # pk__in subquery is distinct by donation identity; Sum does not double-count
+    # when one donation funds multiple public allocations.
     donations = Donation.objects.filter(
         pk__in=allocations.values('donation_id'),
-    ).exclude(status=Donation.Status.ANNULLED)
-    total_received = donations.aggregate(total=Sum('amount', default=ZERO_MONEY))['total'] or ZERO_MONEY
+        currency=OPERATING_CURRENCY,
+        status=Donation.Status.RECEIVED,
+    )
+    linked_received_donations_total = (
+        donations.aggregate(total=Sum('amount', default=ZERO_MONEY))['total'] or ZERO_MONEY
+    )
     total_assigned = allocations.aggregate(total=Sum('amount', default=ZERO_MONEY))['total'] or ZERO_MONEY
     total_executed = expenses.aggregate(total=Sum('amount', default=ZERO_MONEY))['total'] or ZERO_MONEY
     return {
         'project_count': get_public_projects().count(),
-        'total_received': total_received,
+        'linked_received_donations_total': linked_received_donations_total,
         'total_assigned': total_assigned,
         'total_executed': total_executed,
         'available_balance': max(total_assigned - total_executed, ZERO_MONEY),

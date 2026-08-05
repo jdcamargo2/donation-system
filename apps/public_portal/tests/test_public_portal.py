@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.operations.models import Project, ProjectUpdate
+from apps.operations.models import Donation, Project, ProjectUpdate
 from apps.operations.services import (
     finish_project,
     publish_project,
@@ -15,6 +15,7 @@ from apps.operations.services import (
     unpublish_project,
 )
 from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project, create_user
+from apps.public_portal.selectors import get_public_transparency_summary
 
 
 class PublicPortalTests(TestCase):
@@ -175,16 +176,19 @@ class PublicPortalTests(TestCase):
         self.assertEqual(self.client.get(detail_url).status_code, 404)
         self.assertNotContains(self.client.get(list_url), private_project.name)
 
-        publish_project(project_id=private_project.pk, actor=self.user)
+        with self.captureOnCommitCallbacks(execute=True):
+            publish_project(project_id=private_project.pk, actor=self.user)
         self.assertEqual(self.client.get(detail_url).status_code, 200)
         self.assertContains(self.client.get(list_url), private_project.name)
 
-        unpublish_project(project_id=private_project.pk, actor=self.user)
+        with self.captureOnCommitCallbacks(execute=True):
+            unpublish_project(project_id=private_project.pk, actor=self.user)
         self.assertEqual(self.client.get(detail_url).status_code, 404)
         self.assertNotContains(self.client.get(list_url), private_project.name)
 
-        publish_project(project_id=private_project.pk, actor=self.user)
-        finish_project(private_project.pk, actor=self.user)
+        with self.captureOnCommitCallbacks(execute=True):
+            publish_project(project_id=private_project.pk, actor=self.user)
+            finish_project(private_project.pk, actor=self.user)
         private_project.refresh_from_db()
         self.assertEqual(private_project.status, Project.Status.CLOSED)
         self.assertFalse(private_project.is_public)
@@ -493,7 +497,7 @@ class PublicPortalTests(TestCase):
         response = self.client.get(reverse('public_portal:public_home'))
         summary = response.context['summary']
 
-        self.assertEqual(summary['total_received'], self.donation.amount)
+        self.assertEqual(summary['linked_received_donations_total'], self.donation.amount)
         self.assertEqual(summary['total_assigned'], self.allocation.amount)
         self.assertEqual(summary['total_executed'], self.expense.amount)
         self.assertEqual(summary['available_balance'], self.allocation.amount - self.expense.amount)
@@ -589,7 +593,10 @@ class PublicPortalTests(TestCase):
         stylesheet = Path('static/public_portal/css/public_portal.css').read_text()
 
         self.assertEqual(source.count('class="public-money-value"'), 4)
-        self.assertIn('{{ summary.total_received|money_es }} USD</span>', source)
+        self.assertIn(
+            '{{ summary.linked_received_donations_total|money_es }} USD</span>',
+            source,
+        )
         self.assertIn('{{ summary.total_executed|money_es }} USD</span>', source)
         self.assertIn('white-space: nowrap;', stylesheet)
         self.assertIn('font-size: clamp(1.2rem, 2.4vw, 2rem);', stylesheet)
@@ -705,3 +712,176 @@ class PublicPortalTests(TestCase):
         self.assertIn('code', projects_response.json()['projects'][0])
         self.assertIn('metrics', metrics_response.json())
         self.assertIn('project_count', metrics_response.json()['metrics'])
+        self.assertIn(
+            'linked_received_donations_total',
+            metrics_response.json()['metrics'],
+        )
+        self.assertNotIn('total_received', metrics_response.json()['metrics'])
+
+
+class PublicFinancialMetricSemanticsTests(TestCase):
+    """BUG-E2E-005: linked RECEIVED donations vs assigned/executed scope."""
+
+    def setUp(self):
+        cache.clear()
+        self.institution = create_institution()
+        self.public_project = create_project(code='PRJ-PUB-MET', name='Público métricas')
+        self.public_project.status = Project.Status.ACTIVE
+        self.public_project.is_public = True
+        self.public_project.save(update_fields=['status', 'is_public'])
+
+    def test_registered_donation_with_public_allocation_does_not_count(self):
+        donation = create_donation(
+            code='DON-REG-MET',
+            donor=self.institution,
+            amount=Decimal('500.00'),
+            status=Donation.Status.REGISTERED,
+        )
+        create_allocation(
+            donation=donation,
+            project=self.public_project,
+            amount=Decimal('200.00'),
+        )
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('0.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('200.00'))
+
+    def test_received_donation_with_public_allocation_counts_once(self):
+        donation = create_donation(
+            code='DON-REC-MET',
+            donor=self.institution,
+            amount=Decimal('500.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        create_allocation(
+            donation=donation,
+            project=self.public_project,
+            amount=Decimal('200.00'),
+        )
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('500.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('200.00'))
+
+    def test_one_donation_with_multiple_public_allocations_is_not_double_counted(self):
+        second_public = create_project(code='PRJ-PUB-MET-2', name='Segundo público')
+        second_public.status = Project.Status.ACTIVE
+        second_public.is_public = True
+        second_public.save(update_fields=['status', 'is_public'])
+        donation = create_donation(
+            code='DON-MULTI-MET',
+            donor=self.institution,
+            amount=Decimal('1000.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        create_allocation(donation=donation, project=self.public_project, amount=Decimal('300.00'))
+        create_allocation(donation=donation, project=second_public, amount=Decimal('400.00'))
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('1000.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('700.00'))
+
+    def test_donation_linked_only_to_private_project_is_excluded(self):
+        private = create_project(code='PRJ-PRIV-MET', name='Privado')
+        private.status = Project.Status.ACTIVE
+        private.is_public = False
+        private.save(update_fields=['status', 'is_public'])
+        donation = create_donation(
+            code='DON-PRIV-MET',
+            donor=self.institution,
+            amount=Decimal('800.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        create_allocation(donation=donation, project=private, amount=Decimal('500.00'))
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('0.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('0.00'))
+
+    def test_closed_public_project_is_excluded_by_project_scope(self):
+        closed = create_project(code='PRJ-CLOSED-MET', name='Cerrado')
+        closed.status = Project.Status.CLOSED
+        closed.is_public = True
+        closed.save(update_fields=['status', 'is_public'])
+        donation = create_donation(
+            code='DON-CLOSED-MET',
+            donor=self.institution,
+            amount=Decimal('900.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        create_allocation(donation=donation, project=closed, amount=Decimal('400.00'))
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('0.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('0.00'))
+
+    def test_assigned_executed_available_formulas_remain_unchanged(self):
+        donation = create_donation(
+            code='DON-FORM-MET',
+            donor=self.institution,
+            amount=Decimal('1000.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        allocation = create_allocation(
+            donation=donation,
+            project=self.public_project,
+            amount=Decimal('400.00'),
+        )
+        expense = create_expense(allocation=allocation, amount=Decimal('125.00'))
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['total_assigned'], Decimal('400.00'))
+        self.assertEqual(summary['total_executed'], Decimal('125.00'))
+        self.assertEqual(summary['available_balance'], Decimal('275.00'))
+        self.assertEqual(
+            summary['available_balance'],
+            max(summary['total_assigned'] - summary['total_executed'], Decimal('0.00')),
+        )
+        self.assertEqual(expense.amount, Decimal('125.00'))
+
+
+class PublicHomeMetricLabelTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        project = create_project(code='PRJ-LABEL', name='Etiquetas')
+        project.status = Project.Status.ACTIVE
+        project.is_public = True
+        project.save(update_fields=['status', 'is_public'])
+
+    def test_public_home_uses_clarified_financial_labels_and_scope_note(self):
+        response = self.client.get(reverse('public_portal:public_home'))
+        content = response.content.decode()
+
+        self.assertContains(response, 'Donaciones vinculadas')
+        self.assertContains(
+            response,
+            'Monto total de las donaciones recibidas que financian al menos un proyecto visible.',
+        )
+        self.assertContains(response, 'Disponible por ejecutar')
+        self.assertContains(
+            response,
+            'Parte de los fondos asignados a proyectos visibles que aún no se ha registrado como ejecutada.',
+        )
+        self.assertContains(
+            response,
+            'Las cifras financieras corresponden únicamente a proyectos activos y visibles en el portal.',
+        )
+        self.assertContains(response, 'Asignado')
+        self.assertContains(response, 'Recursos ejecutados')
+        # Old primary card heading must not remain on the linked-donations card.
+        linked_card_start = content.index('data-metric="linked-donations"')
+        linked_card_end = content.index('</article>', linked_card_start)
+        linked_card = content[linked_card_start:linked_card_end]
+        self.assertNotIn('Fondos recibidos', linked_card)
+        available_start = content.index('data-metric="available-to-execute"')
+        available_end = content.index('</div>', available_start)
+        available_card = content[available_start:available_end]
+        self.assertNotIn('>Disponible<', available_card)
+        self.assertIn('Disponible por ejecutar', available_card)

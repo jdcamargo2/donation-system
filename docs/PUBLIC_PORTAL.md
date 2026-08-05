@@ -135,17 +135,41 @@ el objeto de almacenamiento existe
 
 ## 5. Métricas públicas
 
+Alcance financiero público: solo proyectos `ACTIVE` con `is_public=True`.
+Los totales internos del dashboard institucional **no** deben igualarse a estos
+agregados públicos: la diferencia de alcance es intencional.
+
 Las métricas públicas:
 
 * utilizan USD como moneda operativa;
-* excluyen donaciones anuladas;
-* excluyen asignaciones anuladas;
-* excluyen gastos anulados;
+* incluyen en **Donaciones vinculadas** (`linked_received_donations_total`) el
+  monto completo de cada donación distinta en estado `RECEIVED` vinculada a al
+  menos una asignación pública elegible (proyecto activo y visible; asignación
+  no anulada). No es el monto asignado a esos proyectos ni el total institucional
+  de fondos recibidos;
+* excluyen donaciones `REGISTERED` y `ANNULLED` del total vinculado;
+* **Asignado** (`total_assigned`) es la suma de asignaciones no anuladas a
+  proyectos visibles;
+* **Recursos ejecutados** (`total_executed`) es la suma de gastos no anulados
+  sobre esas asignaciones;
+* **Disponible por ejecutar** (`available_balance`) = `max(asignado − ejecutado, 0)`.
+  No representa fondos institucionales sin asignar;
+* las reservas de solicitudes de gasto (`APPROVED_RESERVED`) **no** se restan
+  del disponible público;
 * no convierten monedas;
 * utilizan únicamente agregados autorizados;
 * no exponen registros financieros individuales.
 
 Las métricas públicas se expresan exclusivamente en USD.
+
+Etiquetas de la portada pública:
+
+* «Donaciones vinculadas» — donaciones recibidas que financian al menos un
+  proyecto visible;
+* «Asignado» — fondos efectivamente asignados a proyectos visibles;
+* «Disponible por ejecutar» — parte asignada aún no registrada como ejecutada;
+* nota de alcance: las cifras corresponden únicamente a proyectos activos y
+  visibles en el portal.
 
 ## 6. Datos publicados
 
@@ -231,11 +255,17 @@ Tiempos de caché de referencia:
 * La caché no sustituye las validaciones de publicación.
 * Una respuesta obtenida desde caché debe haber sido generada previamente mediante selectores públicos autorizados.
 * Los tiempos pueden ajustarse según la infraestructura y la frecuencia de actualización.
+* Las páginas públicas pueden cachearse brevemente según la tabla anterior.
 * Tras un cambio exitoso del ciclo de publicación del proyecto (publicar,
-  retirar del portal, o terminar un proyecto que estaba público), la aplicación
-  invalida la caché del portal. La implementación actual limpia el cache por
-  defecto de forma amplia (`cache.clear()`); no se promete invalidación
-  confiable por clave individual de vista.
+  retirar del portal, o terminar un proyecto que estaba público), o tras
+  mutaciones financieras relevantes que pueden alterar métricas visibles
+  (recepción/anulación de donaciones, altas/cambios/anulaciones de
+  asignaciones, registro/corrección/anulación de gastos, cumplimiento de
+  solicitud de gasto que crea un gasto), la aplicación invalida la caché del
+  portal **después del commit** (`transaction.on_commit`). La implementación
+  actual limpia el cache por defecto de forma amplia (`cache.clear()`); no se
+  promete invalidación confiable por clave individual de vista. Las mutaciones
+  revertidas no invalidan.
 
 ## 10. Separación arquitectónica
 

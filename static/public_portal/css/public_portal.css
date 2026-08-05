@@ -288,6 +288,14 @@ h3 {
     margin-bottom: 0.95rem;
 }
 
+.public-metrics-scope {
+    color: var(--public-muted);
+    font-size: 0.92rem;
+    line-height: 1.45;
+    margin: 0.45rem 0 0;
+    max-width: 42rem;
+}
+
 .public-section h2 {
     font-size: clamp(1.35rem, 3vw, 1.85rem);
     margin: 0;

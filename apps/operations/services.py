@@ -38,7 +38,7 @@ from .project_update_responsibles import (
     resolve_project_update_reporter,
     validate_project_update_reporter,
 )
-from .public_portal_cache import invalidate_public_portal_cache
+from .public_portal_cache import schedule_public_portal_cache_invalidation
 from .selectors import (
     decidable_pending_expense_requests_for_user,
     decidable_project_update_reviews_for_user,
@@ -200,6 +200,8 @@ def transition_donation_status(donation_id: int, *, actor, target_status: str) -
         donation.full_clean()
         donation.save(update_fields=('status', 'updated_at'))
         _log_status_transition(actor, donation, previous_status, target_status)
+        if target_status == Donation.Status.RECEIVED:
+            schedule_public_portal_cache_invalidation()
         return donation
 
 
@@ -270,7 +272,7 @@ def finish_fund_allocation(allocation_id: int, *, actor) -> FundAllocation:
         )
         if open_expense_requests_for_allocation(allocation).exists():
             _raise_allocation_open_financial_work_error(allocation)
-        return _finalize_operational_entity(
+        finalized = _finalize_operational_entity(
             entity=allocation,
             target_status=FundAllocation.Status.FINISHED,
             actor=actor,
@@ -278,6 +280,8 @@ def finish_fund_allocation(allocation_id: int, *, actor) -> FundAllocation:
             action=AuditLog.Action.CLOSED,
             summary=_('Asignación %(code)s finalizada.') % {'code': allocation.code},
         )
+        schedule_public_portal_cache_invalidation()
+        return finalized
 
 
 # PRE: reason is the proposed historical justification for an annulment.
@@ -369,7 +373,7 @@ def finish_project(project_id: int, *, actor) -> Project:
     allocations are all FINISHED/ANNULLED and have no open ExpenseRequests.
     POST: atomically closes it under Donation → FundAllocation → Project →
     ExpenseRequest locks, forces is_public=False, persists terminal metadata,
-    creates one CLOSE audit event, and invalidates the public portal cache when it
+    creates one CLOSE audit event, and schedules public portal cache invalidation when it
     was previously public. Never auto-finishes or auto-annuls child records.
     """
     _require_transition_actor(actor)
@@ -464,15 +468,16 @@ def finish_project(project_id: int, *, actor) -> Project:
         else:
             summary = _('Proyecto %(code)s terminado.') % {'code': project.code}
         log_action(actor, AuditLog.Action.CLOSED, project, summary)
-    if was_public:
-        invalidate_public_portal_cache()
+        if was_public:
+            schedule_public_portal_cache_invalidation()
     return project
 
 
 def publish_project(*, project_id: int, actor) -> Project:
     """
     PRE: actor is authenticated and project_id identifies an ACTIVE private Project.
-    POST: atomically sets is_public=True, audits once, invalidates public portal cache.
+    POST: atomically sets is_public=True, audits once, schedules public portal cache
+          invalidation after commit.
     """
     _require_transition_actor(actor)
     with transaction.atomic():
@@ -493,14 +498,15 @@ def publish_project(*, project_id: int, actor) -> Project:
             project,
             _('Proyecto %(code)s publicado en el portal público.') % {'code': project.code},
         )
-    invalidate_public_portal_cache()
+        schedule_public_portal_cache_invalidation()
     return project
 
 
 def unpublish_project(*, project_id: int, actor) -> Project:
     """
     PRE: actor is authenticated and project_id identifies an ACTIVE public Project.
-    POST: atomically sets is_public=False, audits once, invalidates public portal cache.
+    POST: atomically sets is_public=False, audits once, schedules public portal cache
+          invalidation after commit.
     """
     _require_transition_actor(actor)
     with transaction.atomic():
@@ -526,7 +532,7 @@ def unpublish_project(*, project_id: int, actor) -> Project:
             project,
             _('Proyecto %(code)s retirado del portal público.') % {'code': project.code},
         )
-    invalidate_public_portal_cache()
+        schedule_public_portal_cache_invalidation()
     return project
 
 
@@ -548,7 +554,7 @@ def annul_donation(donation_id: int, *, actor, reason) -> Donation:
             raise InvalidStateTransitionError(
                 {'allocations': _('La donación mantiene asignaciones no anuladas.')}
             )
-        return _finalize_operational_entity(
+        finalized = _finalize_operational_entity(
             entity=donation,
             target_status=Donation.Status.ANNULLED,
             actor=actor,
@@ -557,6 +563,8 @@ def annul_donation(donation_id: int, *, actor, reason) -> Donation:
             summary=_('Donación %(code)s anulada. Motivo: %(reason)s')
             % {'code': donation.code, 'reason': clean_reason},
         )
+        schedule_public_portal_cache_invalidation()
+        return finalized
 
 
 def annul_fund_allocation(allocation_id: int, *, actor, reason) -> FundAllocation:
@@ -579,7 +587,7 @@ def annul_fund_allocation(allocation_id: int, *, actor, reason) -> FundAllocatio
             raise InvalidStateTransitionError(
                 {'expenses': _('La asignación tiene gastos efectivos y no puede anularse.')}
             )
-        return _finalize_operational_entity(
+        finalized = _finalize_operational_entity(
             entity=allocation,
             target_status=FundAllocation.Status.ANNULLED,
             actor=actor,
@@ -588,6 +596,8 @@ def annul_fund_allocation(allocation_id: int, *, actor, reason) -> FundAllocatio
             summary=_('Asignación %(code)s anulada. Motivo: %(reason)s')
             % {'code': allocation.code, 'reason': clean_reason},
         )
+        schedule_public_portal_cache_invalidation()
+        return finalized
 
 
 def ensure_project_update_is_editable(project_update: ProjectUpdate) -> None:
@@ -1189,6 +1199,7 @@ def update_donation(
                 'new_donor_id': locked_donation.donor_id,
             },
         )
+        schedule_public_portal_cache_invalidation()
         return locked_donation
 
 
@@ -1350,6 +1361,7 @@ def create_fund_allocation(
         )
         allocation.full_clean()
         allocation.save()
+        schedule_public_portal_cache_invalidation()
         return allocation
 
 
@@ -1392,6 +1404,7 @@ def update_fund_allocation(
         locked_allocation.notes = notes
         locked_allocation.full_clean()
         locked_allocation.save()
+        schedule_public_portal_cache_invalidation()
         return locked_allocation
 
 
@@ -1462,6 +1475,7 @@ def _create_expense_locked(
             _('Gasto %(code)s registrado por %(amount)s %(currency)s.')
             % {'code': expense.code, 'amount': expense.amount, 'currency': expense.currency},
         )
+    schedule_public_portal_cache_invalidation()
     return expense
 
 
@@ -1664,6 +1678,7 @@ def update_expense(
                 _('Gasto %(code)s corregido. Antes: %(before)s. Después: %(after)s.')
                 % {'code': locked_expense.code, 'before': before, 'after': after},
             )
+        schedule_public_portal_cache_invalidation()
         return locked_expense
 
 
@@ -1841,6 +1856,7 @@ def annul_expense(expense_id: int, *, actor, reason: str) -> Expense:
                     'reason': clean_reason,
                 },
             )
+        schedule_public_portal_cache_invalidation()
         return expense
 
 

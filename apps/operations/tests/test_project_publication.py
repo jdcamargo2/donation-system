@@ -135,18 +135,19 @@ class ProjectPublicationServiceTests(TestCase):
             ).exists()
         )
 
-    @patch('apps.operations.services.invalidate_public_portal_cache')
+    @patch('apps.operations.services.schedule_public_portal_cache_invalidation')
     def test_successful_publish_unpublish_finish_invalidate_cache(self, invalidate_mock):
         project = self._active_private('PRJ-CACHE-OK')
 
-        publish_project(project_id=project.pk, actor=self.actor)
-        unpublish_project(project_id=project.pk, actor=self.actor)
-        publish_project(project_id=project.pk, actor=self.actor)
-        finish_project(project.pk, actor=self.actor)
+        with self.captureOnCommitCallbacks(execute=True):
+            publish_project(project_id=project.pk, actor=self.actor)
+            unpublish_project(project_id=project.pk, actor=self.actor)
+            publish_project(project_id=project.pk, actor=self.actor)
+            finish_project(project.pk, actor=self.actor)
 
         self.assertEqual(invalidate_mock.call_count, 4)
 
-    @patch('apps.operations.services.invalidate_public_portal_cache')
+    @patch('apps.operations.services.schedule_public_portal_cache_invalidation')
     def test_rejected_operations_do_not_invalidate_cache(self, invalidate_mock):
         private = self._active_private('PRJ-CACHE-FAIL-PRIV')
         public = self._active_public('PRJ-CACHE-FAIL-PUB')
@@ -157,7 +158,8 @@ class ProjectPublicationServiceTests(TestCase):
             unpublish_project(project_id=private.pk, actor=self.actor)
 
         closed = self._active_private('PRJ-CACHE-FAIL-CLOSED')
-        finish_project(closed.pk, actor=self.actor)
+        with self.captureOnCommitCallbacks(execute=True):
+            finish_project(closed.pk, actor=self.actor)
         invalidate_mock.reset_mock()
         with self.assertRaises(InvalidStateTransitionError):
             publish_project(project_id=closed.pk, actor=self.actor)

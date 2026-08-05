@@ -106,9 +106,20 @@ Expected: read-only inspection across financial and request history.
 7. Guess a private attachment public URL → expect `404`.
 8. Confirm remediation attachments and other private supporting/legal files are
    inaccessible anonymously.
+9. On the public home financial cards, confirm labels **Donaciones vinculadas**
+   and **Disponible por ejecutar**, the scope note (active visible projects
+   only), and that public totals differ from the internal dashboard
+   (demo default: linked donations `200000`, assigned `40000`, executed
+   `4500`, available `35500` vs internal received `225000` / assigned
+   `160000`). Do not expect the two surfaces to match.
+10. After a disposable public-relevant financial mutation (or publish of
+    `PRJ-DEMO-002`), reload the public home and confirm metrics refresh without
+    waiting for cache TTL. Prefer focused automated cache tests if no disposable
+    demo row is available.
 
 Expected: public surface shows published project/update content and only
-explicitly public update documents.
+explicitly public update documents; financial cards reflect visible-project
+scope with clarified labels; cache invalidates after successful commits.
 
 ### BUG-E2E checklist (local)
 
@@ -117,6 +128,7 @@ explicitly public update documents.
 | BUG-E2E-001 | Closed project freezes advances/documents | PASS |
 | BUG-E2E-002 | Only explicitly public update attachments appear/download on the public portal | PASS |
 | BUG-E2E-004 | Operators can start Expense Requests from the list via a clear CTA | PASS |
+| BUG-E2E-005 | Public financial labels clarified; RECEIVED linked donations; cache invalidates after financial commits | PASS |
 
 Internal check for BUG-E2E-002: `admin_demo` can publish/unpublish an attachment
 on an active project; `operador_demo` cannot; a closed project cannot change
