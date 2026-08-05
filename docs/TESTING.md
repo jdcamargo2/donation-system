@@ -61,7 +61,10 @@ La suite cubre:
 * escape de fórmulas en exportaciones CSV operativas;
 * flujos end-to-end;
 * seguridad de `seed_sigedon_demo` (rechazo con `DEBUG=False` antes de mutar;
-  sin impresión de contraseña; sin bypass de producción).
+  sin impresión de contraseña; sin bypass de producción);
+* matriz demo de cuatro roles (`admin_demo`, `operador_demo`, `auditor_demo`,
+  `comite_demo`), idempotencia y `--verify` (ver
+  [LOCAL_DEMO_E2E.md](runbooks/LOCAL_DEMO_E2E.md)).
 
 ### 3.2. `apps.integrations.kobo`
 

@@ -117,8 +117,10 @@ como evidencia de una mutación financiera exitosa. Este checkpoint no añade
 ## 2. Datos de demostración
 
 `seed_sigedon_demo` genera datos locales para explorar la interfaz, realizar
-revisiones manuales y preparar capturas de pantalla. No representa una carga
-productiva ni una verificación integral de las reglas operativas.
+revisiones manuales E2E con los cuatro roles canónicos y preparar capturas.
+No representa una carga productiva ni sustituye la suite automatizada.
+
+Guía humana: [LOCAL_DEMO_E2E.md](runbooks/LOCAL_DEMO_E2E.md).
 
 ### Política de producción (absoluta)
 
@@ -134,12 +136,15 @@ productiva ni una verificación integral de las reglas operativas.
 ### Precondición
 
 * Ejecutar únicamente en un entorno local o efímero con `DEBUG=True`.
-* Utilizar una base de datos no productiva donde se acepten datos de demostración.
+* Utilizar una base de datos **desechable** donde se acepten datos de demostración.
+* Preferir `sigedon_demo_e2e` u otra base dedicada; no mezclar con datos locales
+  habituales sin autorización explícita.
 
 Comando:
 
 ```bash
-python manage.py seed_sigedon_demo
+python manage.py seed_sigedon_demo --password '<LOCAL_ONLY_PASSWORD>'
+python manage.py seed_sigedon_demo --verify
 ```
 
 ### Opciones
@@ -147,28 +152,46 @@ python manage.py seed_sigedon_demo
 ```text
 --password
 --skip-users
+--verify
 ```
 
 `SIGEDON_DEMO_PASSWORD` y `--password` son **solo desarrollo**. El comando nunca
 imprime la contraseña; como máximo indica `Demo credentials configured.`
+Las contraseñas vacías se rechazan. No documentar valores reales en
+`.env.example` (solo placeholders).
+
+`--reset` **no está implementado**: los proyectos no pueden eliminarse de forma
+segura; usar una base desechable en lugar de limpieza parcial.
+
+### Usuarios demo
+
+* `admin_demo` — Administrador SIGEDON
+* `operador_demo` — Operador de campo
+* `auditor_demo` — Auditor externo
+* `comite_demo` — Comité de proyectos
 
 ### Reglas
 
 * **No debe ejecutarse en producción** (y el runtime lo impide cuando
   `DEBUG=False`).
-* Usa ORM directo intencionalmente y no pasa por todos los services de dominio.
-* No genera trazabilidad completa en `AuditLog`.
-* Puede crear gastos sin `SupportingDocument`, aunque el flujo UI operativo lo exige.
-* Usa códigos explícitos reservados para demostración.
-* Su idempotencia es parcial: actualiza entidades clave, pero no garantiza que
-  una base previamente modificada vuelva a un estado canónico.
+* Usa códigos explícitos `*-DEMO-*`, usuarios `@sigedon.local` y marcadores
+  `[DEMO-ER:…]` / `[DEMO-UPD:…]` como claves naturales.
+* Las transiciones de solicitudes de gasto, publicación, revisión/remediación y
+  cierre usan servicios de dominio; no rehacen estados terminales en reejecución.
+* Los gastos demo incluyen documento soporte (vía cumplimiento de solicitud o
+  ruta legacy de servicio).
+* La idempotencia cubre usuarios, entidades clave, eventos de solicitud y saldos
+  cuando se reejecuta sobre la misma base demo.
 * Las credenciales demo no deben reutilizarse en entornos reales.
 
 ### Postcondición
 
-* Quedan disponibles las entidades mínimas para navegar y revisar la interfaz.
+* Quedan disponibles los cuatro roles y una matriz mínima para flujos E2E
+  (instituciones, proyectos públicos/privados/cerrados, donaciones,
+  asignaciones, solicitudes, gastos, avances y adjuntos privados).
+* `--verify` confirma la matriz sin escrituras.
 * Los datos resultantes no deben considerarse evidencia de cumplimiento de
-  todas las reglas, auditorías o invariantes del flujo operativo.
+  todas las reglas fuera del entorno local.
 
 ## 3. Sincronización de roles
 

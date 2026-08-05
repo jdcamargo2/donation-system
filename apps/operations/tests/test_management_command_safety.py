@@ -67,7 +67,7 @@ class SeedSigedonDemoProductionGuardTests(TestCase):
     @override_settings(DEBUG=False, ALLOWED_HOSTS=["testserver"])
     def test_debug_false_does_not_invoke_seed_body(self):
         with patch(
-            "apps.operations.management.commands.seed_sigedon_demo.Command._seed_demo_data"
+            "apps.operations.management.commands.seed_sigedon_demo.seed_sigedon_demo"
         ) as seed_body:
             with self.assertRaises(CommandError):
                 call_command("seed_sigedon_demo", stdout=StringIO())
