@@ -20,7 +20,7 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Volver</a>
-        {% if object.status == 'unpublished' and perms.operations.publish_projectupdate %}
+        {% if project_allows_operational_mutation and object.status == 'unpublished' and perms.operations.publish_projectupdate %}
             <form id="project-update-publish-form" method="post" action="{% url 'project_update_publish' object.pk %}">
                 {% csrf_token %}
                 <button
@@ -35,7 +35,8 @@
                 >Publicar</button>
             </form>
         {% endif %}
-        {% if object.status == 'unpublished' and perms.operations.change_projectupdate or object.status == 'unpublished' and perms.operations.add_projectupdateattachment or object.status == 'unpublished' and perms.operations.delete_projectupdate %}
+        {% if project_allows_operational_mutation and object.status == 'unpublished' %}
+        {% if perms.operations.change_projectupdate or perms.operations.add_projectupdateattachment or perms.operations.delete_projectupdate %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Más acciones del avance">
                 Más
@@ -59,6 +60,7 @@
             </div>
         </div>
         {% endif %}
+        {% endif %}
     </div>
 </div>
 
@@ -71,7 +73,7 @@
     <section class="ops-project-update-section ops-project-update-detail-review" aria-labelledby="project-update-review-title">
         <div class="ops-project-update-detail-section-heading">
             <h2 id="project-update-review-title" class="h5 mb-0">Revisión documental del Comité</h2>
-            {% if not object.committee_review and object.status == 'published' and perms.operations.review_projectupdate %}
+            {% if project_allows_operational_mutation and not object.committee_review and object.status == 'published' and perms.operations.review_projectupdate %}
                 <a class="btn btn-sm btn-primary" href="{% url 'project_update_review_create' object.pk %}">Registrar revisión</a>
             {% endif %}
         </div>

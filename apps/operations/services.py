@@ -311,6 +311,31 @@ def ensure_operational_entity_is_editable(entity):
         )
 
 
+def project_allows_operational_mutation(project) -> bool:
+    """
+    PRE: project exposes a persisted lifecycle status.
+    POST: True only while the project still accepts advances, documents, and
+          related operational mutations (not CLOSED).
+    """
+    return project.status not in PROJECT_TERMINAL_STATUSES
+
+
+def ensure_project_allows_operational_mutation(project) -> None:
+    """
+    PRE: project is targeted by an operational mutation (advances, documents,
+         attachments, review/remediation workflow steps).
+    POST: returns only when mutation is allowed; otherwise raises without side effects.
+    """
+    if not project_allows_operational_mutation(project):
+        raise OperationalEntityFinalizedError(
+            {
+                'project': _(
+                    'Los proyectos cerrados no admiten cambios en avances ni documentos.'
+                )
+            }
+        )
+
+
 # PRE: allocation is persisted and its related expense statuses are queryable.
 # POST: returns True exactly when at least one expense still consumes allocation balance.
 def allocation_has_effective_expenses(allocation):
@@ -568,23 +593,33 @@ def annul_fund_allocation(allocation_id: int, *, actor, reason) -> FundAllocatio
 def ensure_project_update_is_editable(project_update: ProjectUpdate) -> None:
     """
     PRE: project_update is a persisted advance targeted by ordinary editing.
-    POST: returns only for UNPUBLISHED; published advances fail without mutation.
+    POST: returns only for UNPUBLISHED advances on an open project; otherwise
+          fails without mutation (published content and CLOSED projects freeze).
     """
     if project_update.status != ProjectUpdate.Status.UNPUBLISHED:
         raise ProjectUpdateImmutableError(
             {'status': _('Solo los avances no publicados pueden editarse.')}
         )
+    try:
+        ensure_project_allows_operational_mutation(project_update.project)
+    except OperationalEntityFinalizedError as exc:
+        raise ProjectUpdateImmutableError(exc.message_dict) from exc
 
 
 def ensure_project_update_is_deletable(project_update: ProjectUpdate) -> None:
     """
     PRE: project_update is a persisted advance targeted by physical deletion.
-    POST: returns unless it is final; final states fail without mutation.
+    POST: returns unless it is final or its project is CLOSED; otherwise fails
+          without mutation.
     """
     if project_update.status in PROJECT_UPDATE_FINAL_STATUSES:
         raise ProjectUpdateImmutableError(
             {'status': _('Los avances publicados no se pueden eliminar.')}
         )
+    try:
+        ensure_project_allows_operational_mutation(project_update.project)
+    except OperationalEntityFinalizedError as exc:
+        raise ProjectUpdateImmutableError(exc.message_dict) from exc
 
 
 def ensure_expense_is_editable(expense: Expense) -> None:
@@ -1178,7 +1213,7 @@ def _validate_project_accepts_allocations(project):
 # PRE: project is locked for update before an expense or project update is written or published.
 # POST: returns only when the project is ACTIVE; otherwise raises a domain validation error.
 def _validate_project_is_active_for_execution_or_updates(project):
-    if project.status != Project.Status.ACTIVE:
+    if not project_allows_operational_mutation(project):
         raise ValidationError(
             {'project': _('Solo los proyectos activos admiten gastos y avances.')}
         )
@@ -2767,11 +2802,30 @@ def _require_draft_remediation(remediation):
         raise ProjectUpdateRemediationError(_('Solo las remediaciones en borrador admiten esta operación.'))
 
 
+def _ensure_remediation_project_allows_mutation(remediation) -> None:
+    """
+    PRE: remediation links to decision → review → project_update → project
+         (preferably select_related already).
+    POST: returns only when the parent project still accepts operational mutations.
+    """
+    project = remediation.decision.review.project_update.project
+    try:
+        ensure_project_allows_operational_mutation(project)
+    except OperationalEntityFinalizedError as exc:
+        raise ProjectUpdateRemediationError(exc.message_dict) from exc
+
+
 def create_project_update_remediation(*, decision_id, response, actor):
     """PRE: decision_id identifies an OBSERVED decision and actor is authenticated. POST: creates one audited DRAFT remediation."""
     _require_remediation_actor(actor)
     with transaction.atomic():
-        decision = ProjectUpdateReviewDecision.objects.select_for_update().get(pk=decision_id)
+        decision = ProjectUpdateReviewDecision.objects.select_for_update().select_related(
+            'review__project_update__project',
+        ).get(pk=decision_id)
+        try:
+            ensure_project_allows_operational_mutation(decision.review.project_update.project)
+        except OperationalEntityFinalizedError as exc:
+            raise ProjectUpdateRemediationError(exc.message_dict) from exc
         if decision.outcome != ProjectUpdateReviewDecision.Outcome.OBSERVED:
             raise ProjectUpdateRemediationError(_('Solo las decisiones observadas admiten remediación.'))
         if hasattr(decision, 'remediation'):
@@ -2791,7 +2845,12 @@ def update_project_update_remediation(*, remediation_id, response, actor):
     """PRE: remediation_id is DRAFT and actor is authenticated. POST: updates only response and audits once."""
     _require_remediation_actor(actor)
     with transaction.atomic():
-        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        remediation = (
+            ProjectUpdateRemediation.objects.select_for_update()
+            .select_related('decision__review__project_update__project')
+            .get(pk=remediation_id)
+        )
+        _ensure_remediation_project_allows_mutation(remediation)
         _require_draft_remediation(remediation)
         remediation.response = (response or '').strip()
         remediation.full_clean()
@@ -2804,7 +2863,12 @@ def add_project_update_remediation_attachment(*, remediation_id, file, title, ac
     """PRE: remediation_id is DRAFT, file is valid, and actor is authenticated. POST: creates one audited attachment."""
     _require_remediation_actor(actor)
     with transaction.atomic():
-        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        remediation = (
+            ProjectUpdateRemediation.objects.select_for_update()
+            .select_related('decision__review__project_update__project')
+            .get(pk=remediation_id)
+        )
+        _ensure_remediation_project_allows_mutation(remediation)
         _require_draft_remediation(remediation)
         draft_attachment = ProjectUpdateRemediationAttachment(
             remediation=remediation,
@@ -2814,7 +2878,12 @@ def add_project_update_remediation_attachment(*, remediation_id, file, title, ac
     storage, stored_name = _store_upload_for_field(draft_attachment, 'file', file)
     try:
         with transaction.atomic():
-            remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+            remediation = (
+                ProjectUpdateRemediation.objects.select_for_update()
+                .select_related('decision__review__project_update__project')
+                .get(pk=remediation_id)
+            )
+            _ensure_remediation_project_allows_mutation(remediation)
             _require_draft_remediation(remediation)
             attachment = ProjectUpdateRemediationAttachment.objects.create(
                 remediation=remediation,
@@ -2833,8 +2902,15 @@ def delete_project_update_remediation_attachment(*, attachment_id, actor):
     """PRE: attachment_id exists and actor is authenticated. POST: deletes only DRAFT attachment and audits once."""
     _require_remediation_actor(actor)
     with transaction.atomic():
-        attachment = ProjectUpdateRemediationAttachment.objects.select_related('remediation').get(pk=attachment_id)
-        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=attachment.remediation_id)
+        attachment = ProjectUpdateRemediationAttachment.objects.select_related(
+            'remediation__decision__review__project_update__project',
+        ).get(pk=attachment_id)
+        remediation = (
+            ProjectUpdateRemediation.objects.select_for_update()
+            .select_related('decision__review__project_update__project')
+            .get(pk=attachment.remediation_id)
+        )
+        _ensure_remediation_project_allows_mutation(remediation)
         _require_draft_remediation(remediation)
         log_delete(actor, attachment, _('Adjunto de remediación eliminado.'))
         attachment.delete()
@@ -2847,7 +2923,12 @@ def submit_project_update_remediation(*, remediation_id, actor):
     with transaction.atomic():
         remediation_ref = ProjectUpdateRemediation.objects.only('decision_id').get(pk=remediation_id)
         ProjectUpdateReviewDecision.objects.select_for_update().get(pk=remediation_ref.decision_id)
-        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        remediation = (
+            ProjectUpdateRemediation.objects.select_for_update()
+            .select_related('decision__review__project_update__project')
+            .get(pk=remediation_id)
+        )
+        _ensure_remediation_project_allows_mutation(remediation)
         _require_draft_remediation(remediation)
         remediation.status = ProjectUpdateRemediation.Status.SUBMITTED
         remediation.submitted_by = actor
@@ -2864,7 +2945,12 @@ def resolve_project_update_remediation(*, remediation_id, status, resolution_not
     if status not in {ProjectUpdateRemediation.Status.ACCEPTED, ProjectUpdateRemediation.Status.REJECTED}:
         raise ProjectUpdateRemediationError(_('La resolución debe ser aceptada o rechazada.'))
     with transaction.atomic():
-        remediation = ProjectUpdateRemediation.objects.select_for_update().get(pk=remediation_id)
+        remediation = (
+            ProjectUpdateRemediation.objects.select_for_update()
+            .select_related('decision__review__project_update__project')
+            .get(pk=remediation_id)
+        )
+        _ensure_remediation_project_allows_mutation(remediation)
         if remediation.status != ProjectUpdateRemediation.Status.SUBMITTED:
             raise ProjectUpdateRemediationError(_('Solo las remediaciones enviadas pueden resolverse.'))
         remediation.status = status
@@ -2915,7 +3001,15 @@ def create_project_update_review(*, update_id: int, observations: str, actor) ->
         raise ProjectUpdateReviewError({'actor': _('La revisión exige un usuario autenticado.')})
     clean_observations = (observations or '').strip()
     with transaction.atomic():
-        project_update = ProjectUpdate.objects.select_for_update().get(pk=update_id)
+        project_update = (
+            ProjectUpdate.objects.select_for_update()
+            .select_related('project')
+            .get(pk=update_id)
+        )
+        try:
+            ensure_project_allows_operational_mutation(project_update.project)
+        except OperationalEntityFinalizedError as exc:
+            raise ProjectUpdateReviewError(exc.message_dict) from exc
         if project_update.status != ProjectUpdate.Status.PUBLISHED:
             raise ProjectUpdateReviewError(
                 {'project_update': _('Solo los avances publicados pueden recibir revisión documental.')}
@@ -2949,7 +3043,15 @@ def create_project_update_review_decision(
     clean_rationale = (rationale or '').strip()
     with transaction.atomic():
         review = ProjectUpdateReview.objects.select_for_update().get(pk=review_id)
-        project_update = ProjectUpdate.objects.select_for_update().get(pk=review.project_update_id)
+        project_update = (
+            ProjectUpdate.objects.select_for_update()
+            .select_related('project')
+            .get(pk=review.project_update_id)
+        )
+        try:
+            ensure_project_allows_operational_mutation(project_update.project)
+        except OperationalEntityFinalizedError as exc:
+            raise ProjectUpdateReviewDecisionError(exc.message_dict) from exc
         if project_update.status != ProjectUpdate.Status.PUBLISHED:
             raise ProjectUpdateReviewDecisionError(
                 {'review': _('La revisión debe pertenecer a un avance publicado.')}

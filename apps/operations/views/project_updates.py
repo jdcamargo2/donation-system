@@ -64,13 +64,16 @@ from ..services import (
     delete_project_update_remediation_attachment,
     submit_project_update_remediation,
     resolve_project_update_remediation,
+    ensure_project_allows_operational_mutation,
     ensure_project_update_is_deletable,
     ensure_project_update_is_editable,
+    OperationalEntityFinalizedError,
     ProjectUpdateImmutableError,
     ProjectUpdateReviewError,
     ProjectUpdateReviewDecisionError,
     ProjectUpdateRemediationError,
     _create_project_update_attachments,
+    project_allows_operational_mutation,
     register_advance,
     publish_project_update,
     delete_project_update_attachment,
@@ -129,12 +132,15 @@ class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMix
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         user = self.request.user
+        mutations_allowed = project_allows_operational_mutation(self.object.project)
+        context['project_allows_operational_mutation'] = mutations_allowed
         can_download = (
             user.has_perm('operations.view_project')
             and user.has_perm('operations.view_projectupdateattachment')
         )
         can_delete = (
-            self.object.status == ProjectUpdate.Status.UNPUBLISHED
+            mutations_allowed
+            and self.object.status == ProjectUpdate.Status.UNPUBLISHED
             and user.has_perm('operations.delete_projectupdateattachment')
         )
         attachments = list(self.object.attachments.all())
@@ -288,7 +294,7 @@ class ProjectUpdateRemediationDetailView(OperationsPermissionRequiredMixin, Deta
 
     def get_queryset(self):
         return ProjectUpdateRemediation.objects.select_related(
-            'decision__review__project_update',
+            'decision__review__project_update__project',
             'created_by',
             'submitted_by',
             'resolved_by',
@@ -297,9 +303,14 @@ class ProjectUpdateRemediationDetailView(OperationsPermissionRequiredMixin, Deta
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         user = self.request.user
+        mutations_allowed = project_allows_operational_mutation(
+            self.object.decision.review.project_update.project
+        )
+        context['project_allows_operational_mutation'] = mutations_allowed
         can_download = user.has_perm('operations.view_projectupdateremediationattachment')
         can_delete = (
-            self.object.status == ProjectUpdateRemediation.Status.DRAFT
+            mutations_allowed
+            and self.object.status == ProjectUpdateRemediation.Status.DRAFT
             and user.has_perm('operations.delete_projectupdateremediationattachment')
         )
         attachments = list(self.object.attachments.all())
@@ -448,7 +459,14 @@ class ProjectUpdateCreateForProjectView(OperationsPermissionRequiredMixin, Route
     page_title = _('Registrar avance')
 
     def dispatch(self, request, *args, **kwargs):
+        # PRE: route targets a project and permission handling remains authoritative.
+        # POST: CLOSED projects return 403 before form binding or advance creation.
         self.project = get_object_or_404(Project, pk=kwargs['project_pk'])
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            try:
+                ensure_project_allows_operational_mutation(self.project)
+            except OperationalEntityFinalizedError as exc:
+                raise PermissionDenied(exc.messages[0]) from exc
         return super().dispatch(request, *args, **kwargs)
 
     def get_form_kwargs(self):
@@ -463,15 +481,19 @@ class ProjectUpdateCreateForProjectView(OperationsPermissionRequiredMixin, Route
         return context
 
     def form_valid(self, form):
-        self.object = register_advance(
-            project_id=self.project.pk,
-            title=form.cleaned_data['title'],
-            description=form.cleaned_data['description'],
-            update_date=form.cleaned_data['update_date'],
-            attachments=form.cleaned_data.get('attachments', ()),
-            created_by=self.request.user if self.request.user.is_authenticated else None,
-            reported_by=form.cleaned_data['reported_by'],
-        )
+        try:
+            self.object = register_advance(
+                project_id=self.project.pk,
+                title=form.cleaned_data['title'],
+                description=form.cleaned_data['description'],
+                update_date=form.cleaned_data['update_date'],
+                attachments=form.cleaned_data.get('attachments', ()),
+                created_by=self.request.user if self.request.user.is_authenticated else None,
+                reported_by=form.cleaned_data['reported_by'],
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
         messages.success(self.request, _('Avance de proyecto registrado.'))
         return HttpResponseRedirect(self.get_success_url())
 

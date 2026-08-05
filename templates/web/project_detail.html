@@ -199,11 +199,14 @@
                 <h2 id="project-updates-title" class="h5 mb-0">Avances del proyecto</h2>
             </div>
             <div class="ops-project-updates-header-actions">
-                {% if perms.operations.add_projectupdate %}
+                {% if can_register_project_update %}
                     <a class="btn btn-sm btn-primary" href="{% url 'project_update_create_for_project' object.pk %}">Registrar avance</a>
                 {% endif %}
             </div>
         </div>
+        {% if not project_allows_operational_mutation %}
+        <p class="small text-muted mb-3">Este proyecto está cerrado. Los avances y documentos se conservan como registro histórico.</p>
+        {% endif %}
         <div id="project-update-list" class="list-group ops-project-updates-list" aria-labelledby="project-updates-title" tabindex="0">
             {% include "web/includes/project_update_items.html" with project_updates=recent_project_updates %}
         </div>
@@ -214,7 +217,7 @@
 <section class="mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="h5 mb-0">Documentos del proyecto</h2>
-        {% if perms.operations.add_projectdocument %}
+        {% if can_add_project_document %}
             <a class="btn btn-sm btn-primary" href="{% url 'project_document_create' object.pk %}">Agregar documento</a>
         {% endif %}
     </div>

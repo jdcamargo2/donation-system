@@ -17,11 +17,13 @@ from .models import (
 from .role_services import operation_role_names
 from .services import (
     ProjectUpdateImmutableError,
+    ensure_project_allows_operational_mutation,
     ensure_project_update_is_deletable,
     ensure_project_update_is_editable,
     log_create,
     log_update,
     ensure_operational_entity_is_editable,
+    project_allows_operational_mutation,
 )
 from .project_update_responsibles import eligible_project_update_reporters, validate_project_update_reporter
 from .upload_limits import attach_private_upload_validator
@@ -377,6 +379,7 @@ class ProjectUpdateAdmin(admin.ModelAdmin):
         PRE: admin form is valid and obj is new or targets an existing advance.
         POST: creates UNPUBLISHED only and saves material changes only on existing UNPUBLISHED advances.
         """
+        ensure_project_allows_operational_mutation(obj.project)
         if change:
             persisted = ProjectUpdate.objects.get(pk=obj.pk)
             ensure_project_update_is_editable(persisted)
@@ -450,6 +453,36 @@ class ProjectDocumentAdmin(admin.ModelAdmin):
         if db_field.name == 'file' and formfield is not None:
             return _configure_private_file_formfield(formfield)
         return formfield
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'project':
+            kwargs['queryset'] = Project.objects.filter(status=Project.Status.ACTIVE)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and not project_allows_operational_mutation(obj.project):
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not project_allows_operational_mutation(obj.project):
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def save_model(self, request, obj, form, change):
+        # PRE: admin form targets a new or existing project document.
+        # POST: persists only when the parent project still accepts operational mutations.
+        ensure_project_allows_operational_mutation(obj.project)
+        super().save_model(request, obj, form, change)
+
+    def delete_model(self, request, obj):
+        ensure_project_allows_operational_mutation(obj.project)
+        return super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        for document in queryset.select_related('project'):
+            ensure_project_allows_operational_mutation(document.project)
+        return super().delete_queryset(request, queryset)
 
 
 @admin.register(ProjectUpdateAttachment)
