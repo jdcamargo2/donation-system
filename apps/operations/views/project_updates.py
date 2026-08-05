@@ -76,6 +76,8 @@ from ..services import (
     project_allows_operational_mutation,
     register_advance,
     publish_project_update,
+    publish_project_update_attachment,
+    unpublish_project_update_attachment,
     delete_project_update_attachment,
     update_project_update,
 )
@@ -143,6 +145,11 @@ class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMix
             and self.object.status == ProjectUpdate.Status.UNPUBLISHED
             and user.has_perm('operations.delete_projectupdateattachment')
         )
+        can_manage_attachment_publicity = (
+            mutations_allowed
+            and user.has_perm('operations.publish_projectupdate')
+        )
+        context['can_manage_attachment_publicity'] = can_manage_attachment_publicity
         attachments = list(self.object.attachments.all())
         for attachment in attachments:
             attachment.file_actions = build_protected_file_actions(
@@ -628,3 +635,49 @@ class ProjectUpdateAttachmentDeleteView(OperationsPermissionRequiredMixin, View)
         except ValidationError as exc:
             raise PermissionDenied(exc.messages[0]) from exc
         return HttpResponseRedirect(reverse('project_update_detail', args=[update_id]))
+
+
+class ProjectUpdateAttachmentPublishView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.publish_projectupdate'
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: user has publish_projectupdate; pk identifies an attachment on an open project.
+        POST: marks the attachment explicitly public via the domain service, or 403.
+        """
+        try:
+            attachment = publish_project_update_attachment(
+                attachment_id=kwargs['pk'], actor=request.user
+            )
+        except ValidationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        messages.success(
+            request,
+            _('Documento marcado como público en el portal de transparencia.'),
+        )
+        return HttpResponseRedirect(
+            reverse('project_update_detail', args=[attachment.project_update_id])
+        )
+
+
+class ProjectUpdateAttachmentUnpublishView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.publish_projectupdate'
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: user has publish_projectupdate; pk identifies a public attachment on an open project.
+        POST: clears explicit publicity without deleting the file, or 403.
+        """
+        try:
+            attachment = unpublish_project_update_attachment(
+                attachment_id=kwargs['pk'], actor=request.user
+            )
+        except ValidationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        messages.success(
+            request,
+            _('Documento retirado del portal de transparencia.'),
+        )
+        return HttpResponseRedirect(
+            reverse('project_update_detail', args=[attachment.project_update_id])
+        )

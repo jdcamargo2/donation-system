@@ -21,7 +21,7 @@ EXPECTED_VIEW_MODULES = (
     'protected_files',
     'supporting_documents',
 )
-EXPECTED_ROUTE_COUNT = 96
+EXPECTED_ROUTE_COUNT = 98
 INCIDENTAL_NAMES_MUST_STAY_PRIVATE = (
     'Donation',
     'CreateView',

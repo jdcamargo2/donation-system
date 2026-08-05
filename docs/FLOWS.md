@@ -493,22 +493,27 @@ Operador de campo o usuario con el permiso `add_projectupdate`.
 11. El avance pasa a estado `PUBLISHED`.
 12. Se registra la auditoría correspondiente.
 13. El avance queda bloqueado contra edición y eliminación.
-14. Los adjuntos permanecen privados y solo pueden agregarse o eliminarse mientras el avance esté en `UNPUBLISHED`; el avance publicado y sus adjuntos son inmutables.
-15. Usuarios autorizados pueden previsualizar (lista blanca) o descargar evidencias
+14. Los adjuntos se crean privados (`is_public=False`) y solo pueden agregarse o eliminarse mientras el avance esté en `UNPUBLISHED`; el contenido del archivo y su vínculo al avance publicado son inmutables.
+15. Un usuario con `publish_projectupdate` puede marcar o retirar la publicidad
+    explícita de un adjunto (`POST` CSRF) mientras el proyecto no esté `CLOSED`.
+    Esa transición no borra el archivo y no bypassa la visibilidad del avance/proyecto.
+16. Usuarios autorizados pueden previsualizar (lista blanca) o descargar evidencias
     persistidas mediante endpoints anidados al proyecto/avance; `UNPUBLISHED` vs
     `PUBLISHED` no bloquea la lectura interna autorizada.
-16. La vista previa de carga (cliente) no sustituye la vista previa persistida (servidor).
+17. La vista previa de carga (cliente) no sustituye la vista previa persistida (servidor).
 
 ### POST
 
-* El avance publicado es inmutable.
+* El avance publicado es inmutable en su contenido textual y en sus adjuntos
+  (salvo la transición explícita de publicidad del adjunto).
 * El creador técnico y la persona responsable del avance quedan diferenciados
   como conceptos; en el registro del Operador de campo coinciden por regla de
   dominio.
 * El avance puede ser revisado institucionalmente.
 * El avance puede aparecer en el portal público cuando cumpla las reglas de publicación.
 * El progreso operativo del proyecto no se captura en el avance; permanece derivado de hitos.
-* Los adjuntos no se exponen en el portal público por el solo hecho de publicar el avance.
+* Los adjuntos no se exponen en el portal público por el solo hecho de publicar el avance;
+  solo los marcados explícitamente como públicos y con padre público/publicado.
 
 ---
 

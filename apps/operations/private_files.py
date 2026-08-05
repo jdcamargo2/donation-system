@@ -41,6 +41,7 @@ DISPOSITION_INLINE = 'inline'
 DISPOSITION_ATTACHMENT = 'attachment'
 
 _PROTECTED_CACHE_CONTROL = 'private, no-store'
+_PUBLIC_CACHE_CONTROL = 'public, max-age=300'
 _PROTECTED_NOSNIFF = 'nosniff'
 _FALLBACK_DOWNLOAD_MIME = 'application/octet-stream'
 _FALLBACK_FILENAME = 'documento'
@@ -359,3 +360,60 @@ def deliver_private_file(
         )
     except PrivateStorageUnavailable:
         return _safe_operational_error_response()
+
+
+def deliver_public_file(
+    field_file,
+    *,
+    download_name=None,
+    content_type=None,
+    disposition: str = DISPOSITION_ATTACHMENT,
+    missing_message=None,
+):
+    """
+    PRE: caller already confirmed public eligibility for this field_file;
+         disposition is inline|attachment.
+    POST: streams through Django with sanitized headers and a public cache policy.
+          Never logs storage keys or signed URLs. Does not authorize private files.
+    """
+    if disposition not in (DISPOSITION_INLINE, DISPOSITION_ATTACHMENT):
+        raise ValueError(f'Unsupported disposition: {disposition!r}')
+
+    message = missing_message or _('Archivo no encontrado.')
+    if not field_file or not getattr(field_file, 'name', None):
+        raise Http404(message)
+
+    safe_filename = download_name or sanitize_download_filename(field_file)
+    safe_filename = (
+        get_valid_filename(
+            str(safe_filename).replace('\r', '').replace('\n', '').replace('"', '')
+        )
+        or _FALLBACK_FILENAME
+    )
+    preview_mime = get_safe_persisted_file_preview_type(field_file)
+
+    if disposition == DISPOSITION_INLINE:
+        if preview_mime is None:
+            raise Http404(_('Vista previa no disponible para este tipo de archivo.'))
+        resolved_type = content_type or preview_mime
+    else:
+        resolved_type = content_type or preview_mime or _FALLBACK_DOWNLOAD_MIME
+
+    # Public delivery always streams so Django owns Content-Type / Disposition /
+    # nosniff / CSP without relying on provider response overrides.
+    try:
+        response = _stream_private_file(
+            field_file,
+            disposition=disposition,
+            content_type=resolved_type,
+            safe_filename=safe_filename,
+            missing_message=message,
+        )
+    except PrivateStorageUnavailable:
+        return _safe_operational_error_response()
+
+    response['Cache-Control'] = _PUBLIC_CACHE_CONTROL
+    response['X-Content-Type-Options'] = _PROTECTED_NOSNIFF
+    if disposition == DISPOSITION_INLINE:
+        response['Content-Security-Policy'] = PROTECTED_PREVIEW_CSP
+    return response

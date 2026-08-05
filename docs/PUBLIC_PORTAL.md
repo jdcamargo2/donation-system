@@ -26,6 +26,9 @@ La ruta principal es:
 /transparency/projects/
 /transparency/projects/<id>/
 /transparency/updates/
+/transparency/updates/<id>/
+/transparency/updates/<update-id>/documents/<attachment-id>/download/
+/transparency/updates/<update-id>/documents/<attachment-id>/preview/
 /transparency/data/projects.json
 /transparency/data/metrics.json
 ```
@@ -36,6 +39,11 @@ La ruta principal es:
 * `/transparency/projects/`: listado de proyectos publicados.
 * `/transparency/projects/<id>/`: detalle público de un proyecto.
 * `/transparency/updates/`: feed de avances publicados.
+* `/transparency/updates/<id>/`: detalle público de un avance publicado.
+* `/transparency/updates/<update-id>/documents/<attachment-id>/download/`:
+  descarga anónima de un adjunto de avance explícitamente público.
+* `/transparency/updates/<update-id>/documents/<attachment-id>/preview/`:
+  vista previa anónima solo para tipos ya considerados seguros.
 * `/transparency/data/projects.json`: salida JSON autorizada de proyectos.
 * `/transparency/data/metrics.json`: salida JSON autorizada de métricas agregadas.
 
@@ -87,6 +95,44 @@ is_public == True
 * Asignaciones y métricas públicas respetan el mismo límite de visibilidad del
   proyecto (`ACTIVE` + `is_public=True`).
 
+## 4.1 Documentos de avance públicos
+
+Los adjuntos de `ProjectUpdateAttachment` son **privados por defecto**
+(`is_public=False`). Publicar el avance **no** publica sus archivos.
+
+Un documento de avance es visible y descargable en el portal solo cuando se
+cumplen **todas** estas condiciones:
+
+```text
+ProjectUpdateAttachment.is_public == True
+AND
+ProjectUpdate.status == PUBLISHED
+AND
+Project.status == ACTIVE
+AND
+Project.is_public == True
+AND
+el objeto de almacenamiento existe
+```
+
+### Reglas
+
+* La marca pública es explícita y la autoriza `operations.publish_projectupdate`
+  (mismo permiso que publica el avance), mediante POST CSRF en el detalle interno.
+* Retirar la marca pública oculta el documento del portal sin borrar el archivo.
+* Si el proyecto o el avance dejan de ser públicos, el documento desaparece del
+  portal automáticamente aunque conserve `is_public=True`.
+* Los adjuntos de remediación, documentos de proyecto, soportes de gasto,
+  adjuntos de solicitud de gasto y documentos legales de institución **no**
+  tienen ruta pública.
+* La entrega pública usa rutas dedicadas bajo `/transparency/.../documents/...`
+  con cabeceras sanitizadas (`Content-Disposition`, `Content-Type`,
+  `X-Content-Type-Options: nosniff`). No se expone `/media/`, ni la ruta
+  autenticada privada, ni un bucket público.
+* Ante fallo de elegibilidad o archivo ausente la respuesta es `404` (nunca
+  `403`), para no revelar existencia de archivos privados.
+* HTML/SVG y tipos no previsualizables no se sirven en línea.
+
 ## 5. Métricas públicas
 
 Las métricas públicas:
@@ -114,6 +160,7 @@ El portal puede exponer, según el contexto:
 * fechas relevantes;
 * progreso del proyecto derivado de hitos (cuando se publique);
 * avances publicados;
+* documentos de avance explícitamente marcados como públicos;
 * métricas agregadas;
 * información institucional autorizada.
 
@@ -132,6 +179,8 @@ El portal no debe exponer:
 * gastos individuales;
 * auditoría;
 * documentos privados;
+* adjuntos de avance no marcados como públicos;
+* adjuntos de remediación;
 * soportes financieros;
 * payloads Kobo;
 * notas internas;
@@ -252,6 +301,8 @@ El portal público se considera correctamente protegido cuando:
 * las métricas utilizan únicamente USD;
 * los endpoints JSON contienen solo campos autorizados;
 * los documentos privados no son accesibles directamente;
+* solo los adjuntos de avance con `is_public=True` (y padre público) aparecen
+  y se descargan por la ruta pública dedicada;
 * las páginas y respuestas JSON son consistentes;
 * la caché no permite filtrar información restringida;
 * las pruebas automatizadas cubren publicación, exclusión y privacidad.

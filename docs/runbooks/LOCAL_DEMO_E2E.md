@@ -97,9 +97,29 @@ Expected: read-only inspection across financial and request history.
 2. Confirm `PRJ-DEMO-001` (public) is visible.
 3. Confirm private projects such as `PRJ-DEMO-002` are absent.
 4. Confirm only published updates appear for public projects.
-5. Confirm private supporting documents / legal files are inaccessible anonymously.
+5. Open the published demo update (`[DEMO-UPD:published]…`) and confirm
+   **Documentos del avance** lists the explicitly public attachment
+   (`Evidencia DEMO pública`) and omits the private one (`Evidencia DEMO interna`).
+6. Download the public document anonymously; confirm no login is required and the
+   URL is under `/transparency/updates/.../documents/...` (not `/media/` or an
+   authenticated private download path).
+7. Guess a private attachment public URL → expect `404`.
+8. Confirm remediation attachments and other private supporting/legal files are
+   inaccessible anonymously.
 
-Expected: public surface shows published project/update content only.
+Expected: public surface shows published project/update content and only
+explicitly public update documents.
+
+### BUG-E2E checklist (local)
+
+| ID | Check | Result |
+|---|---|---|
+| BUG-E2E-001 | Closed project freezes advances/documents | PASS |
+| BUG-E2E-002 | Only explicitly public update attachments appear/download on the public portal | PASS |
+
+Internal check for BUG-E2E-002: `admin_demo` can publish/unpublish an attachment
+on an active project; `operador_demo` cannot; a closed project cannot change
+attachment publicity.
 
 ## Verification and reruns
 

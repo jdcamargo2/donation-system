@@ -553,6 +553,15 @@ class ProjectUpdateAttachment(models.Model):
     )
     file = models.FileField(upload_to='project_update_attachments/%Y/%m/')
     title = models.CharField(max_length=200, blank=True)
+    is_public = models.BooleanField(
+        _('público en el portal de transparencia'),
+        default=False,
+        help_text=_(
+            'Solo los adjuntos marcados explícitamente como públicos pueden '
+            'aparecer en el portal; el avance y el proyecto padre también deben '
+            'ser públicos.'
+        ),
+    )
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -592,9 +601,22 @@ class ProjectUpdateAttachment(models.Model):
 
     def save(self, *args, **kwargs):
         """
-        PRE: the attachment has a valid parent update and ordinary mutation is requested.
-        POST: persists only an attachment associated with an UNPUBLISHED update.
+        PRE: ordinary mutation targets an UNPUBLISHED parent, OR a domain publicity
+             transition sets only ``is_public`` via ``_allow_publicity_transition``.
+        POST: persists the row without weakening published-update immutability for
+              file/title/parent fields.
         """
+        if getattr(self, '_allow_publicity_transition', False):
+            update_fields = kwargs.get('update_fields')
+            if update_fields is not None and set(update_fields) <= {'is_public'}:
+                try:
+                    return super().save(*args, **kwargs)
+                finally:
+                    self._allow_publicity_transition = False
+            self._allow_publicity_transition = False
+            raise ProjectUpdateImmutableError(
+                _('La transición de publicidad solo puede actualizar is_public.')
+            )
         self._ensure_parent_update_is_editable()
         return super().save(*args, **kwargs)
 

@@ -1,8 +1,24 @@
-from django.db.models import Sum
+from pathlib import PurePosixPath
+
+from django.db.models import Prefetch, Sum
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
+from django.utils.html import strip_tags
 
 from apps.operations.choices import OPERATING_CURRENCY
-from apps.operations.models import Donation, Expense, FundAllocation, Project, ProjectUpdate, ZERO_MONEY
+from apps.operations.models import (
+    Donation,
+    Expense,
+    FundAllocation,
+    Project,
+    ProjectUpdate,
+    ProjectUpdateAttachment,
+    ZERO_MONEY,
+)
+from apps.operations.private_files import (
+    can_preview_persisted_file,
+    sanitize_download_filename,
+)
 
 
 # PRE: Operational models are available and project is either a saved Project or None.
@@ -89,11 +105,116 @@ def get_recent_published_updates(limit: int = 10):
     ).select_related('project').order_by('-created_at')[:limit]
 
 
+def _public_attachment_queryset():
+    """
+    PRE: ProjectUpdateAttachment rows may mix private and public flags.
+    POST: returns only attachments explicitly marked public (parent visibility is
+          enforced by the caller or by get_eligible_public_update_attachment).
+    """
+    return ProjectUpdateAttachment.objects.filter(is_public=True).order_by('created_at')
+
+
+def _sanitize_public_attachment_title(attachment) -> str:
+    raw_title = strip_tags((attachment.title or '').strip())
+    if raw_title:
+        return raw_title[:200]
+    return sanitize_download_filename(attachment.file)
+
+
+def _public_attachment_extension(attachment) -> str:
+    if not attachment.file or not getattr(attachment.file, 'name', None):
+        return ''
+    name = str(attachment.file.name).replace('\\', '/')
+    return PurePosixPath(name).suffix.lower().lstrip('.')
+
+
+def serialize_public_update_attachment(attachment) -> dict:
+    """
+    PRE: attachment already passed public eligibility (is_public + parent visibility).
+    POST: returns only sanitized metadata safe for anonymous templates.
+    """
+    filename = sanitize_download_filename(attachment.file)
+    extension = _public_attachment_extension(attachment)
+    can_preview = can_preview_persisted_file(attachment.file)
+    payload = {
+        'id': attachment.pk,
+        'title': _sanitize_public_attachment_title(attachment),
+        'filename': filename,
+        'extension': extension,
+        'can_preview': can_preview,
+        'download_url': reverse(
+            'public_portal:public_project_update_attachment_download',
+            args=[attachment.project_update_id, attachment.pk],
+        ),
+        'preview_url': None,
+    }
+    if can_preview:
+        payload['preview_url'] = reverse(
+            'public_portal:public_project_update_attachment_preview',
+            args=[attachment.project_update_id, attachment.pk],
+        )
+    return payload
+
+
+def get_public_update_documents(project_update) -> list[dict]:
+    """
+    PRE: project_update is a PUBLISHED update of an ACTIVE public project (or will
+         be empty when that invariant does not hold).
+    POST: returns sanitized public attachment payloads only; never remediation or
+          private update attachments.
+    """
+    if (
+        project_update.status != ProjectUpdate.Status.PUBLISHED
+        or not project_update.project.is_public
+        or project_update.project.status != Project.Status.ACTIVE
+    ):
+        return []
+
+    # Prefer prefetched public attachments when present; otherwise query once.
+    prefetched = getattr(project_update, '_prefetched_objects_cache', {})
+    if 'attachments' in prefetched:
+        attachments = [
+            attachment
+            for attachment in project_update.attachments.all()
+            if attachment.is_public and attachment.file and attachment.file.name
+        ]
+    else:
+        attachments = list(
+            _public_attachment_queryset()
+            .filter(project_update_id=project_update.pk)
+            .exclude(file='')
+        )
+    return [
+        serialize_public_update_attachment(attachment)
+        for attachment in attachments
+        if attachment.file and getattr(attachment.file, 'name', None)
+    ]
+
+
+def get_eligible_public_update_attachment(*, update_id: int, attachment_id: int):
+    """
+    PRE: update_id and attachment_id come from a public URL.
+    POST: returns the attachment only when every public eligibility condition holds;
+          otherwise raises Http404 via get_object_or_404 (no existence leak).
+    """
+    return get_object_or_404(
+        ProjectUpdateAttachment.objects.select_related('project_update__project').filter(
+            pk=attachment_id,
+            project_update_id=update_id,
+            is_public=True,
+            project_update__status=ProjectUpdate.Status.PUBLISHED,
+            project_update__project__is_public=True,
+            project_update__project__status=Project.Status.ACTIVE,
+        ),
+    )
+
+
 def get_public_project_update_detail(update_id: int):
     """
     PRE: update_id identifica un avance que se solicita desde el portal público.
     POST: retorna únicamente un avance PUBLISHED de un proyecto ACTIVE y público, con los
-    campos públicos necesarios; cualquier otro avance produce 404.
+    campos públicos necesarios y adjuntos públicos prefetched; cualquier otro avance
+    produce 404.
     """
     return get_object_or_404(
         ProjectUpdate.objects.filter(
@@ -102,15 +223,24 @@ def get_public_project_update_detail(update_id: int):
             project__status=Project.Status.ACTIVE,
         )
         .select_related('project')
+        .prefetch_related(
+            Prefetch(
+                'attachments',
+                queryset=_public_attachment_queryset(),
+            )
+        )
         .only(
             'id',
             'project_id',
             'title',
             'description',
             'update_date',
+            'status',
             'project__id',
             'project__code',
             'project__name',
+            'project__is_public',
+            'project__status',
         ),
         pk=update_id,
     )

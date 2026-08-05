@@ -19,7 +19,7 @@ from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import transaction
+from django.db import models, transaction
 
 from apps.operations.expense_request_services import (
     add_expense_request_attachments,
@@ -66,8 +66,10 @@ from apps.operations.services import (
     finish_project,
     publish_project,
     publish_project_update,
+    publish_project_update_attachment,
     register_advance,
     transition_donation_status,
+    unpublish_project_update_attachment,
 )
 
 
@@ -94,6 +96,9 @@ DEMO_UPDATE_TITLE = {
     'observed': '[DEMO-UPD:observed] Avance publicado con observación',
     'no_attachment': '[DEMO-UPD:plain] Avance publicado sin adjunto',
 }
+
+DEMO_UPDATE_PUBLIC_ATTACHMENT_TITLE = 'Evidencia DEMO pública'
+DEMO_UPDATE_PRIVATE_ATTACHMENT_TITLE = 'Evidencia DEMO interna'
 
 DEMO_USER_DEFINITIONS = {
     'admin': {
@@ -395,6 +400,17 @@ def verify_sigedon_demo() -> list[str]:
             errors.append(f'Update {key} must be published')
         if key == 'published_public' and not update.attachments.exists():
             errors.append('Public published update should have an attachment')
+        if key == 'published_public':
+            public_count = update.attachments.filter(is_public=True).count()
+            private_count = update.attachments.filter(is_public=False).count()
+            if public_count != 1:
+                errors.append(
+                    'Public published update must have exactly one explicitly public attachment'
+                )
+            if private_count < 1:
+                errors.append(
+                    'Public published update must keep at least one private attachment'
+                )
         if key == 'reviewed_ok':
             review = ProjectUpdateReview.objects.filter(project_update=update).first()
             if review is None or not hasattr(review, 'decision'):
@@ -409,6 +425,8 @@ def verify_sigedon_demo() -> list[str]:
                 remediation = ProjectUpdateRemediation.objects.filter(decision=review.decision).first()
                 if remediation is None:
                     errors.append('Observed update missing remediation')
+                elif not remediation.attachments.exists():
+                    errors.append('Observed remediation missing private attachment')
 
     from django.db.models import Count
 
@@ -1135,6 +1153,85 @@ def _advance_expense_request(
     return request
 
 
+def _ensure_demo_published_update_attachments(*, published, operator, admin) -> None:
+    """
+    PRE: published is the demo public-update scenario; operator/admin may be None.
+    POST: ensures one explicitly public and one private update attachment without
+          duplicating files across idempotent seed runs.
+    """
+    public_attachment = ProjectUpdateAttachment.objects.filter(
+        project_update=published,
+        title=DEMO_UPDATE_PUBLIC_ATTACHMENT_TITLE,
+    ).first()
+    if public_attachment is None:
+        legacy = ProjectUpdateAttachment.objects.filter(
+            project_update=published,
+            title='Evidencia DEMO',
+        ).first()
+        if legacy is not None:
+            if published.status == ProjectUpdate.Status.UNPUBLISHED:
+                legacy.title = DEMO_UPDATE_PUBLIC_ATTACHMENT_TITLE
+                legacy.save(update_fields=('title',))
+            elif legacy.title != DEMO_UPDATE_PUBLIC_ATTACHMENT_TITLE:
+                # Demo repair only: published attachment titles are otherwise immutable.
+                legacy.title = DEMO_UPDATE_PUBLIC_ATTACHMENT_TITLE
+                models.Model.save(legacy, update_fields=('title',))
+            public_attachment = legacy
+        elif published.status == ProjectUpdate.Status.UNPUBLISHED and operator is not None:
+            public_attachment = add_project_update_attachment(
+                update_id=published.pk,
+                file=demo_upload('demo-update-public.pdf'),
+                title=DEMO_UPDATE_PUBLIC_ATTACHMENT_TITLE,
+                actor=operator,
+            )
+
+    private_attachment = ProjectUpdateAttachment.objects.filter(
+        project_update=published,
+        title=DEMO_UPDATE_PRIVATE_ATTACHMENT_TITLE,
+    ).first()
+    if private_attachment is None and operator is not None:
+        if published.status == ProjectUpdate.Status.UNPUBLISHED:
+            private_attachment = add_project_update_attachment(
+                update_id=published.pk,
+                file=demo_upload('demo-update-private.pdf'),
+                title=DEMO_UPDATE_PRIVATE_ATTACHMENT_TITLE,
+                actor=operator,
+            )
+        elif (
+            public_attachment is not None
+            and ProjectUpdateAttachment.objects.filter(project_update=published).count()
+            == 1
+        ):
+            # Demo repair only: published updates are otherwise immutable.
+            private_attachment = ProjectUpdateAttachment(
+                project_update=published,
+                title=DEMO_UPDATE_PRIVATE_ATTACHMENT_TITLE,
+                file=demo_upload('demo-update-private.pdf'),
+                uploaded_by=operator if getattr(operator, 'is_authenticated', False) else None,
+                is_public=False,
+            )
+            models.Model.save(private_attachment)
+
+    if admin is None:
+        return
+
+    if public_attachment is not None:
+        public_attachment.refresh_from_db()
+        if not public_attachment.is_public:
+            publish_project_update_attachment(
+                attachment_id=public_attachment.pk,
+                actor=admin,
+            )
+
+    if private_attachment is not None:
+        private_attachment.refresh_from_db()
+        if private_attachment.is_public:
+            unpublish_project_update_attachment(
+                attachment_id=private_attachment.pk,
+                actor=admin,
+            )
+
+
 def _create_project_updates(*, projects, users) -> dict[str, ProjectUpdate]:
     operator = users.get('operator')
     committee = users.get('committee')
@@ -1171,16 +1268,11 @@ def _create_project_updates(*, projects, users) -> dict[str, ProjectUpdate]:
         projects['catia_la_mar'],
         'Avance DEMO publicado visible cuando el proyecto es público.',
     )
-    if (
-        not ProjectUpdateAttachment.objects.filter(project_update=published).exists()
-        and published.status == ProjectUpdate.Status.UNPUBLISHED
-    ):
-        add_project_update_attachment(
-            update_id=published.pk,
-            file=demo_upload('demo-update-attachment.pdf'),
-            title='Evidencia DEMO',
-            actor=operator,
-        )
+    _ensure_demo_published_update_attachments(
+        published=published,
+        operator=operator,
+        admin=admin,
+    )
     if (
         admin is not None
         and published.status == ProjectUpdate.Status.UNPUBLISHED

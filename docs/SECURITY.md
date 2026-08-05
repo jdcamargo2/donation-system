@@ -470,6 +470,8 @@ El portal público no debe exponer:
 * auditoría;
 * payloads crudos;
 * documentos privados;
+* adjuntos de avance no marcados explícitamente como públicos;
+* adjuntos de remediación u otros archivos operativos;
 * notas internas;
 * firmas;
 * submissions rechazadas;
@@ -477,12 +479,20 @@ El portal público no debe exponer:
 * información Kobo no aprobada;
 * donaciones individuales;
 * gastos individuales;
-* identificadores técnicos innecesarios.
+* identificadores técnicos innecesarios;
+* claves de almacenamiento, rutas absolutas o URLs firmadas.
 
 La información pública debe obtenerse mediante selectores y consultas explícitamente diseñadas para publicación.
 
 Los selectores de proyecto del portal requieren `ACTIVE` e `is_public=True`;
 ninguna de las dos condiciones basta por sí sola.
+
+Los documentos de avance públicos exigen además
+`ProjectUpdateAttachment.is_public=True`, avance `PUBLISHED` y archivo existente.
+La entrega anónima usa rutas dedicadas bajo `/transparency/updates/.../documents/...`
+(streaming Django con cabeceras sanitizadas). No se hace público el bucket, no se
+reutilizan rutas autenticadas privadas y los fallos de elegibilidad responden
+`404` (no `403`).
 
 No debe reutilizarse directamente el contexto del panel interno.
 

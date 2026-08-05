@@ -126,6 +126,16 @@ urlpatterns = [
         name='project_update_attachment_download',
     ),
     path('update-attachments/<int:pk>/delete/', views.ProjectUpdateAttachmentDeleteView.as_view(), name='project_update_attachment_delete'),
+    path(
+        'update-attachments/<int:pk>/publish/',
+        views.ProjectUpdateAttachmentPublishView.as_view(),
+        name='project_update_attachment_publish',
+    ),
+    path(
+        'update-attachments/<int:pk>/unpublish/',
+        views.ProjectUpdateAttachmentUnpublishView.as_view(),
+        name='project_update_attachment_unpublish',
+    ),
     path('updates/<int:pk>/delete/', views.ProjectUpdateDeleteView.as_view(), name='project_update_delete'),
     path('donations/', views.DonationListView.as_view(), name='donation_list'),
     path('donations/export.csv', views.DonationCsvExportView.as_view(), name='donation_export_csv'),

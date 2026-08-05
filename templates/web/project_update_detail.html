@@ -107,6 +107,50 @@
                     </div>
                     <div class="ops-project-update-attachment-actions d-flex flex-wrap gap-2 align-items-center">
                         {% include "web/includes/protected_file_item.html" with file_actions=attachment.file_actions %}
+                        {% if can_manage_attachment_publicity %}
+                            {% if attachment.is_public %}
+                                <span class="badge text-bg-success">Portal</span>
+                                <form
+                                    id="project-update-attachment-unpublish-form-{{ attachment.pk }}"
+                                    method="post"
+                                    action="{% url 'project_update_attachment_unpublish' attachment.pk %}"
+                                >
+                                    {% csrf_token %}
+                                    <button
+                                        class="btn btn-sm btn-outline-secondary"
+                                        type="submit"
+                                        data-confirm-action
+                                        data-confirm-form="project-update-attachment-unpublish-form-{{ attachment.pk }}"
+                                        data-confirm-title="¿Retirar este documento del portal?"
+                                        data-confirm-text="El archivo permanecerá en el avance; solo dejará de mostrarse en el portal de transparencia."
+                                        data-confirm-confirm-label="Sí, retirar"
+                                        data-confirm-variant="primary"
+                                        aria-label="Retirar del portal {{ attachment.title|default:attachment }}"
+                                    >Retirar del portal</button>
+                                </form>
+                            {% else %}
+                                <form
+                                    id="project-update-attachment-publish-form-{{ attachment.pk }}"
+                                    method="post"
+                                    action="{% url 'project_update_attachment_publish' attachment.pk %}"
+                                >
+                                    {% csrf_token %}
+                                    <button
+                                        class="btn btn-sm btn-outline-primary"
+                                        type="submit"
+                                        data-confirm-action
+                                        data-confirm-form="project-update-attachment-publish-form-{{ attachment.pk }}"
+                                        data-confirm-title="¿Publicar este documento en el portal?"
+                                        data-confirm-text="Solo será visible públicamente si el avance está publicado y el proyecto es público."
+                                        data-confirm-confirm-label="Sí, publicar"
+                                        data-confirm-variant="primary"
+                                        aria-label="Publicar en el portal {{ attachment.title|default:attachment }}"
+                                    >Publicar en el portal</button>
+                                </form>
+                            {% endif %}
+                        {% elif attachment.is_public %}
+                            <span class="badge text-bg-success">Portal</span>
+                        {% endif %}
                         {% if attachment.file_actions.can_delete and attachment.file_actions.delete_url %}
                             <form
                                 id="project-update-attachment-delete-form-{{ attachment.pk }}"

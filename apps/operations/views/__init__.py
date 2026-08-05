@@ -62,6 +62,8 @@ from .institutions import (
 from .project_updates import (
     ProjectUpdateAttachmentCreateView,
     ProjectUpdateAttachmentDeleteView,
+    ProjectUpdateAttachmentPublishView,
+    ProjectUpdateAttachmentUnpublishView,
     ProjectUpdateCreateForProjectView,
     ProjectUpdateCreateView,
     ProjectUpdateDeleteView,
@@ -194,6 +196,8 @@ __all__ = [
     'ProjectUpdateAttachmentDeleteView',
     'ProjectUpdateAttachmentDownloadView',
     'ProjectUpdateAttachmentPreviewView',
+    'ProjectUpdateAttachmentPublishView',
+    'ProjectUpdateAttachmentUnpublishView',
     'ProjectUpdateCreateForProjectView',
     'ProjectUpdateCreateView',
     'ProjectUpdateChunkView',

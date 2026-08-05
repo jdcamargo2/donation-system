@@ -487,8 +487,10 @@ class ProjectDocumentAdmin(admin.ModelAdmin):
 
 @admin.register(ProjectUpdateAttachment)
 class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
-    list_display = ('project_update', 'title', 'created_at', 'uploaded_by')
+    list_display = ('project_update', 'title', 'is_public', 'created_at', 'uploaded_by')
+    list_filter = ('is_public',)
     search_fields = ('title', 'project_update__title')
+    readonly_fields = ('is_public',)
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
@@ -498,9 +500,15 @@ class ProjectUpdateAttachmentAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         # PRE: el formulario admin contiene un adjunto nuevo o modificado.
-        # POST: guarda solo cuando el avance padre continúa UNPUBLISHED.
+        # POST: guarda solo cuando el avance padre continúa UNPUBLISHED; never
+        #       mutates is_public (publication is a domain service action).
         project_update = ProjectUpdate.objects.get(pk=obj.project_update_id)
         ensure_project_update_is_editable(project_update)
+        if change and obj.pk:
+            persisted = ProjectUpdateAttachment.objects.get(pk=obj.pk)
+            obj.is_public = persisted.is_public
+        else:
+            obj.is_public = False
         super().save_model(request, obj, form, change)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):

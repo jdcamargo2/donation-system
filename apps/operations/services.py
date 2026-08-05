@@ -2792,6 +2792,83 @@ def delete_project_update_attachment(*, attachment_id: int, actor) -> int:
         return update_id
 
 
+def set_project_update_attachment_publicity(
+    *, attachment_id: int, is_public: bool, actor
+) -> ProjectUpdateAttachment:
+    """
+    PRE: actor is authenticated; attachment_id identifies a persisted update attachment;
+         the parent project still allows operational mutation (not CLOSED).
+    POST: toggles only ``is_public`` without deleting the file; audits once; does not
+          bypass parent project/update visibility for the public portal.
+    """
+    if not getattr(actor, 'is_authenticated', False):
+        raise ValidationError(
+            {'actor': _('La publicación de adjuntos exige un usuario autenticado.')}
+        )
+    target_public = bool(is_public)
+    with transaction.atomic():
+        attachment = (
+            ProjectUpdateAttachment.objects.select_for_update()
+            .select_related('project_update__project')
+            .get(pk=attachment_id)
+        )
+        project = Project.objects.select_for_update().get(
+            pk=attachment.project_update.project_id
+        )
+        try:
+            ensure_project_allows_operational_mutation(project)
+        except OperationalEntityFinalizedError as exc:
+            raise ProjectUpdateImmutableError(exc.message_dict) from exc
+        if attachment.is_public == target_public:
+            raise ValidationError(
+                {
+                    'is_public': (
+                        _('El adjunto ya está publicado en el portal de transparencia.')
+                        if target_public
+                        else _('El adjunto no está publicado en el portal de transparencia.')
+                    )
+                }
+            )
+        attachment.is_public = target_public
+        attachment._allow_publicity_transition = True
+        attachment.save(update_fields=('is_public',))
+        if target_public:
+            log_action(
+                actor,
+                AuditLog.Action.PUBLISHED,
+                attachment,
+                _('Adjunto de avance publicado en el portal de transparencia.'),
+            )
+        else:
+            log_action(
+                actor,
+                AuditLog.Action.UNPUBLISHED,
+                attachment,
+                _('Adjunto de avance retirado del portal de transparencia.'),
+            )
+        return attachment
+
+
+def publish_project_update_attachment(*, attachment_id: int, actor) -> ProjectUpdateAttachment:
+    """
+    PRE: actor may publish update attachments and attachment_id is eligible.
+    POST: marks the attachment explicitly public without deleting the file.
+    """
+    return set_project_update_attachment_publicity(
+        attachment_id=attachment_id, is_public=True, actor=actor
+    )
+
+
+def unpublish_project_update_attachment(*, attachment_id: int, actor) -> ProjectUpdateAttachment:
+    """
+    PRE: actor may publish update attachments and attachment_id is currently public.
+    POST: clears explicit publicity without deleting the file.
+    """
+    return set_project_update_attachment_publicity(
+        attachment_id=attachment_id, is_public=False, actor=actor
+    )
+
+
 def _require_remediation_actor(actor):
     if not getattr(actor, 'is_authenticated', False):
         raise ProjectUpdateRemediationError(_('La remediación exige un usuario autenticado.'))
