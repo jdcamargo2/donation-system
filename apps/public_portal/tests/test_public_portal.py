@@ -99,7 +99,7 @@ class PublicPortalTests(TestCase):
         self.assertTemplateUsed(response, 'public_portal/public_base.html')
         self.assertContains(response, 'USD')
         self.assertContains(response, 'SIGEDON Transparencia')
-        self.assertContains(response, 'Conoce cómo se gestionan los recursos y proyectos comunitarios.')
+        self.assertContains(response, 'Sistema Integrado de Gestión de Donaciones')
         self.assertContains(response, 'Portal público de transparencia')
         self.assertContains(response, 'Explorar proyectos')
         self.assertContains(response, 'Ver todos los avances')
