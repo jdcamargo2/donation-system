@@ -116,6 +116,7 @@ explicitly public update documents.
 |---|---|---|
 | BUG-E2E-001 | Closed project freezes advances/documents | PASS |
 | BUG-E2E-002 | Only explicitly public update attachments appear/download on the public portal | PASS |
+| BUG-E2E-004 | Operators can start Expense Requests from the list via a clear CTA | PASS |
 
 Internal check for BUG-E2E-002: `admin_demo` can publish/unpublish an attachment
 on an active project; `operador_demo` cannot; a closed project cannot change

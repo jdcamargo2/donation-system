@@ -164,6 +164,11 @@ urlpatterns = [
         name='expense_request_create',
     ),
     path(
+        'expense-requests/new/select-project/',
+        views.ExpenseRequestCreateProjectChooserView.as_view(),
+        name='expense_request_create_choose_project',
+    ),
+    path(
         'projects/<int:project_pk>/expense-requests/new/',
         views.ExpenseRequestCreateForProjectView.as_view(),
         name='expense_request_create_for_project',

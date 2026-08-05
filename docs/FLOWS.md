@@ -356,9 +356,12 @@ rechazo.
   Operador ve solo las propias; Admin/Comité/Auditor ven todas. El Comité entra
   por defecto en `pending_decision`.
 * ER3B añade el flujo del solicitante:
-  * Operador crea desde el detalle del proyecto (`expense_request_create_for_project`)
-    solo cuando `expense_request_allocation_choices(project=...)` tiene al menos una
-    asignación elegible; si no, el detalle muestra guía neutra sin CTA ejecutable;
+  * Operador crea desde el listado (`expense_request_create_choose_project` →
+    `expense_request_create_for_project`) o desde el detalle del proyecto
+    (`expense_request_create_for_project`) solo cuando
+    `expense_request_allocation_choices(project=...)` tiene al menos una
+    asignación elegible; si no, el detalle muestra guía neutra sin CTA ejecutable
+    y el selector del listado muestra el vacío en español;
   * desde el detalle de una asignación elegible, «Solicitar gasto» abre la misma
     ruta con `?allocation=<pk>`; la preselección se resuelve solo dentro del
     queryset autoritativo del formulario (parámetros manipulados no amplían acceso);

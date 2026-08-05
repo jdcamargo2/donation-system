@@ -546,6 +546,24 @@ def expense_request_allocation_choices(*, project=None, include_allocation_id=No
     )
 
 
+def eligible_projects_for_expense_request_creation():
+    """
+    PRE: none (create-permission and route access are enforced by the chooser view).
+    POST: ACTIVE projects that currently have at least one Expense Request-eligible
+          allocation (same domain filter as create-for-project / project detail CTA);
+          closed and allocation-less projects are excluded; ordered for stable UI.
+    """
+    project_ids = (
+        expense_request_allocation_choices()
+        .values_list('project_id', flat=True)
+        .distinct()
+    )
+    return Project.objects.filter(
+        status=Project.Status.ACTIVE,
+        pk__in=project_ids,
+    ).order_by('code', 'name', 'pk')
+
+
 def visible_expense_requests_for_allocation(*, user, allocation):
     """
     PRE: caller enforces operations.view_expenserequest at the view layer;

@@ -483,17 +483,56 @@ class ExpenseRequestRequesterUITests(TestCase):
     def test_list_cta_visibility(self):
         self.client.force_login(self.admin)
         admin_list = self.client.get(reverse('expense_request_list'))
-        self.assertContains(admin_list, 'Nueva solicitud')
+        self.assertTrue(admin_list.context['show_expense_request_create_cta'])
+        self.assertTrue(admin_list.context['can_create_global_expense_request'])
+        self.assertContains(admin_list, 'Nueva solicitud de gasto')
         self.assertContains(admin_list, reverse('expense_request_create'))
+        self.assertNotContains(
+            admin_list,
+            reverse('expense_request_create_choose_project'),
+        )
 
         self.client.force_login(self.operator)
         operator_list = self.client.get(reverse('expense_request_list'))
-        self.assertNotContains(operator_list, 'Nueva solicitud')
-        self.assertNotContains(operator_list, reverse('expense_request_create'))
+        self.assertTrue(operator_list.context['show_expense_request_create_cta'])
+        self.assertFalse(operator_list.context['can_create_global_expense_request'])
+        self.assertContains(operator_list, 'Nueva solicitud de gasto')
         self.assertContains(
+            operator_list,
+            reverse('expense_request_create_choose_project'),
+        )
+        self.assertNotContains(
+            operator_list,
+            f'href="{reverse("expense_request_create")}"',
+        )
+        self.assertNotContains(
             operator_list,
             'Cree una solicitud desde el detalle de un proyecto.',
         )
+        self.assertContains(
+            operator_list,
+            'Las nuevas solicitudes se registran para un proyecto elegible.',
+        )
+
+        for user in (self.committee, self.auditor):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                response = self.client.get(reverse('expense_request_list'))
+                if response.status_code == 302:
+                    response = self.client.get(response['Location'])
+                self.assertFalse(response.context['show_expense_request_create_cta'])
+                self.assertFalse(response.context['can_create_expense_request'])
+                self.assertNotContains(response, 'Nueva solicitud de gasto')
+                self.assertNotContains(
+                    response,
+                    reverse('expense_request_create_choose_project'),
+                )
+                self.assertNotContains(
+                    response,
+                    f'href="{reverse("expense_request_create")}"',
+                )
+                self.assertNotIn('role_name', response.context)
+                self.assertNotIn('functional_role', response.context)
 
     def test_project_detail_solicitar_gasto_visibility(self):
         url = reverse('project_detail', args=[self.project.pk])

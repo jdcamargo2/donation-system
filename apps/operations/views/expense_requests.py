@@ -34,6 +34,7 @@ from ..selectors import (
     annullable_expense_requests_for_user,
     attachment_display_filename,
     decidable_pending_expense_requests_for_user,
+    eligible_projects_for_expense_request_creation,
     expense_request_allocation_choices,
     fulfillable_expense_requests_for_user,
     get_expense_request_financial_display,
@@ -285,6 +286,9 @@ class ExpenseRequestListView(
         context['can_create_expense_request'] = user.has_perm(
             'operations.add_expenserequest'
         )
+        # Permission-backed entry CTA (not role-name checks). Global creators keep the
+        # allocation browser; other requesters use the eligible-project chooser.
+        context['show_expense_request_create_cta'] = context['can_create_expense_request']
         context['can_decide_expense_request'] = user.has_perm(
             'operations.decide_expenserequest'
         )
@@ -562,6 +566,33 @@ class ExpenseRequestAttachmentDeleteView(OperationsPermissionRequiredMixin, View
         # PRE: delete is POST-only.
         # POST: refuses GET mutation with 405.
         return HttpResponseNotAllowed(['POST'])
+
+class ExpenseRequestCreateProjectChooserView(
+    OperationsPermissionRequiredMixin,
+    RouteContextMixin,
+    ListView,
+):
+    """
+    Operator-facing entry: pick an eligible ACTIVE project, then continue to the
+    existing project-scoped create route. Does not create Expense Requests.
+    """
+
+    permission_required = 'operations.add_expenserequest'
+    template_name = 'web/expense_request_project_chooser.html'
+    context_object_name = 'eligible_projects'
+    route_prefix = 'expense_request'
+    page_title = _('Nueva solicitud de gasto')
+
+    def get_queryset(self):
+        # PRE: add_expenserequest already enforced by the mixin.
+        # POST: only ACTIVE projects with current eligible allocations; no closed rows.
+        return eligible_projects_for_expense_request_creation()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['cancel_url'] = reverse('expense_request_list')
+        return context
+
 
 class ExpenseRequestCreateForProjectView(
     OperationsPermissionRequiredMixin,
