@@ -266,13 +266,14 @@ registra un conflicto; nunca mueve silenciosamente la submission.
 
 ## 8. Webhook
 
-La ruta de recepción se encuentra bajo:
+La ruta externa de recepción del webhook es:
 
 ```text
-/integrations/kobo/
+/integrations/kobo/webhook/
 ```
 
-La URL concreta depende de las rutas configuradas por la aplicación.
+El panel de gestión humana de Kobo vive por separado bajo
+`/panel/integrations/kobo/` (véase §19).
 
 ### Proceso
 
@@ -800,10 +801,13 @@ python manage.py reconcile_kobo_submissions
 
 ## 19. Panel operativo de KoboToolbox
 
-Con `KOBO_ENABLED=true`, `/integrations/kobo/` es el panel operativo para resumen,
-asignación de zonas, núcleos registrados y casos por revisar. Sus mutaciones usan
-POST, CSRF y los servicios administrativos existentes. Cuando Kobo está
-deshabilitado, el enlace y las rutas del panel no están disponibles.
+Con `KOBO_ENABLED=true`, `/panel/integrations/kobo/` es el panel operativo humano
+para resumen, asignación de zonas, núcleos registrados y casos por revisar. Sus
+mutaciones usan POST, CSRF y los servicios administrativos existentes. Cuando
+Kobo está deshabilitado, el enlace y las rutas del panel no están disponibles.
+
+El webhook externo permanece en `/integrations/kobo/webhook/` y no forma parte
+de esta UI de gestión.
 
 El panel de administración territorial está disponible solo para roles
 autorizados. Operador de campo queda explícitamente excluido. La ingestión por
@@ -820,7 +824,7 @@ El lenguaje visible del panel prioriza términos operativos:
 Los nombres técnicos internos (`mapping`, `routing`, identidades territoriales)
 se conservan en modelos, servicios y documentación de arquitectura.
 
-El listado `/integrations/kobo/submissions/pending/` es el hub global de
+El listado `/panel/integrations/kobo/submissions/pending/` es el hub global de
 incidencias (`incident_queryset`). `pending_review_queryset` es un alias
 deprecado de ese mismo queryset; no significa `status=READY_FOR_REVIEW` ni una
 cola humana por Project. `READY_FOR_REVIEW` permanece como estado interno
@@ -828,4 +832,4 @@ transitorio del pipeline automático.
 
 La asignación de zonas admite `?zone=<codigo>` para preseleccionar la zona en el
 formulario de configuración sin mutar por GET. El historial completo de
-sincronizaciones vive en `/integrations/kobo/sync/history/`.
+sincronizaciones vive en `/panel/integrations/kobo/sync/history/`.

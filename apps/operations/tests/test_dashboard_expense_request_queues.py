@@ -175,9 +175,20 @@ class DashboardExpenseRequestQueueTests(TestCase):
         codes = {item['code'] for item in queues['personal']['items']}
         self.assertEqual(codes, {own_pending.code, own_approved.code})
         self.assertNotIn(other.code, codes)
+        own_by_code = {
+            own_pending.code: own_pending,
+            own_approved.code: own_approved,
+        }
         for item in queues['personal']['items']:
             self.assertEqual(item['action_label'], 'Ver solicitud')
-            self.assertTrue(item['action_url'].startswith('/expense-requests/'))
+            expected_url = reverse(
+                'expense_request_detail',
+                args=[own_by_code[item['code']].pk],
+            )
+            self.assertEqual(item['action_url'], expected_url)
+            self.assertTrue(
+                item['action_url'].startswith(reverse('expense_request_list')),
+            )
             self.assertEqual(item['action_style'], 'outline')
 
         self.client.force_login(self.operator)

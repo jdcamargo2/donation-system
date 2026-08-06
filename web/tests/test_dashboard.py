@@ -121,11 +121,22 @@ class DashboardTests(TestCase):
         self.grant_permissions('view_institution')
         self.client.force_login(self.user)
 
-        response = self.client.get(reverse('institution_list'))
+        institutions_url = reverse('institution_list')
+        response = self.client.get(institutions_url)
+        html = response.content.decode()
 
         self.assertContains(response, 'sigedon-nav-link active')
-        self.assertContains(response, 'href="/institutions/"')
+        self.assertContains(response, f'href="{institutions_url}"')
         self.assertContains(response, 'aria-current="page"')
+        # Current section is institutions; unrelated panel sections stay inactive.
+        self.assertIn(
+            f'class="sigedon-nav-link active" href="{institutions_url}"',
+            html,
+        )
+        self.assertNotIn(
+            f'class="sigedon-nav-link active" href="{reverse("dashboard")}"',
+            html,
+        )
 
     def test_dashboard_totals_match_financial_data(self):
         donation = create_donation(donor=self.donor, amount=Decimal('100.00'))

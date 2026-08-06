@@ -616,7 +616,9 @@ class AuditLogListPaginationTests(TestCase):
         self.assertNotIn('name="page"', filter_markup)
 
     def test_list_query_count_stays_bounded(self):
-        with self.assertNumQueries(4):
+        # Session + authenticated user + mandatory-password profile check +
+        # paginated AuditLog COUNT + paginated AuditLog page rows.
+        with self.assertNumQueries(5):
             response = self.client.get(self.url, {'page_size': '20'})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.context['logs']), 20)

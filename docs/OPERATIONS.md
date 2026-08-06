@@ -826,11 +826,12 @@ El despliegue no debe considerarse completo hasta validar el comportamiento bás
 
 ## Panel operativo Kobo
 
-Con Kobo habilitado, el panel `/integrations/kobo/` permite revisar y operar
-asignación de zonas, núcleos registrados, incidencias y reconciliación. No es
-necesario pulsar sincronizar durante la operación normal: las Fichas 1, 10 y 11
-llegan por webhook, el panel se actualiza por polling cada 15 segundos y la
-intervención humana ocurre sólo ante incidencias.
+Con Kobo habilitado, el panel `/panel/integrations/kobo/` permite revisar y
+operar asignación de zonas, núcleos registrados, incidencias y reconciliación.
+El webhook externo permanece en `/integrations/kobo/webhook/`. No es necesario
+pulsar sincronizar durante la operación normal: las Fichas 1, 10 y 11 llegan por
+webhook, el panel se actualiza por polling cada 15 segundos y la intervención
+humana ocurre sólo ante incidencias.
 Compruebe que los permisos Kobo se asignaron antes de habilitar acceso operativo.
 Operador de campo queda fuera de esa audiencia territorial; el webhook y el
 procesamiento de importación en backend no dependen de su acceso al panel.
