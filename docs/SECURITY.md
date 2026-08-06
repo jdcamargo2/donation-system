@@ -15,6 +15,8 @@ Arquitectura de acceso:
   portal público;
 * la autenticación institucional usa `/accounts/login/`;
 * el cierre de sesión (`/accounts/logout/`) solo acepta `POST`;
+  al cerrar sesión, el usuario regresa al acceso institucional
+  (`/accounts/login/`);
 * el cambio de contraseña autenticado usa `/accounts/password_change/`;
 * las rutas de restablecimiento de contraseña por correo
   (`/accounts/password_reset/` y equivalentes) están **deshabilitadas**

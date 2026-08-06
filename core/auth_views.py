@@ -42,12 +42,17 @@ class InstitutionalLoginView(LoginView):
 class InstitutionalLogoutView(LogoutView):
     """
     PRE: authenticated session may exist; only POST is accepted.
-    POST: ends the session and redirects to the public portal root.
+    POST: ends the session and redirects to institutional login
+          (/accounts/login/). A ``next`` parameter is never honored.
     GET never logs the user out.
     """
 
-    next_page = reverse_lazy('public_portal:public_home')
+    next_page = reverse_lazy('login')
     http_method_names = ['post', 'options']
+
+    def get_redirect_url(self):
+        # Ignore user-supplied next; logout always returns to institutional login.
+        return ''
 
 
 class InstitutionalPasswordChangeView(PasswordChangeView):

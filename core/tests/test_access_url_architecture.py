@@ -29,6 +29,12 @@ class AccessUrlArchitectureTests(TestCase):
         self.assertEqual(reverse('public_portal:public_projects_json'), '/datos/proyectos.json')
         self.assertEqual(reverse('public_portal:public_metrics_json'), '/datos/metricas.json')
 
+    def test_anonymous_public_root_remains_public(self):
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Acceso institucional')
+        self.assertNotContains(response, 'Gestión de usuarios')
+
     def test_anonymous_panel_redirects_to_login_with_safe_next(self):
         response = self.client.get('/panel/')
         self.assertEqual(response.status_code, 302)

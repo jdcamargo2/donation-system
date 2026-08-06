@@ -52,13 +52,29 @@ class LoginNavigationTests(TestCase):
                 self.assertNotIn('evil.example', location)
                 self.assertEqual(location, '/panel/')
 
-    def test_logout_post_redirects_to_public_root(self):
+    def test_logout_post_redirects_to_institutional_login(self):
         self.client.force_login(self.user)
         response = self.client.post(reverse('logout'))
-        self.assertRedirects(response, '/', fetch_redirect_response=False)
+        self.assertRedirects(
+            response,
+            '/accounts/login/',
+            fetch_redirect_response=False,
+        )
         follow = self.client.get('/panel/')
         self.assertEqual(follow.status_code, 302)
         self.assertIn(reverse('login'), follow['Location'])
+
+    def test_logout_post_ignores_next_parameter(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('logout'),
+            data={'next': '/panel/projects/'},
+        )
+        self.assertRedirects(
+            response,
+            '/accounts/login/',
+            fetch_redirect_response=False,
+        )
 
     def test_logout_get_does_not_end_session(self):
         self.client.force_login(self.user)

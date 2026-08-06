@@ -53,6 +53,9 @@ administrativa. Detalle de rutas y permisos:
   (`/accounts/password_reset/` y equivalentes) permanecen deshabilitadas
   (`404`) hasta que exista infraestructura SMTP revisada.
 * Toda mutación de cuenta institucional queda registrada en `AuditLog`.
+* Al cerrar sesión, el usuario regresa al acceso institucional
+  (`/accounts/login/`); la raíz pública (`/`) permanece el portal de
+  transparencia y no cambia con el logout.
 
 ---
 
