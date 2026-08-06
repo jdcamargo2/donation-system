@@ -44,12 +44,12 @@ class AllocationTransitionCleanupTests(TestCase):
 
     def test_finish_and_annul_routes_remain_reversible(self):
         self.assertEqual(
-            reverse('allocation_finish', args=[self.allocation.pk]),
-            f'/allocations/{self.allocation.pk}/finish/',
+            reverse('allocation_finish', kwargs={'pk': self.allocation.pk}),
+            f'/panel/allocations/{self.allocation.pk}/finish/',
         )
         self.assertEqual(
-            reverse('allocation_annul', args=[self.allocation.pk]),
-            f'/allocations/{self.allocation.pk}/annul/',
+            reverse('allocation_annul', kwargs={'pk': self.allocation.pk}),
+            f'/panel/allocations/{self.allocation.pk}/annul/',
         )
 
     def test_eligible_active_allocation_can_finish(self):
