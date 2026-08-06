@@ -53,7 +53,7 @@ class KoboWebhookAuthPolicyTests(TestCase):
     def setUp(self):
         self.client = Client()
         kobo_views._legacy_header_warned = False
-        self.url = reverse('kobo:webhook_submission')
+        self.url = reverse('kobo_webhook')
         self.payload = {
             '_uuid': 'webhook-auth-uuid-1',
             '_id': 1,

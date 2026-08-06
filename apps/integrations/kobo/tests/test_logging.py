@@ -220,7 +220,7 @@ class KoboLoggingTests(TestCase):
         )
         try:
             response = self.client.post(
-                reverse('kobo:webhook_submission'),
+                reverse('kobo_webhook'),
                 data=b'{}',
                 content_type='application/json',
             )
@@ -239,7 +239,7 @@ class KoboLoggingTests(TestCase):
         )
         try:
             response = self.client.post(
-                reverse('kobo:webhook_submission'),
+                reverse('kobo_webhook'),
                 data=b'{not-json',
                 content_type='application/json',
                 **self._auth_headers(),
@@ -259,7 +259,7 @@ class KoboLoggingTests(TestCase):
         )
         try:
             response = self.client.post(
-                reverse('kobo:webhook_submission'),
+                reverse('kobo_webhook'),
                 data=body,
                 content_type='application/json',
                 **self._auth_headers(),
@@ -320,7 +320,7 @@ class KoboLoggingTests(TestCase):
                 ),
             ):
                 response = self.client.post(
-                    reverse('kobo:webhook_submission'),
+                    reverse('kobo_webhook'),
                     data=json.dumps(payload),
                     content_type='application/json',
                     **self._auth_headers(),
@@ -350,7 +350,7 @@ class KoboLoggingTests(TestCase):
                 ),
             ):
                 incomplete = self.client.post(
-                    reverse('kobo:webhook_submission'),
+                    reverse('kobo_webhook'),
                     data=json.dumps({**payload, '_uuid': 'webhook-log-uuid-2'}),
                     content_type='application/json',
                     **self._auth_headers(),
@@ -369,7 +369,7 @@ class KoboLoggingTests(TestCase):
                 side_effect=RuntimeError('boom token=FAKE_WH_TOKEN'),
             ):
                 failure = self.client.post(
-                    reverse('kobo:webhook_submission'),
+                    reverse('kobo_webhook'),
                     data=json.dumps({**payload, '_uuid': 'webhook-log-uuid-3'}),
                     content_type='application/json',
                     **self._auth_headers(),

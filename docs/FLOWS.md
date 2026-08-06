@@ -2,6 +2,60 @@
 
 Este documento describe los principales flujos operativos de SIGEDON, incluyendo sus precondiciones, pasos, resultados y restricciones.
 
+## 0. Flujo de acceso institucional
+
+No existe autorregistro público: toda cuenta institucional se crea de forma
+administrativa. Detalle de rutas y permisos:
+[Roles y permisos §5](ROLES_AND_PERMISSIONS.md#5-administración-de-usuarios-useradmin),
+[Despliegue §7](DEPLOYMENT.md#7-usuarios-y-roles).
+
+### PRE
+
+* Existe al menos un superusuario (creado por `createsuperuser` en el
+  bootstrap de despliegue).
+* El actor que crea o gestiona cuentas institucionales es superusuario
+  (`request.user.is_superuser`); el rol funcional «Administrador SIGEDON» no
+  habilita esta gestión.
+
+### Pasos
+
+1. El superusuario inicia sesión en `/accounts/login/` y abre
+   `/panel/usuarios/` (ruta y enlace de sidebar «Gestión de usuarios»
+   visibles solo para superusuarios).
+2. Crea una cuenta institucional con exactamente un rol funcional canónico,
+   `is_staff=False`, `is_superuser=False`, y una contraseña temporal.
+3. El alta fija `UserAccessProfile.must_change_password=True` y audita la
+   creación sin registrar la contraseña.
+4. La contraseña temporal se entrega a la persona por un canal externo
+   seguro (nunca por el propio sistema, tickets ni logs).
+5. En el primer inicio de sesión, `MustChangePasswordMiddleware` restringe a
+   la cuenta marcada a logout, estáticos, sondas de salud y
+   `/accounts/password_change/`; bloquea `/panel/**` y `/admin/` hasta que
+   complete el cambio.
+6. Al completar `/accounts/password_change/`, el sistema limpia
+   `must_change_password` y audita el evento con el propio usuario como actor.
+7. El superusuario puede editar el rol, activar, desactivar o restablecer la
+   contraseña de una cuenta institucional desde `/panel/usuarios/`; no puede
+   gestionar cuentas superusuario desde ese panel ni desactivar la suya propia.
+8. Desactivar una cuenta o restablecer su contraseña invalida de inmediato
+   sus sesiones activas (`Session` en base de datos), conservando la sesión
+   del actor cuando corresponde.
+
+### POST
+
+* Ninguna cuenta institucional se crea fuera de `/panel/usuarios/` (solo
+  superusuario) o de `/admin/` (recuperación técnica).
+* Una cuenta con `must_change_password=True` no puede operar el panel hasta
+  cambiar su contraseña.
+* Una cuenta desactivada pierde acceso inmediato, incluidas las sesiones ya
+  iniciadas.
+* Las rutas de restablecimiento de contraseña por correo
+  (`/accounts/password_reset/` y equivalentes) permanecen deshabilitadas
+  (`404`) hasta que exista infraestructura SMTP revisada.
+* Toda mutación de cuenta institucional queda registrada en `AuditLog`.
+
+---
+
 ## 1. Flujo de proyecto
 
 ```text

@@ -88,7 +88,7 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
         self.assertNotContains(response, "Última actualización por ficha")
 
     def test_dashboard_status_polling_is_protected_compact_and_aggregated(self):
-        with self.assertNumQueries(8):
+        with self.assertNumQueries(9):
             response = self.client.get(
                 reverse("kobo:dashboard_status"),
                 HTTP_HX_REQUEST="true",

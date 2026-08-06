@@ -349,7 +349,7 @@ class KoboWebhookConcurrencyTests(TransactionTestCase):
                 barrier.wait(timeout=10)
                 token = base64.b64encode(b'sigedon-kobo:test-webhook-secret').decode()
                 response = Client().post(
-                    reverse("kobo:webhook_submission"),
+                    reverse('kobo_webhook'),
                     data=json.dumps(payload),
                     content_type="application/json",
                     HTTP_AUTHORIZATION=f"Basic {token}",

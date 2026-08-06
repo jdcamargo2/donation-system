@@ -101,8 +101,9 @@ Expected: read-only inspection across financial and request history.
    **Documentos del avance** lists the explicitly public attachment
    (`Evidencia DEMO pública`) and omits the private one (`Evidencia DEMO interna`).
 6. Download the public document anonymously; confirm no login is required and the
-   URL is under `/transparency/updates/.../documents/...` (not `/media/` or an
-   authenticated private download path).
+   URL is under `/avances/.../documentos/.../descargar/` (not `/media/` or an
+   authenticated private download path). The legacy `/transparency/updates/.../documents/...`
+   path still works but only as a permanent `301` redirect to the canonical URL.
 7. Guess a private attachment public URL → expect `404`.
 8. Confirm remediation attachments and other private supporting/legal files are
    inaccessible anonymously.

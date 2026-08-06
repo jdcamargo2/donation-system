@@ -266,4 +266,35 @@ urlpatterns = [
         name='supporting_document_delete',
     ),
     path('audit/', views.AuditLogListView.as_view(), name='audit_log_list'),
+    path('usuarios/', views.UserAccessListView.as_view(), name='user_access_list'),
+    path(
+        'usuarios/nuevo/',
+        views.UserAccessCreateView.as_view(),
+        name='user_access_create',
+    ),
+    path(
+        'usuarios/<int:pk>/',
+        views.UserAccessDetailView.as_view(),
+        name='user_access_detail',
+    ),
+    path(
+        'usuarios/<int:pk>/editar/',
+        views.UserAccessUpdateView.as_view(),
+        name='user_access_update',
+    ),
+    path(
+        'usuarios/<int:pk>/activar/',
+        views.UserAccessActivateView.as_view(),
+        name='user_access_activate',
+    ),
+    path(
+        'usuarios/<int:pk>/desactivar/',
+        views.UserAccessDeactivateView.as_view(),
+        name='user_access_deactivate',
+    ),
+    path(
+        'usuarios/<int:pk>/restablecer-clave/',
+        views.UserAccessResetPasswordView.as_view(),
+        name='user_access_reset_password',
+    ),
 ]

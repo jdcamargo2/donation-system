@@ -131,6 +131,10 @@ superusuarios a través de Django Admin; el modelo y el queryset rechazan
 * No puede crear, modificar ni eliminar registros de `AuditLog`.
 * No puede anular un proyecto: `Project` no admite estado anulado.
 * No puede eliminar un proyecto.
+* No puede gestionar identidades: crear, editar, activar, desactivar ni
+  restablecer la contraseña de ninguna cuenta institucional. El rol
+  funcional «Administrador SIGEDON» no otorga autoridad de identidad; esa
+  gestión es exclusiva del superusuario en `/panel/usuarios/` (ver §5.1).
 * No recibe permisos de revisión, decisión ni resolución de remediaciones del Comité.
 * No recibe `decide_expenserequest` (solo el Comité decide solicitudes de gasto).
 * Puede crear, editar y retirar solicitudes de gasto **propias** en
@@ -422,6 +426,43 @@ Comportamiento:
 * el bypass de superusuario permanece;
 * las cuentas de servicio pueden operar solo con permisos directos.
 
+### 5.1. Panel institucional de usuarios (`/panel/usuarios/`)
+
+Además de `SigedonUserAdmin` en Django Admin (recuperación técnica, ver §10),
+SIGEDON expone un panel superuser-only bajo `/panel/usuarios/` para la gestión
+ordinaria de cuentas institucionales:
+
+```text
+/panel/usuarios/                          listado
+/panel/usuarios/nuevo/                    alta
+/panel/usuarios/<pk>/                     detalle
+/panel/usuarios/<pk>/editar/              edición (rol, datos, estado)
+/panel/usuarios/<pk>/activar/             activación
+/panel/usuarios/<pk>/desactivar/          desactivación
+/panel/usuarios/<pk>/restablecer-clave/   restablecer contraseña temporal
+```
+
+### Contrato de autoridad
+
+* Toda operación mutadora exige `request.user.is_superuser`; ningún rol
+  funcional (incluido «Administrador SIGEDON») la sustituye.
+* El panel no puede crear, editar ni gestionar cuentas superusuario; esas
+  cuentas se administran exclusivamente desde `/admin/` (recuperación técnica).
+* Un superusuario no puede desactivar su propia cuenta desde este panel.
+* El alta fija exactamente un rol funcional canónico, `is_staff=False`,
+  `is_superuser=False` y `UserAccessProfile.must_change_password=True` con
+  una contraseña temporal; la contraseña nunca se registra en logs ni en
+  `AuditLog`.
+* Desactivar una cuenta o restablecer su contraseña invalida de inmediato
+  sus sesiones activas (`django.contrib.sessions` en base de datos),
+  conservando la sesión del actor cuando corresponde.
+* El enlace de sidebar «Gestión de usuarios» solo se renderiza cuando
+  `request.user.is_superuser` es verdadero; no depende del rol funcional.
+* No existe autorregistro público: ninguna ruta anónima crea cuentas.
+
+Detalle del flujo completo: [Flujos §0](FLOWS.md#0-flujo-de-acceso-institucional).
+Procedimiento de despliegue: [Despliegue §7](DEPLOYMENT.md#7-usuarios-y-roles).
+
 ## 6. Administración de grupos (GroupAdmin)
 
 SIGEDON reemplaza el GroupAdmin estándar con `SigedonGroupAdmin`.
@@ -557,14 +598,20 @@ permisos `kobo.*` (lectura/cambio según la acción).
 El superusuario:
 
 * ignora la matriz ordinaria de permisos;
-* puede acceder al panel de administración;
+* puede acceder al panel de administración (`/admin/`);
+* es el único actor autorizado para gestionar identidades institucionales en
+  `/panel/usuarios/` (ver §5.1);
 * puede utilizar herramientas técnicas;
 * puede consultar y operar sobre todos los módulos habilitados;
 * puede no tener ningún rol funcional SIGEDON.
 
 ### Restricciones de uso
 
-* Debe reservarse para la administración técnica del sistema.
+* Debe reservarse para la administración técnica del sistema y para el
+  bootstrap inicial de acceso (`python manage.py createsuperuser` en el
+  procedimiento de despliegue).
+* `/admin/` queda reservado para recuperación técnica; la gestión
+  operativa diaria de cuentas institucionales pasa por `/panel/usuarios/`.
 * No debe utilizarse como cuenta operativa diaria.
 * Su uso debe limitarse a tareas excepcionales de configuración, soporte o recuperación.
 * La existencia del rol no sustituye la asignación correcta de permisos a usuarios ordinarios.

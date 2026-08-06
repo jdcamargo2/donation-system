@@ -198,16 +198,16 @@ python manage.py runserver
 
 ## Rutas locales
 
-### Panel interno
+### Portal público de transparencia (raíz canónica)
 
 ```text
 http://127.0.0.1:8000/
 ```
 
-### Portal público
+### Panel interno
 
 ```text
-http://127.0.0.1:8000/transparency/
+http://127.0.0.1:8000/panel/
 ```
 
 ### Administración de Django
@@ -215,6 +215,12 @@ http://127.0.0.1:8000/transparency/
 ```text
 http://127.0.0.1:8000/admin/
 ```
+
+> [!NOTE]
+> `/transparency/**` queda como redirección permanente `301` (`GET`/`HEAD`)
+> hacia las rutas canónicas anteriores; las rutas operativas antiguas fuera
+> de `/panel/` (por ejemplo `/projects/`) devuelven `404` sin redirección.
+> Detalle: [Portal público](docs/PUBLIC_PORTAL.md#2-rutas-públicas).
 
 ## Comandos administrativos
 

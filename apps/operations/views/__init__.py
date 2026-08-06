@@ -125,6 +125,15 @@ from .supporting_documents import (
     SupportingDocumentCreateForExpenseView,
     SupportingDocumentDeleteView,
 )
+from .user_access import (
+    UserAccessActivateView,
+    UserAccessCreateView,
+    UserAccessDeactivateView,
+    UserAccessDetailView,
+    UserAccessListView,
+    UserAccessResetPasswordView,
+    UserAccessUpdateView,
+)
 
 __all__ = [
     'AuditLogListView',
@@ -226,4 +235,11 @@ __all__ = [
     'SupportingDocumentDeleteView',
     'SupportingDocumentDownloadView',
     'SupportingDocumentPreviewView',
+    'UserAccessActivateView',
+    'UserAccessCreateView',
+    'UserAccessDeactivateView',
+    'UserAccessDetailView',
+    'UserAccessListView',
+    'UserAccessResetPasswordView',
+    'UserAccessUpdateView',
 ]

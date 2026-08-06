@@ -228,7 +228,7 @@ class PublicPortalTests(TestCase):
         self.assertContains(response, 'Disponible por ejecutar')
         self.assertContains(response, 'Las cifras están expresadas en dólares estadounidenses.')
         self.assertContains(response, 'Fortalecer la respuesta comunitaria.')
-        self.assertContains(response, 'href="/transparency/#metodologia"', html=False)
+        self.assertContains(response, 'href="/#metodologia"', html=False)
         self.assertEqual(content.count('<h1'), 1)
         self.assertIn('public-financial-summary', content)
         self.assertIn('public-project-information', content)
@@ -565,7 +565,7 @@ class PublicPortalTests(TestCase):
         response = self.client.get(reverse('public_portal:public_home'))
 
         self.assertContains(response, 'Metodología')
-        self.assertContains(response, 'href="/transparency/#metodologia"')
+        self.assertContains(response, 'href="/#metodologia"')
         self.assertContains(response, 'solo proyectos ACTIVE y avances PUBLISHED')
         self.assertContains(response, 'TTL de caché')
         self.assertNotContains(response, 'Datos abiertos')
@@ -623,7 +623,6 @@ class PublicPortalTests(TestCase):
             'dashboard',
             'admin',
             'logout',
-            'login',
             'request.user',
             'user.is_authenticated',
             'project_update_create',
@@ -631,11 +630,20 @@ class PublicPortalTests(TestCase):
             'project_update_publish',
             'project_update_update',
             'project_update_delete',
+            'Gestión de usuarios',
+            'user_access_list',
+            'sigedon-sidebar',
         ]
 
         for term in forbidden_terms:
             with self.subTest(term=term):
                 self.assertNotIn(term, source)
+
+        # Discreet institutional access is allowed; no operational menu.
+        self.assertIn('Acceso institucional', source)
+        self.assertIn('/accounts/login/?next=/panel/', source)
+        self.assertNotIn("{% url 'login'", source)
+        self.assertNotIn("{% url 'dashboard'", source)
 
     def test_public_project_list_is_paginated_by_twenty(self):
         for index in range(21):

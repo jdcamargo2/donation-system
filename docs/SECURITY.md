@@ -4,16 +4,51 @@ Este documento describe los controles de seguridad aplicados en SIGEDON y las re
 
 ## 1. Autenticación
 
-El panel interno utiliza el sistema de autenticación de Django.
-
+El panel interno (`/panel/`) utiliza el sistema de autenticación de Django.
 Las rutas privadas requieren un usuario autenticado.
 
-El portal de transparencia:
+Arquitectura de acceso:
+
+* la raíz del sitio (`/`) es el portal público de transparencia; no requiere
+  autenticación;
+* el panel operativo interno vive completo bajo `/panel/`, separado del
+  portal público;
+* la autenticación institucional usa `/accounts/login/`;
+* el cierre de sesión (`/accounts/logout/`) solo acepta `POST`;
+* el cambio de contraseña autenticado usa `/accounts/password_change/`;
+* las rutas de restablecimiento de contraseña por correo
+  (`/accounts/password_reset/` y equivalentes) están **deshabilitadas**
+  (`404`) hasta contar con infraestructura SMTP revisada;
+* **no existe autorregistro público**: ninguna ruta anónima crea cuentas;
+  toda cuenta institucional se crea desde `/panel/usuarios/`
+  (exclusivo de superusuarios; ver
+  [Roles y permisos §5.1](ROLES_AND_PERMISSIONS.md#51-panel-institucional-de-usuarios-panelusuarios));
+* `/admin/` queda reservado para recuperación técnica y el bootstrap inicial
+  (`createsuperuser`), no para el alta operativa de usuarios institucionales.
+
+El portal público de transparencia:
 
 * es público;
 * no requiere autenticación;
 * se encuentra separado del panel interno;
 * expone únicamente información autorizada.
+
+Las rutas heredadas bajo `/transparency/**` permanecen únicamente como
+redirecciones permanentes `301` (`GET`/`HEAD`) hacia las rutas canónicas del
+portal; nunca ejecutan lógica propia. Ver
+[Portal público §2](PUBLIC_PORTAL.md#2-rutas-públicas).
+
+Las rutas operativas antiguas fuera de `/panel/` (por ejemplo `/projects/`,
+`/donations/`, `/integrations/kobo/` sin `panel/`) no reciben redirección:
+responden `404` normal de resolución de URL, sin filtrar si la ruta existió
+alguna vez.
+
+Las cuentas institucionales creadas con contraseña temporal quedan marcadas
+con `must_change_password=True`; hasta completar el cambio en
+`/accounts/password_change/`, el middleware de la aplicación bloquea el
+acceso a `/panel/**` y `/admin/`. Desactivar una cuenta o restablecer su
+contraseña invalida de inmediato sus sesiones activas (backend de sesiones
+en base de datos).
 
 La autenticación confirma la identidad del usuario, pero no concede por sí sola permisos operativos.
 
@@ -489,7 +524,7 @@ ninguna de las dos condiciones basta por sí sola.
 
 Los documentos de avance públicos exigen además
 `ProjectUpdateAttachment.is_public=True`, avance `PUBLISHED` y archivo existente.
-La entrega anónima usa rutas dedicadas bajo `/transparency/updates/.../documents/...`
+La entrega anónima usa rutas dedicadas bajo `/avances/.../documentos/...`
 (streaming Django con cabeceras sanitizadas). No se hace público el bucket, no se
 reutilizan rutas autenticadas privadas y los fallos de elegibilidad responden
 `404` (no `403`).

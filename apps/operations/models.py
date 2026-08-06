@@ -1955,3 +1955,42 @@ class AuditLog(models.Model):
         POST: always rejects deletion and preserves the event.
         """
         raise AuditLogImmutableError(_('Los registros de auditoría no se pueden eliminar.'))
+
+
+class UserAccessProfile(models.Model):
+    """
+    Narrow security profile for institutional account lifecycle.
+
+    Temporary passwords are never stored here. Missing rows default safely to
+    must_change_password=False (deployment superusers are not blocked).
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='access_profile',
+    )
+    must_change_password = models.BooleanField(
+        default=False,
+        verbose_name=_('debe cambiar la contraseña'),
+    )
+    password_reset_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+        verbose_name=_('contraseña restablecida por'),
+    )
+    password_reset_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_('contraseña restablecida en'),
+    )
+
+    class Meta:
+        verbose_name = _('perfil de acceso institucional')
+        verbose_name_plural = _('perfiles de acceso institucional')
+
+    def __str__(self):
+        return f'access-profile:{self.user_id}'

@@ -78,6 +78,9 @@ class SigedonUserAdmin(DjangoUserAdmin):
     User admin with a single optional SIGEDON functional role, separate from
     technical groups. Functional roles are excluded from the groups widget so
     stock groups.set() cannot leave a user with multiple canonical roles.
+
+    Production governance: only Django superusers may access User administration.
+    Functional Administrador SIGEDON and staff non-superusers are denied.
     """
 
     form = SigedonUserChangeForm
@@ -122,6 +125,24 @@ class SigedonUserAdmin(DjangoUserAdmin):
         ),
     )
 
+    def _actor_is_superuser(self, request):
+        return bool(getattr(request.user, 'is_authenticated', False) and request.user.is_superuser)
+
+    def has_module_permission(self, request):
+        return self._actor_is_superuser(request)
+
+    def has_view_permission(self, request, obj=None):
+        return self._actor_is_superuser(request)
+
+    def has_add_permission(self, request):
+        return self._actor_is_superuser(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self._actor_is_superuser(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return self._actor_is_superuser(request)
+
 
 admin.site.unregister(User)
 admin.site.register(User, SigedonUserAdmin)
@@ -131,6 +152,8 @@ class SigedonGroupAdmin(GroupAdmin):
     """
     Protects canonical SIGEDON functional role groups as read-only in admin,
     including for superusers. Technical groups remain fully editable.
+
+    Production governance: only Django superusers may access Group administration.
     """
 
     form = SigedonGroupAdminForm
@@ -138,6 +161,18 @@ class SigedonGroupAdmin(GroupAdmin):
     search_fields = ('name',)
     ordering = ('name',)
     filter_horizontal = ('permissions',)
+
+    def _actor_is_superuser(self, request):
+        return bool(getattr(request.user, 'is_authenticated', False) and request.user.is_superuser)
+
+    def has_module_permission(self, request):
+        return self._actor_is_superuser(request)
+
+    def has_view_permission(self, request, obj=None):
+        return self._actor_is_superuser(request)
+
+    def has_add_permission(self, request):
+        return self._actor_is_superuser(request)
 
     @admin.display(description=_('Tipo'))
     def sigedon_group_type(self, obj):
@@ -164,7 +199,10 @@ class SigedonGroupAdmin(GroupAdmin):
         """
         PRE: request targets an optional Group admin object.
         POST: canonical groups are never changeable, including for superusers.
+              Non-superusers never receive change permission.
         """
+        if not self._actor_is_superuser(request):
+            return False
         if _is_canonical_sigedon_group(obj):
             return False
         return super().has_change_permission(request, obj)
@@ -173,7 +211,10 @@ class SigedonGroupAdmin(GroupAdmin):
         """
         PRE: request targets an optional Group admin object.
         POST: canonical groups are never deletable, including for superusers.
+              Non-superusers never receive delete permission.
         """
+        if not self._actor_is_superuser(request):
+            return False
         if _is_canonical_sigedon_group(obj):
             return False
         return super().has_delete_permission(request, obj)

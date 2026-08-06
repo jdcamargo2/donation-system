@@ -13,41 +13,56 @@ Su propósito es ofrecer una vista básica de transparencia sobre:
 * métricas agregadas;
 * datos JSON autorizados.
 
-La ruta principal es:
+La ruta principal es la raíz del sitio:
 
 ```text
-/transparency/
+/
 ```
 
 ## 2. Rutas públicas
 
+Rutas canónicas (español), montadas en la raíz del sitio:
+
 ```text
-/transparency/
-/transparency/projects/
-/transparency/projects/<id>/
-/transparency/updates/
-/transparency/updates/<id>/
-/transparency/updates/<update-id>/documents/<attachment-id>/download/
-/transparency/updates/<update-id>/documents/<attachment-id>/preview/
-/transparency/data/projects.json
-/transparency/data/metrics.json
+/
+/proyectos/
+/proyectos/<pk>/
+/avances/
+/avances/<pk>/
+/avances/<update_id>/documentos/<attachment_id>/descargar/
+/avances/<update_id>/documentos/<attachment_id>/vista-previa/
+/datos/proyectos.json
+/datos/metricas.json
 ```
 
 ### Descripción
 
-* `/transparency/`: página principal del portal.
-* `/transparency/projects/`: listado de proyectos publicados.
-* `/transparency/projects/<id>/`: detalle público de un proyecto.
-* `/transparency/updates/`: feed de avances publicados.
-* `/transparency/updates/<id>/`: detalle público de un avance publicado.
-* `/transparency/updates/<update-id>/documents/<attachment-id>/download/`:
+* `/`: página principal del portal.
+* `/proyectos/`: listado de proyectos publicados.
+* `/proyectos/<pk>/`: detalle público de un proyecto.
+* `/avances/`: feed de avances publicados.
+* `/avances/<pk>/`: detalle público de un avance publicado.
+* `/avances/<update_id>/documentos/<attachment_id>/descargar/`:
   descarga anónima de un adjunto de avance explícitamente público.
-* `/transparency/updates/<update-id>/documents/<attachment-id>/preview/`:
+* `/avances/<update_id>/documentos/<attachment_id>/vista-previa/`:
   vista previa anónima solo para tipos ya considerados seguros.
-* `/transparency/data/projects.json`: salida JSON autorizada de proyectos.
-* `/transparency/data/metrics.json`: salida JSON autorizada de métricas agregadas.
+* `/datos/proyectos.json`: salida JSON autorizada de proyectos.
+* `/datos/metricas.json`: salida JSON autorizada de métricas agregadas.
 
 Las rutas JSON no constituyen una API pública avanzada.
+
+### Redirecciones heredadas (`/transparency/**`)
+
+Las rutas antiguas bajo `/transparency/` (`/transparency/`,
+`/transparency/projects/`, `/transparency/projects/<id>/`,
+`/transparency/updates/`, `/transparency/updates/<id>/`,
+`/transparency/updates/<update-id>/documents/<attachment-id>/download/`,
+`/transparency/updates/<update-id>/documents/<attachment-id>/preview/`,
+`/transparency/data/projects.json`, `/transparency/data/metrics.json`)
+permanecen activas exclusivamente como **redirecciones permanentes `301`**
+hacia su equivalente canónico. Solo aceptan `GET`/`HEAD`; nunca ejecutan
+selectores públicos ni renderizan contenido propio. Únicamente el parámetro
+de consulta `page` se preserva en la redirección; el resto se descarta.
 
 ## 3. Proyectos publicados
 
@@ -125,7 +140,7 @@ el objeto de almacenamiento existe
 * Los adjuntos de remediación, documentos de proyecto, soportes de gasto,
   adjuntos de solicitud de gasto y documentos legales de institución **no**
   tienen ruta pública.
-* La entrega pública usa rutas dedicadas bajo `/transparency/.../documents/...`
+* La entrega pública usa rutas dedicadas bajo `/avances/.../documentos/...`
   con cabeceras sanitizadas (`Content-Disposition`, `Content-Type`,
   `X-Content-Type-Options: nosniff`). No se expone `/media/`, ni la ruta
   autenticada privada, ni un bucket público.

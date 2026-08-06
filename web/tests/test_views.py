@@ -199,7 +199,12 @@ class AuthenticationLayoutTests(TestCase):
         self.assertContains(response, 'login-card')
         self.assertContains(response, 'name="username"')
         self.assertContains(response, 'name="password"')
+        self.assertContains(response, 'Acceso institucional')
         self.assertContains(response, 'Iniciar sesión')
+        self.assertContains(response, 'Volver al portal público')
+        self.assertNotContains(response, 'password_reset')
+        self.assertNotContains(response, 'Registrarse')
+        self.assertNotContains(response, 'Crear cuenta')
         self.assertNotContains(response, 'class="sigedon-sidebar"')
         self.assertNotContains(response, 'class="ops-topbar"')
         self.assertNotContains(response, 'class="sigedon-main-wrapper"')
@@ -228,7 +233,7 @@ class AuthenticationLayoutTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'registration/auth_base.html')
-        self.assertContains(response, 'Iniciar sesión')
+        self.assertContains(response, 'Acceso institucional')
         self.assertNotContains(response, 'class="sigedon-sidebar"')
 
     def test_valid_credentials_redirect_to_dashboard(self):

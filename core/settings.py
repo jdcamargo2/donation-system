@@ -267,6 +267,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.operations.middleware.MustChangePasswordMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -428,7 +429,11 @@ MEDIA_ROOT = _PRIVATE_STORAGE.media_root
 
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'dashboard'
-LOGOUT_REDIRECT_URL = 'login'
+LOGOUT_REDIRECT_URL = 'public_portal:public_home'
+
+# Database-backed sessions are the production default so deactivation and
+# temporary-password reset can invalidate target sessions safely.
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 
 # ---------------------------------------------------------------------------
 # Runtime logging (stdout/stderr). No file handlers, no external SaaS.

@@ -519,24 +519,58 @@ inverso cuando corresponda.
 
 ## 7. Usuarios y roles
 
-### Crear un superusuario administrativo
+No existe autorregistro público. El alta de cuentas institucionales es un
+procedimiento administrativo explícito, no un formulario expuesto.
 
-```bash
-python manage.py createsuperuser
-```
+### Procedimiento de despliegue (bootstrap → alta institucional)
 
-Después deben crearse las cuentas operativas y asignarse los grupos correspondientes desde el panel de administración.
+1. Aplicar migraciones (`python manage.py migrate`).
+2. Si no existe ningún superusuario, crearlo mediante una shell de despliegue
+   (no expuesta por HTTP):
+
+   ```bash
+   python manage.py createsuperuser
+   ```
+
+3. Iniciar sesión en `/accounts/login/` con esa cuenta superusuario.
+4. Abrir `/panel/usuarios/` (solo visible/accesible para superusuarios; el
+   enlace «Gestión de usuarios» del panel se oculta a cualquier otro usuario).
+5. Crear las cuentas institucionales necesarias desde `/panel/usuarios/`,
+   asignando a cada una exactamente un rol funcional canónico. La creación
+   fija automáticamente `must_change_password=True` y una contraseña
+   temporal; nunca `is_staff`/`is_superuser`.
+6. Entregar las credenciales temporales a cada persona por un canal externo
+   seguro (nunca en el propio sistema, tickets ni logs).
+7. Cada usuario cambia su contraseña en el primer inicio de sesión
+   (`/accounts/password_change/`); hasta entonces,
+   `MustChangePasswordMiddleware` bloquea el acceso a `/panel/**` y a
+   `/admin/` y solo permite logout, estáticos y sondas de salud.
 
 ### Reglas
 
-* El superusuario debe reservarse para administración técnica.
+* El superusuario debe reservarse para administración técnica y para el
+  bootstrap inicial; `/admin/` queda reservado para recuperación técnica, no
+  para la gestión operativa diaria de usuarios institucionales.
 * No debe utilizarse como cuenta operativa diaria.
+* El rol funcional «Administrador SIGEDON» **no** concede autoridad de
+  identidad: no puede crear, editar, activar, desactivar ni restablecer
+  contraseñas de otras cuentas. Solo `request.user.is_superuser` puede
+  invocar esas operaciones (`/panel/usuarios/`).
 * Un usuario ordinario puede tener como máximo un rol funcional canónico.
 * Cada usuario debe contar únicamente con los permisos necesarios.
 * Los permisos técnicos generales `kobo.*` (distintos de los territoriales
   automáticos) deben asignarse por separado.
 * Las cuentas compartidas deben evitarse.
-* Las credenciales iniciales deben cambiarse de forma segura.
+* No existe alta de cuentas por autorregistro público en ninguna ruta.
+* Las rutas de restablecimiento de contraseña por correo
+  (`/accounts/password_reset/` y equivalentes) están **deshabilitadas**
+  (`404`) hasta que exista infraestructura SMTP revisada; el restablecimiento
+  institucional se realiza desde `/panel/usuarios/` (solo superusuario).
+* Desactivar una cuenta invalida de inmediato sus sesiones activas (backend
+  de sesiones en base de datos); restablecer su contraseña también invalida
+  sus sesiones, conservando la del actor cuando corresponde.
+* Las credenciales iniciales deben cambiarse de forma segura y se fuerza su
+  cambio en el primer inicio de sesión.
 
 Detalle de roles y admin: [Roles y permisos](ROLES_AND_PERMISSIONS.md).
 Runbook de sincronización: [Operaciones §3](OPERATIONS.md#3-sincronización-de-roles).

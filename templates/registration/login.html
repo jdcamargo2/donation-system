@@ -1,6 +1,6 @@
 {% extends "registration/auth_base.html" %}
 
-{% block title %}Iniciar sesión - SIGEDON{% endblock %}
+{% block title %}Acceso institucional - SIGEDON{% endblock %}
 
 {% block content %}
 <div class="login-screen ops-login-shell">
@@ -9,7 +9,7 @@
             <div class="login-brand">
                 <span class="login-badge sigedon-brand-mark">S</span>
                 <div>
-                    <div class="ops-kicker">Panel operativo interno</div>
+                    <div class="ops-kicker">Acceso institucional</div>
                     <h1>SIGEDON</h1>
                 </div>
             </div>
@@ -26,8 +26,8 @@
             <div class="card-body">
                 <div class="login-card-header">
                     <span class="login-card-kicker">Ingreso seguro</span>
-                    <h2 class="login-title">Iniciar sesión</h2>
-                    <p class="login-subtitle">Acceda con sus credenciales para ingresar al panel privado.</p>
+                    <h2 class="login-title">Acceso institucional</h2>
+                    <p class="login-subtitle">Ingrese con las credenciales asignadas por la administración de SIGEDON.</p>
                 </div>
                 <form method="post">
                     {% csrf_token %}
@@ -48,7 +48,9 @@
                     </div>
                     <button type="submit" class="btn btn-primary login-submit w-100">Iniciar sesión</button>
                 </form>
-                <p class="login-note">Si no puede acceder, contacte al administrador SIGEDON de su institución.</p>
+                <p class="login-note">
+                    <a href="{% url 'public_portal:public_home' %}">Volver al portal público</a>
+                </p>
             </div>
         </div>
     </div>

@@ -1369,3 +1369,137 @@ class SigedonAdminUserCreationForm(SigedonUserRoleFormMixin, AdminUserCreationFo
         )
         self._configure_role_fields()
         self.fields['functional_role'].initial = None
+
+
+class InstitutionalUserCreateForm(forms.Form):
+    """
+    Superuser panel: create a normal institutional user only.
+    Never exposes is_superuser, is_staff, groups or permissions fields.
+    """
+
+    username = forms.CharField(label=_('Usuario'), max_length=150)
+    first_name = forms.CharField(label=_('Nombre'), max_length=150, required=False)
+    last_name = forms.CharField(label=_('Apellido'), max_length=150, required=False)
+    email = forms.EmailField(label=_('Correo'), required=False)
+    functional_role = forms.ModelChoiceField(
+        label=_('Rol funcional'),
+        queryset=Group.objects.none(),
+        required=True,
+        empty_label=SELECT_PLACEHOLDER,
+    )
+    temporary_password = forms.CharField(
+        label=_('Contraseña temporal'),
+        widget=forms.PasswordInput(render_value=False),
+        strip=False,
+    )
+    temporary_password_confirmation = forms.CharField(
+        label=_('Confirmación de contraseña temporal'),
+        widget=forms.PasswordInput(render_value=False),
+        strip=False,
+    )
+    is_active = forms.BooleanField(
+        label=_('Cuenta activa'),
+        required=False,
+        initial=True,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['functional_role'].queryset = functional_role_groups()
+
+    def clean_username(self):
+        username = self.cleaned_data['username'].strip()
+        UserModel = get_user_model()
+        if UserModel.objects.filter(username=username).exists():
+            raise ValidationError(_('Ya existe un usuario con este nombre.'))
+        return username
+
+    def clean(self):
+        cleaned = super().clean()
+        password = cleaned.get('temporary_password')
+        confirmation = cleaned.get('temporary_password_confirmation')
+        if password or confirmation:
+            if password != confirmation:
+                self.add_error(
+                    'temporary_password_confirmation',
+                    _('Las contraseñas no coinciden.'),
+                )
+            elif password:
+                from django.contrib.auth.password_validation import validate_password
+
+                user = get_user_model()(
+                    username=cleaned.get('username') or '',
+                    email=cleaned.get('email') or '',
+                    first_name=cleaned.get('first_name') or '',
+                    last_name=cleaned.get('last_name') or '',
+                )
+                try:
+                    validate_password(password, user=user)
+                except ValidationError as error:
+                    self.add_error('temporary_password', error)
+        return cleaned
+
+
+class InstitutionalUserUpdateForm(forms.Form):
+    """Edit non-secret profile fields for a normal institutional user."""
+
+    first_name = forms.CharField(label=_('Nombre'), max_length=150, required=False)
+    last_name = forms.CharField(label=_('Apellido'), max_length=150, required=False)
+    email = forms.EmailField(label=_('Correo'), required=False)
+    functional_role = forms.ModelChoiceField(
+        label=_('Rol funcional'),
+        queryset=Group.objects.none(),
+        required=True,
+        empty_label=SELECT_PLACEHOLDER,
+    )
+    is_active = forms.BooleanField(label=_('Cuenta activa'), required=False)
+
+    def __init__(self, *args, **kwargs):
+        self.instance = kwargs.pop('instance', None)
+        super().__init__(*args, **kwargs)
+        self.fields['functional_role'].queryset = functional_role_groups()
+        if self.instance is not None and not self.is_bound:
+            self.fields['first_name'].initial = self.instance.first_name
+            self.fields['last_name'].initial = self.instance.last_name
+            self.fields['email'].initial = self.instance.email
+            self.fields['is_active'].initial = self.instance.is_active
+            roles = list(get_user_functional_roles(self.instance))
+            if len(roles) == 1:
+                self.fields['functional_role'].initial = roles[0]
+
+
+class InstitutionalUserPasswordResetForm(forms.Form):
+    """Superuser temporary password reset; never shows current password."""
+
+    temporary_password = forms.CharField(
+        label=_('Nueva contraseña temporal'),
+        widget=forms.PasswordInput(render_value=False),
+        strip=False,
+    )
+    temporary_password_confirmation = forms.CharField(
+        label=_('Confirmación'),
+        widget=forms.PasswordInput(render_value=False),
+        strip=False,
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned = super().clean()
+        password = cleaned.get('temporary_password')
+        confirmation = cleaned.get('temporary_password_confirmation')
+        if password != confirmation:
+            self.add_error(
+                'temporary_password_confirmation',
+                _('Las contraseñas no coinciden.'),
+            )
+        elif password:
+            from django.contrib.auth.password_validation import validate_password
+
+            try:
+                validate_password(password, user=self.user)
+            except ValidationError as error:
+                self.add_error('temporary_password', error)
+        return cleaned

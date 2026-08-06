@@ -26,7 +26,7 @@ urlpatterns = [
         views.retry_submission_import,
         name="retry_submission_import",
     ),
-    path("webhook/", views.webhook_submission, name="webhook_submission"),
+    # External webhook is mounted at /integrations/kobo/webhook/ in core.urls.
     path(
         "discovered-assets/",
         views.discovered_asset_list,
