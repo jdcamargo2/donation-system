@@ -4,7 +4,6 @@
 {% block title %}Proyecto - SIGEDON{% endblock %}
 
 {% block content %}
-{# DEUDA TÉCNICA: DetailMetricsMixin aún entrega metrics, pero esta vista usa project_financial_summary. Retirar el contexto en una intervención posterior. #}
 <div class="ops-page-header ops-page-header-row ops-project-detail-header">
     <div class="ops-project-detail-identity">
         <div class="ops-kicker">Proyecto operativo</div>
@@ -12,85 +11,129 @@
         <div class="ops-project-detail-primary-meta">
             <span class="ops-project-detail-code">{{ object.code }}</span>
             <span class="badge ops-status-badge">{{ object.get_status_display }}</span>
+            {% if object.is_public %}
+                <span class="badge text-bg-success" aria-label="Visibilidad del proyecto: Público">Público</span>
+            {% else %}
+                <span class="badge text-bg-secondary" aria-label="Visibilidad del proyecto: Privado">Privado</span>
+            {% endif %}
         </div>
-        {% if object.location or object.responsible_unit %}
+        {% if object.location %}
         <div class="ops-project-detail-secondary-meta">
-            {% if object.location %}<span><strong>Ubicación:</strong> {{ object.location }}</span>{% endif %}
-            {% if object.responsible_unit %}<span><strong>Unidad responsable:</strong> {{ object.responsible_unit }}</span>{% endif %}
+            <span><strong>Ubicación:</strong> {{ object.location }}</span>
         </div>
+        {% endif %}
+        {% if show_finish_guidance %}
+        <p class="small text-muted mb-0 mt-2">Para cerrar el proyecto, finaliza o anula sus asignaciones y resuelve las solicitudes de gasto abiertas.</p>
         {% endif %}
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
-        {% if perms.operations.change_project and object.status != 'closed' and object.status != 'annulled' %}
+        {% if can_create_expense_request %}
+            <a class="btn btn-primary" href="{% url 'expense_request_create_for_project' object.pk %}">Solicitar gasto</a>
+        {% elif show_expense_request_allocation_guidance %}
+            <p class="small text-muted mb-0 align-self-center">No hay asignaciones disponibles para registrar una solicitud de gasto.{% if show_expense_request_admin_allocation_guidance %} Verifica que el proyecto tenga una asignación activa y disponible.{% endif %}</p>
+        {% endif %}
+        {% if perms.operations.change_project and object.status != 'closed' %}
             <a class="btn btn-primary" href="{% url update_url_name object.pk %}">Editar</a>
         {% endif %}
-        {% if perms.operations.change_project and status_transitions %}
-        <div class="dropdown">
-            <button class="btn btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Cambiar estado del proyecto">
-                Estado
-            </button>
-            <div class="dropdown-menu dropdown-menu-end ops-project-detail-action-menu">
-                {% for transition in status_transitions %}
-                <form method="post" action="{% url transition_url_name object.pk transition.value %}">
-                    {% csrf_token %}
-                    <button class="dropdown-item" type="submit">Cambiar a {{ transition.label }}</button>
-                </form>
-                {% endfor %}
-            </div>
-        </div>
-        {% endif %}
-        {% if perms.operations.change_project and can_finish or perms.operations.change_project and can_annul %}
+        {% if can_finish or can_publish or can_unpublish %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Más acciones del proyecto">
                 Más
             </button>
             <div class="dropdown-menu dropdown-menu-end ops-project-detail-action-menu">
-                {% if can_finish %}
-                    <a
-                        class="dropdown-item"
-                        href="{% url 'project_finish' object.pk %}"
-                        data-confirm-action
-                        data-confirm-form="project-finish-form"
-                        data-confirm-title="¿Terminar este proyecto?"
-                        data-confirm-text="Después de terminarlo no podrá editarse ni reactivarse."
-                        data-confirm-confirm-label="Sí, terminar"
-                        data-confirm-variant="warning"
-                    >Terminar proyecto</a>
-                    <form id="project-finish-form" method="post" action="{% url 'project_finish' object.pk %}">
-                        {% csrf_token %}
-                    </form>
+                {% if can_publish %}
+                <a
+                    class="dropdown-item"
+                    href="{% url 'project_publish' object.pk %}"
+                    data-confirm-action
+                    data-confirm-form="project-publish-form"
+                    data-confirm-title="¿Publicar este proyecto en el portal público?"
+                    data-confirm-text="El proyecto quedará visible en el portal público mientras permanezca activo y público."
+                    data-confirm-confirm-label="Sí, publicar"
+                    data-confirm-variant="primary"
+                >Publicar en portal</a>
                 {% endif %}
-                {% if can_annul %}<a class="dropdown-item text-danger" href="{% url 'project_annul' object.pk %}">Anular proyecto</a>{% endif %}
+                {% if can_unpublish %}
+                <a
+                    class="dropdown-item"
+                    href="{% url 'project_unpublish' object.pk %}"
+                    data-confirm-action
+                    data-confirm-form="project-unpublish-form"
+                    data-confirm-title="¿Retirar este proyecto del portal público?"
+                    data-confirm-text="El proyecto dejará de listarse en el portal público."
+                    data-confirm-confirm-label="Sí, retirar"
+                    data-confirm-variant="warning"
+                >Retirar del portal</a>
+                {% endif %}
+                {% if can_finish %}
+                <a
+                    class="dropdown-item"
+                    href="{% url 'project_finish' object.pk %}"
+                    data-confirm-action
+                    data-confirm-form="project-finish-form"
+                    data-confirm-title="¿Terminar este proyecto?"
+                    data-confirm-text="Después de terminarlo no podrá editarse ni reactivarse."
+                    data-confirm-confirm-label="Sí, terminar"
+                    data-confirm-variant="warning"
+                >Terminar proyecto</a>
+                {% endif %}
+                {% if can_publish %}
+                <form id="project-publish-form" method="post" action="{% url 'project_publish' object.pk %}">
+                    {% csrf_token %}
+                </form>
+                {% endif %}
+                {% if can_unpublish %}
+                <form id="project-unpublish-form" method="post" action="{% url 'project_unpublish' object.pk %}">
+                    {% csrf_token %}
+                </form>
+                {% endif %}
+                {% if can_finish %}
+                <form id="project-finish-form" method="post" action="{% url 'project_finish' object.pk %}">
+                    {% csrf_token %}
+                </form>
+                {% endif %}
             </div>
         </div>
         {% endif %}
     </div>
 </div>
 
+{% if can_view_project_financials %}
 <section class="ops-project-financial-summary mb-4" aria-labelledby="project-financial-summary-title">
     <div class="ops-project-financial-heading">
         <h2 id="project-financial-summary-title" class="h5 mb-0">Resumen financiero</h2>
         <div class="ops-project-financial-secondary">
             <span><strong>Presupuesto estimado:</strong> <span class="ops-money text-nowrap">{{ project_financial_summary.estimated_budget|money_es }} USD</span></span>
-            <span><strong>Ejecución financiera:</strong> {{ execution_percentage|floatformat:1 }}%</span>
+            <span><strong>Ejecución:</strong>
+                {% if project_financial_summary.execution_percentage is None %}
+                    —
+                {% else %}
+                    {{ project_financial_summary.execution_percentage|percentage_es }} %
+                {% endif %}
+            </span>
         </div>
     </div>
     <div class="ops-project-financial-metrics">
         <div class="ops-project-financial-metric">
-            <div class="ops-metric-label">Financiado</div>
+            <div class="ops-metric-label">Fondos asignados</div>
             <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.funded_amount|money_es }} USD</div>
         </div>
         <div class="ops-project-financial-metric">
-            <div class="ops-metric-label">Ejecutado</div>
+            <div class="ops-metric-label">Gastos registrados</div>
             <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.executed_amount|money_es }} USD</div>
         </div>
+        <div class="ops-project-financial-metric">
+            <div class="ops-metric-label">Reservado</div>
+            <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.reserved_amount|money_es }} USD</div>
+        </div>
         <div class="ops-project-financial-metric ops-project-financial-metric-available">
-            <div class="ops-metric-label">Disponible</div>
+            <div class="ops-metric-label">Disponible operativo</div>
             <div class="ops-project-financial-value text-nowrap">{{ project_financial_summary.available_amount|money_es }} USD</div>
         </div>
     </div>
 </section>
+{% endif %}
 
 {% include "web/includes/project_milestones.html" %}
 
@@ -108,7 +151,7 @@
         <section class="card border-0 h-100 ops-detail-card ops-project-general-info" aria-labelledby="project-general-info-title">
             <div class="card-body">
                 <h2 id="project-general-info-title" class="h5 mb-3">Información general</h2>
-                {% if object.start_date or object.end_date or object.location or object.responsible_unit %}
+                {% if object.start_date or object.end_date or object.location %}
                 <dl class="ops-project-general-grid">
                     {% if object.start_date or object.end_date %}
                     <div>
@@ -120,12 +163,6 @@
                     <div>
                         <dt>Ubicación</dt>
                         <dd>{{ object.location }}</dd>
-                    </div>
-                    {% endif %}
-                    {% if object.responsible_unit %}
-                    <div>
-                        <dt>Unidad responsable</dt>
-                        <dd>{{ object.responsible_unit }}</dd>
                     </div>
                     {% endif %}
                 </dl>
@@ -162,11 +199,14 @@
                 <h2 id="project-updates-title" class="h5 mb-0">Avances del proyecto</h2>
             </div>
             <div class="ops-project-updates-header-actions">
-                {% if perms.operations.add_projectupdate %}
+                {% if can_register_project_update %}
                     <a class="btn btn-sm btn-primary" href="{% url 'project_update_create_for_project' object.pk %}">Registrar avance</a>
                 {% endif %}
             </div>
         </div>
+        {% if not project_allows_operational_mutation %}
+        <p class="small text-muted mb-3">Este proyecto está cerrado. Los avances y documentos se conservan como registro histórico.</p>
+        {% endif %}
         <div id="project-update-list" class="list-group ops-project-updates-list" aria-labelledby="project-updates-title" tabindex="0">
             {% include "web/includes/project_update_items.html" with project_updates=recent_project_updates %}
         </div>
@@ -177,7 +217,7 @@
 <section class="mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="h5 mb-0">Documentos del proyecto</h2>
-        {% if perms.operations.add_projectdocument %}
+        {% if can_add_project_document %}
             <a class="btn btn-sm btn-primary" href="{% url 'project_document_create' object.pk %}">Agregar documento</a>
         {% endif %}
     </div>
@@ -189,22 +229,21 @@
                     <div class="small text-muted">{{ document.get_document_type_display }} · {{ document.created_at }}</div>
                     {% if document.description %}<div>{{ document.description }}</div>{% endif %}
                 </div>
-                <div class="d-flex gap-2">
-                    {% if perms.operations.view_projectdocument %}
-                        <a class="btn btn-sm btn-outline-primary" href="{% url 'project_document_download' document.pk %}">Descargar</a>
-                    {% endif %}
-                    {% if perms.operations.delete_projectdocument %}
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                    {% include "web/includes/protected_file_item.html" with file_actions=document.file_actions %}
+                    {% if document.file_actions.can_delete and document.file_actions.delete_url %}
                         <a
                             class="btn btn-sm btn-outline-danger"
-                            href="{% url 'project_document_delete' document.pk %}"
+                            href="{{ document.file_actions.delete_url }}"
                             data-confirm-action
                             data-confirm-form="project-document-delete-form-{{ document.pk }}"
                             data-confirm-title="¿Eliminar este documento?"
                             data-confirm-text="El archivo dejará de estar disponible en el proyecto."
                             data-confirm-confirm-label="Sí, eliminar"
                             data-confirm-variant="danger"
+                            aria-label="Eliminar {{ document.title }}"
                         >Eliminar</a>
-                        <form id="project-document-delete-form-{{ document.pk }}" method="post" action="{% url 'project_document_delete' document.pk %}">
+                        <form id="project-document-delete-form-{{ document.pk }}" method="post" action="{{ document.file_actions.delete_url }}">
                             {% csrf_token %}
                         </form>
                     {% endif %}
@@ -215,6 +254,28 @@
         {% endfor %}
     </div>
 </section>
+
+{% if perms.operations.view_supportingdocument %}
+<section class="mt-4" aria-labelledby="project-supporting-documents-title">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 id="project-supporting-documents-title" class="h5 mb-0">Documentos de soporte</h2>
+    </div>
+    <p class="small text-muted mb-3">Archivos de soporte vinculados al proyecto. No se muestran montos ni datos financieros del gasto.</p>
+    <div class="list-group">
+        {% for document in project_supporting_documents %}
+            <div class="list-group-item d-flex justify-content-between align-items-center gap-3">
+                <div>
+                    <strong>{{ document.title }}</strong>
+                    <div class="small text-muted">Cargado el {{ document.uploaded_at }}</div>
+                </div>
+                {% include "web/includes/protected_file_item.html" with file_actions=document.file_actions %}
+            </div>
+        {% empty %}
+            <div class="list-group-item text-muted">Este proyecto todavía no tiene documentos de soporte.</div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}

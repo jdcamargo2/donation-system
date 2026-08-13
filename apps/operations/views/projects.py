@@ -1,8 +1,6 @@
-from decimal import Decimal
-
 from django.conf import settings
-
-from django.core.exceptions import PermissionDenied
+from django.contrib import messages
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 
 from django.db.models import Prefetch
@@ -38,34 +36,39 @@ from ..models import (
     Project,
     ProjectDocument,
     ProjectUpdate,
+    SupportingDocument,
+)
+
+from ..selectors import (
+    expense_request_allocation_choices,
+    project_has_open_financial_work,
+    user_can_create_global_expense_request,
+    user_can_view_project_financials,
 )
 
 from ..services import (
     get_project_financial_summary,
     OperationalEntityFinalizedError,
-    annul_project,
     ensure_operational_entity_is_editable,
+    ensure_project_allows_operational_mutation,
     finish_project,
     log_create,
     log_delete,
-    PROJECT_STATUS_TRANSITIONS,
-    transition_project_status,
+    project_allows_operational_mutation,
+    publish_project,
+    unpublish_project,
 )
 
 from .common import (
     AuditMixin,
-    DeleteAuditMixin,
-    DetailMetricsMixin,
     FilteredListContextMixin,
     OperationsPermissionRequiredMixin,
     PaginatedListMixin,
     RouteContextMixin,
-    StateTransitionContextMixin,
-    StateTransitionView,
     TerminalActionView,
-    _protected_file_response,
     apply_list_filters,
 )
+from ..file_access import build_protected_file_actions
 from .project_milestone_context import (
     build_project_milestone_context,
     project_milestone_prefetch,
@@ -100,15 +103,38 @@ class ProjectFinishView(TerminalActionView):
     requires_reason = False
 
 
-class ProjectAnnulView(TerminalActionView):
-    permission_required = 'operations.change_project'
-    model = Project
-    action_service = staticmethod(annul_project)
-    detail_url_name = 'project_detail'
-    action_title = _('Anular proyecto')
-    consequence = _('Solo puede anularse si no mantiene asignaciones activas. Esta acción es irreversible.')
-    submit_label = _('Confirmar anulación')
-    success_message = _('Proyecto anulado.')
+class ProjectPublishView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.manage_project_publication'
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: the user holds manage_project_publication and pk identifies a Project.
+        POST: publishes via domain service or reports the domain error without mutating.
+        """
+        try:
+            project = publish_project(project_id=kwargs['pk'], actor=request.user)
+        except ValidationError as error:
+            messages.error(request, ' '.join(error.messages))
+            return HttpResponseRedirect(reverse('project_detail', args=[kwargs['pk']]))
+        messages.success(request, _('Proyecto publicado en el portal público.'))
+        return HttpResponseRedirect(reverse('project_detail', args=[project.pk]))
+
+
+class ProjectUnpublishView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.manage_project_publication'
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: the user holds manage_project_publication and pk identifies a Project.
+        POST: unpublishes via domain service or reports the domain error without mutating.
+        """
+        try:
+            project = unpublish_project(project_id=kwargs['pk'], actor=request.user)
+        except ValidationError as error:
+            messages.error(request, ' '.join(error.messages))
+            return HttpResponseRedirect(reverse('project_detail', args=[kwargs['pk']]))
+        messages.success(request, _('Proyecto retirado del portal público.'))
+        return HttpResponseRedirect(reverse('project_detail', args=[project.pk]))
 
 
 class ProjectListView(
@@ -133,14 +159,12 @@ class ProjectListView(
             text_fields=('code', 'name'), date_field='start_date',
         ).order_by('code', 'pk')
 
-class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
+class ProjectDetailView(OperationsPermissionRequiredMixin, RouteContextMixin, DetailView):
     permission_required = 'operations.view_project'
     model = Project
     template_name = 'web/project_detail.html'
     route_prefix = 'project'
     page_title = _('Proyecto')
-    transition_map = PROJECT_STATUS_TRANSITIONS
-    transition_url_name = 'project_status_transition'
 
     def get_queryset(self):
         # PRE: la vista consulta un proyecto autorizado por clave primaria.
@@ -161,16 +185,65 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
     def get_context_data(self, **kwargs):
         """
         PRE: self.object was loaded through get_queryset with detail relations prefetched.
-        POST: returns one coherent detail context with derived milestone progress and UI permissions.
+        POST: returns one coherent detail context with derived milestone progress and UI
+              permissions. Operational financial metrics are included only when the user
+              has both view_fundallocation and view_expense (same rule as DASH-FIN3).
         """
         context = super().get_context_data(**kwargs)
-        allowed_targets = PROJECT_STATUS_TRANSITIONS.get(self.object.status, ())
-        context['can_finish'] = Project.Status.CLOSED in allowed_targets
-        context['can_annul'] = (
-            Project.Status.ANNULLED in allowed_targets
-            and not self.object.allocations.exclude(status=FundAllocation.Status.ANNULLED).exists()
+        user = self.request.user
+        can_change_project = user.has_perm('operations.change_project')
+        project_is_active = self.object.status == Project.Status.ACTIVE
+        has_open_financial_work = (
+            project_has_open_financial_work(self.object) if project_is_active else False
         )
-        visible_updates = get_visible_project_updates(self.object, self.request.user)
+        context['can_finish'] = (
+            can_change_project
+            and project_is_active
+            and not has_open_financial_work
+        )
+        context['show_finish_guidance'] = (
+            can_change_project
+            and project_is_active
+            and has_open_financial_work
+        )
+        may_create_expense_request = (
+            user.has_perm('operations.add_expenserequest')
+            and self.object.status == Project.Status.ACTIVE
+        )
+        eligible_allocations = (
+            expense_request_allocation_choices(project=self.object)
+            if may_create_expense_request
+            else None
+        )
+        context['can_create_expense_request'] = (
+            may_create_expense_request and eligible_allocations.exists()
+        )
+        context['show_expense_request_allocation_guidance'] = (
+            may_create_expense_request and not context['can_create_expense_request']
+        )
+        context['show_expense_request_admin_allocation_guidance'] = (
+            context['show_expense_request_allocation_guidance']
+            and user_can_create_global_expense_request(user)
+        )
+        context['can_manage_publication'] = user.has_perm(
+            'operations.manage_project_publication'
+        )
+        context['can_publish'] = (
+            context['can_manage_publication']
+            and self.object.status == Project.Status.ACTIVE
+            and not self.object.is_public
+        )
+        context['can_unpublish'] = (
+            context['can_manage_publication']
+            and self.object.status == Project.Status.ACTIVE
+            and self.object.is_public
+        )
+        mutations_allowed = project_allows_operational_mutation(self.object)
+        context['project_allows_operational_mutation'] = mutations_allowed
+        context['can_register_project_update'] = (
+            mutations_allowed and user.has_perm('operations.add_projectupdate')
+        )
+        visible_updates = get_visible_project_updates(self.object, user)
         update_paginator = Paginator(
             visible_updates,
             RECENT_PROJECT_UPDATES_LIMIT,
@@ -180,18 +253,62 @@ class ProjectDetailView(StateTransitionContextMixin, OperationsPermissionRequire
         context['project_update_page'] = update_page
         context['project_update_count'] = update_paginator.count
         context['has_more_project_updates'] = update_page.has_next()
-        context['project_documents'] = self.object.detail_documents
-        context.update(
-            build_project_milestone_context(self.object, self.request.user)
+        can_view_project_document = user.has_perm('operations.view_projectdocument')
+        can_add_project_document = (
+            mutations_allowed and user.has_perm('operations.add_projectdocument')
         )
-        summary = get_project_financial_summary(self.object)
-        context['project_financial_summary'] = summary
-        context['execution_percentage'] = (
-            (summary['executed_amount'] / summary['funded_amount']) * Decimal('100')
-            if summary['funded_amount'] > 0 else Decimal('0')
+        can_delete_project_document = (
+            mutations_allowed and user.has_perm('operations.delete_projectdocument')
         )
+        context['can_add_project_document'] = can_add_project_document
+        project_documents = list(self.object.detail_documents)
+        for document in project_documents:
+            document.file_actions = build_protected_file_actions(
+                file_field=document.file,
+                file_label=document.title,
+                uploaded_at=document.created_at,
+                can_download=can_view_project_document,
+                preview_url_name='project_document_preview',
+                download_url_name='project_document_download',
+                url_args=(self.object.pk, document.pk),
+                delete_url=reverse('project_document_delete', args=[document.pk])
+                if can_delete_project_document
+                else None,
+                can_delete=can_delete_project_document,
+            )
+        context['project_documents'] = project_documents
+        # Narrow project-level support listing: title + upload date only (no financial fields).
+        can_view_support = user.has_perm('operations.view_supportingdocument')
+        if can_view_support:
+            support_docs = list(
+                SupportingDocument.objects.select_related('expense__allocation')
+                .filter(expense__allocation__project_id=self.object.pk)
+                .order_by('-uploaded_at', '-pk')
+            )
+            for document in support_docs:
+                document.file_actions = build_protected_file_actions(
+                    file_field=document.document,
+                    file_label=document.title,
+                    uploaded_at=document.uploaded_at,
+                    can_download=True,
+                    preview_url_name='project_supporting_document_preview',
+                    download_url_name='project_supporting_document_download',
+                    url_args=(self.object.pk, document.pk),
+                )
+            context['project_supporting_documents'] = support_docs
+        else:
+            context['project_supporting_documents'] = ()
         context.update(
-            get_project_detail_integration_context(self.object, self.request.user)
+            build_project_milestone_context(self.object, user)
+        )
+        can_view_financials = user_can_view_project_financials(user)
+        context['can_view_project_financials'] = can_view_financials
+        if can_view_financials:
+            context['project_financial_summary'] = get_project_financial_summary(
+                self.object
+            )
+        context.update(
+            get_project_detail_integration_context(self.object, user)
         )
         return context
 
@@ -228,6 +345,9 @@ class ProjectUpdateChunkView(OperationsPermissionRequiredMixin, View):
                 'project_update_page': page,
                 'project_updates': page.object_list,
                 'is_update_chunk': True,
+                'project_allows_operational_mutation': project_allows_operational_mutation(
+                    project
+                ),
             },
         )
 
@@ -266,22 +386,6 @@ class ProjectUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCont
         return super().dispatch(request, *args, **kwargs)
 
 
-class ProjectDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, RouteContextMixin, DeleteView):
-    permission_required = 'operations.delete_project'
-    model = Project
-    template_name = 'web/object_confirm_delete.html'
-    success_url = reverse_lazy('project_list')
-    route_prefix = 'project'
-    page_title = _('Eliminar proyecto')
-    audit_summary = _('Proyecto eliminado.')
-
-
-class ProjectStatusTransitionView(StateTransitionView):
-    permission_required = 'operations.change_project'
-    transition_service = staticmethod(transition_project_status)
-    detail_url_name = 'project_detail'
-
-
 class ProjectDocumentCreateView(OperationsPermissionRequiredMixin, CreateView):
     permission_required = 'operations.add_projectdocument'
     model = ProjectDocument
@@ -289,12 +393,23 @@ class ProjectDocumentCreateView(OperationsPermissionRequiredMixin, CreateView):
     template_name = 'web/project_document_form.html'
 
     def dispatch(self, request, *args, **kwargs):
+        # PRE: route targets a project and permission handling remains authoritative.
+        # POST: CLOSED projects return 403 before any form binding or storage write.
         self.project = get_object_or_404(Project, pk=kwargs['project_pk'])
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            try:
+                ensure_project_allows_operational_mutation(self.project)
+            except OperationalEntityFinalizedError as exc:
+                raise PermissionDenied(exc.messages[0]) from exc
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
         # PRE: el formulario contiene metadatos y archivo válidos para self.project.
         # POST: guarda el documento, atribuye al usuario y registra auditoría.
+        try:
+            ensure_project_allows_operational_mutation(self.project)
+        except OperationalEntityFinalizedError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
         form.instance.project = self.project
         form.instance.uploaded_by = self.request.user
         response = super().form_valid(form)
@@ -310,23 +425,24 @@ class ProjectDocumentCreateView(OperationsPermissionRequiredMixin, CreateView):
         return reverse('project_detail', args=[self.project.pk])
 
 
-class ProjectDocumentDownloadView(OperationsPermissionRequiredMixin, DetailView):
-    permission_required = 'operations.view_projectdocument'
-    model = ProjectDocument
-
-    def get(self, request, *args, **kwargs):
-        # PRE: el usuario tiene permiso de lectura y pk identifica un documento.
-        # POST: descarga el archivo sin revelar su ruta de almacenamiento.
-        return _protected_file_response(
-            self.get_object().file,
-            missing_message=_('El documento de proyecto no está disponible.'),
-        )
-
-
 class ProjectDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView):
     permission_required = 'operations.delete_projectdocument'
     model = ProjectDocument
     template_name = 'web/object_confirm_delete.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        # PRE: permission handling remains authoritative for the document pk.
+        # POST: CLOSED parent projects return 403 without delete or storage removal.
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            document = get_object_or_404(
+                ProjectDocument.objects.select_related('project'),
+                pk=kwargs['pk'],
+            )
+            try:
+                ensure_project_allows_operational_mutation(document.project)
+            except OperationalEntityFinalizedError as exc:
+                raise PermissionDenied(exc.messages[0]) from exc
+        return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         """
@@ -342,6 +458,10 @@ class ProjectDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView):
     def form_valid(self, form):
         # PRE: el usuario tiene permiso y self.object es el documento confirmado.
         # POST: audita y elimina el registro; el proyecto permanece intacto.
+        try:
+            ensure_project_allows_operational_mutation(self.object.project)
+        except OperationalEntityFinalizedError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
         project_id = self.object.project_id
         log_delete(self.request.user, self.object, _('Documento de proyecto eliminado.'))
         self.object.delete()

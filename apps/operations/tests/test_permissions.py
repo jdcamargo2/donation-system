@@ -125,14 +125,12 @@ class OperationsPermissionTests(TestCase):
                     'delete_project', 'delete_institution',
                 ),
                 (
-                    reverse('project_delete', args=[self.project.pk]),
                     reverse('institution_delete', args=[self.institution.pk]),
                 ),
             ),
         )
         action_urls = (
             reverse('project_update', args=[self.project.pk]),
-            reverse('project_delete', args=[self.project.pk]),
             reverse('institution_update', args=[self.institution.pk]),
             reverse('institution_delete', args=[self.institution.pk]),
         )
@@ -157,6 +155,8 @@ class OperationsPermissionTests(TestCase):
                     reverse('institution_detail', args=[self.institution.pk]),
                     combined_html,
                 )
+                self.assertNotIn(f'/projects/{self.project.pk}/delete/', combined_html)
+                self.assertNotIn('>Eliminar</a>', responses[0].content.decode())
                 for action_url in action_urls:
                     assertion = self.assertIn if action_url in expected_urls else self.assertNotIn
                     assertion(action_url, combined_html)
@@ -164,41 +164,40 @@ class OperationsPermissionTests(TestCase):
                     self.assertIn('data-bs-boundary="viewport"', combined_html)
                     self.assertIn('dropdown-menu dropdown-menu-end', combined_html)
 
-    def test_project_and_institution_delete_links_keep_post_confirmation_and_csrf(self):
+    def test_institution_delete_links_keep_post_confirmation_and_csrf(self):
         user = create_user_with_permissions(
             'compact-delete-confirmation',
-            'view_project', 'view_institution', 'delete_project', 'delete_institution',
+            'view_institution', 'delete_institution',
         )
         self.client.force_login(user)
 
-        cases = (
-            (
-                reverse('project_list'),
-                reverse('project_delete', args=[self.project.pk]),
-                self.project,
-            ),
-            (
-                reverse('institution_list'),
-                reverse('institution_delete', args=[self.institution.pk]),
-                self.institution,
-            ),
-        )
-        for list_url, delete_url, instance in cases:
-            with self.subTest(delete_url=delete_url):
-                list_response = self.client.get(list_url)
-                confirmation_response = self.client.get(delete_url)
+        list_url = reverse('institution_list')
+        delete_url = reverse('institution_delete', args=[self.institution.pk])
+        list_response = self.client.get(list_url)
+        confirmation_response = self.client.get(delete_url)
 
-                self.assertContains(list_response, delete_url)
-                self.assertContains(confirmation_response, '<form method="post">')
-                self.assertContains(confirmation_response, 'name="csrfmiddlewaretoken"')
-                self.assertTrue(type(instance).objects.filter(pk=instance.pk).exists())
+        self.assertContains(list_response, delete_url)
+        self.assertContains(confirmation_response, '<form method="post">')
+        self.assertContains(confirmation_response, 'name="csrfmiddlewaretoken"')
+        self.assertTrue(type(self.institution).objects.filter(pk=self.institution.pk).exists())
 
         csrf_client = Client(enforce_csrf_checks=True)
         csrf_client.force_login(user)
-        for _, delete_url, instance in cases:
-            with self.subTest(csrf_delete_url=delete_url):
-                self.assertEqual(csrf_client.post(delete_url).status_code, 403)
-                self.assertTrue(type(instance).objects.filter(pk=instance.pk).exists())
+        self.assertEqual(csrf_client.post(delete_url).status_code, 403)
+        self.assertTrue(type(self.institution).objects.filter(pk=self.institution.pk).exists())
+
+    def test_project_list_never_exposes_delete_even_with_builtin_permission(self):
+        user = create_user_with_permissions(
+            'project-builtin-delete-perm',
+            'view_project', 'delete_project', 'change_project',
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse('project_list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse('project_update', args=[self.project.pk]))
+        self.assertNotContains(response, f'/projects/{self.project.pk}/delete/')
+        self.assertNotContains(response, '>Eliminar</a>')
 
     def test_donation_secondary_actions_follow_permissions(self):
         edit_url = reverse('donation_update', args=[self.donation.pk])
@@ -418,7 +417,7 @@ class OperationsPermissionTests(TestCase):
         self.assertEqual(edit_response.status_code, 200)
         self.assertEqual(publish_response.status_code, 403)
         self.project_update.refresh_from_db()
-        self.assertEqual(self.project_update.status, 'draft')
+        self.assertEqual(self.project_update.status, 'unpublished')
 
     def test_publish_projectupdate_permission_can_publish_without_editing(self):
         self.client.force_login(create_user_with_permissions(
@@ -440,7 +439,7 @@ class OperationsPermissionTests(TestCase):
         )
         self.assertEqual(edit_response.status_code, 403)
         self.assertEqual(get_publish_response.status_code, 405)
-        self.assertEqual(self.project_update.status, 'draft')
+        self.assertEqual(self.project_update.status, 'unpublished')
 
         publish_response = self.client.post(publish_url)
         published_list_response = self.client.get(reverse('project_update_list'))
@@ -458,7 +457,7 @@ class OperationsPermissionTests(TestCase):
         self.assertNotContains(list_response, f'action="{publish_url}"')
         self.assertEqual(publish_response.status_code, 403)
         self.project_update.refresh_from_db()
-        self.assertEqual(self.project_update.status, 'draft')
+        self.assertEqual(self.project_update.status, 'unpublished')
 
     def test_project_update_list_omits_arbitrary_progress_representation(self):
         self.client.force_login(
@@ -469,10 +468,8 @@ class OperationsPermissionTests(TestCase):
 
         self.assertNotContains(response, '<th>Progreso</th>')
         self.assertNotContains(response, 'role="progressbar"')
-        self.assertNotContains(
-            response,
-            f'>{self.project_update.progress_percentage}%<',
-        )
+        self.assertNotContains(response, 'Porcentaje de progreso')
+        self.assertNotContains(response, 'progress_percentage')
 
     def test_project_update_secondary_actions_follow_permissions(self):
         detail_url = reverse('project_update_detail', args=[self.project_update.pk])
@@ -510,7 +507,7 @@ class OperationsPermissionTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.project_update.refresh_from_db()
-        self.assertEqual(self.project_update.status, 'draft')
+        self.assertEqual(self.project_update.status, 'unpublished')
 
     def test_user_with_view_auditlog_permission_can_access_audit_log_list(self):
         self.client.force_login(create_user_with_permissions('view-auditlog', 'view_auditlog'))

@@ -1,4 +1,3 @@
-import ast
 from dataclasses import dataclass
 import inspect
 from pathlib import Path
@@ -10,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.db import close_old_connections, connection, connections
 from django.test import TestCase, TransactionTestCase, override_settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from apps.integrations.kobo.form_registry import KoboFormType
@@ -176,22 +175,16 @@ class KoboImportContractTests(TestCase):
             with self.subTest(form_type=form_type):
                 self.assertEqual(get_import_handler(form_type).form_type, form_type)
 
-    def test_legacy_project_import_route_is_explicitly_disabled(self):
+    def test_legacy_project_import_route_is_removed(self):
         views_path = Path(__file__).parents[1] / "views.py"
         views_source = views_path.read_text()
-        views_tree = ast.parse(views_source)
-        expected_delegates = {"project_pending_submission_import": "raise Http404"}
-        view_functions = {
-            node.name: ast.get_source_segment(views_source, node)
-            for node in views_tree.body
-            if isinstance(node, ast.FunctionDef) and node.name in expected_delegates
-        }
-        self.assertEqual(set(view_functions), set(expected_delegates))
-        for function_name, expected_delegate in expected_delegates.items():
-            with self.subTest(callable=function_name):
-                source = view_functions[function_name]
-                self.assertIn(expected_delegate, source)
-                self.assertNotIn("Status.IMPORTED", source)
+        self.assertNotIn("def project_pending_submission_import", views_source)
+        self.assertNotIn("project_pending_submission_import", views_source)
+        with self.assertRaises(NoReverseMatch):
+            reverse(
+                "kobo:project_pending_submission_import",
+                args=(self.project.pk, 1),
+            )
 
     def test_ficha_11_handler_rejects_incomplete_normalized_assessment(self):
         submission = self.create_submission(
@@ -346,18 +339,20 @@ class KoboImportContractTests(TestCase):
         )
 
     @override_settings(KOBO_ENABLED=True)
-    def test_legacy_project_import_ui_is_disabled(self):
+    def test_legacy_project_import_ui_is_removed(self):
         submission = self.create_submission(
             KoboFormType.FICHA_11,
             status=KoboSubmission.Status.READY_FOR_REVIEW,
         )
         self.client.force_login(self.importer)
 
-        response = self.client.post(
+        with self.assertRaises(NoReverseMatch):
             reverse(
                 "kobo:project_pending_submission_import",
                 args=(self.project.pk, submission.pk),
             )
+        response = self.client.post(
+            f"/integrations/kobo/projects/{self.project.pk}/pending-submissions/{submission.pk}/import/"
         )
         submission.refresh_from_db()
 

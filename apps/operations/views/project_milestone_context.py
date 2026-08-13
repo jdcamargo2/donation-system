@@ -48,10 +48,7 @@ def build_project_milestone_context(project, user):
             can_view_project
             and 'operations.reorder_projectmilestone' in granted_permissions
         ),
-        'milestone_mutations_allowed': project.status not in (
-            Project.Status.CLOSED,
-            Project.Status.ANNULLED,
-        ),
+        'milestone_mutations_allowed': project.status != Project.Status.CLOSED,
     }
 
 

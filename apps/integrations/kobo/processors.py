@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from datetime import tzinfo
 
@@ -17,6 +18,7 @@ from apps.integrations.kobo.models import (
 )
 from apps.integrations.kobo.normalizers import normalize_submission
 
+logger = logging.getLogger("sigedon.kobo.processing")
 
 PROCESSABLE_STATUSES = (
     KoboSubmission.Status.RECEIVED,
@@ -116,6 +118,11 @@ def process_submission(
             default_timezone=default_timezone,
         )
     except KoboPayloadError:
+        logger.info(
+            "Kobo normalization validation failed submission_id=%s stage=%s",
+            submission.pk,
+            "normalization",
+        )
         return _failure_outcome(
             submission,
             previous_status=previous_status,
@@ -125,6 +132,11 @@ def process_submission(
             stage="normalization",
         )
     except Exception:
+        logger.exception(
+            "Kobo normalization failed submission_id=%s stage=%s",
+            submission.pk,
+            "normalize",
+        )
         return _failure_outcome(
             submission,
             previous_status=previous_status,
@@ -186,6 +198,11 @@ def process_submission(
                 message="Submission normalized and ready for review.",
             )
     except Exception:
+        logger.exception(
+            "Kobo normalization persist failed submission_id=%s stage=%s",
+            submission.pk,
+            "persist",
+        )
         return _failure_outcome(
             submission,
             previous_status=previous_status,

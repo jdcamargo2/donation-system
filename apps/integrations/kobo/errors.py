@@ -56,3 +56,7 @@ class KoboProcessingError(KoboIntegrationError):
 
 class KoboAttachmentError(KoboIntegrationError):
     """Un archivo adjunto no pudo validarse o procesarse."""
+
+
+class KoboAttachmentTooLargeError(KoboAttachmentError):
+    """El cuerpo del adjunto supera el límite configurado (no reintentable)."""

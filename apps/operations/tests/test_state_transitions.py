@@ -2,10 +2,8 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib import admin
-from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
 from django.test import RequestFactory, TestCase
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 
 from apps.operations.admin import DonationAdmin, FundAllocationAdmin, ProjectAdmin
 from apps.operations.forms import DonationForm, FundAllocationForm, ProjectForm
@@ -15,9 +13,8 @@ from apps.operations.services import (
     FUND_ALLOCATION_STATUS_TRANSITIONS,
     PROJECT_STATUS_TRANSITIONS,
     InvalidStateTransitionError,
+    finish_fund_allocation,
     transition_donation_status,
-    transition_fund_allocation_status,
-    transition_project_status,
     validate_state_transition,
     finish_project,
 )
@@ -54,17 +51,6 @@ class StateTransitionServiceTests(TestCase):
             status=status,
         )
 
-    def create_allocation(self, status):
-        number = self.next_counter()
-        return FundAllocation.objects.create(
-            donation=create_donation(code=f'DON-STATE-ALLOC-{number}'),
-            project=create_project(code=f'PRJ-STATE-ALLOC-{number}'),
-            budget_category='health_psychosocial',
-            amount=Decimal('20.00'),
-            allocation_date=TEST_DATE,
-            status=status,
-        )
-
     def assert_transition_matrix(self, *, transitions, statuses, factory, service):
         """
         PRE: transitions is complete and factory/service create and transition one model.
@@ -94,20 +80,30 @@ class StateTransitionServiceTests(TestCase):
             service=transition_donation_status,
         )
 
-    def test_project_transition_matrix(self):
-        self.assert_transition_matrix(
-            transitions=PROJECT_STATUS_TRANSITIONS,
-            statuses=Project.Status.values,
-            factory=self.create_project,
-            service=transition_project_status,
+    def test_project_lifecycle_allows_only_active_to_closed(self):
+        self.assertEqual(
+            PROJECT_STATUS_TRANSITIONS,
+            {
+                Project.Status.ACTIVE: frozenset({Project.Status.CLOSED}),
+                Project.Status.CLOSED: frozenset(),
+            },
         )
+        project = self.create_project(Project.Status.ACTIVE)
+        finished = finish_project(project.pk, actor=self.actor)
+        self.assertEqual(finished.status, Project.Status.CLOSED)
+        with self.assertRaises(InvalidStateTransitionError):
+            finish_project(project.pk, actor=self.actor)
 
-    def test_allocation_transition_matrix(self):
-        self.assert_transition_matrix(
-            transitions=FUND_ALLOCATION_STATUS_TRANSITIONS,
-            statuses=FundAllocation.Status.values,
-            factory=self.create_allocation,
-            service=transition_fund_allocation_status,
+    def test_allocation_lifecycle_map_is_terminal_only(self):
+        self.assertEqual(
+            FUND_ALLOCATION_STATUS_TRANSITIONS,
+            {
+                FundAllocation.Status.ACTIVE: frozenset(
+                    {FundAllocation.Status.FINISHED, FundAllocation.Status.ANNULLED}
+                ),
+                FundAllocation.Status.FINISHED: frozenset(),
+                FundAllocation.Status.ANNULLED: frozenset(),
+            },
         )
 
     def test_pure_validator_rejects_same_and_unknown_states(self):
@@ -137,13 +133,11 @@ class StateTransitionServiceTests(TestCase):
         donation.refresh_from_db()
         self.assertEqual(donation.status, Donation.Status.REGISTERED)
 
-    def test_transition_requires_authenticated_actor(self):
-        project = self.create_project(Project.Status.PLANNED)
+    def test_finish_project_requires_authenticated_actor(self):
+        project = self.create_project(Project.Status.ACTIVE)
 
         with self.assertRaises(InvalidStateTransitionError):
-            transition_project_status(
-                project.pk, actor=None, target_status=Project.Status.ACTIVE
-            )
+            finish_project(project.pk, actor=None)
 
     def test_project_with_incoherent_dates_cannot_close(self):
         project = self.create_project(Project.Status.ACTIVE)
@@ -156,26 +150,6 @@ class StateTransitionServiceTests(TestCase):
 
         project.refresh_from_db()
         self.assertEqual(project.status, Project.Status.ACTIVE)
-
-    def test_invalid_allocation_cannot_activate(self):
-        allocation = self.create_allocation(FundAllocation.Status.ACTIVE)
-        FundAllocation.objects.create(
-            donation=allocation.donation,
-            project=allocation.project,
-            budget_category='food_security',
-            amount=Decimal('90.00'),
-            allocation_date=TEST_DATE,
-        )
-
-        with self.assertRaises(ValidationError):
-            transition_fund_allocation_status(
-                allocation.pk,
-                actor=self.actor,
-                target_status=FundAllocation.Status.ACTIVE,
-            )
-
-        allocation.refresh_from_db()
-        self.assertEqual(allocation.status, FundAllocation.Status.ACTIVE)
 
     def test_service_uses_persisted_state_and_second_attempt_does_not_duplicate_audit(self):
         donation = self.create_donation(Donation.Status.REGISTERED)
@@ -209,6 +183,7 @@ class StateTransitionBoundaryTests(TestCase):
 
     def test_ordinary_forms_exclude_and_ignore_status(self):
         self.assertNotIn('status', ProjectForm().fields)
+        self.assertNotIn('is_public', ProjectForm().fields)
         self.assertNotIn('status', DonationForm().fields)
         self.assertNotIn('status', FundAllocationForm().fields)
 
@@ -218,58 +193,98 @@ class StateTransitionBoundaryTests(TestCase):
                 'name': self.project.name,
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': '',
                 'estimated_budget': '1000.00',
                 'start_date': '',
                 'end_date': '',
-                'status': Project.Status.ACTIVE,
+                'status': Project.Status.CLOSED,
+                'is_public': True,
             },
         )
         self.assertTrue(form.is_valid(), form.errors)
-        self.assertEqual(form.save().status, Project.Status.PLANNED)
+        saved = form.save()
+        self.assertEqual(saved.status, Project.Status.ACTIVE)
+        self.assertFalse(saved.is_public)
 
-    def test_transition_route_is_post_only_and_requires_permission(self):
-        url = reverse(
-            'project_status_transition', args=(self.project.pk, Project.Status.ACTIVE)
+    def test_project_defaults_to_active_and_not_public(self):
+        project = Project.objects.create(
+            code='PRJ-DEFAULTS',
+            name='Proyecto por defecto',
+            estimated_budget=Decimal('100.00'),
         )
+        self.assertEqual(project.status, Project.Status.ACTIVE)
+        self.assertFalse(project.is_public)
+
         self.client.force_login(self.user)
-        self.assertEqual(self.client.get(url).status_code, 405)
+        response = self.client.post(
+            reverse('project_create'),
+            data={
+                'name': 'Proyecto web',
+                'description': '',
+                'objective': '',
+                'location': '',
+                'estimated_budget': '100.00',
+                'start_date': '',
+                'end_date': '',
+                'status': Project.Status.CLOSED,
+                'is_public': True,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        created = Project.objects.get(name='Proyecto web')
+        self.assertEqual(created.status, Project.Status.ACTIVE)
+        self.assertFalse(created.is_public)
 
-        limited = get_user_model().objects.create_user(username='limited')
-        self.client.force_login(limited)
-        self.assertEqual(self.client.post(url).status_code, 403)
-        self.project.refresh_from_db()
-        self.assertEqual(self.project.status, Project.Status.PLANNED)
+    def test_removed_project_transition_and_annul_routes_do_not_exist(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse('project_status_transition', args=(self.project.pk, Project.Status.ACTIVE))
+        with self.assertRaises(NoReverseMatch):
+            reverse('project_annul', args=(self.project.pk,))
 
-    def test_detail_shows_only_allowed_transition_posts(self):
+    def test_removed_allocation_generic_status_transition_route_does_not_exist(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse(
+                'allocation_status_transition',
+                args=(self.allocation.pk, FundAllocation.Status.FINISHED),
+            )
+        reverse('allocation_finish', args=(self.allocation.pk,))
+        reverse('allocation_annul', args=(self.allocation.pk,))
+
+    def test_detail_shows_finish_without_estado_or_annul(self):
         self.client.force_login(self.user)
 
+        blocked = self.client.get(reverse('project_detail', args=(self.project.pk,)))
+        self.assertNotContains(blocked, 'Terminar proyecto')
+        self.assertContains(
+            blocked,
+            'Para cerrar el proyecto, finaliza o anula sus asignaciones',
+        )
+        self.assertNotContains(blocked, 'aria-label="Cambiar estado del proyecto"')
+        self.assertNotContains(blocked, 'Anular proyecto')
+
+        finish_fund_allocation(self.allocation.pk, actor=self.user)
         response = self.client.get(reverse('project_detail', args=(self.project.pk,)))
 
-        self.assertContains(
-            response,
-            reverse('project_status_transition', args=(self.project.pk, Project.Status.ACTIVE)),
-        )
-        self.assertNotContains(response, reverse('project_annul', args=(self.project.pk,)))
-        unallocated_project = create_project(code='PRJ-NAMED-ANNUL')
-        unallocated_response = self.client.get(
-            reverse('project_detail', args=(unallocated_project.pk,))
-        )
-        self.assertContains(
-            unallocated_response,
-            reverse('project_annul', args=(unallocated_project.pk,)),
-        )
-        self.assertNotContains(
-            response,
-            reverse('project_status_transition', args=(self.project.pk, Project.Status.SUSPENDED)),
-        )
+        self.assertContains(response, reverse('project_finish', args=(self.project.pk,)))
+        self.assertContains(response, 'Terminar proyecto')
+        self.assertContains(response, 'Privado')
+        self.assertNotContains(response, 'aria-label="Cambiar estado del proyecto"')
+        self.assertNotContains(response, 'Anular proyecto')
+        self.assertContains(response, self.project.get_status_display())
+
+        finish_project(self.project.pk, actor=self.user)
+        closed_response = self.client.get(reverse('project_detail', args=(self.project.pk,)))
+        self.assertNotContains(closed_response, 'Terminar proyecto')
+        self.assertNotContains(closed_response, 'Publicar en portal')
+        self.assertNotContains(closed_response, 'Retirar del portal')
+        self.assertContains(closed_response, 'Cerrado')
+        self.assertContains(closed_response, 'Privado')
 
     def test_admin_status_is_readonly_and_save_cannot_bypass(self):
         request = RequestFactory().post('/admin/')
         request.user = self.user
         cases = (
-            (ProjectAdmin(Project, admin.site), self.project, Project.Status.ACTIVE),
+            (ProjectAdmin(Project, admin.site), self.project, Project.Status.CLOSED),
             (DonationAdmin(Donation, admin.site), self.donation, Donation.Status.ANNULLED),
             (FundAllocationAdmin(FundAllocation, admin.site), self.allocation, FundAllocation.Status.ACTIVE),
         )
@@ -281,3 +296,4 @@ class StateTransitionBoundaryTests(TestCase):
                 model_admin.save_model(request, instance, form=None, change=True)
                 instance.refresh_from_db()
                 self.assertEqual(instance.status, original_status)
+        self.assertIn('is_public', ProjectAdmin(Project, admin.site).get_readonly_fields(request, self.project))

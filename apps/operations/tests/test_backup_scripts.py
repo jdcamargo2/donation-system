@@ -255,6 +255,20 @@ class BackupScriptsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 4)
         self.assertIn('SIGEDON_MAINTENANCE_CONFIRMED', result.stderr)
 
+    def test_backup_rejects_relative_media_root(self):
+        env = self.env.copy()
+        env['SIGEDON_MEDIA_ROOT'] = 'relative/media'
+        result = _run(['bash', str(BACKUP_SCRIPT)], env=env)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('absoluta', result.stderr)
+
+    def test_backup_rejects_filesystem_root_media(self):
+        env = self.env.copy()
+        env['SIGEDON_MEDIA_ROOT'] = '/'
+        result = _run(['bash', str(BACKUP_SCRIPT)], env=env)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('raiz', result.stderr)
+
     def test_backup_creates_missing_backup_root_and_continues(self):
         alt = self.tmp / 'missing_root_case'
         alt.mkdir()
@@ -335,7 +349,11 @@ exit 99
 
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(missing_root.is_dir())
-        leftovers = list(missing_root.glob('.sigedon-backup.*'))
+        leftovers = [
+            path
+            for path in missing_root.glob('.sigedon-backup.*')
+            if path.name != '.sigedon-ops.lock'
+        ]
         self.assertEqual(leftovers, [])
 
     def test_backup_creates_manifest_and_artifacts(self):
@@ -377,7 +395,11 @@ exit 99
         second = _run(['bash', str(BACKUP_SCRIPT)], env=self.env)
         self.assertNotEqual(second.returncode, 0)
         backup_root = Path(self.env['SIGEDON_BACKUP_ROOT'])
-        leftovers = list(backup_root.glob('.sigedon-backup.*'))
+        leftovers = [
+            path
+            for path in backup_root.glob('.sigedon-backup.*')
+            if path.name != '.sigedon-ops.lock'
+        ]
         self.assertEqual(leftovers, [])
         self.assertTrue(first_dir.is_dir())
 
@@ -494,6 +516,204 @@ exec /usr/bin/date "$@"
         result = _run(['bash', str(RESTORE_SCRIPT), str(backup_dir)], env=env)
         self.assertEqual(result.returncode, 4)
         self.assertIn('prefijo seguro', result.stderr)
+
+
+VALIDATE_MEDIA_ARCHIVE = SCRIPTS_DIR / 'validate_media_archive.py'
+
+
+def _write_tar_with_members(archive_path: Path, members: list[tuple[str, bytes | None, str]]):
+    """
+    PRE: members is a list of (name, content_or_None, kind) where kind is
+         file|dir|symlink|hardlink|fifo.
+    POST: writes a disposable gzipped tar at archive_path.
+    """
+    import tarfile
+    import io
+
+    with tarfile.open(archive_path, mode='w:gz') as archive:
+        for name, content, kind in members:
+            info = tarfile.TarInfo(name=name)
+            if kind == 'dir':
+                info.type = tarfile.DIRTYPE
+                info.mode = 0o755
+                archive.addfile(info)
+            elif kind == 'file':
+                payload = content or b''
+                info.type = tarfile.REGTYPE
+                info.size = len(payload)
+                info.mode = 0o644
+                archive.addfile(info, io.BytesIO(payload))
+            elif kind == 'symlink':
+                info.type = tarfile.SYMTYPE
+                info.linkname = content.decode() if isinstance(content, bytes) else (content or 'target')
+                archive.addfile(info)
+            elif kind == 'hardlink':
+                info.type = tarfile.LNKTYPE
+                info.linkname = content.decode() if isinstance(content, bytes) else (content or 'a.txt')
+                archive.addfile(info)
+            elif kind == 'fifo':
+                info.type = tarfile.FIFOTYPE
+                archive.addfile(info)
+            elif kind == 'chr':
+                info.type = tarfile.CHRTYPE
+                info.devmajor = 1
+                info.devminor = 3
+                archive.addfile(info)
+            else:
+                raise AssertionError(f'unknown kind {kind}')
+
+
+class MediaArchiveValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix='sigedon-tar-validate-'))
+        self.restore_root = self.tmp / 'restore_root'
+        self.restore_root.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _validate(self, archive: Path):
+        return _run(
+            ['python3', str(VALIDATE_MEDIA_ARCHIVE), str(archive), str(self.restore_root)],
+            env=os.environ.copy(),
+        )
+
+    def test_normal_relative_file_passes(self):
+        archive = self.tmp / 'ok.tar.gz'
+        _write_tar_with_members(archive, [('docs/a.txt', b'hello', 'file')])
+        result = self._validate(archive)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_nested_relative_file_passes(self):
+        archive = self.tmp / 'nested.tar.gz'
+        _write_tar_with_members(
+            archive,
+            [
+                ('docs', None, 'dir'),
+                ('docs/nested/b.txt', b'x', 'file'),
+            ],
+        )
+        result = self._validate(archive)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_dotdot_escape_rejected(self):
+        archive = self.tmp / 'escape.tar.gz'
+        _write_tar_with_members(archive, [('../escape.txt', b'x', 'file')])
+        result = self._validate(archive)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unsafe archive member', result.stderr)
+
+    def test_nested_dotdot_escape_rejected(self):
+        archive = self.tmp / 'nested_escape.tar.gz'
+        _write_tar_with_members(archive, [('safe/../../escape.txt', b'x', 'file')])
+        result = self._validate(archive)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_absolute_member_rejected(self):
+        archive = self.tmp / 'abs.tar.gz'
+        _write_tar_with_members(archive, [('/etc/passwd', b'x', 'file')])
+        result = self._validate(archive)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_symlink_member_rejected(self):
+        archive = self.tmp / 'sym.tar.gz'
+        _write_tar_with_members(archive, [('link', b'/tmp/x', 'symlink')])
+        result = self._validate(archive)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('symlink', result.stderr)
+
+    def test_hardlink_member_rejected(self):
+        archive = self.tmp / 'hard.tar.gz'
+        _write_tar_with_members(
+            archive,
+            [
+                ('a.txt', b'x', 'file'),
+                ('b.txt', b'a.txt', 'hardlink'),
+            ],
+        )
+        result = self._validate(archive)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('hard-link', result.stderr)
+
+    def test_device_and_fifo_rejected(self):
+        for kind, label in (('fifo', 'fifo'), ('chr', 'device')):
+            with self.subTest(kind=kind):
+                archive = self.tmp / f'{kind}.tar.gz'
+                _write_tar_with_members(archive, [(f'{kind}.node', None, kind)])
+                result = self._validate(archive)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(label, result.stderr)
+
+    def test_failed_validation_leaves_restore_root_unchanged(self):
+        marker = self.restore_root / 'marker.txt'
+        marker.write_text('keep', encoding='utf-8')
+        before = sorted(p.name for p in self.restore_root.iterdir())
+        archive = self.tmp / 'bad.tar.gz'
+        _write_tar_with_members(archive, [('../escape.txt', b'x', 'file')])
+        result = self._validate(archive)
+        self.assertNotEqual(result.returncode, 0)
+        after = sorted(p.name for p in self.restore_root.iterdir())
+        self.assertEqual(before, after)
+        self.assertEqual(marker.read_text(encoding='utf-8'), 'keep')
+
+    def test_restore_extracts_safe_archive_without_owner_flags(self):
+        backup_dir = _make_valid_backup_dir(self.tmp / 'restore_ok')
+        dest = self.tmp / 'restore_ok_media'
+        bin_dir = self.tmp / 'restore_ok_bin'
+        bin_dir.mkdir()
+        _build_mock_bin(bin_dir)
+        env = _base_backup_env(self.tmp / 'restore_ok_env')
+        env['PATH'] = f"{bin_dir}:{os.environ.get('PATH', '')}"
+        env.update(
+            {
+                'SIGEDON_RESTORE_DB': 'test_restore_isolated',
+                'SIGEDON_RESTORE_MEDIA_ROOT': str(dest),
+                'SIGEDON_RESTORE_CONFIRM': 'YES',
+                'POSTGRES_DB': 'source_db_sigedon',
+            }
+        )
+        result = _run(['bash', str(RESTORE_SCRIPT), str(backup_dir)], env=env)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertTrue((dest / 'a.txt').is_file())
+        self.assertEqual((dest / 'a.txt').read_text(encoding='utf-8'), 'x')
+        # Source backup unchanged.
+        self.assertTrue((backup_dir / 'media.tar.gz').is_file())
+
+    def test_restore_rejects_traversal_archive_before_extract(self):
+        backup_dir = _make_valid_backup_dir(self.tmp / 'restore_trav')
+        media = backup_dir / 'media.tar.gz'
+        _write_tar_with_members(media, [('../escape.txt', b'pwn', 'file')])
+        # Refresh checksums so verify_backup accepts the malicious archive.
+        dump = backup_dir / 'database.dump'
+        dump_sha = subprocess.check_output(['sha256sum', str(dump)], text=True).split()[0]
+        media_sha = subprocess.check_output(['sha256sum', str(media)], text=True).split()[0]
+        manifest = json.loads((backup_dir / 'manifest.json').read_text(encoding='utf-8'))
+        manifest['database']['sha256'] = dump_sha
+        manifest['media']['sha256'] = media_sha
+        manifest['media']['size_bytes'] = media.stat().st_size
+        (backup_dir / 'manifest.json').write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + '\n',
+            encoding='utf-8',
+        )
+        dest = self.tmp / 'restore_trav_media'
+        bin_dir = self.tmp / 'restore_trav_bin'
+        bin_dir.mkdir()
+        _build_mock_bin(bin_dir)
+        env = _base_backup_env(self.tmp / 'restore_trav_env')
+        env['PATH'] = f"{bin_dir}:{os.environ.get('PATH', '')}"
+        env.update(
+            {
+                'SIGEDON_RESTORE_DB': 'test_restore_isolated',
+                'SIGEDON_RESTORE_MEDIA_ROOT': str(dest),
+                'SIGEDON_RESTORE_CONFIRM': 'YES',
+                'POSTGRES_DB': 'source_db_sigedon',
+            }
+        )
+        result = _run(['bash', str(RESTORE_SCRIPT), str(backup_dir)], env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('inseguros', result.stderr.lower() + result.stdout.lower())
+        if dest.exists():
+            self.assertFalse(any(dest.rglob('escape.txt')))
 
 
 if __name__ == '__main__':

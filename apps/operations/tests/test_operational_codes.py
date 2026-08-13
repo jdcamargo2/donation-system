@@ -17,7 +17,7 @@ from apps.operations.models import (
     Project,
     reserve_operational_code,
 )
-from apps.operations.services import create_expense, create_fund_allocation
+from apps.operations.services import create_expense_legacy as create_expense, create_fund_allocation
 from apps.operations.tests.helpers import TEST_DATE, create_donation, create_institution, create_project
 
 
@@ -88,8 +88,9 @@ class OperationalCodeTests(TestCase):
         project.refresh_from_db()
         self.assertEqual(project.code, original_code)
 
-        for form_class in (ProjectForm, DonationForm, FundAllocationForm, ExpenseForm):
+        for form_class in (ProjectForm, DonationForm, FundAllocationForm):
             self.assertNotIn('code', form_class().fields)
+        self.assertNotIn('code', ExpenseForm.base_fields)
 
     def test_admin_exposes_every_code_as_readonly(self):
         for admin_class, model in (
@@ -130,14 +131,15 @@ class OperationalCodeTests(TestCase):
         project = Project.objects.create(name='Proyecto posterior al rollback')
         self.assertEqual(project.code, f'PRJ-{before:06d}')
 
-    def test_post_commit_deletion_does_not_reuse_a_project_code(self):
-        first = Project.objects.create(name='Proyecto eliminado después de confirmar')
+    def test_consecutive_project_codes_are_monotonic_and_unique(self):
+        first = Project.objects.create(name='Proyecto primero')
         first_number = int(first.code.removeprefix('PRJ-'))
-        first.delete()
 
-        second = Project.objects.create(name='Proyecto posterior a eliminación')
+        second = Project.objects.create(name='Proyecto posterior consecutivo')
 
+        self.assertNotEqual(first.code, second.code)
         self.assertEqual(second.code, f'PRJ-{first_number + 1:06d}')
+        self.assertTrue(Project.objects.filter(pk=first.pk).exists())
 
     def test_six_digit_padding_is_not_a_code_limit(self):
         sequence = OperationalCodeSequence.objects.get(namespace='project')

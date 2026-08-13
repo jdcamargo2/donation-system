@@ -2,9 +2,18 @@ from decimal import Decimal
 
 from django.test import SimpleTestCase, TestCase
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+
 from apps.operations.forms import DonationForm, ExpenseForm, FundAllocationForm, ProjectForm
-from apps.operations.models import Donation, Expense, FundAllocation, Project
-from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_institution, create_project
+from apps.operations.models import Donation, Expense, FundAllocation, Project, SupportingDocument
+from apps.operations.tests.helpers import (
+    TEST_DATE,
+    create_allocation,
+    create_donation,
+    create_expense,
+    create_institution,
+    create_project,
+)
 from apps.operations.templatetags.operations_format import money_es
 
 
@@ -43,6 +52,12 @@ class LocalizedMoneyFormTests(TestCase):
         project = create_project()
         donation = create_donation(donor=donor)
         allocation = create_allocation(donation=donation, project=project)
+        expense = create_expense(allocation=allocation, amount=Decimal('10.00'))
+        SupportingDocument.objects.create(
+            expense=expense,
+            title='Soporte',
+            document=SimpleUploadedFile('soporte.pdf', b'%PDF soporte'),
+        )
         initial_counts = {
             FundAllocation: FundAllocation.objects.count(),
             Donation: Donation.objects.count(),
@@ -73,18 +88,20 @@ class LocalizedMoneyFormTests(TestCase):
                 'received_date': '',
                 'support_reference': '',
             }),
-            ExpenseForm(data={
-                'allocation': allocation.pk,
-                'expense_date': TEST_DATE,
-                'category': 'food',
-                'amount': 'not-a-number',
-                'reason': 'Monto inválido',
-                'provider_or_recipient': 'Proveedor',
-                'payment_method': 'bank_transfer',
-                'description': '',
-                'observations': '',
-                'status': Expense.Status.REGISTERED,
-            }),
+            ExpenseForm(
+                instance=expense,
+                data={
+                    'allocation': allocation.pk,
+                    'expense_date': TEST_DATE,
+                    'category': 'food',
+                    'amount': 'not-a-number',
+                    'reason': 'Monto inválido',
+                    'provider_or_recipient': 'Proveedor',
+                    'payment_method': 'bank_transfer',
+                    'description': '',
+                    'observations': '',
+                },
+            ),
         ]
         for form in invalid_forms:
             with self.subTest(form=type(form).__name__):
@@ -103,7 +120,6 @@ class LocalizedMoneyFormTests(TestCase):
             'name': project.name,
             'description': '',
             'objective': '',
-            'responsible_unit': '',
             'location': '',
             'estimated_budget': '10.000.000,00',
             'start_date': '',

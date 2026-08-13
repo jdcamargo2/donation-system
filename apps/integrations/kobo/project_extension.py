@@ -2,10 +2,7 @@ from django.conf import settings
 from django.urls import reverse
 
 from apps.integrations.kobo.models import KoboAsset, KoboSubmission, KoboTerritorialIdentity
-from apps.integrations.kobo.services import (
-    get_project_imported_submissions,
-    get_project_pending_submissions,
-)
+from apps.integrations.kobo.services import get_project_imported_submissions
 
 
 def get_project_detail_context(project, user):
@@ -19,9 +16,6 @@ def get_project_detail_context(project, user):
         "kobo_microproject_submissions": (),
         "kobo_prioritization_submissions": (),
         "kobo_submissions": (),
-        "kobo_pending_submissions": (),
-        "kobo_pending_submission_count": 0,
-        "can_import_kobo_submissions": False,
     }
     if not settings.KOBO_ENABLED:
         return empty_context
@@ -36,15 +30,11 @@ def get_project_detail_context(project, user):
                 }
             )
         return empty_context
-    pending_submissions = get_project_pending_submissions(project)
     context = {
         "show_kobo_section": True,
         "kobo_territorial_submissions": get_project_imported_submissions(project, form_role=KoboAsset.FormRole.TERRITORIAL_PROFILE),
         "kobo_microproject_submissions": get_project_imported_submissions(project, form_role=KoboAsset.FormRole.PRIORITIZED_MICROPROJECT),
         "kobo_prioritization_submissions": get_project_imported_submissions(project, form_role=KoboAsset.FormRole.PRIORITIZATION_MATRIX),
-        "kobo_pending_submissions": pending_submissions,
-        "kobo_pending_submission_count": pending_submissions.count(),
-        "can_import_kobo_submissions": user.has_perm("operations.change_project"),
     }
     context["kobo_submissions"] = context["kobo_territorial_submissions"]
     if not user.has_perm("kobo.view_territorial_administration"):

@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}SIGEDON{% endblock %}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{% static 'vendor/bootstrap/5.3.3/css/bootstrap.min.css' %}" rel="stylesheet">
+    <link href="{% static 'vendor/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css' %}" rel="stylesheet">
     <link href="{% static 'vendor/flatpickr/flatpickr.min.css' %}" rel="stylesheet">
     <link href="{% static 'web/css/sigedon.css' %}" rel="stylesheet">
     {% block extra_css %}{% endblock %}
@@ -28,9 +28,24 @@
     {% if user.is_authenticated %}
         <aside class="sigedon-sidebar" id="sigedonSidebar" aria-label="Navegación principal">
             <div class="sigedon-sidebar-header">
-                <a class="sigedon-brand text-decoration-none" href="{% url 'dashboard' %}" title="SIGEDON">
-                    <span class="sigedon-brand-mark">S</span>
-                    <span class="sigedon-nav-label">SIGEDON</span>
+                <a
+                    class="sigedon-brand text-decoration-none"
+                    href="{% url 'dashboard' %}"
+                    aria-label="ILDE · SIGEDON"
+                    title="ILDE · SIGEDON"
+                >
+                    <img
+                        class="sigedon-brand-logo sigedon-brand-logo-expanded"
+                        src="{% static 'web/img/logo_ilde.png' %}"
+                        alt=""
+                        decoding="async"
+                    >
+                    <img
+                        class="sigedon-brand-logo sigedon-brand-logo-collapsed"
+                        src="{% static 'web/img/logo_ilde_short.png' %}"
+                        alt=""
+                        decoding="async"
+                    >
                 </a>
                 <button class="sigedon-collapse-button" type="button" aria-label="Colapsar navegación" title="Colapsar navegación" data-sidebar-toggle>
                     <i class="bi bi-chevron-left" aria-hidden="true"></i>
@@ -43,7 +58,7 @@
                     <span class="sigedon-nav-label">Panel financiero</span>
                 </a>
                 {% if perms.operations.view_project %}
-                    <a class="sigedon-nav-link {% if current_url == 'project_list' or current_url == 'project_export_csv' or current_url == 'project_create' or current_url == 'project_detail' or current_url == 'project_update' or current_url == 'project_delete' or current_url == 'project_finish' or current_url == 'project_annul' or current_url == 'project_status_transition' or current_url == 'project_document_create' or current_url == 'project_document_download' or current_url == 'project_document_delete' %}active{% endif %}" href="{% url 'project_list' %}" title="Proyectos" {% if current_url == 'project_list' or current_url == 'project_export_csv' or current_url == 'project_create' or current_url == 'project_detail' or current_url == 'project_update' or current_url == 'project_delete' or current_url == 'project_finish' or current_url == 'project_annul' or current_url == 'project_status_transition' or current_url == 'project_document_create' or current_url == 'project_document_download' or current_url == 'project_document_delete' %}aria-current="page"{% endif %}>
+                    <a class="sigedon-nav-link {% if current_url == 'project_list' or current_url == 'project_export_csv' or current_url == 'project_create' or current_url == 'project_detail' or current_url == 'project_update' or current_url == 'project_finish' or current_url == 'project_document_create' or current_url == 'project_document_download' or current_url == 'project_document_delete' %}active{% endif %}" href="{% url 'project_list' %}" title="Proyectos" {% if current_url == 'project_list' or current_url == 'project_export_csv' or current_url == 'project_create' or current_url == 'project_detail' or current_url == 'project_update' or current_url == 'project_finish' or current_url == 'project_document_create' or current_url == 'project_document_download' or current_url == 'project_document_delete' %}aria-current="page"{% endif %}>
                         <i class="bi bi-folder2-open sigedon-nav-icon" aria-hidden="true"></i>
                         <span class="sigedon-nav-label">Proyectos</span>
                     </a>
@@ -72,8 +87,14 @@
                         <span class="sigedon-nav-label">Asignaciones</span>
                     </a>
                 {% endif %}
+                {% if perms.operations.view_expenserequest %}
+                    <a class="sigedon-nav-link {% if 'expense_request_' in current_url %}active{% endif %}" href="{% url 'expense_request_list' %}" title="Solicitudes de gasto" {% if 'expense_request_' in current_url %}aria-current="page"{% endif %}>
+                        <i class="bi bi-file-earmark-text sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Solicitudes de gasto</span>
+                    </a>
+                {% endif %}
                 {% if perms.operations.view_expense %}
-                    <a class="sigedon-nav-link {% if 'expense_' in current_url %}active{% endif %}" href="{% url 'expense_list' %}" title="Gastos" {% if 'expense_' in current_url %}aria-current="page"{% endif %}>
+                    <a class="sigedon-nav-link {% if 'expense_' in current_url and 'expense_request_' not in current_url %}active{% endif %}" href="{% url 'expense_list' %}" title="Gastos" {% if 'expense_' in current_url and 'expense_request_' not in current_url %}aria-current="page"{% endif %}>
                         <i class="bi bi-receipt sigedon-nav-icon" aria-hidden="true"></i>
                         <span class="sigedon-nav-label">Gastos</span>
                     </a>
@@ -82,6 +103,12 @@
                     <a class="sigedon-nav-link {% if current_url == 'audit_log_list' %}active{% endif %}" href="{% url 'audit_log_list' %}" title="Auditoría" {% if current_url == 'audit_log_list' %}aria-current="page"{% endif %}>
                         <i class="bi bi-clipboard-check sigedon-nav-icon" aria-hidden="true"></i>
                         <span class="sigedon-nav-label">Auditoría</span>
+                    </a>
+                {% endif %}
+                {% if request.user.is_superuser %}
+                    <a class="sigedon-nav-link {% if 'user_access_' in current_url %}active{% endif %}" href="{% url 'user_access_list' %}" title="Gestión de usuarios" {% if 'user_access_' in current_url %}aria-current="page"{% endif %}>
+                        <i class="bi bi-people sigedon-nav-icon" aria-hidden="true"></i>
+                        <span class="sigedon-nav-label">Gestión de usuarios</span>
                     </a>
                 {% endif %}
                 {% if kobo_enabled and perms.kobo.view_territorial_administration %}
@@ -135,12 +162,14 @@
             {% endfor %}
         ]
     </script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="{% static 'vendor/bootstrap/5.3.3/js/bootstrap.bundle.min.js' %}"></script>
+    <script src="{% static 'web/js/table_dropdowns.js' %}"></script>
+    <script src="{% static 'vendor/sweetalert2/11.26.25/sweetalert2.all.min.js' %}"></script>
     <script src="{% static 'vendor/flatpickr/flatpickr.min.js' %}" defer></script>
     <script src="{% static 'vendor/flatpickr/l10n/es.js' %}" defer></script>
     <script src="{% static 'vendor/autonumeric/autoNumeric.min.js' %}" defer></script>
     <script src="{% static 'web/js/ops_forms.js' %}" defer></script>
+    <script src="{% static 'web/js/file_upload_preview.js' %}" defer></script>
 
     <script>
         // MÓDULO 1: Gestión de la Sidebar y Persistencia del Layout

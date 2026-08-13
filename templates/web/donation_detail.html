@@ -24,6 +24,29 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url list_url_name %}">Volver</a>
+        {% if perms.operations.change_donation and status_transitions %}
+            {% for transition in status_transitions %}
+                {% if transition.value == 'received' %}
+                    <form
+                        id="donation-receive-form-{{ object.pk }}"
+                        method="post"
+                        action="{% url transition_url_name object.pk transition.value %}"
+                    >
+                        {% csrf_token %}
+                        <button
+                            class="btn btn-outline-primary"
+                            type="submit"
+                            data-confirm-action
+                            data-confirm-form="donation-receive-form-{{ object.pk }}"
+                            data-confirm-title="¿Marcar esta donación como recibida?"
+                            data-confirm-text="La donación quedará disponible para su gestión y asignación. No podrá volver al estado Registrada; solo podrá anularse si no tiene asignaciones activas."
+                            data-confirm-confirm-label="Sí, marcar como recibida"
+                            data-confirm-variant="warning"
+                        >Cambiar a {{ transition.label }}</button>
+                    </form>
+                {% endif %}
+            {% endfor %}
+        {% endif %}
         {% if can_create_allocation %}
             <a class="btn btn-primary" href="{% url 'allocation_create' %}">Nueva asignación</a>
         {% elif perms.operations.change_donation and object.status != 'annulled' %}
@@ -44,12 +67,14 @@
                     {% if show_edit_in_more %}<li><a class="dropdown-item" href="{% url update_url_name object.pk %}">Editar</a></li>{% endif %}
                     {% if perms.operations.change_donation and status_transitions %}
                         {% for transition in status_transitions %}
-                        <li>
-                            <form method="post" action="{% url transition_url_name object.pk transition.value %}">
-                                {% csrf_token %}
-                                <button class="dropdown-item" type="submit">Cambiar a {{ transition.label }}</button>
-                            </form>
-                        </li>
+                            {% if transition.value != 'received' %}
+                                <li>
+                                    <form method="post" action="{% url transition_url_name object.pk transition.value %}">
+                                        {% csrf_token %}
+                                        <button class="dropdown-item" type="submit">Cambiar a {{ transition.label }}</button>
+                                    </form>
+                                </li>
+                            {% endif %}
                         {% endfor %}
                     {% endif %}
                     {% if perms.operations.change_donation and can_annul %}<li><a class="dropdown-item text-danger" href="{% url 'donation_annul' object.pk %}">Anular donación</a></li>{% endif %}
@@ -144,5 +169,5 @@
 
 {% block extra_js %}
 {{ block.super }}
-{% if perms.operations.delete_donation %}<script src="{% static 'web/js/confirm_actions.js' %}" defer></script>{% endif %}
+{% if perms.operations.delete_donation or perms.operations.change_donation and status_transitions %}<script src="{% static 'web/js/confirm_actions.js' %}" defer></script>{% endif %}
 {% endblock %}

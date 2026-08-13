@@ -9,16 +9,25 @@ https://docs.djangoproject.com/en/6.0/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
+import logging
 import os
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
+from core.media_paths import resolve_media_root
+from core.private_storage import resolve_private_storage_settings
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-load_dotenv(BASE_DIR / '.env')
+# Optional local overrides. Unreadable/missing .env must not block startup
+# (CI and sandboxed worktrees may mount a non-readable placeholder).
+try:
+    load_dotenv(BASE_DIR / '.env')
+except (PermissionError, OSError):
+    pass
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -42,18 +51,54 @@ def env_bool(name, default=False):
     raise ImproperlyConfigured(f'{name} debe ser un valor booleano válido.')
 
 
-def env_int(name, default, *, minimum=0):
+def env_int(name, default, *, minimum=0, maximum=None):
     """
-    PRE: name identifies an optional integer variable and default/minimum are integers.
-    POST: returns an integer at least minimum or raises ImproperlyConfigured safely.
+    PRE: name identifies an optional integer variable; default/minimum/maximum
+         are integers when provided.
+    POST: returns an integer within [minimum, maximum] or raises
+          ImproperlyConfigured without echoing the source value.
     """
     raw_value = os.getenv(name)
     try:
         value = default if raw_value is None or not raw_value.strip() else int(raw_value)
     except ValueError as exc:
-        raise ImproperlyConfigured(f'{name} debe ser un entero válido.') from exc
+        raise ImproperlyConfigured(f'{name} debe ser un entero válido.') from None
     if value < minimum:
-        raise ImproperlyConfigured(f'{name} debe ser mayor o igual a {minimum}.')
+        raise ImproperlyConfigured(
+            f'{name} debe estar entre {minimum} y {maximum}.'
+            if maximum is not None
+            else f'{name} debe ser mayor o igual a {minimum}.'
+        )
+    if maximum is not None and value > maximum:
+        raise ImproperlyConfigured(
+            f'{name} debe estar entre {minimum} y {maximum}.'
+        )
+    return value
+
+
+def env_float(name, default, *, minimum, maximum):
+    """
+    PRE: name identifies an optional float variable; bounds are finite floats.
+    POST: returns a finite float within [minimum, maximum] or raises
+          ImproperlyConfigured without echoing the source value.
+    """
+    raw_value = os.getenv(name)
+    try:
+        value = (
+            float(default)
+            if raw_value is None or not raw_value.strip()
+            else float(raw_value)
+        )
+    except (TypeError, ValueError):
+        raise ImproperlyConfigured(f'{name} debe ser un número válido.') from None
+    if value != value or value in (float('inf'), float('-inf')):
+        raise ImproperlyConfigured(
+            f'{name} debe estar entre {minimum} y {maximum}.'
+        )
+    if value < minimum or value > maximum:
+        raise ImproperlyConfigured(
+            f'{name} debe estar entre {minimum} y {maximum}.'
+        )
     return value
 
 
@@ -63,6 +108,29 @@ def env_list(name):
     POST: returns its non-empty trimmed entries without logging the source value.
     """
     return [item.strip() for item in os.getenv(name, '').split(',') if item.strip()]
+
+
+VALID_LOG_LEVELS = frozenset({'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'})
+
+
+def env_log_level(name, default='INFO'):
+    """
+    PRE: name identifies an optional log-level variable; default is a valid level.
+    POST: returns an uppercase level name or raises ImproperlyConfigured on typos.
+    """
+    if default not in VALID_LOG_LEVELS:
+        raise ImproperlyConfigured(
+            f'Default de nivel de log inválido para {name}.'
+        )
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    normalized = raw_value.strip().upper()
+    if normalized not in VALID_LOG_LEVELS:
+        raise ImproperlyConfigured(
+            f'{name} debe ser uno de: {", ".join(sorted(VALID_LOG_LEVELS))}.'
+        )
+    return normalized
 
 
 def require_env(*names):
@@ -98,34 +166,81 @@ KOBO_BASE_URL = os.getenv("KOBO_BASE_URL", "")
 KOBO_API_TOKEN = os.getenv("KOBO_API_TOKEN", "")
 KOBO_WEBHOOK_USERNAME = os.getenv("KOBO_WEBHOOK_USERNAME", "")
 KOBO_WEBHOOK_SECRET = os.getenv("KOBO_WEBHOOK_SECRET", "")
-KOBO_ENABLED = os.getenv("KOBO_ENABLED", "False").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
+KOBO_ENABLED = env_bool("KOBO_ENABLED", False)
+# Legacy X-Kobo-Webhook-Secret is disabled by default. Enable only for a
+# temporary migration window; Basic auth is canonical.
+KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER = env_bool(
+    "KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER", False
+)
 
-KOBO_HTTP_CONNECT_TIMEOUT = float(os.getenv("KOBO_HTTP_CONNECT_TIMEOUT", "5"))
-KOBO_HTTP_READ_TIMEOUT = float(os.getenv("KOBO_HTTP_READ_TIMEOUT", "15"))
-KOBO_HTTP_MAX_ATTEMPTS = int(os.getenv("KOBO_HTTP_MAX_ATTEMPTS", "3"))
-KOBO_HTTP_RETRY_BASE_DELAY = float(os.getenv("KOBO_HTTP_RETRY_BASE_DELAY", "0.5"))
-KOBO_HTTP_RETRY_MAX_DELAY = float(os.getenv("KOBO_HTTP_RETRY_MAX_DELAY", "8"))
-KOBO_HTTP_RETRY_AFTER_MAX_DELAY = float(
-    os.getenv("KOBO_HTTP_RETRY_AFTER_MAX_DELAY", "60")
+KOBO_HTTP_CONNECT_TIMEOUT = env_float(
+    "KOBO_HTTP_CONNECT_TIMEOUT", 5, minimum=0.1, maximum=60
 )
-KOBO_HTTP_MAX_PAGES = int(os.getenv("KOBO_HTTP_MAX_PAGES", "100"))
-KOBO_SYNC_OVERLAP_SECONDS = int(os.getenv("KOBO_SYNC_OVERLAP_SECONDS", "300"))
-KOBO_SYNC_LEASE_SECONDS = int(os.getenv("KOBO_SYNC_LEASE_SECONDS", "900"))
+KOBO_HTTP_READ_TIMEOUT = env_float(
+    "KOBO_HTTP_READ_TIMEOUT", 15, minimum=0.1, maximum=300
+)
+KOBO_HTTP_MAX_ATTEMPTS = env_int(
+    "KOBO_HTTP_MAX_ATTEMPTS", 3, minimum=1, maximum=10
+)
+KOBO_HTTP_RETRY_BASE_DELAY = env_float(
+    "KOBO_HTTP_RETRY_BASE_DELAY", 0.5, minimum=0, maximum=30
+)
+KOBO_HTTP_RETRY_MAX_DELAY = env_float(
+    "KOBO_HTTP_RETRY_MAX_DELAY", 8, minimum=0.1, maximum=300
+)
+KOBO_HTTP_RETRY_AFTER_MAX_DELAY = env_float(
+    "KOBO_HTTP_RETRY_AFTER_MAX_DELAY", 60, minimum=0.1, maximum=900
+)
+if KOBO_HTTP_RETRY_MAX_DELAY < KOBO_HTTP_RETRY_BASE_DELAY:
+    raise ImproperlyConfigured(
+        'KOBO_HTTP_RETRY_MAX_DELAY debe ser mayor o igual a '
+        'KOBO_HTTP_RETRY_BASE_DELAY.'
+    )
+KOBO_HTTP_MAX_PAGES = env_int(
+    "KOBO_HTTP_MAX_PAGES", 100, minimum=1, maximum=1000
+)
+KOBO_SYNC_OVERLAP_SECONDS = env_int(
+    "KOBO_SYNC_OVERLAP_SECONDS", 300, minimum=0, maximum=86400
+)
+KOBO_SYNC_LEASE_SECONDS = env_int(
+    "KOBO_SYNC_LEASE_SECONDS", 900, minimum=1, maximum=86400
+)
 
-KOBO_MAX_ATTACHMENT_BYTES = int(
-    os.getenv("KOBO_MAX_ATTACHMENT_BYTES", "10485760")
+KOBO_MAX_ATTACHMENT_BYTES = env_int(
+    "KOBO_MAX_ATTACHMENT_BYTES", 10485760, minimum=1, maximum=104857600
 )
-KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS = int(
-    os.getenv("KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS", "900")
+KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS = env_int(
+    "KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS",
+    900,
+    minimum=1,
+    maximum=86400,
 )
-KOBO_WEBHOOK_MAX_BYTES = int(
-    os.getenv("KOBO_WEBHOOK_MAX_BYTES", "1048576")
+KOBO_WEBHOOK_MAX_BYTES = env_int(
+    "KOBO_WEBHOOK_MAX_BYTES", 1048576, minimum=1, maximum=10485760
 )
+
+# Operational private uploads (forms/admin). Independent of Kobo attachment policy.
+SIGEDON_MAX_PRIVATE_UPLOAD_BYTES = env_int(
+    'SIGEDON_MAX_PRIVATE_UPLOAD_BYTES',
+    10485760,
+    minimum=1,
+    maximum=104857600,
+)
+# Readiness (/readyz/): SELECT 1 every probe; migration graph briefly cached.
+# 0 disables caching (diagnostics/tests). Bound 0–300 seconds.
+SIGEDON_READINESS_MIGRATION_CACHE_SECONDS = env_int(
+    'SIGEDON_READINESS_MIGRATION_CACHE_SECONDS',
+    15,
+    minimum=0,
+    maximum=300,
+)
+# Coarse request-body ceiling: up to 20 files at the per-file cap plus form fields.
+_PRIVATE_UPLOAD_REQUEST_FILE_BUDGET = 20
+DATA_UPLOAD_MAX_MEMORY_SIZE = (
+    SIGEDON_MAX_PRIVATE_UPLOAD_BYTES * _PRIVATE_UPLOAD_REQUEST_FILE_BUDGET
+    + 2_097_152
+)
+FILE_UPLOAD_MAX_MEMORY_SIZE = SIGEDON_MAX_PRIVATE_UPLOAD_BYTES
 
 # Application definition
 
@@ -137,6 +252,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django_countries',
+    'core.apps.CoreConfig',
     'apps.operations',
     'apps.public_portal',
     'apps.integrations.kobo',
@@ -145,10 +261,13 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'core.request_ids.RequestIdMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.operations.middleware.MustChangePasswordMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -261,14 +380,148 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
+#
+# Production (DEBUG=False): WhiteNoise serves collected files from STATIC_ROOT
+# via CompressedManifestStaticFilesStorage (hashed + gzip). Private media is
+# never served by WhiteNoise. Development keeps plain StaticFilesStorage so
+# `{% static %}` works without a prior collectstatic.
+# No persistent disk is required for static assets on Render (collectstatic
+# during build). Private media uses SIGEDON_PRIVATE_STORAGE (filesystem|r2).
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 
+# Private storage mode is explicit. Presence of R2_* alone never selects R2.
+# R2 never auto-falls back to filesystem — incomplete production config fails.
+_PRIVATE_STORAGE = resolve_private_storage_settings(
+    env=os.environ,
+    debug=DEBUG,
+    base_dir=BASE_DIR,
+    static_root=STATIC_ROOT,
+    resolve_media_root=resolve_media_root,
+)
+SIGEDON_PRIVATE_STORAGE = _PRIVATE_STORAGE.mode
+SIGEDON_PRIVATE_FILE_DELIVERY = _PRIVATE_STORAGE.delivery_mode
+SIGEDON_R2_CONFIG = _PRIVATE_STORAGE.r2
+
+STORAGES = {
+    'default': _PRIVATE_STORAGE.storages_default,
+    'staticfiles': {
+        'BACKEND': (
+            'whitenoise.storage.CompressedManifestStaticFilesStorage'
+            if not DEBUG
+            else 'django.contrib.staticfiles.storage.StaticFilesStorage'
+        ),
+    },
+}
+
+# Production-safe WhiteNoise defaults. Do not enable finders/autorefresh in
+# production; collected STATIC_ROOT is the only static source at runtime.
+WHITENOISE_USE_FINDERS = False
+WHITENOISE_AUTOREFRESH = False
+
 MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Filesystem mode: development defaults to BASE_DIR/media; production requires
+# absolute SIGEDON_MEDIA_ROOT (shape at import; existence via check --deploy).
+# R2 mode: MEDIA_ROOT is an unused placeholder; default storage is S3Storage.
+MEDIA_ROOT = _PRIVATE_STORAGE.media_root
 
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'login'
+
+# Database-backed sessions are the production default so deactivation and
+# temporary-password reset can invalidate target sessions safely.
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+
+# ---------------------------------------------------------------------------
+# Runtime logging (stdout/stderr). No file handlers, no external SaaS.
+# Gunicorn owns access lines; django.request stays at WARNING+ to avoid
+# duplicating ordinary request access noise. See docs/OPERATIONS.md.
+# ---------------------------------------------------------------------------
+DJANGO_LOG_LEVEL = env_log_level(
+    'DJANGO_LOG_LEVEL',
+    'INFO' if not DEBUG else 'WARNING',
+)
+SIGEDON_LOG_LEVEL = env_log_level('SIGEDON_LOG_LEVEL', 'INFO')
+KOBO_LOG_LEVEL = env_log_level('KOBO_LOG_LEVEL', 'INFO')
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'request_id': {
+            '()': 'core.logging_filters.RequestIdFilter',
+        },
+        'redact_sensitive': {
+            '()': 'core.logging_filters.SensitiveDataRedactionFilter',
+        },
+        'stdout_only': {
+            '()': 'core.logging_filters.MaxLevelFilter',
+            'max_level': logging.INFO,
+        },
+    },
+    'formatters': {
+        'sigedon': {
+            '()': 'core.logging_filters.SigedonFormatter',
+            'format': (
+                '{asctime} {levelname} {name} request_id={request_id} {message}'
+            ),
+            'style': '{',
+            'datefmt': '%Y-%m-%dT%H:%M:%S%z',
+        },
+    },
+    'handlers': {
+        'stdout': {
+            'class': 'logging.StreamHandler',
+            'stream': 'ext://sys.stdout',
+            'level': 'DEBUG',
+            'filters': ['request_id', 'redact_sensitive', 'stdout_only'],
+            'formatter': 'sigedon',
+        },
+        'stderr': {
+            'class': 'logging.StreamHandler',
+            'stream': 'ext://sys.stderr',
+            'level': 'WARNING',
+            'filters': ['request_id', 'redact_sensitive'],
+            'formatter': 'sigedon',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['stdout', 'stderr'],
+            'level': DJANGO_LOG_LEVEL,
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['stdout', 'stderr'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.security': {
+            'handlers': ['stdout', 'stderr'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.db.backends': {
+            'handlers': ['stdout', 'stderr'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'sigedon': {
+            'handlers': ['stdout', 'stderr'],
+            'level': SIGEDON_LOG_LEVEL,
+            'propagate': False,
+        },
+        'sigedon.kobo': {
+            'handlers': ['stdout', 'stderr'],
+            'level': KOBO_LOG_LEVEL,
+            'propagate': False,
+        },
+    },
+    'root': {
+        'handlers': ['stdout', 'stderr'],
+        'level': 'WARNING',
+    },
+}

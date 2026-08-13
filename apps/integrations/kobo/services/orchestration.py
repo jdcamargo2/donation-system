@@ -1,10 +1,12 @@
 """Orchestrate multi-asset Kobo synchronization with automatic import."""
 
+import logging
 from dataclasses import dataclass, field
 
 from apps.integrations.kobo.models import KoboAsset, KoboSyncRun
 from apps.integrations.kobo.services.incremental import AssetSyncResult, sync_asset_submissions
 
+logger = logging.getLogger("sigedon.kobo.sync")
 
 SUPPORTED_FORM_ROLES = (
     KoboAsset.FormRole.TERRITORIAL_PROFILE,
@@ -77,6 +79,11 @@ def sync_supported_assets(*, client, actor=None, full=False, max_pages=None) -> 
                 max_pages=max_pages,
             )
         except Exception:
+            logger.exception(
+                "Kobo asset sync unexpected failure asset_id=%s stage=%s",
+                asset.pk,
+                "orchestrate",
+            )
             errors += 1
             asset_results.append(
                 AssetOrchestrationResult(

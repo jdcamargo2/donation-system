@@ -5,8 +5,8 @@ Este documento describe el estado de referencia de la suite automatizada, las á
 ## 1. Estado de referencia
 
 ```text
-880 tests
-880 aprobados
+1562 tests
+1562 aprobados
 ```
 
 Este número representa el estado de referencia actual de esta rama.
@@ -40,8 +40,17 @@ La suite cubre:
 * servicios de dominio;
 * constraints;
 * generación de códigos;
-* estados y transiciones;
-* acciones terminales;
+* estados y transiciones de proyecto (`ACTIVE`/`CLOSED`, sin estados obsoletos);
+* defaults `ACTIVE` + privado (`is_public=False`);
+* publicar/retirar con permiso `manage_project_publication`;
+* selectores públicos de doble condición;
+* terminar proyecto y retiro automático de visibilidad pública;
+* rutas eliminadas de cambio genérico de estado, anulación o eliminación de
+  proyecto;
+* ruta eliminada de cambio genérico de estado de asignación
+  (`allocation_status_transition`); ciclo de vida solo vía Finalizar/Anular;
+* bloqueos de eliminación en instancia, queryset y Admin (incluido superusuario);
+* acciones terminales de otras entidades (anular/eliminar donde aplique);
 * auditoría;
 * archivos protegidos;
 * permisos;
@@ -49,7 +58,13 @@ La suite cubre:
 * avances;
 * revisiones;
 * decisiones institucionales;
-* flujos end-to-end.
+* escape de fórmulas en exportaciones CSV operativas;
+* flujos end-to-end;
+* seguridad de `seed_sigedon_demo` (rechazo con `DEBUG=False` antes de mutar;
+  sin impresión de contraseña; sin bypass de producción);
+* matriz demo de cuatro roles (`admin_demo`, `operador_demo`, `auditor_demo`,
+  `comite_demo`), idempotencia y `--verify` (ver
+  [LOCAL_DEMO_E2E.md](runbooks/LOCAL_DEMO_E2E.md)).
 
 ### 3.2. `apps.integrations.kobo`
 
@@ -69,13 +84,18 @@ La suite cubre:
 * revisión;
 * importación;
 * rechazo;
-* restauración.
+* restauración;
+* códigos de salida de `process_kobo_submissions` y
+  `reconcile_kobo_submissions` (éxito → 0; fallo parcial → `CommandError`;
+  commits parciales conservados; dry-run no muta; sin tokens/payloads en
+  salida).
 
 ### 3.3. `apps.public_portal`
 
 La suite cubre:
 
-* proyectos públicos;
+* proyectos públicos (`ACTIVE` + `is_public=True`);
+* exclusión de proyectos privados o cerrados;
 * avances publicados;
 * métricas agregadas;
 * privacidad;
@@ -104,6 +124,8 @@ La suite cubre:
 * auditoría;
 * búsquedas;
 * exportaciones;
+* seguridad de escape CSV frente a inyección de fórmulas de hoja de cálculo
+  (`apps.operations.tests.test_csv_export_security`);
 * pruebas de regresión.
 
 ## 4. Pruebas sobre PostgreSQL
@@ -145,6 +167,194 @@ python manage.py test web.tests.test_dashboard
 python manage.py test apps.operations.tests.test_roles
 ```
 
+### Solicitudes de gasto (ER1)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_expense_request_models \
+  apps.operations.tests.test_expense_request_roles \
+  apps.operations.tests.test_expense_request_operational_codes \
+  apps.operations.tests.test_expense_request_events \
+  apps.operations.tests.test_expense_request_attachments \
+  apps.operations.tests.test_roles \
+  apps.operations.tests.test_operational_codes
+```
+
+Los tests de trigger PostgreSQL y concurrencia de códigos `SGS` se omiten de
+forma limpia bajo SQLite (`skipUnless`); deben ejecutarse contra una base
+PostgreSQL desechable para validar la defensa append-only.
+
+### Verificación operativa PostgreSQL (`verify_postgres_security`)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_verify_postgres_security \
+  apps.operations.tests.test_verify_postgres_security_command \
+  --noinput
+```
+
+* Exige PostgreSQL; contra otro motor el comando sale distinto de 0.
+* Debe ejecutarse en despliegue/restore con el rol runtime final; un éxito
+  bajo el propietario no valida la separación de roles.
+* Cubre catálogo (funciones/triggers/`O`), sondas UPDATE/DELETE con rollback,
+  constraints críticos y (en staging) privilegios runtime.
+* En la suite automatizada, la postura de rol runtime suele **mockearse**
+  porque la base de prueba conecta como propietario; la verificación real de
+  grants permanece como requisito de staging.
+* No repara; no sustituye a `verify_restored_data` ni a
+  `reconcile_operational_code_sequences`.
+
+### Solicitudes de gasto — reservas, cumplimiento y anulación (ER2A–ER2E)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_expense_request_fulfillment \
+  apps.operations.tests.test_expense_request_annulment \
+  apps.operations.tests.test_expense_request_concurrency \
+  apps.operations.tests.test_expense_request_services \
+  apps.operations.tests.test_expense_request_balances \
+  apps.operations.tests.test_expense_lifecycle \
+  apps.operations.tests.test_services \
+  apps.operations.tests.test_concurrency \
+  apps.operations.tests.test_roles \
+  --noinput
+```
+
+Cobertura focalizada:
+
+* saldos reservation-aware y selectores sin multiplicación por join;
+* create / update / withdraw / deny / approve;
+* cumplimiento exacto/parcial, eventos y rollbacks;
+* anulación administrativa pendiente/reservada;
+* anulación de gasto enlazado sin recrear reserva;
+* rechazo de `create_expense()` público;
+* `ExpenseForm` solo edición con choices de asignación alineados a elegibilidad
+  operativa canónica (`test_expense_form_allocation_choices`);
+* integridad de reasignación en `update_expense` (estructural, saldo, vínculo
+  con `ExpenseRequest`, concurrencia PostgreSQL):
+  `test_expense_reassignment_integrity`;
+* concurrencia PostgreSQL (fulfill vs fulfill/annul/bypass/approval);
+* regresión de ciclo de vida de `Expense` y roles.
+
+`test_expense_request_concurrency` se omite bajo SQLite (`skipUnless`).
+
+### Solicitudes de gasto — UI de listado/detalle (ER3A), solicitante (ER3B), decisión del Comité (ER4A), anulación administrativa (ER4B) y cumplimiento (ER5)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_expense_request_fulfillment_ui \
+  apps.operations.tests.test_expense_request_admin_annul_ui \
+  apps.operations.tests.test_expense_request_committee_ui \
+  apps.operations.tests.test_expense_request_requester_ui \
+  apps.operations.tests.test_expense_request_forms \
+  apps.operations.tests.test_expense_request_views \
+  apps.operations.tests.test_expense_request_ui \
+  apps.operations.tests.test_expense_request_permissions \
+  apps.operations.tests.test_expense_request_fulfillment \
+  apps.operations.tests.test_expense_request_services \
+  apps.operations.tests.test_expense_request_balances \
+  apps.operations.tests.test_expense_lifecycle \
+  apps.operations.tests.test_role_based_ui \
+  apps.operations.tests.test_permissions \
+  web.tests.test_dashboard \
+  --noinput
+```
+
+Cobertura focalizada:
+
+* selector de visibilidad por permisos (no por nombre de rol);
+* listado compartido con filtros/paginación y default pendiente del Comité;
+* detalle con resumen financiero, timeline y acciones del solicitante;
+* creación global (Admin) y desde proyecto (Admin/Operador);
+* edición/retiro solo del solicitante original en `PENDING_DECISION`;
+* defensa de POST forzado (asignación ajena, requester/status/código);
+* aprobación/denegación del Comité con reserva atómica y motivo obligatorio;
+* exclusión de Admin/Operador/Auditor de las rutas de decisión;
+* anulación administrativa (Admin) de pendientes y aprobadas-reservadas;
+* motivo obligatorio; liberación de reserva; preservación del historial de decisión;
+* saldo/estado obsoleto y fallos de evento/auditoría sin escrituras parciales;
+* cumplimiento UI (Admin): exacto/parcial, soporte obligatorio, rollbacks;
+* retiro de CTAs de creación directa de `Expense` y redirección de `expense_create`;
+* ítem de sidebar entre Asignaciones y Gastos;
+* regresión de navegación, permisos y panel.
+
+ER5 no cubre contadores nuevos en el dashboard.
+
+### Solicitudes de gasto — adjuntos protegidos (ER6)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_expense_request_attachments_ui \
+  apps.operations.tests.test_expense_request_attachment_files \
+  apps.operations.tests.test_protected_file_preview \
+  apps.operations.tests.test_expense_request_ui \
+  apps.operations.tests.test_expense_request_permissions \
+  apps.operations.tests.test_expense_request_views \
+  apps.operations.tests.test_expense_request_requester_ui \
+  apps.operations.tests.test_expense_request_committee_ui \
+  apps.operations.tests.test_expense_request_admin_annul_ui \
+  apps.operations.tests.test_expense_request_fulfillment_ui \
+  apps.operations.tests.test_role_based_ui \
+  apps.operations.tests.test_permissions \
+  --noinput
+```
+
+Cubre:
+
+* upload/delete solo del solicitante original en `PENDING_DECISION`;
+* congelación tras aprobación/denegación/retiro/anulación/cumplimiento;
+* preview/download protegidos con alcance del padre visible;
+* Operador ajeno → 404; sin permiso de vista → 403; anónimo → login;
+* sin URLs `/media/` directas; MIME whitelist; compensación de huérfanos;
+* regresión ER3–ER5 (Editar/Retirar, Aprobar/Denegar, Anular, Registrar gasto).
+
+### Solicitudes de gasto — cierre de módulo y dashboard (ER7)
+
+```bash
+python manage.py test \
+  web.tests.test_dashboard \
+  apps.operations.tests.test_role_based_ui \
+  apps.operations.tests.test_expense_request_fulfillment_ui \
+  apps.operations.tests.test_expense_request_ui \
+  apps.operations.tests.test_expense_request_views \
+  apps.operations.tests.test_expense_request_permissions \
+  apps.operations.tests.test_expense_request_attachments_ui \
+  apps.operations.tests.test_internal_experience \
+  --noinput
+```
+
+Cubre:
+
+* atajos de dashboard por permisos efectivos (Admin / Operador / Comité);
+* Auditor sin bloque de accesos rápidos; sidebar de solicitudes intacto;
+* ausencia de CTAs `Crear gasto` / `Nuevo gasto` / `expense_create` activos;
+* filtros `status=approved_reserved` y `status=pending_decision` en atajos;
+* etiquetas canónicas: «Solicitudes de gasto», «Solicitar gasto», «Registrar gasto»;
+* regresión de navegación y experiencia interna.
+
+Suite completa (PostgreSQL, sin sustituir por SQLite):
+
+```bash
+python manage.py test --noinput
+```
+
+Resultado de validación ER7 (PostgreSQL `test_db_sigedon`):
+
+* 1562 tests;
+* OK;
+* 0 skips reportados por el runner en la corrida de cierre;
+* duración registrada ~796 s (no normativa);
+* teardown: Destroying test database OK;
+* exit code 0.
+
+Migración de cierre descubierta en la suite: `operations.0030_expense_request_event_expense_protect`
+(`ExpenseRequestEvent.expense` `SET_NULL` → `PROTECT`). Aplicar solo en bases
+autorizadas; no se ejecuta automáticamente contra `db_sigedon` en este
+checkpoint.
+
+ER7 no añade contadores financieros de solicitudes, descarga ZIP, antivirus ni
+versionado de adjuntos.
+
 ### Concurrencia
 
 ```bash
@@ -162,6 +372,35 @@ python manage.py test apps.public_portal.tests
 ```bash
 python manage.py test apps.integrations.kobo.tests
 ```
+
+### Seguridad operativa de comandos (OPS-COMMAND-SAFETY)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_management_command_safety \
+  apps.integrations.kobo.tests.test_process_kobo_submissions_command \
+  apps.integrations.kobo.tests.test_reconcile_kobo_submissions_command \
+  --noinput
+```
+
+El contrato de exit distinto de cero se verifica con `call_command` +
+`CommandError` (el mismo mecanismo que Django usa para el código de salida del
+shell). No se requiere subprocess adicional salvo regresiones específicas.
+
+### Automatización de backup (OPS-BACKUP-AUTOMATION)
+
+```bash
+python manage.py test \
+  apps.operations.tests.test_backup_scripts \
+  apps.operations.tests.test_backup_automation \
+  --noinput
+```
+
+Cubre lock exclusivo global (FD 9; hijos reafirman FD heredado, sin atajo por
+env), pipeline programado E2E mockeado, markers de éxito/fallo, retención
+segura, runner concurrente (exit 8), rechazo de drill sobre base activa y
+contrato del alert hook. Usa mocks en PATH; no ejecuta backup/restore de
+producción ni abre red.
 
 Las rutas de módulos de prueba deben ajustarse si la organización interna cambia.
 
@@ -219,7 +458,24 @@ No debe reportar:
 
 Esta verificación no sustituye al formateo, al análisis estático ni a la revisión del código.
 
-## 9. Regla para nuevos cambios
+## 9. Indicadores de campos obligatorios (formularios operativos)
+
+Contrato de la marca `*` en formularios operativos de `templates/web/`:
+
+* la fuente de verdad es `field.field.required` de Django;
+* la marca se renderiza únicamente mediante
+  `templates/web/includes/ops_form_field_label.html`;
+* los campos opcionales y los campos ocultos no reciben marca;
+* el marcador usa `aria-hidden="true"` (decorativo para lectores de pantalla);
+* las pruebas Django verifican el contrato HTML (etiqueta, clase y `aria-hidden`),
+  no el espaciado visual;
+* los campos con obligatoriedad condicional solo en `clean()` (por ejemplo
+  `ExpenseForm.support_file`) son una preocupación aparte: no exponen
+  `required=True` y por tanto no muestran `*` hasta que el formulario Python lo declare.
+
+Módulo focalizado: `web.tests.test_required_field_indicators`.
+
+## 10. Regla para nuevos cambios
 
 Todo cambio funcional debe incluir pruebas sobre los casos relevantes.
 
@@ -236,7 +492,7 @@ Como mínimo, deben considerarse:
 
 No todos los cambios requieren exactamente la misma combinación, pero cualquier exclusión debe ser coherente con el riesgo del cambio.
 
-## 10. Pruebas de permisos
+## 11. Pruebas de permisos
 
 Las funcionalidades restringidas deben comprobar:
 
@@ -249,7 +505,7 @@ Las funcionalidades restringidas deben comprobar:
 
 Ocultar un botón no constituye una prueba suficiente de autorización.
 
-## 11. Pruebas de acciones terminales
+## 12. Pruebas de acciones terminales
 
 Las acciones de publicación, cierre, anulación, eliminación, rechazo o restauración deben validar:
 
@@ -265,20 +521,80 @@ Las acciones de publicación, cierre, anulación, eliminación, rechazo o restau
 
 También debe probarse que la acción no pueda ejecutarse mediante `GET`.
 
-## 12. Pruebas de archivos
+## 13. Pruebas de archivos
 
 Las pruebas de archivos privados deben comprobar:
 
 * autenticación;
-* autorización;
-* pertenencia del archivo;
-* respuesta ante un archivo inexistente;
-* protección frente a URLs directas;
+* autorización (permisos canónicos, sin nombres de rol hardcodeados);
+* pertenencia del archivo al padre (rutas anidadas / querysets acotados);
+* preview en línea solo para la lista blanca de extensiones;
+* download con `Content-Disposition: attachment` para tipos autorizados;
+* cabeceras `X-Content-Type-Options: nosniff` y `Cache-Control: private, no-store`;
+* respuesta ante un archivo inexistente (fila o almacenamiento);
+* protección frente a URLs directas y ausencia de montaje DEBUG de `MEDIA_ROOT`;
+* contrato de producción `SIGEDON_MEDIA_ROOT` (settings + `check --deploy`)
+  en modo filesystem;
+* contrato de modo R2 en settings/checks (backend privado, bucket no público,
+  staticfiles en WhiteNoise) — **sin** afirmar conectividad real a Cloudflare;
 * separación entre archivos públicos y privados;
-* privacidad de adjuntos Kobo;
-* comportamiento de archivos asociados a entidades anuladas o no publicadas.
+* privacidad de adjuntos Kobo (preview + download separados);
+* comportamiento de archivos asociados a entidades anuladas o no publicadas;
+* cobertura de roles (Admin, Operador, Auditor, Comité, anónimo, permiso directo);
+* carga múltiple de adjuntos de avance en registro/edición y en la ruta independiente del detalle;
+* contrato de widget/plantilla del opt-in `data-file-upload-preview` en los campos de
+  adjuntos de `ProjectUpdate` (atributo, contenedores de lista/resumen, help text y exclusión
+  de formularios no habilitados);
+* contrato de opt-in de un solo archivo en `ProjectDocumentForm.file` (atributo de widget,
+  wrapper/list/summary renderizados, ausencia de `multiple`, y remount tras redisplay por
+  validación);
+* contrato de opt-in de un solo archivo en `ExpenseForm.support_file` y
+  `SupportingDocumentForm.document` (atributo de widget, wrapper/list/summary en create/edit
+  de gasto y alta standalone de soporte, ausencia de `multiple`, y remount tras redisplay por
+  validación);
+* contrato de opt-in `ClearableFileInput` en `InstitutionForm.legal_document` (preservación
+  del widget, atributo de preview, wrapper/list/summary en create/edit, ausencia de
+  `multiple`, controles Django de archivo actual/limpiar en edición con documento, matriz
+  servidor preserve/replace/clear/contradiction, y remount tras redisplay por validación);
+* contrato de opt-in de un solo archivo en `ProjectUpdateRemediationAttachmentForm.file`
+  (atributo de widget, wrapper/list/summary en el alta, ausencia de `multiple`, remount tras
+  redisplay por archivo requerido, alta exitosa con auditoría, rechazo en remediaciones no
+  borrador y regresión de descarga privada);
+* confirmación manual de que quitar la selección pendiente no marca ni desmarca
+  `legal_document-clear` y no limpia el archivo persistido;
+* inclusión única de `file_upload_preview.js` en `templates/base.html`;
+* un evento de auditoría `CREATED` por cada adjunto persistido;
+* rechazo de altas o bajas de adjuntos cuando el avance ya está `PUBLISHED`.
 
-## 13. Pruebas de auditoría
+Módulo dedicado de preview/download: `apps.operations.tests.test_protected_file_preview`.
+Helpers de storage remoto simulado (sin red): `core.tests.storage_backends`.
+
+### 13.1. Storage privado R2 (preparación vs conectividad real)
+
+El código soporta `SIGEDON_PRIVATE_STORAGE=r2`, pero **no** se ha provisionado
+cuenta/bucket/credenciales ni se ha completado una sonda real contra
+Cloudflare. La suite automatizada valida contratos locales y doubles de
+storage; no sustituye:
+
+```bash
+python manage.py verify_private_storage
+python manage.py verify_private_storage --probe
+```
+
+en staging con secretos reales (sin imprimir claves ni URL firmadas). Tras
+activar R2: smoke de upload autorizado, download autorizado, rechazo no
+autorizado, backup y restore drill aislado **antes** de aceptar archivos
+reales. `/readyz/` no llama a R2. Runbook:
+[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+
+La vista previa client-side de selección (fusión incremental o reemplazo de un solo archivo,
+miniaturas, `DataTransfer`, enfoque tras quitar y limpieza de object URLs) no está cubierta
+por el cliente HTTP de Django; debe validarse manualmente en navegador según la checklist
+del cambio correspondiente, incluyendo humo de reemplazo/remoción en `ProjectDocument`,
+`ExpenseForm.support_file`, `SupportingDocumentForm.document`,
+`InstitutionForm.legal_document` y `ProjectUpdateRemediationAttachmentForm.file`.
+
+## 14. Pruebas de auditoría
 
 Las pruebas sobre `AuditLog` deben comprobar:
 
@@ -291,12 +607,12 @@ Las pruebas sobre `AuditLog` deben comprobar:
 * protección desde el panel de administración;
 * ausencia de permisos incompatibles en los roles operativos.
 
-## 14. Pruebas del portal público
+## 15. Pruebas del portal público
 
 El portal debe comprobar:
 
-* publicación exclusiva de proyectos autorizados;
-* inclusión únicamente de avances publicados;
+* publicación exclusiva de proyectos con `ACTIVE` e `is_public=True`;
+* inclusión únicamente de avances publicados de esos proyectos;
 * exclusión de entidades anuladas;
 * exclusión de datos privados;
 * persistencia exclusiva de operaciones monetarias en USD;
@@ -304,7 +620,7 @@ El portal debe comprobar:
 * ausencia de firmas y documentos privados;
 * consistencia entre páginas y respuestas JSON.
 
-## 15. Pruebas de KoboToolbox
+## 16. Pruebas de KoboToolbox
 
 La integración debe comprobar:
 
@@ -319,11 +635,13 @@ La integración debe comprobar:
 * privacidad;
 * procesamiento;
 * reconciliación sin duplicados;
-* revisión humana;
-* importación;
-* rechazo;
-* restauración;
+* importación automática;
+* reintento técnico de importación;
 * diferenciación entre `KoboProcessingEvent` y `AuditLog`.
+
+No cubre una bandeja de aprobación/rechazo humana de submissions: esa superficie
+HTTP fue retirada. `READY_FOR_REVIEW` se prueba como estado interno/incidencia
+de routing, no como cola de aprobación.
 
 Para transporte remoto, use `FakeResponse`, `SequenceTransport` y
 `RecordingSleeper` en `apps.integrations.kobo.tests.helpers`: el adapter espera
@@ -335,7 +653,7 @@ Las pruebas de locking real de Kobo están marcadas explícitamente con
 `Requires PostgreSQL row-level locking` en `test_concurrency.py` y las clases
 concurrentes de importación, priorización y routing. No se validan con SQLite.
 
-## 16. Flujo recomendado antes de integrar cambios
+## 17. Flujo recomendado antes de integrar cambios
 
 Ejecutar:
 
@@ -348,7 +666,133 @@ git diff --check
 
 Cuando el cambio afecte concurrencia o comportamiento específico de PostgreSQL, la suite correspondiente debe ejecutarse contra PostgreSQL.
 
-## 17. Criterio de aceptación
+### Arranque de producción (Gunicorn / preflight / Render)
+
+Los tests de contrato de runtime viven en:
+
+* `core.tests.test_runtime_startup` — Gunicorn, `deploy/start_web.sh`,
+  `deploy/preflight.sh`, `verify_deployment_assets`
+* `core.tests.test_render_deployment_contract` — scripts `deploy/render/`,
+  registro de entorno, runbooks (staging / go-no-go / first deploy)
+* `core.tests.test_render_configuration` — `verify_render_configuration`
+
+No requieren iniciar el servidor ni abrir puertos ni contactar Render.
+Gunicorn no es necesario para el resto de la suite unitaria. Detalle:
+[DEPLOYMENT.md](DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn),
+[deploy/render/README.md](../deploy/render/README.md),
+[RENDER_FIRST_DEPLOY.md](runbooks/RENDER_FIRST_DEPLOY.md).
+
+### Resiliencia de estáticos UI (sin CDN)
+
+Pruebas focalizadas: `core.tests.test_static_resilience`,
+`core.tests.test_whitenoise_static` y `web.tests.test_base_template`.
+
+Cubren resolución por static finders de Bootstrap / Bootstrap Icons /
+SweetAlert2 vendorizados, ausencia de CDN en plantillas base, alineación con
+sentinelas de `verify_deployment_assets`, contrato WhiteNoise (middleware,
+`CompressedManifestStaticFilesStorage`, collectstatic+manifest, separación
+de media privada) y versiones en `static/vendor/THIRD_PARTY_ASSETS.md`.
+CI ejercita `collectstatic` + `verify_deployment_assets` bajo
+`core.ci_settings` (STATIC_ROOT temporal + storage de manifest).
+### Sondas HTTP (`/healthz/` y `/readyz/`)
+
+Pruebas focalizadas: `core.tests.test_health_endpoints`.
+
+Cubren liveness sin consultas a BD, readiness con BD desechable y grafo real de
+migraciones, fallos simulados (BD / migraciones pendientes), cabeceras
+no-store/`X-Request-ID`, ausencia de cookies de sesión, aislamiento de
+Kobo/caché/media/R2 y logging seguro en `sigedon.health`. Contrato operativo:
+[DEPLOYMENT.md §6.3](DEPLOYMENT.md#63-sondas-http-healthz-y-readyz).
+`/readyz/` no sustituye `verify_private_storage --probe`.
+
+### Logging y correlación (`X-Request-ID`)
+
+Pruebas focalizadas:
+
+* `core.tests.test_request_ids`
+* `core.tests.test_logging_config`
+* `core.tests.test_log_redaction`
+* `apps.integrations.kobo.tests.test_logging`
+
+Verifican generación/validación de `X-Request-ID`, configuración `LOGGING`,
+redacción defensiva y logs Kobo seguros (sin payloads/secretos).
+
+## 18. Integración continua (GitHub Actions)
+
+El flujo canónico es [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+
+### Disparadores
+
+* `pull_request`
+* `push` a `main`
+* `workflow_dispatch` (manual)
+
+Las ejecuciones obsoletas del mismo ref se cancelan (`concurrency.cancel-in-progress`).
+
+### Runtime canónico
+
+* Python 3.12
+* PostgreSQL 16 (service container; sin fallback silencioso a SQLite en jobs de integración)
+* `TZ=UTC`
+* `KOBO_ENABLED=False`
+* credenciales ficticias `sigedon_ci` (sin secretos de repositorio)
+
+Matrices de compatibilidad adicionales pueden añadirse deliberadamente más adelante.
+
+### Jobs (merge-blocking)
+
+| Check name | Propósito |
+| --- | --- |
+| CI / Static and repository checks | higiene, `pip check`, `manage.py check`, `makemigrations --check`, `bash -n` |
+| CI / PostgreSQL migration and artifact verification | migrate from zero, `check --deploy`, `collectstatic` + `verify_deployment_assets` |
+| CI / Critical PostgreSQL tests | suite focalizada de integridad/despliegue |
+| CI / Full PostgreSQL suite | `python manage.py test --noinput` |
+
+Grafo: `static` → (`postgres-migrations` ∥ `critical-tests`) → `full-suite`.
+La suite completa **espera ambos** jobs previos; no hay `continue-on-error` ni
+enmascaramiento de fallos.
+
+CI **no** despliega, **no** ejecuta backup/restore reales, **no** corre `seed_sigedon_demo` y **no** llama a Kobo remoto.
+
+`verify_postgres_security` con éxito de rol runtime permanece como **gate de staging**: el rol propietario de CI no es una verificación runtime válida. Los tests de catálogo/triggers sí corren en CI.
+
+### Suite crítica (comando canónico)
+
+```bash
+export DATABASE_ENGINE=postgresql
+# POSTGRES_* + SIGEDON_MEDIA_ROOT apuntando a una base/media desechables
+./deploy/ci/run_critical_tests.sh
+```
+
+Equivalente documentado: módulos listados en `deploy/ci/run_critical_tests.sh`
+(settings/media, runtime/preflight, logging/request IDs, health, estáticos,
+PostgreSQL security tests, triggers append-only, constraints, ER lifecycle,
+roles/permisos, backup automation mockeado, comandos Kobo seguros, archivos
+protegidos, contrato CI/higiene).
+
+### Suite completa
+
+```bash
+python manage.py test --noinput
+```
+
+Requiere PostgreSQL. No usar SQLite para validar concurrencia ni triggers.
+
+### Reproducción local de gates estáticos
+
+```bash
+./deploy/ci/run_static_checks.sh
+```
+
+### Gates de migración/artefactos (PostgreSQL)
+
+```bash
+export DATABASE_ENGINE=postgresql
+# POSTGRES_* ficticios hacia una instancia local desechable
+./deploy/ci/run_migration_gates.sh
+```
+
+## 19. Criterio de aceptación
 
 Un cambio se considera listo cuando:
 

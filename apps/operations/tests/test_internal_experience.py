@@ -3,15 +3,41 @@ from decimal import Decimal
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group, Permission
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
-from apps.operations.models import Donation, Expense, FundAllocation, Project, ProjectUpdate, SupportingDocument
+from apps.operations.expense_request_services import (
+    approve_expense_request,
+    create_expense_request,
+)
+from apps.operations.models import (
+    Donation,
+    Expense,
+    FundAllocation,
+    Project,
+    ProjectUpdate,
+    SupportingDocument,
+)
+from apps.operations.role_services import sync_operation_roles
+from apps.operations.roles import (
+    ROLE_FIELD_OPERATOR,
+    ROLE_PROJECT_COMMITTEE,
+    ROLE_SIGEDON_ADMIN,
+)
+from apps.operations.services import create_expense as create_expense_public
 from apps.operations.services import register_advance
-from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project
+from apps.operations.tests.helpers import (
+    TEST_DATE,
+    create_allocation,
+    create_donation,
+    create_expense,
+    create_institution,
+    create_project,
+    create_support_upload,
+)
 
 
 class InternalExperienceTemplateTests(TestCase):
@@ -21,12 +47,11 @@ class InternalExperienceTemplateTests(TestCase):
         self.institution = create_institution(name='Fundación Operativa')
         self.project = create_project(code='PRJ-OPS-001', name='Proyecto operativo')
         self.project.location = 'Zona central'
-        self.project.responsible_unit = 'Unidad de proyectos'
         self.project.objective = 'Mejorar la atención comunitaria.'
         self.project.description = 'Intervención operativa priorizada.'
         self.project.status = Project.Status.ACTIVE
         self.project.save(update_fields=(
-            'location', 'responsible_unit', 'objective', 'description',
+            'location', 'objective', 'description',
             'status', 'updated_at',
         ))
         self.donation = create_donation(code='DON-OPS-001', donor=self.institution)
@@ -177,8 +202,18 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(response, 'Distribución financiera')
         self.assertContains(response, f'<h1>{self.allocation.code}</h1>', count=1, html=True)
         self.assertContains(response, self.allocation.get_status_display(), count=1)
-        self.assertContains(response, 'Nuevo gasto')
-        self.assertContains(response, reverse('expense_create'))
+        self.assertContains(response, 'Solicitar gasto')
+        create_url = reverse(
+            'expense_request_create_for_project',
+            args=[self.allocation.project.pk],
+        )
+        self.assertContains(
+            response,
+            f'{create_url}?allocation={self.allocation.pk}',
+        )
+        self.assertNotContains(response, 'Nuevo gasto')
+        self.assertNotContains(response, reverse('expense_create'))
+        self.assertTrue(response.context['can_create_expense_request'])
         self.assertContains(response, 'Más')
         self.assertIn(f'href="{delete_url}"', content)
         self.assertIn(
@@ -188,7 +223,8 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(response, 'data-confirm-action')
         self.assertContains(response, 'data-confirm-title="¿Eliminar esta asignación?"')
         self.assertContains(response, 'data-confirm-variant="danger"')
-        self.assertNotContains(response, 'Finalizar')
+        self.assertContains(response, 'Finalizar asignación')
+        self.assertContains(response, reverse('allocation_finish', args=[self.allocation.pk]))
         self.assertNotIn('status_transitions', Path('templates/web/allocation_detail.html').read_text())
 
     def test_allocation_detail_links_relations_only_with_their_permissions(self):
@@ -457,11 +493,11 @@ class InternalExperienceTemplateTests(TestCase):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Financiado')
-        self.assertContains(response, 'Ejecutado')
-        self.assertContains(response, 'Disponible')
+        self.assertContains(response, 'Fondos asignados')
+        self.assertContains(response, 'Gastos registrados')
+        self.assertContains(response, 'Disponible operativo')
         self.assertContains(response, 'Presupuesto estimado:')
-        self.assertContains(response, 'Ejecución financiera:')
+        self.assertContains(response, 'Ejecución:')
         self.assertNotContains(
             response,
             'Existen movimientos históricos en otras monedas excluidos de este resumen.',
@@ -486,7 +522,6 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertContains(response, self.project.code, count=1)
         self.assertContains(response, self.project.get_status_display(), count=1)
         self.assertContains(response, self.project.location, count=2)
-        self.assertContains(response, self.project.responsible_unit, count=2)
         self.assertContains(response, 'Información general')
         self.assertContains(response, self.project.objective)
         self.assertContains(response, self.project.description)
@@ -506,18 +541,18 @@ class InternalExperienceTemplateTests(TestCase):
     def test_project_detail_unifies_actions_and_keeps_mutations_as_post_forms(self):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
         content = response.content.decode()
-        transition_url = reverse(
-            'project_status_transition',
-            args=[self.project.pk, Project.Status.SUSPENDED],
-        )
 
         self.assertContains(response, reverse('project_update', args=[self.project.pk]))
-        self.assertContains(response, 'aria-label="Cambiar estado del proyecto"')
+        self.assertNotContains(response, 'aria-label="Cambiar estado del proyecto"')
         self.assertContains(response, 'aria-label="Más acciones del proyecto"')
-        self.assertIn(f'<form method="post" action="{transition_url}">', content)
+        self.assertNotContains(response, 'Terminar proyecto')
+        self.assertContains(
+            response,
+            'Para cerrar el proyecto, finaliza o anula sus asignaciones',
+        )
+        self.assertContains(response, 'Privado')
+        self.assertNotContains(response, 'Anular proyecto')
         self.assertIn('name="csrfmiddlewaretoken"', content)
-        self.assertNotIn(f'href="{transition_url}"', content)
-        self.assertContains(response, reverse('project_finish', args=[self.project.pk]))
 
         viewer = get_user_model().objects.create_user(
             username='project-detail-viewer',
@@ -541,20 +576,10 @@ class InternalExperienceTemplateTests(TestCase):
             viewer_response,
             reverse('project_update', args=[self.project.pk]),
         )
-        self.assertNotContains(viewer_response, 'aria-label="Cambiar estado del proyecto"')
+        self.assertNotContains(viewer_response, 'aria-label="Más acciones del proyecto"')
         self.assertNotContains(viewer_response, self.project_update.title)
         self.assertContains(viewer_response, published_update.title)
         self.client.force_login(self.user)
-
-        annulable_project = create_project(code='PRJ-OPS-ANNULABLE')
-        annulable_response = self.client.get(
-            reverse('project_detail', args=[annulable_project.pk])
-        )
-        self.assertContains(
-            annulable_response,
-            reverse('project_annul', args=[annulable_project.pk]),
-        )
-        self.assertContains(annulable_response, 'Anular proyecto')
 
         self.project.status = Project.Status.CLOSED
         self.project.save(update_fields=('status', 'updated_at'))
@@ -565,6 +590,7 @@ class InternalExperienceTemplateTests(TestCase):
             terminal_response,
             reverse('project_update', args=[self.project.pk]),
         )
+        self.assertNotContains(terminal_response, 'Terminar proyecto')
 
     def test_project_detail_keeps_milestones_once_after_financial_summary(self):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
@@ -665,30 +691,38 @@ class InternalExperienceTemplateTests(TestCase):
         self.assertEqual(len(one_update_queries), len(five_update_queries))
 
     def test_project_detail_confirmation_hooks_keep_post_forms_and_get_fallbacks(self):
+        from apps.operations.services import finish_fund_allocation
+
+        finish_fund_allocation(self.allocation.pk, actor=self.user)
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
         content = response.content.decode()
         finish_url = reverse('project_finish', args=[self.project.pk])
+        publish_url = reverse('project_publish', args=[self.project.pk])
         update_delete_url = reverse(
             'project_update_delete', args=[self.project_update.pk]
         )
 
         for url, form_id in (
+            (publish_url, 'project-publish-form'),
             (finish_url, 'project-finish-form'),
             (update_delete_url, f'project-update-delete-form-{self.project_update.pk}'),
         ):
             with self.subTest(url=url):
                 self.assertIn(f'href="{url}"', content)
                 self.assertIn(f'id="{form_id}" method="post" action="{url}"', content)
-        self.assertContains(response, 'data-confirm-action', count=2)
+        self.assertContains(response, 'data-confirm-action', count=3)
+        self.assertContains(response, 'data-confirm-title="¿Publicar este proyecto en el portal público?"')
         self.assertContains(response, 'data-confirm-title="¿Terminar este proyecto?"')
         self.assertContains(response, 'data-confirm-title="¿Eliminar este avance?"')
         self.assertContains(response, 'web/js/confirm_actions.js')
         self.assertGreaterEqual(content.count('name="csrfmiddlewaretoken"'), 2)
 
         self.assertEqual(self.client.get(finish_url).status_code, 200)
+        self.assertEqual(self.client.get(publish_url).status_code, 405)
         self.assertEqual(self.client.get(update_delete_url).status_code, 200)
         self.project.refresh_from_db()
         self.assertEqual(self.project.status, Project.Status.ACTIVE)
+        self.assertFalse(self.project.is_public)
         self.assertTrue(ProjectUpdate.objects.filter(pk=self.project_update.pk).exists())
 
         script = Path('static/web/js/confirm_actions.js').read_text()
@@ -714,3 +748,123 @@ class InternalExperienceTemplateTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse('login'), response['Location'])
+
+    def test_expense_list_and_dashboard_retire_direct_expense_creation_ctas(self):
+        expense_list = self.client.get(reverse('expense_list'))
+        dashboard = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(expense_list.status_code, 200)
+        self.assertNotContains(expense_list, 'Nuevo gasto')
+        self.assertNotContains(expense_list, reverse('expense_create'))
+        self.assertContains(expense_list, 'Ver solicitudes de gasto')
+        self.assertContains(expense_list, reverse('expense_request_list'))
+        self.assertContains(
+            expense_list,
+            reverse('expense_detail', args=[self.expense.pk]),
+        )
+
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertNotContains(dashboard, 'Crear gasto')
+        self.assertNotContains(dashboard, reverse('expense_create'))
+        self.assertNotContains(dashboard, 'Accesos rápidos')
+        self.assertContains(dashboard, 'Solicitudes que requieren atención')
+        self.assertContains(dashboard, reverse('expense_request_list'))
+        self.assertContains(dashboard, 'Estado financiero por proyecto')
+        self.assertNotContains(dashboard, 'Top 10')
+
+    def test_approved_request_detail_shows_registrar_gasto_for_administrator(self):
+        sync_operation_roles()
+        admin = get_user_model().objects.create_user(
+            username='ie-admin', password='pass-12345',
+        )
+        operator = get_user_model().objects.create_user(
+            username='ie-operator', password='pass-12345',
+        )
+        committee = get_user_model().objects.create_user(
+            username='ie-committee', password='pass-12345',
+        )
+        admin.groups.add(Group.objects.get(name=ROLE_SIGEDON_ADMIN))
+        operator.groups.add(Group.objects.get(name=ROLE_FIELD_OPERATOR))
+        committee.groups.add(Group.objects.get(name=ROLE_PROJECT_COMMITTEE))
+
+        request_allocation = create_allocation(
+            donation=create_donation(code='DON-IE-FULFILL', amount=Decimal('100.00')),
+            project=create_project(code='PRJ-IE-FULFILL'),
+            amount=Decimal('80.00'),
+        )
+        request_allocation.project.status = Project.Status.ACTIVE
+        request_allocation.project.save(update_fields=('status', 'updated_at'))
+        pending = create_expense_request(
+            fund_allocation=request_allocation,
+            requested_amount=Decimal('25.00'),
+            purpose='Solicitud para CTA de cumplimiento interno',
+            requested_date=TEST_DATE,
+            actor=operator,
+        )
+        approved = approve_expense_request(pending, actor=committee)
+
+        self.client.force_login(admin)
+        response = self.client.get(
+            reverse('expense_request_detail', args=[approved.pk]),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['can_fulfill_expense_request'])
+        self.assertContains(response, 'Registrar gasto')
+        self.assertContains(
+            response,
+            reverse('expense_request_fulfill', args=[approved.pk]),
+        )
+
+    def test_legacy_expense_create_get_and_post_redirect_without_creating(self):
+        expenses_before = Expense.objects.count()
+        docs_before = SupportingDocument.objects.count()
+
+        get_response = self.client.get(reverse('expense_create'))
+        self.assertEqual(get_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), get_response['Location'])
+        self.assertIn('status=approved_reserved', get_response['Location'])
+
+        post_response = self.client.post(
+            reverse('expense_create'),
+            {
+                'allocation': self.allocation.pk,
+                'expense_date': TEST_DATE.isoformat(),
+                'category': 'food',
+                'amount': '10.00',
+                'reason': 'Intento directo desde experiencia interna',
+                'provider_or_recipient': 'Proveedor',
+                'payment_method': 'bank_transfer',
+                'support_title': 'Soporte inválido',
+                'support_file': create_support_upload('direct-ie.pdf'),
+            },
+        )
+        self.assertEqual(post_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), post_response['Location'])
+        self.assertEqual(Expense.objects.count(), expenses_before)
+        self.assertEqual(SupportingDocument.objects.count(), docs_before)
+
+        follow = self.client.get(get_response['Location'], follow=True)
+        self.assertContains(
+            follow,
+            'El gasto debe registrarse desde una solicitud de gasto aprobada.',
+        )
+
+    def test_public_create_expense_service_remains_rejected(self):
+        with self.assertRaisesMessage(
+            Exception,
+            'El gasto debe registrarse desde una solicitud de gasto aprobada.',
+        ):
+            create_expense_public(
+                allocation=self.allocation,
+                expense_date=TEST_DATE,
+                category='food',
+                amount=Decimal('10.00'),
+                reason='Directo desde experiencia interna',
+                provider_or_recipient='Proveedor',
+                payment_method='cash',
+                description='',
+                observations='',
+                actor=self.user,
+                support_title='x',
+                support_file=create_support_upload('svc-ie.pdf'),
+            )

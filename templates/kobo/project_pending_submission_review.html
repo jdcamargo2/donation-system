@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% load kobo_presentation %}
 
-{% block title %}Revisar ficha Kobo | SIGEDON{% endblock %}
+{% block title %}Historial Kobo | SIGEDON{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-3">
-    {% if back_to_history %}<a href="{% url 'kobo:project_submission_history' project.pk %}" class="text-decoration-none">← Volver al historial</a>{% else %}<a href="{% url 'kobo:project_pending_submission_list' project.pk %}" class="text-decoration-none">← Volver a fichas pendientes</a>{% endif %}
-    <div class="my-3"><div class="text-uppercase text-muted small">Revisión Kobo</div><h1 class="h3">{{ project_submission_detail_title }}</h1></div>
+    {% if back_to_history %}<a href="{% url 'kobo:project_submission_history' project.pk %}" class="text-decoration-none">← Volver al historial</a>{% else %}<a href="{% url 'project_detail' project.pk %}" class="text-decoration-none">← Volver al proyecto</a>{% endif %}
+    <div class="my-3"><div class="text-uppercase text-muted small">Historial Kobo</div><h1 class="h3">{{ project_submission_detail_title }}</h1></div>
     <section class="card card-body mb-3"><dl class="row mb-0">
         <dt class="col-sm-4">Proyecto destino</dt><dd class="col-sm-8">{{ project }}</dd>
         <dt class="col-sm-4">Tipo de ficha</dt><dd class="col-sm-8">{{ submission.asset.form_role|kobo_label }}</dd>
@@ -24,7 +24,7 @@
             <dt class="col-sm-4">Notas generales</dt><dd class="col-sm-8">{{ normalized_payload.general_notes|default:"—" }}</dd>
         {% endif %}
     </dl></section>
-    <section class="card card-body mb-3"><h2 class="h5">Adjuntos</h2><ul class="mb-0">{% for attachment in attachments %}<li>{{ attachment.original_filename|default:attachment.field_name }} · {{ attachment.get_privacy_level_display }} · {{ attachment.get_status_display }}</li>{% empty %}<li class="text-muted">No hay adjuntos disponibles.</li>{% endfor %}</ul></section>
+    <section class="card card-body mb-3"><h2 class="h5">Adjuntos</h2><ul class="mb-0">{% for attachment in attachments %}<li>{{ attachment.original_filename|default:attachment.field_name }} · {{ attachment.privacy_level|kobo_label }} · {{ attachment.status|kobo_label }}</li>{% empty %}<li class="text-muted">No hay adjuntos disponibles.</li>{% endfor %}</ul></section>
     {% if not read_only %}<p class="text-muted mb-0">Esta incidencia se procesa automáticamente cuando se corrige su causa.</p>{% endif %}
 </div>
 {% endblock %}

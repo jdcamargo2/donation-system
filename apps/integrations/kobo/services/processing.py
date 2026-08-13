@@ -1,10 +1,12 @@
-from django.db import transaction
+import logging
 
-from apps.integrations.kobo.services.common import ProcessingBatchResult, ReviewResult
-from apps.integrations.kobo.errors import KoboConfigurationError, KoboPayloadError
-from apps.integrations.kobo.models import KoboProcessingEvent, KoboSubmission
+from apps.integrations.kobo.services.common import ProcessingBatchResult
+from apps.integrations.kobo.errors import KoboConfigurationError
+from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.processors import PROCESSABLE_STATUSES, process_submission
 from apps.integrations.kobo.services.territorial_routing import route_normalized_submission
+
+logger = logging.getLogger("sigedon.kobo.processing")
 
 
 def process_pending_submissions(
@@ -39,6 +41,10 @@ def process_pending_submissions(
                 default_timezone=default_timezone,
             )
         except Exception:
+            logger.exception(
+                "Kobo batch processing unexpected failure submission_id=%s",
+                submission.pk,
+            )
             processing_failed_count += 1
             continue
         processed_count += int(outcome.processed)
@@ -69,59 +75,4 @@ def process_pending_submissions(
         validation_failed_count=validation_failed_count,
         processing_failed_count=processing_failed_count,
         skipped_count=skipped_count,
-    )
-
-
-def review_submission(
-    submission: KoboSubmission,
-    *,
-    decision: str,
-    reason: str,
-    reviewed_by,
-) -> ReviewResult:
-    """
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    DEPRECATED: human review is no longer part of the operational Kobo workflow.
-    Prefer automatic import via auto_import_if_eligible().
-
-    PRE: submission is ready, decision is valid, reviewer is authenticated, and
-    rejection includes a reason.
-    POST: atomically records the terminal review state and event without payload,
-    operations, or publication changes, and returns an explicit result.
-    """
-    valid_decisions = {
-        KoboSubmission.Status.APPROVED_FOR_IMPORT,
-        KoboSubmission.Status.REJECTED,
-    }
-    if decision not in valid_decisions:
-        raise KoboPayloadError("Review decision is invalid.")
-    if not getattr(reviewed_by, "is_authenticated", False):
-        raise KoboConfigurationError("An authenticated reviewer is required.")
-    cleaned_reason = reason.strip()
-    if decision == KoboSubmission.Status.REJECTED and not cleaned_reason:
-        raise KoboPayloadError("A rejection reason is required.")
-
-    event_message = cleaned_reason or "Submission approved for import."
-    with transaction.atomic():
-        locked_submission = KoboSubmission.objects.select_for_update().get(
-            pk=submission.pk
-        )
-        if locked_submission.status != KoboSubmission.Status.READY_FOR_REVIEW:
-            raise KoboPayloadError("Submission is not ready for review.")
-        previous_status = locked_submission.status
-        locked_submission.status = decision
-        locked_submission.save(update_fields=("status",))
-        KoboProcessingEvent.objects.create(
-            submission=locked_submission,
-            stage="review",
-            level=KoboProcessingEvent.Level.INFO,
-            code=decision,
-            message=event_message,
-        )
-    submission.status = decision
-    return ReviewResult(
-        submission_id=submission.pk,
-        previous_status=previous_status,
-        final_status=submission.status,
-        reviewed_by_id=reviewed_by.pk,
     )

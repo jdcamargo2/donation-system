@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Administración</div>
+        <h1>{{ title }}</h1>
+        <p>Cuentas institucionales. Solo superusuarios pueden aprovisionar identidades.</p>
+    </div>
+    <a class="btn btn-primary" href="{% url 'user_access_create' %}">Nuevo usuario</a>
+</div>
+
+<form method="get" class="ops-filters mb-3" role="search">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label" for="filter-q">Buscar</label>
+            <input class="form-control" id="filter-q" type="search" name="q" value="{{ filter_q }}" placeholder="Usuario, nombre o correo">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="filter-role">Rol funcional</label>
+            <select class="form-select" id="filter-role" name="role">
+                <option value="">Todos</option>
+                {% for role in role_choices %}
+                    <option value="{{ role }}"{% if filter_role == role %} selected{% endif %}>{{ role }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="filter-status">Estado</label>
+            <select class="form-select" id="filter-status" name="status">
+                <option value="">Todos</option>
+                <option value="active"{% if filter_status == 'active' %} selected{% endif %}>Activo</option>
+                <option value="inactive"{% if filter_status == 'inactive' %} selected{% endif %}>Inactivo</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-outline-secondary w-100" type="submit">Filtrar</button>
+        </div>
+    </div>
+</form>
+
+<div class="card border-0 ops-table-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Usuario</th>
+                    <th>Nombre</th>
+                    <th>Correo</th>
+                    <th>Rol funcional</th>
+                    <th>Estado</th>
+                    <th>Acceso administrativo</th>
+                    <th>Último acceso</th>
+                    <th>Fecha de creación</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                    <tr>
+                        <td>
+                            <a class="fw-semibold text-decoration-none" href="{% url 'user_access_detail' user.pk %}">{{ user.username }}</a>
+                        </td>
+                        <td>{{ user.get_full_name|default:"—" }}</td>
+                        <td>{{ user.email|default:"—" }}</td>
+                        <td>{% if user.display_functional_role %}{{ user.display_functional_role.name }}{% else %}—{% endif %}</td>
+                        <td>{% if user.is_active %}Activo{% else %}Inactivo{% endif %}</td>
+                        <td>
+                            {% if user.is_superuser %}
+                                Superusuario
+                            {% elif user.is_staff %}
+                                Personal institucional
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>{{ user.last_login|default:"—" }}</td>
+                        <td>{{ user.date_joined }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center text-muted py-4">No hay usuarios que coincidan con el filtro.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+    {% include "web/includes/pagination.html" %}
+{% endif %}
+{% endblock %}

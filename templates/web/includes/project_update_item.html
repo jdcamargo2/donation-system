@@ -16,7 +16,7 @@
     <p class="mb-2 mt-2">{{ update.description|truncatewords:20 }}</p>
     <div class="ops-project-update-actions">
         <a class="btn btn-sm btn-outline-secondary" href="{% url 'project_update_detail' update.pk %}">Ver detalle</a>
-        {% if update.status == 'draft' %}
+        {% if project_allows_operational_mutation and update.status == 'unpublished' %}
             {% if perms.operations.publish_projectupdate %}
                 <form method="post" action="{% url 'project_update_publish' update.pk %}">
                     {% csrf_token %}

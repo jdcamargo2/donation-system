@@ -20,6 +20,38 @@
     {{ update.description|linebreaks }}
 </section>
 
+{% if public_attachments %}
+<section class="public-update-documents" aria-labelledby="update-documents-heading">
+    <h2 id="update-documents-heading">Documentos del avance</h2>
+    <ul class="public-update-document-list">
+        {% for document in public_attachments %}
+        <li class="public-update-document-item">
+            <div class="public-update-document-meta">
+                <strong>{{ document.title }}</strong>
+                {% if document.extension %}
+                <span class="public-update-document-type">{{ document.extension|upper }}</span>
+                {% endif %}
+            </div>
+            <div class="public-update-document-actions">
+                {% if document.can_preview and document.preview_url %}
+                <a
+                    href="{{ document.preview_url }}"
+                    class="public-update-document-link"
+                    aria-label="Ver {{ document.title }}"
+                >Ver</a>
+                {% endif %}
+                <a
+                    href="{{ document.download_url }}"
+                    class="public-update-document-link"
+                    aria-label="Descargar {{ document.title }}"
+                >Descargar</a>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
 <aside class="public-related-project" aria-labelledby="related-project-heading">
     <p class="public-eyebrow">Proyecto relacionado</p>
     <h2 id="related-project-heading">{{ update.project.name }}</h2>

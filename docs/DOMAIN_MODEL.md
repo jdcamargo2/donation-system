@@ -41,23 +41,69 @@ Representa un proyecto, programa o línea de acción.
 ### Estados
 
 ```text
-PLANNED
 ACTIVE
-SUSPENDED
 CLOSED
-ANNULLED
 ```
 
-### Reglas
+Estado por defecto: `ACTIVE`.
 
-* Solo los proyectos activos pueden recibir nuevos avances.
+No existen estados `PLANNED`, `SUSPENDED` ni `ANNULLED` para `Project`.
+
+### Publicación
+
+Campo independiente del estado operativo:
+
+```text
+is_public = False | True
+```
+
+Valor por defecto: `False` (privado).
+
+Estado operativo y visibilidad pública son dimensiones separadas. Solo un
+proyecto `ACTIVE` puede publicarse. Un proyecto `CLOSED` nunca es público:
+`finish_project()` / «Terminar proyecto» fuerza `is_public=False`.
+
+Los selectores del portal público exigen ambas condiciones:
+
+```text
+status = ACTIVE
+AND
+is_public = True
+```
+
+### Ciclo de vida
+
+```text
+ACTIVE → CLOSED
+```
+
+| Transición | Cómo ocurre | Reversible |
+| --- | --- | --- |
+| `ACTIVE` → `CLOSED` | Solo mediante `finish_project()` / «Terminar proyecto» | No |
+
+Reglas del ciclo:
+
+* Todo proyecto nuevo nace `ACTIVE` y privado (`is_public=False`).
+* El estado no es editable manualmente (formularios ordinarios, dropdown genérico o Admin).
+* No hay flujos de activación, suspensión, reactivación, anulación ni reapertura.
+* Terminar es terminal e irreversible: fija `status=CLOSED`, `is_public=False`, metadatos terminales (`terminal_at`, `terminal_by`, `terminal_reason`) y una entrada de auditoría de cierre.
+* Un proyecto solo puede cerrarse cuando no tiene asignaciones `ACTIVE` y no existen solicitudes de gasto abiertas (`PENDING_DECISION` o `APPROVED_RESERVED`) en su alcance. El cierre nunca finaliza ni anula automáticamente asignaciones ni solicitudes: el usuario debe resolverlas de forma explícita. La guarda se aplica de forma transaccional en `finish_project`.
+* Un `Project` no puede anularse.
+* Un `Project` no puede eliminarse por la UI operativa, URLs, Django Admin, `Project.delete()` ni `Project.objects...delete()`. La administración directa de base de datos queda fuera de la garantía de aplicación.
+
+### Reglas operativas
+
+* Solo los proyectos activos pueden recibir nuevas asignaciones, avances y mutaciones de hitos.
+* Los gastos y avances de proyecto requieren un proyecto `ACTIVE`.
+* Un proyecto cerrado es inmutable para cambios operativos ordinarios.
+* La selección operativa Kobo usa proyectos `ACTIVE`; la visibilidad pública no afecta elegibilidad financiera ni Kobo interna.
 * El presupuesto estimado no puede ser negativo.
 * La fecha final no puede ser anterior a la fecha inicial.
 * El código operativo es único e inmutable.
 * El monto financiado se deriva únicamente de las asignaciones no anuladas financiadas en USD.
 * El monto ejecutado se deriva únicamente de gastos efectivos en USD sobre donaciones USD.
 * PostgreSQL impide monedas distintas de USD en donaciones y gastos.
-* Los proyectos cerrados o anulados no deben recibir nuevas operaciones incompatibles con su estado.
+* Los proyectos cerrados no deben recibir nuevas operaciones incompatibles con su estado.
 
 ### 2.1. `ProjectMilestone`
 
@@ -69,7 +115,7 @@ Reglas:
 * El progreso se deriva de hitos completados sobre el total; no se persiste en `Project`.
 * Un proyecto sin hitos tiene progreso indefinido.
 * Completar o reabrir hitos no modifica `Project.status`.
-* Los proyectos cerrados o anulados conservan sus hitos visibles, pero no admiten mutaciones.
+* Los proyectos cerrados conservan sus hitos visibles, pero no admiten mutaciones.
 * Completar exige un actor autenticado y conserva fecha y actor mientras este exista.
 * Si el actor se elimina posteriormente, `completed_by` puede quedar en `NULL` sin perder la fecha ni la completitud histórica.
 * Crear, editar, completar, reabrir, eliminar y reordenar se ejecutan mediante servicios atómicos y auditados.
@@ -92,9 +138,14 @@ ANNULLED
 * La moneda es estrictamente USD; no existe conversión monetaria.
 * El código operativo es único e inmutable.
 * PostgreSQL impide monedas distintas de USD.
+* El monto de la donación no puede ser inferior a la suma de sus asignaciones no anuladas (`ACTIVE` y `FINISHED` cuentan; `ANNULLED` no cuenta). La invariante se aplica de forma transaccional en el servicio (`update_donation` / `create_donation`), con validación defensiva en formulario y modelo; no existe un `CheckConstraint` cruzado.
+* Solo instituciones `ACTIVE` pueden figurar como donante en una donación nueva. Un donante histórico `INACTIVE` puede permanecer en ediciones existentes, pero no puede sustituirse por otra institución inactiva.
 * Las asignaciones no anuladas no pueden exceder el monto disponible.
 * Una donación anulada queda excluida de métricas y saldos operativos.
+* El KPI global de dashboard **Fondos recibidos** cuenta solo `RECEIVED`
+  (no `REGISTERED`).
 * El nivel de asignación se calcula a partir de sus asignaciones y no se almacena como estado editable.
+* `DonationAdmin` es de solo lectura (sin alta, cambio ni borrado), para impedir bypass del servicio.
 
 ## 4. `FundAllocation`
 
@@ -114,9 +165,68 @@ ANNULLED
 * No puede superar el saldo disponible de la donación.
 * No puede utilizar una donación anulada.
 * Los gastos no anulados no pueden superar el monto asignado.
+* El saldo disponible resta gastos efectivos **y** reservas activas
+  (`ExpenseRequest.APPROVED_RESERVED`); la ejecución (`executed_amount`) y la
+  reserva permanecen conceptos distintos.
 * Una asignación anulada no participa en métricas ni saldos.
 * La ejecución parcial o completa se deriva de los gastos asociados.
 * Una asignación no debe interpretarse como un gasto.
+* Finalizar (`FINISHED`) exige que no existan solicitudes `PENDING_DECISION` ni
+  `APPROVED_RESERVED`, ni reservas activas. El histórico terminal (`FULFILLED`,
+  `DENIED`, `WITHDRAWN`, `ANNULLED`) y los gastos ya ejecutados no bloquean el
+  cierre. La finalización no anula ni modifica solicitudes; la guarda vive en
+  `finish_fund_allocation` bajo bloqueo transaccional.
+* Las transiciones terminales de `FundAllocation` usan acciones dedicadas
+  (`finish_fund_allocation` / `annul_fund_allocation`). No hay cambio genérico
+  de estado para asignaciones.
+
+## 5a. `ExpenseRequest`
+
+Representa una solicitud de gasto gobernada sobre una asignación de fondos.
+
+### Estados
+
+```text
+PENDING_DECISION
+  → APPROVED_RESERVED
+  → FULFILLED
+
+PENDING_DECISION
+  → DENIED
+
+PENDING_DECISION
+  → WITHDRAWN
+
+PENDING_DECISION / APPROVED_RESERVED
+  → ANNULLED
+```
+
+### Reglas
+
+* El monto solicitado debe ser positivo.
+* El código operativo `SGS-######` es único e inmutable.
+* La moneda se deriva de la asignación/donación (USD); no hay columna `currency`.
+* Los adjuntos (`ExpenseRequestAttachment`) son opcionales y mutables solo en
+  `PENDING_DECISION`.
+* `ExpenseRequestEvent` es append-only y complementa `AuditLog`.
+* Servicios ER2A–ER2E (`apps/operations/expense_request_services.py`):
+  * creación → `PENDING_DECISION` (sin reserva);
+  * edición / retiro → solo solicitante original y solo pendiente;
+  * denegación / aprobación → solo `decide_expenserequest` (Comité);
+  * aprobación reserva atómicamente `requested_amount`;
+  * cumplimiento (`fulfill_expense_request`) → `FULFILLED` + `Expense` enlazado;
+  * anulación administrativa (`annul_expense_request`) → `ANNULLED` con liberación
+    de reserva si estaba aprobada.
+* La anulación del `Expense` enlazado deja la solicitud en `FULFILLED` y emite
+  `LINKED_EXPENSE_ANNULLED` sin recrear reserva.
+* Agregación autoritativa de reservas: `get_allocation_reserved_amount()` en
+  `apps/operations/financials.py` (solo `APPROVED_RESERVED`).
+* Resumen financiero interno de proyecto (detalle autenticado y bloque
+  DASH-FIN3 del dashboard): Fondos asignados, Gastos registrados, Reservado,
+  Disponible operativo = `max(asignados − gastos − reservado, 0)`. Visible solo
+  con `view_fundallocation` **y** `view_expense` (misma regla en detalle y
+  dashboard); sin ambos permisos el resumen no se calcula ni se añade al
+  contexto. El portal público conserva su propio resumen sin restar reservas.
 
 ## 5. `Expense`
 
@@ -133,11 +243,25 @@ ANNULLED
 
 * El monto debe ser positivo.
 * Debe pertenecer a una asignación operativa.
-* No puede superar el saldo disponible de la asignación.
+* No puede superar el saldo disponible de la asignación (ejecutado + reservas
+  activas).
 * Debe contar con soporte documental obligatorio.
 * La anulación requiere una justificación.
 * El código operativo es único e inmutable.
 * Los gastos anulados no participan en saldos ni métricas.
+* Todo gasto futuro debe originarse en una `ExpenseRequest` aprobada y reservada.
+* `create_expense()` público rechaza la creación directa ordinaria; el camino
+  canónico es `fulfill_expense_request` (primitiva `_create_expense_locked`).
+* `create_expense_legacy()` queda solo para tests/importaciones controladas.
+* `ExpenseForm` edita gastos existentes: las opciones de asignación siguen
+  elegibilidad operativa canónica y conservan la asignación histórica actual;
+  la validación de escritura la impone `update_expense`.
+* Reasignación (`update_expense` cuando cambia el pk de asignación): el destino
+  debe cumplir la misma regla estructural que `operational_fund_allocation_choices`
+  (`validate_fund_allocation_for_new_operational_use`) y capacidad de saldo;
+  la asignación histórica sin cambio puede permanecer en ediciones de otros
+  campos. Gastos materializados desde `ExpenseRequest` no se reasignan a otra
+  asignación.
 
 ## 6. `SupportingDocument`
 
@@ -166,7 +290,7 @@ Representa un avance de proyecto.
 ### Estados
 
 ```text
-DRAFT
+UNPUBLISHED
 PUBLISHED
 ```
 
@@ -178,11 +302,16 @@ PUBLISHED
 ### Reglas
 
 * Solo puede crearse para proyectos activos.
-* El porcentaje de progreso debe estar entre 0 y 100.
-* La publicación constituye una transición explícita.
-* Un avance publicado es inmutable.
+* Un avance nuevo queda en `UNPUBLISHED` (No publicado): registrado internamente,
+  editable por usuarios autorizados, admite adjuntos y no aparece en el portal
+  público.
+* La publicación constituye una transición explícita a `PUBLISHED`.
+* Un avance publicado es inmutable, elegible para revisión y visible
+  públicamente solo si el proyecto está activo y marcado como público.
 * El creador técnico y la persona responsable del avance representan responsabilidades diferentes.
+* Para el Operador de campo, al crear un avance ambos coinciden con el actor autenticado; Administrador/superusuario pueden seleccionar otro `reported_by` elegible.
 * La revisión institucional no altera el estado del avance.
+* `ProjectUpdate` no almacena porcentaje de progreso; el progreso operativo del proyecto se deriva de hitos (`ProjectMilestone`).
 
 ## 8. `ProjectDocument`
 
@@ -366,8 +495,8 @@ Responsabilidades:
 * conservar el payload original;
 * mantener el estado del pipeline;
 * registrar intentos y resultados;
-* permitir revisión humana;
-* soportar rechazo, restauración e importación;
+* soportar importación automática e inspección técnica de incidencias;
+* conservar estados históricos (`REJECTED`, `READY_FOR_REVIEW`, etc.) sin reabrir una bandeja humana;
 * evitar la pérdida de información original.
 
 ### 14.6. `KoboTerritorialIdentity`

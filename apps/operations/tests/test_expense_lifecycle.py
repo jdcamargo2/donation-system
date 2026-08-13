@@ -12,7 +12,7 @@ from apps.operations.models import AuditLog, Expense, Project
 from apps.operations.services import (
     ExpenseFinalizedError,
     annul_expense,
-    create_expense,
+    create_expense_legacy as create_expense,
     update_expense,
 )
 from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_user
@@ -61,11 +61,56 @@ class ExpenseLifecycleTests(TestCase):
         )
 
     def test_form_requires_support_and_excludes_status(self):
-        form = ExpenseForm(data=self.expense_data())
+        expense = self.create_registered_expense()
+        expense.supporting_documents.all().delete()
+        form = ExpenseForm(instance=expense, data=self.expense_data())
         self.assertFalse(form.is_valid())
         self.assertIn('support_file', form.errors)
         self.assertNotIn('status', form.fields)
 
+    def test_expense_form_support_file_opts_into_single_file_upload_preview(self):
+        expense = self.create_registered_expense()
+        form = ExpenseForm(instance=expense)
+        field = form.fields['support_file']
+
+        self.assertEqual(field.widget.attrs.get('data-file-upload-preview'), 'true')
+        self.assertFalse(field.widget.allow_multiple_selected)
+        rendered = str(field.widget.render('support_file', None))
+        self.assertIn('data-file-upload-preview="true"', rendered)
+        self.assertNotIn('multiple', rendered)
+
+    def test_expense_update_page_renders_file_upload_preview_contract(self):
+        expense = self.create_registered_expense()
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('expense_update', args=[expense.pk]))
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-file-upload-preview')
+        self.assertContains(response, 'class="ops-file-upload"')
+        self.assertContains(response, 'data-file-upload-list')
+        self.assertContains(response, 'data-file-upload-summary')
+        self.assertContains(response, 'enctype="multipart/form-data"')
+        self.assertContains(response, 'csrfmiddlewaretoken')
+        self.assertContains(response, 'type="submit"')
+        self.assertContains(response, 'Cancelar')
+        self.assertEqual(content.count('type="file"'), 1)
+        self.assertNotIn('multiple', content.split('type="file"')[1].split('>')[0])
+        self.assertNotIn('name="title" data-file-upload-preview', content)
+        self.assertNotIn('name="support_title" data-file-upload-preview', content)
+
+    def test_direct_expense_create_route_redirects_without_creating(self):
+        self.client.force_login(self.user)
+        expenses_before = Expense.objects.count()
+        response = self.client.get(reverse('expense_create'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), response['Location'])
+        self.assertIn('status=approved_reserved', response['Location'])
+
+        post = self.client.post(reverse('expense_create'), data=self.expense_data())
+        self.assertEqual(post.status_code, 302)
+        self.assertEqual(Expense.objects.count(), expenses_before)
     def test_create_counts_immediately_and_creates_support_and_audit(self):
         expense = self.create_registered_expense()
         self.assertEqual(expense.status, Expense.Status.REGISTERED)

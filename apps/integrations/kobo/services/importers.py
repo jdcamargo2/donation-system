@@ -1,12 +1,11 @@
 from typing import Mapping
+import logging
 
 from django.db import transaction
 from django.utils import timezone
-from django.utils.html import strip_tags
 
 from apps.integrations.kobo.errors import (
     KoboConfigurationError,
-    KoboPayloadError,
     KoboUnsupportedFormError,
 )
 from apps.integrations.kobo.form_registry import KoboFormType, resolve_form_type
@@ -26,12 +25,9 @@ from apps.integrations.kobo.models import (
     KoboProcessingEvent,
     KoboSubmission,
 )
-from apps.integrations.kobo.services.common import (
-    FORM_DEFINITION_ROLES,
-    KoboRejectionResult,
-    KoboRestoreResult,
-    REJECTION_REASON_LABELS,
-)
+from apps.integrations.kobo.services.common import FORM_DEFINITION_ROLES
+
+logger = logging.getLogger("sigedon.kobo.import")
 
 
 def _operational_import_failure(
@@ -80,132 +76,6 @@ def _lock_submission_for_operational_import(submission_id: int) -> KoboSubmissio
     POST: locks only the KoboSubmission row, without joining nullable relations.
     """
     return KoboSubmission.objects.select_for_update().get(pk=submission_id)
-
-
-def _validate_project_operator(actor, submission: KoboSubmission) -> None:
-    """
-    PRE: actor and submission are persisted candidates for a project decision.
-    POST: returns only for an authenticated project operator and assigned project.
-    """
-    if not getattr(actor, "is_authenticated", False):
-        raise KoboConfigurationError("An authenticated project operator is required.")
-    if not actor.has_perm("operations.change_project"):
-        raise KoboConfigurationError("Project change permission is required.")
-    if submission.project_id is None:
-        raise KoboPayloadError("Submission has no assigned project.")
-
-
-def reject_kobo_submission(
-    submission: KoboSubmission,
-    *,
-    actor,
-    reason: str,
-    comment: str = "",
-) -> KoboRejectionResult:
-    """
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    PRE: submission is persisted, ready for review, and reason is a supported code.
-    POST: atomically records one auditable rejection without changing payloads or attachments.
-    """
-    if submission is None or submission.pk is None:
-        raise KoboConfigurationError("Kobo submission must exist.")
-    if reason not in REJECTION_REASON_LABELS:
-        raise KoboPayloadError("Rejection reason is invalid.")
-    cleaned_comment = strip_tags(comment).strip()
-    if reason == "other" and not cleaned_comment:
-        raise KoboPayloadError("A comment is required for the other rejection reason.")
-
-    with transaction.atomic():
-        locked_submission = _lock_submission_for_operational_import(submission.pk)
-        _validate_project_operator(actor, locked_submission)
-        if locked_submission.status == KoboSubmission.Status.REJECTED:
-            return KoboRejectionResult(
-                submission_id=locked_submission.pk,
-                rejected=False,
-                already_rejected=True,
-            )
-        if locked_submission.status != KoboSubmission.Status.READY_FOR_REVIEW:
-            raise KoboPayloadError("Only submissions ready for review can be rejected.")
-        if locked_submission.imported_at is not None:
-            raise KoboPayloadError("Imported submissions cannot be rejected.")
-
-        from apps.operations.models import AuditLog
-        from apps.operations.services import log_action
-
-        locked_submission.status = KoboSubmission.Status.REJECTED
-        locked_submission.save(update_fields=("status",))
-        KoboProcessingEvent.objects.create(
-            submission=locked_submission,
-            stage="review",
-            level=KoboProcessingEvent.Level.INFO,
-            code=reason,
-            message=cleaned_comment or REJECTION_REASON_LABELS[reason],
-        )
-        log_action(
-            actor,
-            AuditLog.Action.REJECTED,
-            locked_submission,
-            "Ficha Kobo rechazada.",
-        )
-
-    submission.status = KoboSubmission.Status.REJECTED
-    return KoboRejectionResult(
-        submission_id=submission.pk,
-        rejected=True,
-        already_rejected=False,
-    )
-
-
-def restore_kobo_submission_to_review(
-    submission: KoboSubmission,
-    *,
-    actor,
-) -> KoboRestoreResult:
-    """
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    PRE: submission is persisted and actor is a project operator.
-    POST: atomically restores only a rejected submission to ready-for-review.
-    """
-    if submission is None or submission.pk is None:
-        raise KoboConfigurationError("Kobo submission must exist.")
-
-    with transaction.atomic():
-        locked_submission = _lock_submission_for_operational_import(submission.pk)
-        _validate_project_operator(actor, locked_submission)
-        if locked_submission.status == KoboSubmission.Status.READY_FOR_REVIEW:
-            return KoboRestoreResult(
-                submission_id=locked_submission.pk,
-                restored=False,
-                already_ready=True,
-            )
-        if locked_submission.status != KoboSubmission.Status.REJECTED:
-            raise KoboPayloadError("Only rejected submissions can be restored.")
-
-        from apps.operations.models import AuditLog
-        from apps.operations.services import log_action
-
-        locked_submission.status = KoboSubmission.Status.READY_FOR_REVIEW
-        locked_submission.save(update_fields=("status",))
-        KoboProcessingEvent.objects.create(
-            submission=locked_submission,
-            stage="review",
-            level=KoboProcessingEvent.Level.INFO,
-            code="restored",
-            message="Kobo submission restored to review.",
-        )
-        log_action(
-            actor,
-            AuditLog.Action.UPDATED,
-            locked_submission,
-            "Ficha Kobo restaurada a revisión.",
-        )
-
-    submission.status = KoboSubmission.Status.READY_FOR_REVIEW
-    return KoboRestoreResult(
-        submission_id=submission.pk,
-        restored=True,
-        already_ready=False,
-    )
 
 
 def _validate_common_import_preconditions(
@@ -532,6 +402,11 @@ def _import_kobo_submission_with_handlers(
             warnings=exc.warnings,
         )
     except Exception:
+        logger.exception(
+            "Kobo import unexpected failure submission_id=%s stage=%s",
+            submission.pk,
+            "operational_import",
+        )
         return _record_failed_import(submission.pk)
 
     submission.status = KoboSubmission.Status.IMPORTED

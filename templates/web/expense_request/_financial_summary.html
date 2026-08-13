@@ -1,0 +1,40 @@
+{% load operations_format %}
+<section class="ops-allocation-financial-summary ops-expense-request-financial-summary" aria-labelledby="expense-request-financial-summary-title">
+    <div class="ops-allocation-financial-heading">
+        <h2 id="expense-request-financial-summary-title" class="h5 mb-0">Resumen financiero</h2>
+        {% if financial_summary.has_active_reservation %}
+            <span class="small text-muted">Estos fondos permanecen reservados.</span>
+        {% elif financial_summary.linked_expense_is_annulled %}
+            <span class="small text-muted">El gasto enlazado fue anulado; la reserva no fue recreada.</span>
+        {% elif expense_request.status == 'fulfilled' %}
+            <span class="small text-muted">La reserva fue convertida en gasto.</span>
+        {% endif %}
+    </div>
+    <div class="ops-allocation-financial-metrics ops-expense-request-financial-metrics">
+        <div class="ops-allocation-financial-metric">
+            <span class="ops-metric-label">Solicitado</span>
+            <strong class="ops-allocation-financial-value ops-money text-nowrap">{{ financial_summary.requested_amount|money_es }} {{ financial_summary.currency }}</strong>
+        </div>
+        <div class="ops-allocation-financial-metric">
+            <span class="ops-metric-label">Reservado</span>
+            <strong class="ops-allocation-financial-value ops-money text-nowrap">
+                {% if financial_summary.show_reserved %}{{ financial_summary.reserved_amount|money_es }} {{ financial_summary.currency }}{% else %}—{% endif %}
+            </strong>
+        </div>
+        <div class="ops-allocation-financial-metric">
+            <span class="ops-metric-label">Ejecutado</span>
+            <strong class="ops-allocation-financial-value ops-money text-nowrap">
+                {% if financial_summary.show_executed %}{{ financial_summary.executed_amount|money_es }} {{ financial_summary.currency }}{% else %}—{% endif %}
+            </strong>
+            {% if financial_summary.show_executed %}
+                <span class="small text-muted">Monto registrado a través de la solicitud</span>
+            {% endif %}
+        </div>
+        <div class="ops-allocation-financial-metric">
+            <span class="ops-metric-label">Liberado</span>
+            <strong class="ops-allocation-financial-value ops-money text-nowrap">
+                {% if financial_summary.show_released %}{{ financial_summary.released_amount|money_es }} {{ financial_summary.currency }}{% else %}—{% endif %}
+            </strong>
+        </div>
+    </div>
+</section>

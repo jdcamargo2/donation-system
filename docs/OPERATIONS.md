@@ -35,6 +35,32 @@ Antes de continuar, debe completarse la configuración mínima requerida en `.en
 python manage.py migrate
 ```
 
+Las migraciones `0026`–`0030` de `operations` introducen `ExpenseRequest`,
+constraints, la secuencia operativa `expense_request`/`SGS`, el trigger
+append-only de `ExpenseRequestEvent` y el `PROTECT` del FK `expense` en eventos
+(compatible con el trigger ante borrados de gasto). Deben aplicarse solo sobre
+bases autorizadas; no se documenta aquí su aplicación sobre `db_sigedon` activa.
+
+Tras migrar un entorno desechable o de staging, sincronizar roles y verificar
+secuencias:
+
+```bash
+python manage.py sync_sigedon_roles
+python manage.py reconcile_operational_code_sequences
+```
+
+`reconcile_operational_code_sequences` es detect-only e incluye el namespace
+`expense_request` (`SGS`). `sync_sigedon_roles` aplica la matriz canónica de
+permisos de solicitud de gasto (incluida fulfillment/anulación administrativa)
+sin mutar eventos. La UI de cumplimiento (ER5) usa `fulfill_expenserequest` y no
+requiere sync adicional de roles. La UI de adjuntos de solicitud (ER6) reutiliza
+`add_expenserequestattachment`, `delete_expenserequestattachment` y
+`view_expenserequestattachment` ya presentes en la matriz canónica; no introduce
+permisos nuevos ni sync de roles. ER7 solo ajusta atajos de dashboard y
+documentación; no cambia permisos ni esquema. No ejecutar sync de roles ni
+migraciones contra `db_sigedon` activo durante checkpoints de desarrollo de
+solicitudes.
+
 ### 1.5. Crear un superusuario
 
 ```bash
@@ -43,31 +69,82 @@ python manage.py createsuperuser
 
 ### 1.6. Sincronizar roles y permisos
 
+Sincroniza los cuatro roles canónicos desde código. No modifica membresías.
+Detalle: [§3 Sincronización de roles](#3-sincronización-de-roles).
+
 ```bash
 python manage.py sync_sigedon_roles
 ```
 
 ### 1.7. Ejecutar el servidor local
 
+> [!WARNING]
+> Django `runserver` no es un servidor de aplicación de producción. El contrato
+> de producción es Gunicorn (`docs/DEPLOYMENT.md`).
+
 ```bash
 python manage.py runserver
 ```
 
+## 1.8. Logging operativo y correlación de peticiones
+
+SIGEDON emite logs de runtime a **stdout/stderr**. La recolección, retención,
+rotación, control de acceso y alertas son responsabilidad de la plataforma.
+
+* Cabecera de correlación: `X-Request-ID`.
+* IDs inbound inválidos, malformados o demasiado largos se reemplazan; el valor
+  inválido no se registra ni se refleja.
+* Ante un error 500, el usuario/operador puede aportar el `X-Request-ID` de la
+  respuesta para diagnóstico.
+* No se registran cuerpos, query strings completas, cookies, Authorization,
+  secretos, payloads Kobo crudos ni datos personales/financieros privados.
+* Los logs Kobo usan identificadores internos seguros (`submission_id`, stage,
+  status, clase de excepción).
+* Retención: política de plataforma; no retener indefinidamente; no pegar logs
+  crudos en trackers públicos.
+
+### Separación AuditLog vs logs de runtime
+
+| Fuente | Uso |
+| --- | --- |
+| Runtime logs (stdout/stderr) | ciclo de vida del proceso, fallos de petición, fallos de integración, diagnóstico operativo, despliegue |
+| `AuditLog` / `ExpenseRequestEvent` / `KoboProcessingEvent` | eventos de negocio durables, historial actor/acción, transiciones de dominio, historial de procesamiento |
+
+No duplicar cada fila de `AuditLog` en logs de runtime. No usar logs de runtime
+como evidencia de una mutación financiera exitosa. Este checkpoint no añade
+`request_id` al esquema de auditoría en base de datos.
+
 ## 2. Datos de demostración
 
 `seed_sigedon_demo` genera datos locales para explorar la interfaz, realizar
-revisiones manuales y preparar capturas de pantalla. No representa una carga
-productiva ni una verificación integral de las reglas operativas.
+revisiones manuales E2E con los cuatro roles canónicos y preparar capturas.
+No representa una carga productiva ni sustituye la suite automatizada.
+
+Guía humana: [LOCAL_DEMO_E2E.md](runbooks/LOCAL_DEMO_E2E.md).
+
+### Política de producción (absoluta)
+
+* **Solo desarrollo:** el comando exige `DEBUG=True` (`DJANGO_DEBUG=True`).
+* Cuando `DEBUG=False`, el comando **rechaza la ejecución antes de cualquier
+  escritura** y termina con código distinto de cero (`CommandError`:
+  `seed_sigedon_demo is disabled when DEBUG=False.`).
+* No existe bypass por `--force`, `--allow-production` ni variables de entorno.
+* **No forma parte** de release, preflight, arranque web ni comprobación de
+  disponibilidad productiva.
+* No debe usarse para probar que producción “funciona”.
 
 ### Precondición
 
-* Ejecutar únicamente en un entorno local o efímero.
-* Utilizar una base de datos no productiva donde se acepten datos de demostración.
+* Ejecutar únicamente en un entorno local o efímero con `DEBUG=True`.
+* Utilizar una base de datos **desechable** donde se acepten datos de demostración.
+* Preferir `sigedon_demo_e2e` u otra base dedicada; no mezclar con datos locales
+  habituales sin autorización explícita.
 
 Comando:
 
 ```bash
-python manage.py seed_sigedon_demo
+python manage.py seed_sigedon_demo --password '<LOCAL_ONLY_PASSWORD>'
+python manage.py seed_sigedon_demo --verify
 ```
 
 ### Opciones
@@ -75,43 +152,108 @@ python manage.py seed_sigedon_demo
 ```text
 --password
 --skip-users
+--verify
 ```
+
+`SIGEDON_DEMO_PASSWORD` y `--password` son **solo desarrollo**. El comando nunca
+imprime la contraseña; como máximo indica `Demo credentials configured.`
+Las contraseñas vacías se rechazan. No documentar valores reales en
+`.env.example` (solo placeholders).
+
+`--reset` **no está implementado**: los proyectos no pueden eliminarse de forma
+segura; usar una base desechable en lugar de limpieza parcial.
+
+### Usuarios demo
+
+* `admin_demo` — Administrador SIGEDON
+* `operador_demo` — Operador de campo
+* `auditor_demo` — Auditor externo
+* `comite_demo` — Comité de proyectos
 
 ### Reglas
 
-* **No debe ejecutarse en producción.**
-* Usa ORM directo intencionalmente y no pasa por todos los services de dominio.
-* No genera trazabilidad completa en `AuditLog`.
-* Puede crear gastos sin `SupportingDocument`, aunque el flujo UI operativo lo exige.
-* Usa códigos explícitos reservados para demostración.
-* Su idempotencia es parcial: actualiza entidades clave, pero no garantiza que
-  una base previamente modificada vuelva a un estado canónico.
+* **No debe ejecutarse en producción** (y el runtime lo impide cuando
+  `DEBUG=False`).
+* Usa códigos explícitos `*-DEMO-*`, usuarios `@sigedon.local` y marcadores
+  `[DEMO-ER:…]` / `[DEMO-UPD:…]` como claves naturales.
+* Las transiciones de solicitudes de gasto, publicación, revisión/remediación y
+  cierre usan servicios de dominio; no rehacen estados terminales en reejecución.
+* Los gastos demo incluyen documento soporte (vía cumplimiento de solicitud o
+  ruta legacy de servicio).
+* La idempotencia cubre usuarios, entidades clave, eventos de solicitud y saldos
+  cuando se reejecuta sobre la misma base demo.
 * Las credenciales demo no deben reutilizarse en entornos reales.
 
 ### Postcondición
 
-* Quedan disponibles las entidades mínimas para navegar y revisar la interfaz.
+* Quedan disponibles los cuatro roles y una matriz mínima para flujos E2E
+  (instituciones, proyectos públicos/privados/cerrados, donaciones,
+  asignaciones, solicitudes, gastos, avances y adjuntos privados).
+* `--verify` confirma la matriz sin escrituras.
 * Los datos resultantes no deben considerarse evidencia de cumplimiento de
-  todas las reglas, auditorías o invariantes del flujo operativo.
+  todas las reglas fuera del entorno local.
 
 ## 3. Sincronización de roles
 
-Los roles y permisos deben sincronizarse después de:
-
-* un despliegue inicial;
-* una restauración de base de datos;
-* cambios en la matriz de permisos;
-* una actualización del sistema;
-* modificaciones en grupos operativos;
-* incorporación o eliminación de modelos protegidos.
-
-Comando:
+Comando autoritativo para las matrices de los cuatro roles funcionales canónicos:
 
 ```bash
 python manage.py sync_sigedon_roles
 ```
 
-La operación debe ser idempotente y retirar permisos incompatibles heredados.
+La matriz completa de permisos por rol está en
+[Roles y permisos](ROLES_AND_PERMISSIONS.md).
+
+### Cuándo ejecutarlo
+
+* despliegue inicial o actualización del sistema;
+* restauración de base de datos;
+* cambios en la matriz de roles definida en código;
+* incorporación o eliminación de modelos/permisos protegidos por los roles.
+
+### Contrato exacto (cuatro grupos)
+
+El comando:
+
+* asegura que existen exactamente estos cuatro grupos canónicos:
+  `Administrador SIGEDON`, `Operador de campo`, `Auditor externo`,
+  `Comité de proyectos`;
+* **reemplaza** la matriz de permisos de cada grupo canónico desde el código;
+* **no toca** membresías de usuarios (`auth_user_groups`);
+* **preserva** grupos técnicos / no canónicos;
+* **no elimina** grupos técnicos;
+* es **idempotente**.
+
+### Salida esperada
+
+```text
+Roles operativos de SIGEDON sincronizados.
+- Administrador SIGEDON: <n> permisos
+- Operador de campo: <n> permisos
+- Auditor externo: <n> permisos
+- Comité de proyectos: <n> permisos
+```
+
+### Verificación posterior
+
+```bash
+# Contar grupos canónicos (esperado: 4)
+python manage.py shell -c "from django.contrib.auth.models import Group; from apps.operations.role_services import operation_role_names; print(Group.objects.filter(name__in=operation_role_names()).count())"
+
+# Listar permisos de un rol
+python manage.py shell -c "from django.contrib.auth.models import Group; g=Group.objects.get(name='Comité de proyectos'); print(g.permissions.count()); print(*sorted(f'{p.content_type.app_label}.{p.codename}' for p in g.permissions.all()), sep='\n')"
+```
+
+### Advertencias
+
+* No editar manualmente permisos de grupos canónicos en Django admin: están
+  protegidos como solo lectura y, en cualquier caso, `sync_sigedon_roles`
+  sobrescribe esas matrices.
+* El comando no asigna ni quita usuarios de grupos.
+* Operador de campo no forma parte de la audiencia de administración
+  territorial Kobo. Tras un despliegue que corrija la matriz canónica,
+  `sync_sigedon_roles` retira `kobo.view_territorial_administration` del
+  grupo Operador; las membresías de usuarios permanecen intactas.
 
 ## 4. Operación inicial de KoboToolbox
 
@@ -141,7 +283,8 @@ Después del descubrimiento se debe:
 2. asociarlo con una definición soportada;
 3. configurar la zona pastoral hacia un proyecto;
 4. activar el activo;
-5. verificar las credenciales del webhook;
+5. verificar las credenciales del webhook (Basic auth canónico;
+   `KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER=False` en staging);
 6. comprobar la recepción de submissions;
 7. comprobar que el webhook materializa automáticamente una submission de prueba.
 
@@ -180,6 +323,40 @@ Opciones disponibles:
 La reconciliación recupera submissions ausentes en staging, pero no sustituye la
 validación, normalización, asignación territorial ni importación automática.
 
+### Códigos de salida (contrato operativo)
+
+Ambos comandos siguen la misma taxonomía:
+
+| Resultado | Exit |
+| --- | --- |
+| Lote seleccionado completado sin errores (incluye “nada elegible”) | `0` |
+| Uno o más registros fallaron, o fallo fatal de configuración/init | distinto de `0` |
+
+Matices importantes para cron, systemd y jobs de release:
+
+* **Exit distinto de cero no implica cero trabajo comprometido.** Registros
+  previos del mismo lote pueden haberse persistido con éxito.
+* Tras un fallo parcial, inspeccione el hub Kobo, `KoboProcessingEvent` y los
+  logs de runtime correlacionados; no asuma rollback total.
+* Es seguro reejecutar según las reglas de idempotencia existentes.
+* No enmascare el fallo con `|| true`.
+
+Ejemplo de orquestación:
+
+```bash
+if ! python manage.py process_kobo_submissions; then
+  echo "Kobo processing completed with failures" >&2
+  exit 1
+fi
+```
+
+`--dry-run` en reconciliación no escribe datos: sin errores → `0`; con errores
+operativos (p. ej. fallo remoto) → distinto de `0`.
+
+Estos comandos CLI **no adquieren** el lease de sincronización incremental del
+hub; ese locking pertenece a la sincronización remota del hub y permanece
+inalterado.
+
 ### Recuperación e incidencias
 
 Use **Sincronizar KoboToolbox** sólo tras una caída, webhook perdido o para
@@ -215,6 +392,8 @@ git diff --check
 
 Cuando se utilicen pruebas dependientes de PostgreSQL, deben ejecutarse contra ese motor y no asumirse como validadas únicamente con SQLite.
 
+La integración continua del repositorio (GitHub Actions) ejecuta gates estáticos, migración desde cero, suite crítica y suite completa contra PostgreSQL 16. No sustituye backups, restore-drills ni `verify_postgres_security` con rol runtime en staging. Ver [TESTING.md §18](TESTING.md#18-integración-continua-github-actions).
+
 ## 7. Gestión de archivos
 
 Directorios locales habituales:
@@ -222,20 +401,52 @@ Directorios locales habituales:
 ```text
 staticfiles/
 media/
-private_media/
 ```
 
 Estos directorios no deben versionarse.
 
 ### Reglas de operación
 
-* `staticfiles/` contiene archivos estáticos recopilados.
-* `media/` puede contener archivos públicos o de desarrollo, según la configuración.
-* `private_media/` contiene archivos que requieren autorización.
-* Los archivos privados no deben exponerse mediante URLs directas.
-* Producción debe utilizar permisos adecuados sobre el sistema de archivos o el almacenamiento externo.
-* Los respaldos de archivos deben tratarse como información sensible.
+* `staticfiles/` contiene archivos estáticos recopilados (`collectstatic`).
+  En producción los sirve **WhiteNoise** desde `STATIC_ROOT` (manifest
+  hashed + gzip). No se requiere disco persistente para estáticos en el
+  runtime Python nativo de Render.
+* `MEDIA_ROOT` (`media/` por defecto en desarrollo; en producción
+  `SIGEDON_MEDIA_ROOT` absoluto a volumen persistente) almacena archivos
+  operativos privados cuando `SIGEDON_PRIVATE_STORAGE=filesystem` (default).
+* WhiteNoise **no** sirve media privada. Los archivos privados **nunca** se
+  montan con `static(MEDIA_URL, document_root=MEDIA_ROOT)`, ni siquiera con
+  `DEBUG=True`.
+* El acceso en desarrollo y producción ocurre solo mediante endpoints protegidos
+  de preview/download autenticados (`apps/operations/file_access.py`).
+  `FileField.url` no es autorización.
+* Producción en modo filesystem exige `SIGEDON_MEDIA_ROOT` fuera del
+  repositorio; el despliegue monta el volumen antes del arranque y
+  `check --deploy` verifica existencia/permisos.
+* **R2 / Render:** el código acepta `SIGEDON_PRIVATE_STORAGE=r2` con
+  secretos `R2_*`. Aún no hay cuenta/bucket/credenciales provisionadas ni
+  sonda real de conectividad. En Render, filesystem **no** es el modo final
+  aceptado para documentos productivos. Activarlo es configuración +
+  `verify_private_storage` / `--probe` + aceptación staging. Runbooks:
+  [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md),
+  [RENDER_FIRST_DEPLOY.md](runbooks/RENDER_FIRST_DEPLOY.md).
+* Los ejemplos systemd/cron de `deploy/backups/examples/` **no** se asumen
+  dentro de un Web Service Render; programar backup con Cron Job / scheduler
+  externo y copiar el artefacto off-host (disco efímero ≠ respaldo durable).
+* Tras `collectstatic` en el build/release, `./deploy/preflight.sh` (vía
+  `verify_deployment_assets`) exige sentinelas lógicos bajo el storage de
+  staticfiles, incluidos Bootstrap / Bootstrap Icons / SweetAlert2
+  vendorizados. El proceso web (Gunicorn) no ejecuta `collectstatic`.
+  Staticfiles **nunca** usan R2.
+* Un CDN/proxy de borde no debe cachear HTML autenticado ni media privada;
+  solo los assets hashed públicos son candidatos a caché larga.
+* Los respaldos de archivos filesystem deben tratarse como información
+  sensible y usar el mismo `SIGEDON_MEDIA_ROOT` que Django. Con R2 activo,
+  complementar con export de objetos privados (ver runbook / backups README).
 * Debe verificarse el espacio disponible y la política de retención.
+* La documentación histórica que menciona `private_media/` como ruta montada
+  separada describe la intención de aislamiento; el código actual usa storage
+  privado + endpoints autorizados.
 
 ## 8. Base de datos
 
@@ -271,7 +482,11 @@ python manage.py check
 
 Antes de despliegues, migraciones relevantes o cambios de infraestructura, debe existir una copia de seguridad verificable.
 
-Los scripts manuales viven en `deploy/backups/` (ver `deploy/backups/README.md`). Esta fase **no** automatiza frecuencia ni retención con cron/systemd.
+Los scripts viven en `deploy/backups/` (ver `deploy/backups/README.md`). El
+formato del artefacto permanece estable. La automatización operativa
+(`run_scheduled_backup.sh`, retención, lock, markers, drill) está en el
+repositorio; el **scheduling y la entrega de alertas** son de la plataforma
+(ejemplos en `deploy/backups/examples/`).
 
 ### Ventana de mantenimiento
 
@@ -280,7 +495,7 @@ La consistencia del backup exige una **ventana de mantenimiento obligatoria**:
 * detener web, workers, comandos de procesamiento Kobo y uploads;
 * exportar `SIGEDON_MAINTENANCE_CONFIRMED=YES`;
 * exportar `SIGEDON_BACKUP_ROOT` (se crea automáticamente con permisos `0700` si no existe) y `SIGEDON_MEDIA_ROOT` (debe existir; no se crea);
-* ejecutar `deploy/backups/backup_sigedon.sh`.
+* ejecutar `deploy/backups/backup_sigedon.sh` o el pipeline `run_scheduled_backup.sh`.
 
 El script no puede comprobar por sí solo que esos procesos estén detenidos.
 
@@ -295,7 +510,25 @@ Cada backup publicado es un directorio:
   manifest.json
 ```
 
-Incluye PostgreSQL + `MEDIA_ROOT`. La configuración crítica y los secretos deben respaldarse fuera de estos scripts, en un sistema seguro.
+Incluye PostgreSQL + `MEDIA_ROOT` como un solo set operativo cuando el storage
+es filesystem. Con R2 activo, complementar con export de objetos privados
+(`export_private_objects`); ver [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+Temps `.sigedon-backup.*` son incompletos; solo sets que pasan
+`verify_backup.sh` cuentan como verificados. La configuración crítica y los
+secretos deben respaldarse fuera de estos scripts, en un sistema seguro.
+
+### Pipeline programado, lock, retención y markers
+
+* Lock exclusivo: un global `<SIGEDON_BACKUP_ROOT>/.sigedon-ops.lock` en FD 9
+  (código 8 si ocupado); el runner lo mantiene en el pipeline y los hijos
+  reafirman el FD heredado (sin reapertura).
+* Pipeline: `run_scheduled_backup.sh` → backup → verify → retención opcional →
+  `.sigedon-backup-status.json`.
+* Retención: `SIGEDON_BACKUP_KEEP_COUNT` / `SIGEDON_BACKUP_KEEP_DAYS`; solo borra
+  sets verificados bajo el backup root configurado.
+* Alertas: exit codes fiables + hook local opcional `SIGEDON_BACKUP_ALERT_HOOK`
+  (la plataforma implementa la entrega).
+* Un fallo nunca se publica como `status=success`.
 
 ### Verificación y restore aislado
 
@@ -305,9 +538,14 @@ Incluye PostgreSQL + `MEDIA_ROOT`. La configuración crítica y los secretos deb
 
 La restauración solo está permitida hacia bases con prefijo seguro (`test_restore_` / `staging_restore_`), distintas de `POSTGRES_DB`, con `SIGEDON_RESTORE_CONFIRM=YES` y un directorio de media nuevo/vacío. Nunca sobreescribir el `MEDIA_ROOT` activo ni modificar `.env`.
 
+Drill periódico: `run_restore_drill.sh` con `SIGEDON_RESTORE_DRILL_ENABLED=YES`
+contra destinos desechables. **Prohibido** automatizar restore de producción
+con un timer.
+
 ### Post-restore
 
-Con el entorno apuntando a la base y media restauradas:
+Con el entorno apuntando a la base y media restauradas, y con las
+**credenciales del rol runtime** (no el propietario de migraciones):
 
 ```bash
 python manage.py migrate --check
@@ -317,6 +555,16 @@ python manage.py reconcile_operational_code_sequences
 python manage.py verify_restored_data
 python manage.py sync_sigedon_roles
 ```
+
+`verify_postgres_security` exige PostgreSQL, comprueba append-only de
+`AuditLog` y `ExpenseRequestEvent` (triggers + privilegios runtime
+`SELECT`/`INSERT` sobre ambas tablas tras `harden_runtime_role.sql`),
+constraints críticos y postura del rol runtime; las sondas hacen rollback y
+no reparan. Fallar el restore si este comando no sale 0: restaurar filas no
+basta si faltan triggers o grants. El éxito bajo el rol propietario de CI no
+valida la separación; la verificación runtime real es gate de staging.
+`verify_restored_data` es complementario (conteos, archivos, secuencias
+observables), no un reemplazo.
 
 `reconcile_operational_code_sequences` funciona en modo detect-only y es de
 solo lectura: no crea ni ajusta secuencias. El comando falla ante una secuencia
@@ -330,10 +578,12 @@ debe revisarse y ejecutarse manualmente. Una secuencia adelantada es válida.
 * Deben almacenarse fuera del repositorio.
 * Deben protegerse mediante controles de acceso.
 * Preferir `~/.pgpass` frente a `PGPASSWORD` en los scripts.
-* Las restauraciones deben probarse periódicamente (al menos trimestral).
+* Las restauraciones deben probarse periódicamente (drill aislado; al menos trimestral).
 * Un respaldo no se considera válido hasta comprobar que puede restaurarse.
 * Cifrado y copia off-site son requisitos de infraestructura (aún no implementados en scripts).
-* **RPO/RTO no están definidos** hasta medir restauraciones reales.
+* RPO/RTO: propuestas no aprobadas / placeholders de despliegue
+  (p. ej. RPO ≤ 24 h, RTO ≤ 4 h). **No son un SLA.** El RTO debe validarse con
+  un restore drill representativo medido. Detalle en `deploy/backups/README.md`.
 
 ## 10. Auditoría
 
@@ -361,12 +611,34 @@ Durante la operación deben revisarse:
 * fallos del webhook;
 * submissions detenidas;
 * errores de procesamiento Kobo;
-* espacio disponible;
+* espacio disponible (incluye `SIGEDON_BACKUP_ROOT`);
 * conexiones a PostgreSQL;
 * vencimiento o rotación de credenciales;
-* crecimiento de archivos y logs.
+* crecimiento de archivos y logs;
+* fallos sostenidos de readiness (`/readyz/` → `503`) frente a ventanas
+  esperadas de migración en el release;
+* jobs de backup: `.sigedon-backup-status.json` con `status!=success`, exit
+  code distinto de cero, o `finished_at_utc` obsoleto respecto a la frecuencia
+  programada;
+* drills de restore: `.sigedon-restore-drill-status.json` y frescura del último
+  drill exitoso (no confundir con `/healthz/`/`/readyz/`).
+
+### 11.1. Sondas HTTP vs preflight
+
+* `./deploy/preflight.sh` valida el **release** (checks estáticos, migraciones
+  pendientes vía CLI, assets). No arranca el servidor web.
+* `GET /healthz/` — liveness del proceso (sin BD ni dependencias externas).
+* `GET /readyz/` — readiness runtime: BD `default` alcanzable y migraciones
+  aplicadas (`SELECT 1` cada probe; plan de migraciones cacheable con
+  `SIGEDON_READINESS_MIGRATION_CACHE_SECONDS`). No consulta Kobo, caché, media
+  ni R2.
+
+Detalle de contrato, cabeceras y ejemplos de plataforma:
+[DEPLOYMENT.md §6.3](DEPLOYMENT.md#63-sondas-http-healthz-y-readyz).
 
 Los logs no deben contener secretos, tokens ni payloads sensibles completos.
+Los fallos de readiness se registran de forma segura en `sigedon.health` (sin
+detalles internos en la respuesta HTTP).
 
 ## 12. Errores comunes
 
@@ -459,7 +731,8 @@ La ausencia de un botón en la interfaz no demuestra que el permiso esté correc
 * existencia de registros;
 * moneda operativa USD;
 * estados anulados;
-* filtros de publicación;
+* filtros de publicación: un proyecto público de métricas debe estar
+  `ACTIVE` e `is_public=True`;
 * fechas y estados operativos;
 * selectores utilizados por el dashboard o portal.
 
@@ -471,15 +744,18 @@ Los datos anulados quedan excluidos deliberadamente; toda operación monetaria v
 
 #### Verificar
 
-* existencia física del archivo;
-* ruta configurada;
+* modo de storage (`SIGEDON_PRIVATE_STORAGE`: filesystem | r2);
+* existencia del objeto (volumen local o bucket);
+* ruta / clave configurada;
 * permisos del usuario;
 * relación con la entidad;
 * clasificación pública o privada;
-* configuración de almacenamiento;
+* configuración de almacenamiento y, si aplica, `verify_private_storage`;
 * tamaño y metadatos del adjunto Kobo.
 
 Los archivos privados no deben corregirse exponiendo directamente `FileField.url`.
+Con R2 y objetos productivos, no cambiar a filesystem vacío: los documentos
+parecerán ausentes. Ver [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
 
 ---
 
@@ -536,22 +812,26 @@ Después de desplegar:
 
 1. ejecutar migraciones;
 2. sincronizar roles;
-3. ejecutar `python manage.py check`;
-4. verificar acceso al panel interno;
-5. verificar acceso al portal público;
-6. comprobar descargas protegidas;
-7. confirmar conexión con PostgreSQL;
-8. revisar logs;
-9. verificar webhook y procesamiento Kobo, cuando esté habilitado;
-10. realizar una comprobación funcional básica sin alterar datos reales.
+3. ejecutar `python manage.py check` y `./deploy/preflight.sh`;
+4. verificar `/healthz/` (`200`) y `/readyz/` (`200`);
+5. verificar acceso al panel interno;
+6. verificar acceso al portal público;
+7. comprobar descargas protegidas;
+8. confirmar conexión con PostgreSQL;
+9. revisar logs;
+10. verificar webhook y procesamiento Kobo, cuando esté habilitado;
+11. realizar una comprobación funcional básica sin alterar datos reales.
 
 El despliegue no debe considerarse completo hasta validar el comportamiento básico del sistema.
 
 ## Panel operativo Kobo
 
-Con Kobo habilitado, el panel `/integrations/kobo/` permite revisar y operar
-asignación de zonas, núcleos registrados, incidencias y reconciliación. No es
-necesario pulsar sincronizar durante la operación normal: las Fichas 1, 10 y 11
-llegan por webhook, el panel se actualiza por polling cada 15 segundos y la
-intervención humana ocurre sólo ante incidencias.
+Con Kobo habilitado, el panel `/panel/integrations/kobo/` permite revisar y
+operar asignación de zonas, núcleos registrados, incidencias y reconciliación.
+El webhook externo permanece en `/integrations/kobo/webhook/`. No es necesario
+pulsar sincronizar durante la operación normal: las Fichas 1, 10 y 11 llegan por
+webhook, el panel se actualiza por polling cada 15 segundos y la intervención
+humana ocurre sólo ante incidencias.
 Compruebe que los permisos Kobo se asignaron antes de habilitar acceso operativo.
+Operador de campo queda fuera de esa audiencia territorial; el webhook y el
+procesamiento de importación en backend no dependen de su acceso al panel.

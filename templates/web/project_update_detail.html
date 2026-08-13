@@ -20,7 +20,7 @@
     </div>
     <div class="ops-header-actions">
         <a class="btn btn-outline-secondary" href="{% url 'project_detail' object.project.pk %}">Volver</a>
-        {% if object.status == 'draft' and perms.operations.publish_projectupdate %}
+        {% if project_allows_operational_mutation and object.status == 'unpublished' and perms.operations.publish_projectupdate %}
             <form id="project-update-publish-form" method="post" action="{% url 'project_update_publish' object.pk %}">
                 {% csrf_token %}
                 <button
@@ -35,14 +35,15 @@
                 >Publicar</button>
             </form>
         {% endif %}
-        {% if object.status == 'draft' and perms.operations.change_projectupdate or object.status == 'draft' and perms.operations.add_projectupdateattachment or object.status == 'draft' and perms.operations.delete_projectupdate %}
+        {% if project_allows_operational_mutation and object.status == 'unpublished' %}
+        {% if perms.operations.change_projectupdate or perms.operations.add_projectupdateattachment or perms.operations.delete_projectupdate %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Más acciones del avance">
                 Más
             </button>
             <div class="dropdown-menu dropdown-menu-end ops-project-update-detail-action-menu">
                 {% if perms.operations.change_projectupdate %}<a class="dropdown-item" href="{% url update_url_name object.pk %}">Editar</a>{% endif %}
-                {% if perms.operations.add_projectupdateattachment %}<a class="dropdown-item" href="{% url 'project_update_attachment_create' object.pk %}">Agregar adjunto</a>{% endif %}
+                {% if perms.operations.add_projectupdateattachment %}<a class="dropdown-item" href="{% url 'project_update_attachment_create' object.pk %}">Agregar adjuntos</a>{% endif %}
                 {% if perms.operations.delete_projectupdate %}
                     <a
                         class="dropdown-item text-danger"
@@ -59,6 +60,7 @@
             </div>
         </div>
         {% endif %}
+        {% endif %}
     </div>
 </div>
 
@@ -71,7 +73,7 @@
     <section class="ops-project-update-section ops-project-update-detail-review" aria-labelledby="project-update-review-title">
         <div class="ops-project-update-detail-section-heading">
             <h2 id="project-update-review-title" class="h5 mb-0">Revisión documental del Comité</h2>
-            {% if not object.committee_review and object.status == 'published' and perms.operations.review_projectupdate %}
+            {% if project_allows_operational_mutation and not object.committee_review and object.status == 'published' and perms.operations.review_projectupdate %}
                 <a class="btn btn-sm btn-primary" href="{% url 'project_update_review_create' object.pk %}">Registrar revisión</a>
             {% endif %}
         </div>
@@ -94,7 +96,7 @@
             <h2 id="project-update-attachments-title" class="h5 mb-0">Evidencias y adjuntos</h2>
         </div>
         <div class="ops-project-update-attachment-list">
-            {% for attachment in object.attachments.all %}
+            {% for attachment in detail_attachments %}
                 <div class="ops-project-update-attachment-item">
                     <div class="ops-project-update-attachment-name">
                         <i class="bi bi-file-earmark ops-project-update-attachment-icon" aria-hidden="true"></i>
@@ -103,27 +105,71 @@
                             <div class="small text-muted">Cargado el {{ attachment.created_at }}</div>
                         </div>
                     </div>
-                    <div class="ops-project-update-attachment-actions">
-                        {% if perms.operations.view_projectupdateattachment %}
-                            <a class="btn btn-sm btn-outline-primary" href="{% url 'project_update_attachment_download' attachment.pk %}">Descargar</a>
-                        {% endif %}
-                        {% if object.status == 'draft' and perms.operations.delete_projectupdateattachment %}
-                            <div class="dropdown">
-                                <button class="btn btn-sm btn-outline-secondary ops-project-update-attachment-more" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Acciones del archivo {{ attachment.title|default:attachment }}">⋮</button>
-                                <form id="project-update-attachment-delete-form-{{ attachment.pk }}" method="post" action="{% url 'project_update_attachment_delete' attachment.pk %}">
+                    <div class="ops-project-update-attachment-actions d-flex flex-wrap gap-2 align-items-center">
+                        {% include "web/includes/protected_file_item.html" with file_actions=attachment.file_actions %}
+                        {% if can_manage_attachment_publicity %}
+                            {% if attachment.is_public %}
+                                <span class="badge text-bg-success">Portal</span>
+                                <form
+                                    id="project-update-attachment-unpublish-form-{{ attachment.pk }}"
+                                    method="post"
+                                    action="{% url 'project_update_attachment_unpublish' attachment.pk %}"
+                                >
                                     {% csrf_token %}
                                     <button
-                                        class="dropdown-item text-danger"
+                                        class="btn btn-sm btn-outline-secondary"
                                         type="submit"
                                         data-confirm-action
-                                        data-confirm-form="project-update-attachment-delete-form-{{ attachment.pk }}"
-                                        data-confirm-title="¿Eliminar este archivo?"
-                                        data-confirm-text="El adjunto dejará de estar disponible en el avance."
-                                        data-confirm-confirm-label="Sí, eliminar"
-                                        data-confirm-variant="danger"
-                                    >Eliminar</button>
+                                        data-confirm-form="project-update-attachment-unpublish-form-{{ attachment.pk }}"
+                                        data-confirm-title="¿Retirar este documento del portal?"
+                                        data-confirm-text="El archivo permanecerá en el avance; solo dejará de mostrarse en el portal de transparencia."
+                                        data-confirm-confirm-label="Sí, retirar"
+                                        data-confirm-variant="primary"
+                                        aria-label="Retirar del portal {{ attachment.title|default:attachment }}"
+                                    >Retirar del portal</button>
                                 </form>
-                            </div>
+                            {% else %}
+                                <form
+                                    id="project-update-attachment-publish-form-{{ attachment.pk }}"
+                                    method="post"
+                                    action="{% url 'project_update_attachment_publish' attachment.pk %}"
+                                >
+                                    {% csrf_token %}
+                                    <button
+                                        class="btn btn-sm btn-outline-primary"
+                                        type="submit"
+                                        data-confirm-action
+                                        data-confirm-form="project-update-attachment-publish-form-{{ attachment.pk }}"
+                                        data-confirm-title="¿Publicar este documento en el portal?"
+                                        data-confirm-text="Solo será visible públicamente si el avance está publicado y el proyecto es público."
+                                        data-confirm-confirm-label="Sí, publicar"
+                                        data-confirm-variant="primary"
+                                        aria-label="Publicar en el portal {{ attachment.title|default:attachment }}"
+                                    >Publicar en el portal</button>
+                                </form>
+                            {% endif %}
+                        {% elif attachment.is_public %}
+                            <span class="badge text-bg-success">Portal</span>
+                        {% endif %}
+                        {% if attachment.file_actions.can_delete and attachment.file_actions.delete_url %}
+                            <form
+                                id="project-update-attachment-delete-form-{{ attachment.pk }}"
+                                method="post"
+                                action="{{ attachment.file_actions.delete_url }}"
+                            >
+                                {% csrf_token %}
+                                <button
+                                    class="btn btn-sm btn-outline-danger"
+                                    type="submit"
+                                    data-confirm-action
+                                    data-confirm-form="project-update-attachment-delete-form-{{ attachment.pk }}"
+                                    data-confirm-title="¿Eliminar este archivo?"
+                                    data-confirm-text="El adjunto dejará de estar disponible en el avance."
+                                    data-confirm-confirm-label="Sí, eliminar"
+                                    data-confirm-variant="danger"
+                                    aria-label="Eliminar {{ attachment.title|default:attachment }}"
+                                >Eliminar</button>
+                            </form>
                         {% endif %}
                     </div>
                 </div>

@@ -8,6 +8,11 @@ urlpatterns = [
     path('institutions/new/', views.InstitutionCreateView.as_view(), name='institution_create'),
     path('institutions/<int:pk>/', views.InstitutionDetailView.as_view(), name='institution_detail'),
     path(
+        'institutions/<int:pk>/legal-document/preview/',
+        views.InstitutionLegalDocumentPreviewView.as_view(),
+        name='institution_legal_document_preview',
+    ),
+    path(
         'institutions/<int:pk>/legal-document/download/',
         views.InstitutionLegalDocumentDownloadView.as_view(),
         name='institution_legal_document_download',
@@ -24,10 +29,13 @@ urlpatterns = [
         name='project_update_chunk',
     ),
     path('projects/<int:pk>/edit/', views.ProjectUpdateView.as_view(), name='project_update'),
-    path('projects/<int:pk>/delete/', views.ProjectDeleteView.as_view(), name='project_delete'),
     path('projects/<int:pk>/finish/', views.ProjectFinishView.as_view(), name='project_finish'),
-    path('projects/<int:pk>/annul/', views.ProjectAnnulView.as_view(), name='project_annul'),
-    path('projects/<int:pk>/status/<str:target_status>/', views.ProjectStatusTransitionView.as_view(), name='project_status_transition'),
+    path('projects/<int:pk>/publish/', views.ProjectPublishView.as_view(), name='project_publish'),
+    path(
+        'projects/<int:pk>/unpublish/',
+        views.ProjectUnpublishView.as_view(),
+        name='project_unpublish',
+    ),
     path(
         'projects/<int:project_pk>/milestones/add/',
         views.ProjectMilestoneAddView.as_view(),
@@ -84,13 +92,50 @@ urlpatterns = [
     path('remediations/<int:pk>/resolve/', views.ProjectUpdateRemediationResolveView.as_view(), name='project_update_remediation_resolve'),
     path('remediations/<int:pk>/attachments/create/', views.ProjectUpdateRemediationAttachmentCreateView.as_view(), name='project_update_remediation_attachment_create'),
     path('remediation-attachments/<int:pk>/delete/', views.ProjectUpdateRemediationAttachmentDeleteView.as_view(), name='project_update_remediation_attachment_delete'),
-    path('remediation-attachments/<int:pk>/download/', views.ProjectUpdateRemediationAttachmentDownloadView.as_view(), name='project_update_remediation_attachment_download'),
+    path(
+        'remediations/<int:remediation_pk>/attachments/<int:pk>/preview/',
+        views.ProjectUpdateRemediationAttachmentPreviewView.as_view(),
+        name='project_update_remediation_attachment_preview',
+    ),
+    path(
+        'remediations/<int:remediation_pk>/attachments/<int:pk>/download/',
+        views.ProjectUpdateRemediationAttachmentDownloadView.as_view(),
+        name='project_update_remediation_attachment_download',
+    ),
     path('projects/<int:project_pk>/documents/create/', views.ProjectDocumentCreateView.as_view(), name='project_document_create'),
-    path('project-documents/<int:pk>/download/', views.ProjectDocumentDownloadView.as_view(), name='project_document_download'),
+    path(
+        'projects/<int:project_pk>/documents/<int:pk>/preview/',
+        views.ProjectDocumentPreviewView.as_view(),
+        name='project_document_preview',
+    ),
+    path(
+        'projects/<int:project_pk>/documents/<int:pk>/download/',
+        views.ProjectDocumentDownloadView.as_view(),
+        name='project_document_download',
+    ),
     path('project-documents/<int:pk>/delete/', views.ProjectDocumentDeleteView.as_view(), name='project_document_delete'),
     path('updates/<int:update_pk>/attachments/create/', views.ProjectUpdateAttachmentCreateView.as_view(), name='project_update_attachment_create'),
-    path('update-attachments/<int:pk>/download/', views.ProjectUpdateAttachmentDownloadView.as_view(), name='project_update_attachment_download'),
+    path(
+        'projects/<int:project_pk>/updates/<int:update_pk>/attachments/<int:pk>/preview/',
+        views.ProjectUpdateAttachmentPreviewView.as_view(),
+        name='project_update_attachment_preview',
+    ),
+    path(
+        'projects/<int:project_pk>/updates/<int:update_pk>/attachments/<int:pk>/download/',
+        views.ProjectUpdateAttachmentDownloadView.as_view(),
+        name='project_update_attachment_download',
+    ),
     path('update-attachments/<int:pk>/delete/', views.ProjectUpdateAttachmentDeleteView.as_view(), name='project_update_attachment_delete'),
+    path(
+        'update-attachments/<int:pk>/publish/',
+        views.ProjectUpdateAttachmentPublishView.as_view(),
+        name='project_update_attachment_publish',
+    ),
+    path(
+        'update-attachments/<int:pk>/unpublish/',
+        views.ProjectUpdateAttachmentUnpublishView.as_view(),
+        name='project_update_attachment_unpublish',
+    ),
     path('updates/<int:pk>/delete/', views.ProjectUpdateDeleteView.as_view(), name='project_update_delete'),
     path('donations/', views.DonationListView.as_view(), name='donation_list'),
     path('donations/export.csv', views.DonationCsvExportView.as_view(), name='donation_export_csv'),
@@ -107,7 +152,82 @@ urlpatterns = [
     path('allocations/<int:pk>/edit/', views.FundAllocationUpdateView.as_view(), name='allocation_update'),
     path('allocations/<int:pk>/delete/', views.FundAllocationDeleteView.as_view(), name='allocation_delete'),
     path('allocations/<int:pk>/annul/', views.FundAllocationAnnulView.as_view(), name='allocation_annul'),
-    path('allocations/<int:pk>/status/<str:target_status>/', views.FundAllocationStatusTransitionView.as_view(), name='allocation_status_transition'),
+    path('allocations/<int:pk>/finish/', views.FundAllocationFinishView.as_view(), name='allocation_finish'),
+    path(
+        'expense-requests/',
+        views.ExpenseRequestListView.as_view(),
+        name='expense_request_list',
+    ),
+    path(
+        'expense-requests/new/',
+        views.ExpenseRequestCreateView.as_view(),
+        name='expense_request_create',
+    ),
+    path(
+        'expense-requests/new/select-project/',
+        views.ExpenseRequestCreateProjectChooserView.as_view(),
+        name='expense_request_create_choose_project',
+    ),
+    path(
+        'projects/<int:project_pk>/expense-requests/new/',
+        views.ExpenseRequestCreateForProjectView.as_view(),
+        name='expense_request_create_for_project',
+    ),
+    path(
+        'expense-requests/<int:pk>/',
+        views.ExpenseRequestDetailView.as_view(),
+        name='expense_request_detail',
+    ),
+    path(
+        'expense-requests/<int:pk>/edit/',
+        views.ExpenseRequestUpdateView.as_view(),
+        name='expense_request_update',
+    ),
+    path(
+        'expense-requests/<int:pk>/withdraw/',
+        views.ExpenseRequestWithdrawView.as_view(),
+        name='expense_request_withdraw',
+    ),
+    path(
+        'expense-requests/<int:pk>/approve/',
+        views.ExpenseRequestApproveView.as_view(),
+        name='expense_request_approve',
+    ),
+    path(
+        'expense-requests/<int:pk>/deny/',
+        views.ExpenseRequestDenyView.as_view(),
+        name='expense_request_deny',
+    ),
+    path(
+        'expense-requests/<int:pk>/annul/',
+        views.ExpenseRequestAnnulView.as_view(),
+        name='expense_request_annul',
+    ),
+    path(
+        'expense-requests/<int:pk>/fulfill/',
+        views.ExpenseRequestFulfillView.as_view(),
+        name='expense_request_fulfill',
+    ),
+    path(
+        'expense-requests/<int:request_pk>/attachments/new/',
+        views.ExpenseRequestAttachmentCreateView.as_view(),
+        name='expense_request_attachment_create',
+    ),
+    path(
+        'expense-requests/<int:request_pk>/attachments/<int:pk>/delete/',
+        views.ExpenseRequestAttachmentDeleteView.as_view(),
+        name='expense_request_attachment_delete',
+    ),
+    path(
+        'expense-requests/<int:request_pk>/attachments/<int:pk>/preview/',
+        views.ExpenseRequestAttachmentPreviewView.as_view(),
+        name='expense_request_attachment_preview',
+    ),
+    path(
+        'expense-requests/<int:request_pk>/attachments/<int:pk>/download/',
+        views.ExpenseRequestAttachmentDownloadView.as_view(),
+        name='expense_request_attachment_download',
+    ),
     path('expenses/', views.ExpenseListView.as_view(), name='expense_list'),
     path('expenses/export.csv', views.ExpenseCsvExportView.as_view(), name='expense_export_csv'),
     path('expenses/new/', views.ExpenseCreateView.as_view(), name='expense_create'),
@@ -121,9 +241,24 @@ urlpatterns = [
         name='supporting_document_create_for_expense',
     ),
     path(
-        'documents/<int:pk>/download/',
+        'expenses/<int:expense_pk>/documents/<int:pk>/preview/',
+        views.SupportingDocumentPreviewView.as_view(),
+        name='supporting_document_preview',
+    ),
+    path(
+        'expenses/<int:expense_pk>/documents/<int:pk>/download/',
         views.SupportingDocumentDownloadView.as_view(),
         name='supporting_document_download',
+    ),
+    path(
+        'projects/<int:project_pk>/supporting-documents/<int:pk>/preview/',
+        views.ProjectSupportingDocumentPreviewView.as_view(),
+        name='project_supporting_document_preview',
+    ),
+    path(
+        'projects/<int:project_pk>/supporting-documents/<int:pk>/download/',
+        views.ProjectSupportingDocumentDownloadView.as_view(),
+        name='project_supporting_document_download',
     ),
     path(
         'documents/<int:pk>/delete/',
@@ -131,4 +266,35 @@ urlpatterns = [
         name='supporting_document_delete',
     ),
     path('audit/', views.AuditLogListView.as_view(), name='audit_log_list'),
+    path('usuarios/', views.UserAccessListView.as_view(), name='user_access_list'),
+    path(
+        'usuarios/nuevo/',
+        views.UserAccessCreateView.as_view(),
+        name='user_access_create',
+    ),
+    path(
+        'usuarios/<int:pk>/',
+        views.UserAccessDetailView.as_view(),
+        name='user_access_detail',
+    ),
+    path(
+        'usuarios/<int:pk>/editar/',
+        views.UserAccessUpdateView.as_view(),
+        name='user_access_update',
+    ),
+    path(
+        'usuarios/<int:pk>/activar/',
+        views.UserAccessActivateView.as_view(),
+        name='user_access_activate',
+    ),
+    path(
+        'usuarios/<int:pk>/desactivar/',
+        views.UserAccessDeactivateView.as_view(),
+        name='user_access_deactivate',
+    ),
+    path(
+        'usuarios/<int:pk>/restablecer-clave/',
+        views.UserAccessResetPasswordView.as_view(),
+        name='user_access_reset_password',
+    ),
 ]

@@ -10,12 +10,11 @@
 
     {% if page_size_choices %}
         <form class="ops-pagination-size" method="get" action="{{ request.path }}">
-            {% if request.GET.q %}<input type="hidden" name="q" value="{{ request.GET.q }}">{% endif %}
-            {% if request.GET.status %}<input type="hidden" name="status" value="{{ request.GET.status }}">{% endif %}
-            {% if request.GET.institution %}<input type="hidden" name="institution" value="{{ request.GET.institution }}">{% endif %}
-            {% if request.GET.project %}<input type="hidden" name="project" value="{{ request.GET.project }}">{% endif %}
-            {% if request.GET.date_from %}<input type="hidden" name="date_from" value="{{ request.GET.date_from }}">{% endif %}
-            {% if request.GET.date_to %}<input type="hidden" name="date_to" value="{{ request.GET.date_to }}">{% endif %}
+            {% for key, value in request.GET.items %}
+                {% if key != 'page' and key != 'page_size' %}
+                    <input type="hidden" name="{{ key }}" value="{{ value }}">
+                {% endif %}
+            {% endfor %}
             <label class="form-label mb-0" for="page-size-select">Por página</label>
             <select class="form-select form-select-sm" id="page-size-select" name="page_size" onchange="this.form.submit()">
                 {% for size in page_size_choices %}

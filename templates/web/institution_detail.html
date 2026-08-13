@@ -57,12 +57,12 @@
 </div>
 
 <article class="ops-institution-detail-body">
-    {% if object.legal_document %}
+    {% if object.legal_document and legal_document_file_actions %}
     <section class="ops-institution-detail-section" aria-labelledby="institution-information-title">
         <h2 id="institution-information-title" class="h5">Información institucional</h2>
-        <div class="ops-institution-document">
+        <div class="ops-institution-document d-flex flex-wrap gap-3 align-items-center">
             <span>Documento legal</span>
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'institution_legal_document_download' object.pk %}">Descargar</a>
+            {% include "web/includes/protected_file_item.html" with file_actions=legal_document_file_actions %}
         </div>
     </section>
     {% endif %}

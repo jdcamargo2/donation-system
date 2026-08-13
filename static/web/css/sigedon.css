@@ -56,8 +56,7 @@ body {
     flex-direction: column;
     height: 100vh;
     left: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
+    overflow: hidden;
     padding: 1rem 0.75rem;
     position: fixed;
     top: 0;
@@ -69,6 +68,7 @@ body {
 .sigedon-sidebar-header {
     align-items: center;
     display: flex;
+    flex: 0 0 auto;
     gap: 0.65rem;
     justify-content: space-between;
     margin-bottom: 1rem;
@@ -91,6 +91,31 @@ body {
 
 .sigedon-brand:hover {
     color: var(--ops-primary);
+}
+
+.sigedon-brand:focus-visible {
+    outline: 2px solid var(--ops-primary);
+    outline-offset: 2px;
+    border-radius: 0.8rem;
+}
+
+.sigedon-brand-logo {
+    display: block;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.sigedon-brand-logo-expanded {
+    max-width: 150px;
+    max-height: 40px;
+}
+
+.sigedon-brand-logo-collapsed {
+    display: none;
+    max-width: 40px;
+    max-height: 40px;
 }
 
 .sigedon-brand-mark {
@@ -149,6 +174,8 @@ body.sidebar-collapsed .sigedon-collapse-button i {
     flex-direction: column;
     gap: 0.3rem;
     min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .sigedon-nav-link {
@@ -285,6 +312,14 @@ body.sidebar-collapsed .sigedon-collapse-button i {
 .sidebar-collapsed .sigedon-brand {
     flex: 0 0 auto;
     justify-content: flex-start;
+}
+
+.sidebar-collapsed .sigedon-brand-logo-expanded {
+    display: none;
+}
+
+.sidebar-collapsed .sigedon-brand-logo-collapsed {
+    display: block;
 }
 
 .sidebar-collapsed .sigedon-collapse-button {
@@ -424,6 +459,21 @@ body.sidebar-collapsed .sigedon-collapse-button i {
     font-weight: 700;
 }
 
+.ops-expense-request-queue-list {
+    margin: 0;
+}
+
+.ops-expense-request-queue-row .ops-row-actions {
+    flex-shrink: 0;
+}
+
+@media (max-width: 767.98px) {
+    .ops-expense-request-queue-row .ops-row-actions,
+    .ops-expense-request-queue-row .ops-row-actions .btn {
+        width: 100%;
+    }
+}
+
 .list-group {
     border-radius: 1rem;
     box-shadow: var(--ops-shadow-soft);
@@ -508,6 +558,83 @@ body.sidebar-collapsed .sigedon-collapse-button i {
     font-weight: 850;
     line-height: 1.15;
     margin-top: 0.45rem;
+}
+
+.ops-metric-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.ops-metric-link:hover,
+.ops-metric-link:focus-visible {
+    color: var(--ops-primary);
+    text-decoration: underline;
+}
+
+.ops-metric-helper {
+    color: var(--ops-muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
+    margin-top: 0.55rem;
+}
+
+.ops-ratio-grid {
+    align-items: stretch;
+}
+
+.ops-ratio-card .ops-ratio-percentage {
+    color: var(--ops-text);
+    font-size: clamp(1.35rem, 2vw, 1.75rem);
+    font-variant-numeric: tabular-nums;
+    font-weight: 850;
+    line-height: 1.15;
+    margin-top: 0.4rem;
+}
+
+.ops-ratio-amounts {
+    color: var(--ops-muted);
+    font-size: 0.92rem;
+    margin-top: 0.35rem;
+}
+
+.ops-financial-progress {
+    background: #e2e8f0;
+    border-radius: 999px;
+    display: block;
+    height: 0.55rem;
+    margin-top: 0.85rem;
+    overflow: hidden;
+    width: 100%;
+}
+
+.ops-financial-progress > span {
+    background: var(--ops-primary);
+    display: block;
+    height: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.ops-financial-progress-compact {
+    height: 0.4rem;
+    margin-top: 0.35rem;
+}
+
+.ops-project-financial-identity {
+    display: inline-block;
+    max-width: 18rem;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.ops-table-card .ops-project-financial-table {
+    min-width: 860px;
+}
+
+.ops-section-subtitle {
+    color: var(--ops-muted);
+    font-weight: 750;
+    margin-bottom: 0.75rem;
 }
 
 .ops-activity-list .list-group-item {
@@ -810,6 +937,7 @@ body.sidebar-collapsed .sigedon-collapse-button i {
 }
 
 .ops-field:has(.ops-textarea),
+.ops-form-grid .ops-field:has(input[type="file"]),
 .ops-field-full {
     grid-column: 1 / -1;
 }
@@ -850,6 +978,116 @@ body.sidebar-collapsed .sigedon-collapse-button i {
     justify-content: flex-end;
     margin-top: 0.9rem;
     padding-top: 0.9rem;
+}
+
+.ops-form-grid .ops-field:has(.ops-file-upload) {
+    grid-column: 1 / -1;
+}
+
+.ops-file-upload {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    min-width: 0;
+    width: 100%;
+}
+
+.ops-file-upload-preview:empty,
+.ops-file-upload-summary:empty {
+    display: none;
+}
+
+.ops-file-upload-preview {
+    border-top: 1px solid var(--ops-border);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.ops-file-upload-item {
+    align-items: center;
+    border-bottom: 1px solid var(--ops-border);
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding: 0.7rem 0;
+}
+
+.ops-file-upload-item:last-child {
+    border-bottom: 0;
+}
+
+.ops-file-upload-thumbnail {
+    align-items: center;
+    background: var(--ops-surface-soft);
+    border: 1px solid var(--ops-border);
+    border-radius: 0.55rem;
+    color: var(--ops-muted);
+    display: flex;
+    flex: 0 0 auto;
+    font-size: 1.15rem;
+    height: 2.75rem;
+    justify-content: center;
+    overflow: hidden;
+    width: 2.75rem;
+}
+
+.ops-file-upload-thumbnail img {
+    display: block;
+    height: 100%;
+    object-fit: cover;
+    width: 100%;
+}
+
+.ops-file-upload-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.ops-file-upload-name {
+    color: var(--ops-text);
+    font-size: 0.92rem;
+    font-weight: 600;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.ops-file-upload-details {
+    color: var(--ops-muted);
+    font-size: 0.78rem;
+    line-height: 1.3;
+}
+
+.ops-file-upload-remove {
+    align-items: center;
+    display: inline-flex;
+    flex: 0 0 auto;
+    justify-content: center;
+    min-height: 2.5rem;
+    min-width: 2.5rem;
+}
+
+.ops-file-upload-summary {
+    color: var(--ops-muted);
+    font-size: 0.82rem;
+    margin: 0;
+}
+
+@media (max-width: 575.98px) {
+    .ops-file-upload-item {
+        align-items: start;
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .ops-file-upload-remove {
+        grid-column: 2;
+        justify-self: start;
+    }
 }
 
 .required-mark {
@@ -1520,6 +1758,16 @@ input[type="number"] {
     line-height: 1.2;
 }
 
+.ops-expense-request-financial-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 991.98px) {
+    .ops-expense-request-financial-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 .ops-allocation-detail-body {
     background: var(--ops-surface);
     border: 1px solid var(--ops-border);
@@ -1803,7 +2051,7 @@ input[type="number"] {
 .ops-project-financial-metrics {
     display: grid;
     gap: 0;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     margin-top: 0.9rem;
 }
 
@@ -2466,7 +2714,8 @@ input[type="number"] {
 }
 
 .ops-audit-action-executed,
-.ops-audit-action-closed {
+.ops-audit-action-closed,
+.ops-audit-action-unpublished {
     background: #fff6e5;
     border-color: #f0d5a0;
     color: #9a6700;

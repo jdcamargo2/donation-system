@@ -48,7 +48,12 @@ from ..models import (
     ProjectUpdateRemediationAttachment,
 )
 
-from ..selectors import with_project_update_attachment_count
+from ..selectors import (
+    decidable_project_update_reviews_for_user,
+    resolvable_project_update_remediations_for_user,
+    reviewable_project_updates_for_user,
+    with_project_update_attachment_count,
+)
 
 from ..services import (
     create_project_update_review,
@@ -59,25 +64,31 @@ from ..services import (
     delete_project_update_remediation_attachment,
     submit_project_update_remediation,
     resolve_project_update_remediation,
+    ensure_project_allows_operational_mutation,
     ensure_project_update_is_deletable,
     ensure_project_update_is_editable,
+    OperationalEntityFinalizedError,
     ProjectUpdateImmutableError,
     ProjectUpdateReviewError,
     ProjectUpdateReviewDecisionError,
     ProjectUpdateRemediationError,
-    add_project_update_attachment,
+    _create_project_update_attachments,
+    project_allows_operational_mutation,
     register_advance,
     publish_project_update,
+    publish_project_update_attachment,
+    unpublish_project_update_attachment,
     delete_project_update_attachment,
     update_project_update,
 )
+
+from ..file_access import build_protected_file_actions
 
 from .common import (
     DeleteAuditMixin,
     OperationsPermissionRequiredMixin,
     PaginatedListMixin,
     RouteContextMixin,
-    _protected_file_response,
     add_service_errors_to_form,
 )
 
@@ -120,6 +131,43 @@ class ProjectUpdateDetailView(OperationsPermissionRequiredMixin, RouteContextMix
             'committee_review__decision__remediation',
         ).prefetch_related('attachments')
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        mutations_allowed = project_allows_operational_mutation(self.object.project)
+        context['project_allows_operational_mutation'] = mutations_allowed
+        can_download = (
+            user.has_perm('operations.view_project')
+            and user.has_perm('operations.view_projectupdateattachment')
+        )
+        can_delete = (
+            mutations_allowed
+            and self.object.status == ProjectUpdate.Status.UNPUBLISHED
+            and user.has_perm('operations.delete_projectupdateattachment')
+        )
+        can_manage_attachment_publicity = (
+            mutations_allowed
+            and user.has_perm('operations.publish_projectupdate')
+        )
+        context['can_manage_attachment_publicity'] = can_manage_attachment_publicity
+        attachments = list(self.object.attachments.all())
+        for attachment in attachments:
+            attachment.file_actions = build_protected_file_actions(
+                file_field=attachment.file,
+                file_label=attachment.title or str(attachment),
+                uploaded_at=attachment.created_at,
+                can_download=can_download,
+                preview_url_name='project_update_attachment_preview',
+                download_url_name='project_update_attachment_download',
+                url_args=(self.object.project_id, self.object.pk, attachment.pk),
+                delete_url=reverse('project_update_attachment_delete', args=[attachment.pk])
+                if can_delete
+                else None,
+                can_delete=can_delete,
+            )
+        context['detail_attachments'] = attachments
+        return context
+
 
 class ProjectUpdateReviewCreateView(OperationsPermissionRequiredMixin, FormView):
     permission_required = 'operations.review_projectupdate'
@@ -127,12 +175,18 @@ class ProjectUpdateReviewCreateView(OperationsPermissionRequiredMixin, FormView)
     template_name = 'web/project_update_review_form.html'
 
     def dispatch(self, request, *args, **kwargs):
+        # PRE: review route targets a PUBLISHED advance without a committee review.
+        # POST: loads from reviewable_project_updates_for_user or 404; no mutation on GET.
+        # Intentional: stale/ineligible rows 404 (same as expense-request action routes)
+        # instead of 403 after an unscoped get_object_or_404.
         if request.user.is_authenticated and request.user.has_perm(self.permission_required):
-            self.project_update = get_object_or_404(ProjectUpdate, pk=kwargs['update_pk'])
-            if self.project_update.status != ProjectUpdate.Status.PUBLISHED:
-                raise PermissionDenied(_('Solo los avances publicados pueden recibir revisión documental.'))
-            if ProjectUpdateReview.objects.filter(project_update_id=self.project_update.pk).exists():
-                raise PermissionDenied(_('Este avance ya tiene una revisión documental registrada.'))
+            self.project_update = get_object_or_404(
+                reviewable_project_updates_for_user(request.user).select_related(
+                    'project',
+                    'reported_by',
+                ),
+                pk=kwargs['update_pk'],
+            )
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
@@ -174,12 +228,17 @@ class ProjectUpdateReviewDecisionCreateView(OperationsPermissionRequiredMixin, F
     template_name = 'web/project_update_review_decision_form.html'
 
     def dispatch(self, request, *args, **kwargs):
+        # PRE: decision route targets a review of a PUBLISHED advance without a decision.
+        # POST: loads from decidable_project_update_reviews_for_user or 404; no mutation on GET.
+        # Intentional: stale/ineligible rows 404 (same as expense-request action routes).
         if request.user.is_authenticated and request.user.has_perm(self.permission_required):
-            self.review = get_object_or_404(ProjectUpdateReview, pk=kwargs['review_pk'])
-            if self.review.project_update.status != ProjectUpdate.Status.PUBLISHED:
-                raise PermissionDenied(_('La revisión debe pertenecer a un avance publicado.'))
-            if ProjectUpdateReviewDecision.objects.filter(review_id=self.review.pk).exists():
-                raise PermissionDenied(_('Esta revisión ya tiene un resultado institucional registrado.'))
+            self.review = get_object_or_404(
+                decidable_project_update_reviews_for_user(request.user).select_related(
+                    'project_update__project',
+                    'reviewed_by',
+                ),
+                pk=kwargs['review_pk'],
+            )
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
@@ -241,7 +300,46 @@ class ProjectUpdateRemediationDetailView(OperationsPermissionRequiredMixin, Deta
     template_name = 'web/project_update_remediation_detail.html'
 
     def get_queryset(self):
-        return ProjectUpdateRemediation.objects.select_related('decision__review__project_update', 'created_by', 'submitted_by', 'resolved_by').prefetch_related('attachments')
+        return ProjectUpdateRemediation.objects.select_related(
+            'decision__review__project_update__project',
+            'created_by',
+            'submitted_by',
+            'resolved_by',
+        ).prefetch_related('attachments')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        mutations_allowed = project_allows_operational_mutation(
+            self.object.decision.review.project_update.project
+        )
+        context['project_allows_operational_mutation'] = mutations_allowed
+        can_download = user.has_perm('operations.view_projectupdateremediationattachment')
+        can_delete = (
+            mutations_allowed
+            and self.object.status == ProjectUpdateRemediation.Status.DRAFT
+            and user.has_perm('operations.delete_projectupdateremediationattachment')
+        )
+        attachments = list(self.object.attachments.all())
+        for attachment in attachments:
+            attachment.file_actions = build_protected_file_actions(
+                file_field=attachment.file,
+                file_label=attachment.title or str(attachment),
+                uploaded_at=attachment.created_at,
+                can_download=can_download,
+                preview_url_name='project_update_remediation_attachment_preview',
+                download_url_name='project_update_remediation_attachment_download',
+                url_args=(self.object.pk, attachment.pk),
+                delete_url=reverse(
+                    'project_update_remediation_attachment_delete',
+                    args=[attachment.pk],
+                )
+                if can_delete
+                else None,
+                can_delete=can_delete,
+            )
+        context['detail_attachments'] = attachments
+        return context
 
 
 class ProjectUpdateRemediationUpdateView(OperationsPermissionRequiredMixin, FormView):
@@ -281,7 +379,18 @@ class ProjectUpdateRemediationResolveView(OperationsPermissionRequiredMixin, For
     template_name = 'web/project_update_remediation_resolve_form.html'
 
     def dispatch(self, request, *args, **kwargs):
-        self.remediation = get_object_or_404(ProjectUpdateRemediation, pk=kwargs['pk'])
+        # PRE: resolve route targets a SUBMITTED remediation under a PUBLISHED update.
+        # POST: loads from resolvable_project_update_remediations_for_user or 404.
+        # Intentional: DRAFT/terminal remediations 404 before the form (service still
+        # remains authoritative on POST race conditions).
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            self.remediation = get_object_or_404(
+                resolvable_project_update_remediations_for_user(request.user).select_related(
+                    'decision__review__project_update__project',
+                    'submitted_by',
+                ),
+                pk=kwargs['pk'],
+            )
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
@@ -320,14 +429,6 @@ class ProjectUpdateRemediationAttachmentDeleteView(OperationsPermissionRequiredM
         return HttpResponseRedirect(reverse('project_update_remediation_detail', args=[remediation_id]))
 
 
-class ProjectUpdateRemediationAttachmentDownloadView(OperationsPermissionRequiredMixin, DetailView):
-    permission_required = 'operations.view_projectupdateremediationattachment'
-    model = ProjectUpdateRemediationAttachment
-
-    def get(self, request, *args, **kwargs):
-        return _protected_file_response(self.get_object().file, missing_message=_('El adjunto de remediación no está disponible.'))
-
-
 class ProjectUpdateCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):
     permission_required = 'operations.add_projectupdate'
     model = ProjectUpdate
@@ -337,13 +438,17 @@ class ProjectUpdateCreateView(OperationsPermissionRequiredMixin, RouteContextMix
     route_prefix = 'project_update'
     page_title = _('Nuevo avance de proyecto')
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
     def form_valid(self, form):
         self.object = register_advance(
             project_id=form.cleaned_data['project'].pk,
             title=form.cleaned_data['title'],
             description=form.cleaned_data['description'],
             update_date=form.cleaned_data['update_date'],
-            progress_percentage=form.cleaned_data['progress_percentage'],
             attachments=form.cleaned_data.get('attachments', ()),
             created_by=self.request.user if self.request.user.is_authenticated else None,
             reported_by=form.cleaned_data['reported_by'],
@@ -361,8 +466,20 @@ class ProjectUpdateCreateForProjectView(OperationsPermissionRequiredMixin, Route
     page_title = _('Registrar avance')
 
     def dispatch(self, request, *args, **kwargs):
+        # PRE: route targets a project and permission handling remains authoritative.
+        # POST: CLOSED projects return 403 before form binding or advance creation.
         self.project = get_object_or_404(Project, pk=kwargs['project_pk'])
+        if request.user.is_authenticated and request.user.has_perm(self.permission_required):
+            try:
+                ensure_project_allows_operational_mutation(self.project)
+            except OperationalEntityFinalizedError as exc:
+                raise PermissionDenied(exc.messages[0]) from exc
         return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -371,16 +488,19 @@ class ProjectUpdateCreateForProjectView(OperationsPermissionRequiredMixin, Route
         return context
 
     def form_valid(self, form):
-        self.object = register_advance(
-            project_id=self.project.pk,
-            title=form.cleaned_data['title'],
-            description=form.cleaned_data['description'],
-            update_date=form.cleaned_data['update_date'],
-            progress_percentage=form.cleaned_data['progress_percentage'],
-            attachments=form.cleaned_data.get('attachments', ()),
-            created_by=self.request.user if self.request.user.is_authenticated else None,
-            reported_by=form.cleaned_data['reported_by'],
-        )
+        try:
+            self.object = register_advance(
+                project_id=self.project.pk,
+                title=form.cleaned_data['title'],
+                description=form.cleaned_data['description'],
+                update_date=form.cleaned_data['update_date'],
+                attachments=form.cleaned_data.get('attachments', ()),
+                created_by=self.request.user if self.request.user.is_authenticated else None,
+                reported_by=form.cleaned_data['reported_by'],
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
         messages.success(self.request, _('Avance de proyecto registrado.'))
         return HttpResponseRedirect(self.get_success_url())
 
@@ -399,7 +519,7 @@ class ProjectUpdateUpdateView(OperationsPermissionRequiredMixin, RouteContextMix
 
     def dispatch(self, request, *args, **kwargs):
         # PRE: request targets ordinary editing and permission handling remains authoritative.
-        # POST: permits DRAFT advances only; published advances return 403.
+        # POST: permits UNPUBLISHED advances only; published advances return 403.
         if request.user.is_authenticated and request.user.has_perm(self.permission_required):
             project_update = get_object_or_404(ProjectUpdate, pk=kwargs['pk'])
             try:
@@ -408,9 +528,14 @@ class ProjectUpdateUpdateView(OperationsPermissionRequiredMixin, RouteContextMix
                 raise PermissionDenied(exc.messages[0]) from exc
         return super().dispatch(request, *args, **kwargs)
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
     def form_valid(self, form):
         """
-        PRE: form is valid and the route targets a DRAFT advance.
+        PRE: form is valid and the route targets an UNPUBLISHED advance.
         POST: updates through the locked domain service or redisplays domain errors.
         """
         try:
@@ -420,7 +545,6 @@ class ProjectUpdateUpdateView(OperationsPermissionRequiredMixin, RouteContextMix
                 title=form.cleaned_data['title'],
                 description=form.cleaned_data['description'],
                 update_date=form.cleaned_data['update_date'],
-                progress_percentage=form.cleaned_data['progress_percentage'],
                 reported_by=form.cleaned_data['reported_by'],
                 actor=self.request.user,
                 attachments=form.cleaned_data.get('attachments', ()),
@@ -469,9 +593,8 @@ class ProjectUpdatePublishView(OperationsPermissionRequiredMixin, View):
         return HttpResponseRedirect(reverse('project_update_detail', args=[project_update.pk]))
 
 
-class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, CreateView):
+class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, FormView):
     permission_required = 'operations.add_projectupdateattachment'
-    model = ProjectUpdateAttachment
     form_class = ProjectUpdateAttachmentForm
     template_name = 'web/project_update_attachment_form.html'
 
@@ -485,12 +608,13 @@ class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, Creat
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
+        # PRE: form.cleaned_data['files'] is a validated non-empty upload list; parent update is UNPUBLISHED.
+        # POST: persists one attachment per file via the domain helper, then redirects once to detail.
         try:
-            add_project_update_attachment(
-                update_id=self.project_update.pk,
-                file=form.cleaned_data['file'],
-                title=form.cleaned_data.get('title', ''),
-                actor=self.request.user,
+            _create_project_update_attachments(
+                self.project_update,
+                form.cleaned_data['files'],
+                self.request.user,
             )
         except ValidationError as exc:
             add_service_errors_to_form(form, exc)
@@ -498,25 +622,12 @@ class ProjectUpdateAttachmentCreateView(OperationsPermissionRequiredMixin, Creat
         return HttpResponseRedirect(reverse('project_update_detail', args=[self.project_update.pk]))
 
 
-class ProjectUpdateAttachmentDownloadView(OperationsPermissionRequiredMixin, DetailView):
-    permission_required = 'operations.view_projectupdateattachment'
-    model = ProjectUpdateAttachment
-
-    def get(self, request, *args, **kwargs):
-        # PRE: el usuario tiene permiso de lectura y pk identifica un adjunto.
-        # POST: descarga el archivo sin revelar su ruta de almacenamiento.
-        return _protected_file_response(
-            self.get_object().file,
-            missing_message=_('El adjunto del avance no está disponible.'),
-        )
-
-
 class ProjectUpdateAttachmentDeleteView(OperationsPermissionRequiredMixin, View):
     permission_required = 'operations.delete_projectupdateattachment'
 
     def post(self, request, *args, **kwargs):
         # PRE: el usuario tiene permiso y pk identifica un adjunto.
-        # POST: elimina mediante el servicio solo si el avance padre es DRAFT.
+        # POST: elimina mediante el servicio solo si el avance padre es UNPUBLISHED.
         try:
             update_id = delete_project_update_attachment(
                 attachment_id=kwargs['pk'], actor=request.user
@@ -524,3 +635,49 @@ class ProjectUpdateAttachmentDeleteView(OperationsPermissionRequiredMixin, View)
         except ValidationError as exc:
             raise PermissionDenied(exc.messages[0]) from exc
         return HttpResponseRedirect(reverse('project_update_detail', args=[update_id]))
+
+
+class ProjectUpdateAttachmentPublishView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.publish_projectupdate'
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: user has publish_projectupdate; pk identifies an attachment on an open project.
+        POST: marks the attachment explicitly public via the domain service, or 403.
+        """
+        try:
+            attachment = publish_project_update_attachment(
+                attachment_id=kwargs['pk'], actor=request.user
+            )
+        except ValidationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        messages.success(
+            request,
+            _('Documento marcado como público en el portal de transparencia.'),
+        )
+        return HttpResponseRedirect(
+            reverse('project_update_detail', args=[attachment.project_update_id])
+        )
+
+
+class ProjectUpdateAttachmentUnpublishView(OperationsPermissionRequiredMixin, View):
+    permission_required = 'operations.publish_projectupdate'
+
+    def post(self, request, *args, **kwargs):
+        """
+        PRE: user has publish_projectupdate; pk identifies a public attachment on an open project.
+        POST: clears explicit publicity without deleting the file, or 403.
+        """
+        try:
+            attachment = unpublish_project_update_attachment(
+                attachment_id=kwargs['pk'], actor=request.user
+            )
+        except ValidationError as exc:
+            raise PermissionDenied(exc.messages[0]) from exc
+        messages.success(
+            request,
+            _('Documento retirado del portal de transparencia.'),
+        )
+        return HttpResponseRedirect(
+            reverse('project_update_detail', args=[attachment.project_update_id])
+        )

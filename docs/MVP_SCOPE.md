@@ -62,21 +62,90 @@ Permite registrar:
 * ubicación;
 * presupuesto estimado;
 * fechas;
-* estado;
+* estado operativo;
+* visibilidad pública (`is_public`);
 * documentos;
 * avances;
 * resumen financiero;
 * levantamientos Kobo asociados.
 
+Estados operativos:
+
+```text
+ACTIVE
+CLOSED
+```
+
+Todo proyecto nuevo se crea automáticamente como `ACTIVE` y privado
+(`is_public=False`). El estado no es editable manualmente. No existen estados
+`PLANNED`, `SUSPENDED` ni `ANNULLED` para proyecto, ni flujos de activación,
+suspensión, reactivación, anulación o reapertura.
+
+La única transición es `ACTIVE` → `CLOSED`, mediante «Terminar proyecto»
+(`finish_project()`). Terminar es irreversible, fuerza `is_public=False` y
+registra metadatos terminales y auditoría de cierre.
+
+Publicación:
+
+* `is_public` es independiente del estado operativo;
+* publicar y retirar del portal son acciones explícitas y auditadas;
+* requieren el permiso `operations.manage_project_publication`;
+* la visibilidad pública exige `status=ACTIVE` e `is_public=True`.
+
+Los proyectos no pueden eliminarse por la UI operativa, URLs, Django Admin ni
+ORM de aplicación. La anulación sigue aplicada a donaciones, asignaciones y
+gastos; no a proyectos.
+
+### 3.3a. Solicitudes de gasto
+
+Una solicitud de gasto (`ExpenseRequest`) es el paso gobernado entre asignación
+y gasto. La cadena operativa del MVP es:
+
+```text
+Donation
+→ FundAllocation
+→ ExpenseRequest
+→ Expense
+```
+
+Todo gasto futuro debe originarse en una solicitud aprobada con fondos
+reservados. ER2A–ER2E completan reserva, cumplimiento, anulación administrativa
+e integración de anulación del gasto enlazado. ER3A añade listado/detalle con
+visibilidad por permisos efectivos. ER3B añade la UI del solicitante (crear
+desde proyecto; Admin también crea en global; editar/retirar solo propias
+pendientes). ER4A añade la UI de decisión del Comité (aprobar con reserva
+atómica; denegar con motivo obligatorio). ER4B añade la UI de anulación
+administrativa (Admin anula pendientes o aprobadas-reservadas con motivo
+obligatorio; la reserva se libera cuando aplica; el historial de decisión se
+preserva). ER5 añade la UI de cumplimiento: el Administrador registra el gasto
+final desde una solicitud `APPROVED_RESERVED` (soporte obligatorio; conversión
+exacta o parcial con liberación del remanente). La UI ordinaria de creación
+directa de `Expense` queda retirada; el listado/detalle de gastos históricos
+permanecen. ER6 añade adjuntos opcionales de solicitud con mutación solo por el
+solicitante original en `PENDING_DECISION`, congelados tras cualquier decisión o
+cierre, y preview/download protegidos (sin URLs directas de media ni exposición
+permanecen. ER6 añade adjuntos opcionales de solicitud con mutación solo por el
+solicitante original en `PENDING_DECISION`, congelados tras cualquier decisión o
+cierre, y preview/download protegidos (sin URLs directas de media ni exposición
+pública). ER7 cierra el módulo: atajos de dashboard por permisos efectivos
+(Admin: listado y aprobadas-reservadas; Operador: mis solicitudes; Comité:
+pendientes de decisión; Auditor: sin bloque de accesos rápidos), sin contadores
+agregados nuevos ni creación directa de `Expense`. ER1 estableció modelos,
+permisos, evidencias y eventos inmutables.
+
 Estados:
 
 ```text
-PLANNED
-ACTIVE
-SUSPENDED
-CLOSED
+PENDING_DECISION
+APPROVED_RESERVED
+DENIED
+WITHDRAWN
+FULFILLED
 ANNULLED
 ```
+
+No existe estado `DRAFT`. Los adjuntos de solicitud son opcionales, distintos de
+`SupportingDocument`, y se congelan al salir de `PENDING_DECISION`.
 
 ### 3.3. Donaciones
 
@@ -136,6 +205,18 @@ La ejecución parcial o completa se calcula automáticamente.
 ### 3.5. Gastos
 
 Un gasto representa una ejecución monetaria previamente autorizada fuera del sistema.
+En la cadena gobernada, todo gasto futuro debe proceder de una `ExpenseRequest`
+aprobada y reservada. `create_expense()` público rechaza la creación directa;
+el camino canónico es `fulfill_expense_request` (UI ER5: `expense_request_fulfill`).
+La UI ordinaria de creación directa de gasto está retirada; listado y detalle de
+gastos históricos permanecen. `Expense` conserva únicamente:
+
+```text
+REGISTERED
+ANNULLED
+```
+
+No se introducen estados de aprobación o pendiente en `Expense`.
 
 Incluye:
 
@@ -159,14 +240,15 @@ REGISTERED
 ANNULLED
 ```
 
-El MVP no incluye aprobación multinivel de gastos.
+El registro de gasto permanece como ejecución contable; la decisión de aprobación
+vive en `ExpenseRequest`, no en `Expense`.
 
 ### 3.6. Avances
 
 Flujo del avance:
 
 ```text
-DRAFT
+UNPUBLISHED
 → PUBLISHED
 ```
 
@@ -176,13 +258,18 @@ Incluye:
 * título;
 * descripción;
 * fecha real;
-* porcentaje de progreso;
 * creador técnico;
 * persona responsable del contenido del avance;
 * evidencias;
 * publicación.
 
-Un avance publicado es inmutable.
+Un avance se registra inicialmente como **No publicado** (`UNPUBLISHED`): visible
+internamente, editable por usuarios autorizados, admite adjuntos y no aparece en
+el portal público. La publicación es una transición explícita; un avance
+publicado es inmutable, elegible para revisión y visible públicamente solo si el
+proyecto está activo y marcado como público.
+
+El progreso operativo del proyecto no se captura en el avance; se deriva de hitos verificables.
 
 ### 3.7. Revisión institucional
 
@@ -214,7 +301,8 @@ El MVP separa:
 * soportes financieros;
 * adjuntos Kobo.
 
-Los archivos privados se descargan mediante endpoints autorizados.
+Los archivos privados se previsualizan y descargan mediante endpoints autorizados
+(parent-scoped). No se exponen vía `FileField.url` ni montaje público de `MEDIA_ROOT`.
 
 ### 3.9. Auditoría
 
@@ -240,8 +328,8 @@ No se permite:
 
 Incluye:
 
-* proyectos activos;
-* avances publicados;
+* proyectos con `status=ACTIVE` e `is_public=True`;
+* avances publicados de esos proyectos;
 * métricas agregadas;
 * JSON público autorizado;
 * navegación pública.
@@ -273,10 +361,9 @@ Incluye:
 * recepción;
 * normalización;
 * asociación;
-* revisión;
-* importación;
-* rechazo;
-* restauración;
+* enrutamiento e importación automática;
+* hub global de incidencias;
+* historial e importaciones por proyecto;
 * reconciliación;
 * gestión de adjuntos.
 
@@ -296,14 +383,15 @@ Puede:
 * consultar avances;
 * registrar avances;
 * cargar adjuntos durante el registro;
-* consultar y registrar soportes autorizados.
+* consultar y registrar soportes autorizados;
+* gestionar remediaciones propias según el flujo.
 
 No puede:
 
 * publicar avances;
 * editar avances después del registro;
 * gestionar finanzas;
-* revisar en nombre del Comité.
+* revisar, decidir ni resolver en nombre del Comité.
 
 ### 4.3. Auditor externo
 
@@ -322,14 +410,20 @@ No puede modificar información.
 
 ### 4.4. Comité de proyectos
 
+Un único rol funcional. El mismo rol puede revisar, decidir y resolver
+remediaciones según el estado del flujo; no son roles separados.
+
 Puede:
 
 * consultar proyectos y avances;
 * consultar documentos y evidencias;
 * registrar una revisión;
-* registrar una decisión institucional.
+* registrar una decisión institucional;
+* resolver remediaciones cuando el flujo lo permita.
 
 No puede modificar el contenido original del avance.
+
+Los permisos exactos están en [Roles y permisos](ROLES_AND_PERMISSIONS.md).
 
 ### 4.5. Administración técnica de Kobo
 
@@ -376,6 +470,7 @@ Formatos:
 PRJ-000001
 DON-000001
 ASG-000001
+SGS-000001
 GAS-000001
 ```
 
@@ -389,7 +484,7 @@ Los códigos:
 
 ## 7. Acciones terminales
 
-Cerrar, anular o eliminar requiere:
+Cerrar, anular o eliminar (según la entidad) requiere:
 
 * solicitud `POST`;
 * permiso;
@@ -398,6 +493,10 @@ Cerrar, anular o eliminar requiere:
 * motivo, cuando corresponda;
 * auditoría;
 * bloqueo posterior, cuando aplique.
+
+Para `Project`, la única acción terminal operativa es terminar
+(`ACTIVE` → `CLOSED`). Un proyecto no se anula ni se elimina. Anular y eliminar
+siguen aplicando a otras entidades operativas cuando el dominio lo permite.
 
 ## 8. Eliminaciones protegidas
 
@@ -442,7 +541,7 @@ El MVP se considera cerrado cuando:
 * los archivos privados requieren autorización;
 * la auditoría es append-only;
 * los avances se registran y publican;
-* el Comité puede revisar y decidir;
+* el Comité de proyectos (un rol) puede revisar, decidir y resolver remediaciones;
 * el portal publica únicamente datos autorizados;
 * las fichas 1, 10 y 11 funcionan;
 * PostgreSQL está soportado;

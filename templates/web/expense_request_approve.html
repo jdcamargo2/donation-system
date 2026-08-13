@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% load operations_format %}
+
+{% block title %}{{ title }} - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Comité de proyectos</div>
+        <h1>{{ title }}</h1>
+        <p>Revise el resumen y confirme la reserva de fondos. La aprobación no registra un gasto.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Volver a la solicitud</a>
+</div>
+
+<div class="card border-0 ops-form-card">
+    <div class="card-body">
+        <div class="ops-expense-metadata-grid mb-4">
+            <div><span class="ops-detail-label">Solicitud</span><span>{{ expense_request.code }}</span></div>
+            <div>
+                <span class="ops-detail-label">Proyecto</span>
+                <span>{{ expense_request.fund_allocation.project.code }} · {{ expense_request.fund_allocation.project.name }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Categoría</span>
+                <span>{{ expense_request.fund_allocation.get_budget_category_display }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Monto solicitado</span>
+                <span class="ops-money text-nowrap">USD {{ approval_requested_amount|money_es }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Saldo disponible actual</span>
+                <span class="ops-money text-nowrap">USD {{ approval_available_balance|money_es }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Saldo estimado después</span>
+                <span class="ops-money text-nowrap">USD {{ approval_balance_after|money_es }}</span>
+            </div>
+        </div>
+
+        {% if approval_balance_insufficient %}
+            <div class="alert alert-danger" role="alert">
+                El saldo disponible actual no permite aprobar esta solicitud.
+            </div>
+        {% else %}
+            <div class="alert alert-warning" role="alert">
+                Al aprobar, se reservarán USD {{ approval_requested_amount|money_es }} en esta asignación.
+                El monto dejará de estar disponible para otros gastos hasta que el Administrador registre el gasto o anule la solicitud.
+                La aprobación no registra un gasto; el Administrador debe registrar el gasto final después.
+            </div>
+        {% endif %}
+
+        <form method="post" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <div class="ops-form-section">
+                <div class="ops-form-grid">
+                    {% for field in form %}
+                        {% if field.is_hidden %}
+                            {{ field }}
+                        {% else %}
+                            <div class="ops-form-field ops-field">
+                                {% include "web/includes/ops_form_field_label.html" with field=field %}
+                                {% include "web/includes/ops_form_field_control.html" with field=field %}
+                                {% if field.help_text %}
+                                    <div class="form-text">{{ field.help_text }}</div>
+                                {% endif %}
+                                {% if field.errors %}
+                                    <div id="{{ field.id_for_label }}_error" class="text-danger small" role="alert">{{ field.errors|striptags }}</div>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="ops-form-actions">
+                <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Volver a la solicitud</a>
+                {% if not approval_balance_insufficient %}
+                    <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

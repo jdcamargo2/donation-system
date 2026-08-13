@@ -13,8 +13,7 @@ from apps.operations.role_services import sync_operation_roles
 from apps.operations.roles import (
     ROLE_EXTERNAL_AUDITOR,
     ROLE_FIELD_OPERATOR,
-    ROLE_PROJECT_UPDATE_DECIDER,
-    ROLE_PROJECT_UPDATE_REVIEWER,
+    ROLE_PROJECT_COMMITTEE,
     ROLE_SIGEDON_ADMIN,
 )
 from apps.operations.services import (
@@ -33,11 +32,7 @@ class ProjectUpdateReviewDecisionTests(TestCase):
         self.committee_member = get_user_model().objects.create_user(
             username='committee-decision-maker', password='pass-12345'
         )
-        self.committee_member.groups.add(Group.objects.get(name=ROLE_PROJECT_UPDATE_DECIDER))
-        self.reviewer = get_user_model().objects.create_user(
-            username='committee-reviewer', password='pass-12345'
-        )
-        self.reviewer.groups.add(Group.objects.get(name=ROLE_PROJECT_UPDATE_REVIEWER))
+        self.committee_member.groups.add(Group.objects.get(name=ROLE_PROJECT_COMMITTEE))
         self.field_operator = get_user_model().objects.create_user(
             username='field-decision-operator', password='pass-12345'
         )
@@ -62,7 +57,7 @@ class ProjectUpdateReviewDecisionTests(TestCase):
         return create_project_update_review(
             update_id=published_update.pk,
             observations='Revisión documental registrada.',
-            actor=self.reviewer,
+            actor=self.committee_member,
         )
 
     def create_decision(self, review=None, outcome='conforming', rationale='El expediente documental está completo.'):
@@ -163,7 +158,7 @@ class ProjectUpdateReviewDecisionTests(TestCase):
         )
         self.assertEqual(
             self.client.get(reverse('project_update_review_decision_create', args=[review.pk])).status_code,
-            403,
+            404,
         )
 
     def test_users_without_decision_permission_cannot_create_it(self):
@@ -173,7 +168,7 @@ class ProjectUpdateReviewDecisionTests(TestCase):
         )
         administrator.groups.add(Group.objects.get(name=ROLE_SIGEDON_ADMIN))
 
-        for user in (administrator, self.reviewer, self.field_operator, self.auditor):
+        for user in (administrator, self.field_operator, self.auditor):
             with self.subTest(user=user.username):
                 self.client.force_login(user)
                 response = self.client.post(
@@ -182,6 +177,25 @@ class ProjectUpdateReviewDecisionTests(TestCase):
                 )
                 self.assertEqual(response.status_code, 403)
                 self.assertFalse(ProjectUpdateReviewDecision.objects.filter(review=review).exists())
+
+    def test_committee_cannot_decide_before_review_exists(self):
+        project_update = register_advance(
+            project_id=self.project.pk,
+            title='Avance sin revisión previa',
+            description='La decisión exige revisión previa.',
+            created_by=self.field_operator,
+            reported_by=self.field_operator,
+        )
+        published_update = publish_project_update(project_update.pk, self.field_operator)
+        self.client.force_login(self.committee_member)
+
+        response = self.client.get(
+            reverse('project_update_detail', args=[published_update.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse('project_update_review_create', args=[published_update.pk]))
+        self.assertNotContains(response, 'Registrar resultado')
 
     def test_user_without_decision_permission_cannot_distinguish_decision_state(self):
         undecided_review = self.create_review()
@@ -219,13 +233,18 @@ class ProjectUpdateReviewDecisionTests(TestCase):
         with self.assertRaises(NoReverseMatch):
             reverse('project_update_review_decision_delete', args=[1])
 
-    def test_decider_permission_matrix_keeps_crud_mutations_disabled(self):
+    def test_committee_permission_matrix_keeps_crud_mutations_disabled(self):
+        self.assertTrue(self.committee_member.has_perm('operations.review_projectupdate'))
         self.assertTrue(self.committee_member.has_perm('operations.decide_projectupdate'))
+        self.assertTrue(self.committee_member.has_perm('operations.resolve_projectupdateremediation'))
         self.assertTrue(self.committee_member.has_perm('operations.view_projectupdatereviewdecision'))
-        self.assertFalse(self.committee_member.has_perm('operations.review_projectupdate'))
+        self.assertFalse(self.committee_member.has_perm('operations.add_projectupdatereview'))
+        self.assertFalse(self.committee_member.has_perm('operations.add_projectupdatereviewdecision'))
         self.assertFalse(self.committee_member.has_perm('operations.change_projectupdatereviewdecision'))
         self.assertFalse(self.committee_member.has_perm('operations.delete_projectupdatereviewdecision'))
         self.assertFalse(self.committee_member.has_perm('operations.change_projectupdate'))
+        self.assertFalse(self.committee_member.has_perm('operations.publish_projectupdate'))
+        self.assertFalse(self.committee_member.has_perm('operations.submit_projectupdateremediation'))
 
 
 class ProjectUpdateReviewDecisionAdminTests(TestCase):

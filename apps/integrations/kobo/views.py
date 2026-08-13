@@ -1,7 +1,9 @@
 import base64
 import binascii
 import json
+import logging
 import secrets
+import threading
 
 from django.conf import settings
 from django.contrib import messages
@@ -9,7 +11,7 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.core.files.storage import default_storage
 from django.core.exceptions import PermissionDenied, RequestDataTooBig, ValidationError
 from django.db.models import Count, Q
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -19,17 +21,7 @@ from apps.integrations.kobo.client import build_kobo_api_client
 from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.forms import (
     KoboAssetConfigurationForm,
-    KoboReviewForm,
-    KoboRejectionForm,
     get_compatible_asset_configuration,
-)
-from apps.integrations.kobo.mappings.ficha_10 import (
-    FICHA_10_FORM_ID,
-    FICHA_10_VERSION,
-)
-from apps.integrations.kobo.mappings.ficha_11 import (
-    FICHA_11_FORM_ID,
-    FICHA_11_VERSION,
 )
 from apps.integrations.kobo.models import (
     KoboAsset,
@@ -46,13 +38,8 @@ from apps.integrations.kobo.services import (
     activate_kobo_asset,
     configure_discovered_asset,
     converge_webhook_submission,
-    get_project_pending_submissions,
     get_project_submission_history,
-    import_kobo_submission,
-    review_submission,
-    reject_kobo_submission,
     receive_webhook_submission,
-    restore_kobo_submission_to_review,
     route_normalized_submission,
 )
 from apps.integrations.kobo.hub import (
@@ -76,9 +63,13 @@ from apps.integrations.kobo.hub import (
     sync_asset,
     sync_history,
 )
+from apps.integrations.kobo.presentation import presentation_label
 from apps.integrations.kobo.submission_presentation import (
     attachment_status_label,
+    build_imported_submission_detail_context,
     form_identity,
+    history_submission_detail_rows,
+    history_submission_detail_title,
     present_contact_fields,
     present_processing_events,
     present_submission_fields,
@@ -90,23 +81,19 @@ from apps.integrations.kobo.submission_presentation import (
 
 
 WEBHOOK_BASIC_REALM = "SIGEDON Kobo Webhook"
+logger = logging.getLogger("sigedon.kobo.webhook")
+
+_legacy_header_warned = False
+_legacy_header_warn_lock = threading.Lock()
 
 
-def _has_valid_webhook_credentials(request) -> bool:
+def _basic_webhook_credentials_valid(
+    request, *, configured_username: str, configured_secret: str
+) -> bool:
     """
-    PRE: request is an HTTP request directed to the Kobo webhook.
-    POST: returns True only for non-empty configured Basic credentials or the
-    legacy secret header, without logging or raising for malformed input.
+    PRE: configured_secret is non-empty; request may carry Authorization.
+    POST: True only for valid Basic auth matching configured username/secret.
     """
-    configured_username = settings.KOBO_WEBHOOK_USERNAME
-    configured_secret = settings.KOBO_WEBHOOK_SECRET
-    if not configured_secret:
-        return False
-
-    supplied_secret = request.headers.get("X-Kobo-Webhook-Secret", "")
-    if supplied_secret and secrets.compare_digest(supplied_secret, configured_secret):
-        return True
-
     authorization = request.headers.get("Authorization", "")
     try:
         scheme, encoded_credentials = authorization.split(None, 1)
@@ -126,6 +113,53 @@ def _has_valid_webhook_credentials(request) -> bool:
         and secrets.compare_digest(supplied_username, configured_username)
         and secrets.compare_digest(supplied_password, configured_secret)
     )
+
+
+def _warn_legacy_webhook_header_once() -> None:
+    """Emit one process-local deprecation warning without secret/header content."""
+    global _legacy_header_warned
+    with _legacy_header_warn_lock:
+        if _legacy_header_warned:
+            return
+        _legacy_header_warned = True
+    logger.warning(
+        "Kobo webhook accepted legacy X-Kobo-Webhook-Secret header; "
+        "Basic authentication is canonical. Disable "
+        "KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER after callers migrate."
+    )
+
+
+def _has_valid_webhook_credentials(request) -> bool:
+    """
+    PRE: request is an HTTP request directed to the Kobo webhook.
+    POST: returns True for valid Basic credentials (canonical). Legacy
+          X-Kobo-Webhook-Secret is accepted only when
+          KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER is explicitly True.
+          Never logs credential or header values.
+    """
+    configured_username = settings.KOBO_WEBHOOK_USERNAME
+    configured_secret = settings.KOBO_WEBHOOK_SECRET
+    if not configured_secret:
+        return False
+
+    if _basic_webhook_credentials_valid(
+        request,
+        configured_username=configured_username,
+        configured_secret=configured_secret,
+    ):
+        return True
+
+    allow_legacy = bool(
+        getattr(settings, "KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER", False)
+    )
+    if not allow_legacy:
+        return False
+
+    supplied_secret = request.headers.get("X-Kobo-Webhook-Secret", "")
+    if supplied_secret and secrets.compare_digest(supplied_secret, configured_secret):
+        _warn_legacy_webhook_header_once()
+        return True
+    return False
 
 
 def _webhook_unauthorized_response():
@@ -157,37 +191,59 @@ def _declared_webhook_payload_exceeds_limit(request) -> bool:
 @csrf_exempt
 @require_POST
 def webhook_submission(request):
-    # PRE: Kobo POSTs JSON with configured Basic credentials or legacy secret.
+    # PRE: Kobo POSTs JSON with configured Basic credentials (canonical);
+    #      legacy X-Kobo-Webhook-Secret only when explicitly enabled.
     # POST: safely stages and processes one configured asset submission idempotently.
     if not settings.KOBO_ENABLED:
+        logger.info("Kobo webhook rejected: integration disabled")
         raise Http404
     if not _has_valid_webhook_credentials(request):
+        # Fixed message only; never log credentials, headers, or body content.
+        logger.warning("Kobo webhook authentication failed")
         return _webhook_unauthorized_response()
     if request.content_type.split(";", 1)[0].lower() != "application/json":
+        logger.warning("Kobo webhook rejected: invalid content type")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     if _declared_webhook_payload_exceeds_limit(request):
+        logger.warning(
+            "Kobo webhook rejected: body exceeds limit max_bytes=%s",
+            settings.KOBO_WEBHOOK_MAX_BYTES,
+        )
         return _webhook_payload_too_large_response()
     try:
         body = request.body
     except RequestDataTooBig:
+        logger.warning(
+            "Kobo webhook rejected: body exceeds limit max_bytes=%s",
+            settings.KOBO_WEBHOOK_MAX_BYTES,
+        )
         return _webhook_payload_too_large_response()
     except ValueError:
+        logger.warning("Kobo webhook rejected: unreadable body")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     if len(body) > settings.KOBO_WEBHOOK_MAX_BYTES:
+        logger.warning(
+            "Kobo webhook rejected: body exceeds limit max_bytes=%s",
+            settings.KOBO_WEBHOOK_MAX_BYTES,
+        )
         return _webhook_payload_too_large_response()
     try:
         raw_payload = json.loads(body)
     except (TypeError, ValueError, UnicodeDecodeError):
+        logger.warning("Kobo webhook rejected: malformed JSON")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     if not isinstance(raw_payload, dict):
+        logger.warning("Kobo webhook rejected: JSON root is not an object")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     asset_uid = raw_payload.get("_xform_id_string")
     if not isinstance(asset_uid, str) or not asset_uid:
+        logger.warning("Kobo webhook rejected: missing required asset identifier")
         return JsonResponse({"ok": False, "error": "invalid_payload"}, status=400)
     try:
         asset = KoboAsset.objects.select_related("form_definition").get(asset_uid=asset_uid)
         submission, created = receive_webhook_submission(asset=asset, raw_payload=raw_payload)
     except (KoboAsset.DoesNotExist, KoboPayloadError):
+        logger.warning("Kobo webhook rejected: invalid submission or unknown asset")
         return JsonResponse({"ok": False, "error": "invalid_submission"}, status=400)
     try:
         convergence = converge_webhook_submission(
@@ -195,6 +251,10 @@ def webhook_submission(request):
             default_timezone=timezone.get_current_timezone(),
         )
     except Exception:
+        logger.exception(
+            "Kobo webhook unexpected failure submission_id=%s",
+            submission.pk,
+        )
         return JsonResponse({"ok": False, "error": "internal_error"}, status=500)
     durable_statuses = {
         KoboSubmission.Status.READY_FOR_REVIEW,
@@ -207,6 +267,12 @@ def webhook_submission(request):
         KoboSubmission.Status.PARTIALLY_IMPORTED,
     }
     if convergence.completed or convergence.final_status in durable_statuses:
+        logger.info(
+            "Kobo webhook staged submission_id=%s created=%s status=%s",
+            convergence.submission_id,
+            created,
+            convergence.final_status,
+        )
         return JsonResponse(
             {
                 "ok": True,
@@ -217,6 +283,11 @@ def webhook_submission(request):
             status=201 if created else 200,
         )
     # Still incomplete (e.g. RECEIVED/NORMALIZED): ask Kobo to retry.
+    logger.warning(
+        "Kobo webhook processing incomplete submission_id=%s status=%s",
+        convergence.submission_id,
+        convergence.final_status,
+    )
     return JsonResponse(
         {
             "ok": False,
@@ -274,172 +345,6 @@ def _can_view_sensitive_kobo_data(user) -> bool:
     return user.is_superuser or user.has_perm("kobo.change_kobosubmission")
 
 
-MICROPROJECT_CHOICE_LABELS = {
-    "component": {
-        "infrastructure": "Infraestructura",
-        "health_psychosocial": "Salud y atención psicosocial",
-        "training": "Formación",
-        "livelihoods": "Medios de vida",
-        "communication": "Comunicación",
-        "mixed": "Mixto",
-    },
-    "beneficiary_group": {
-        "youth": "Jóvenes",
-        "women": "Mujeres",
-        "adults": "Adultos",
-        "unemployed": "Personas desempleadas",
-        "entrepreneurs": "Emprendedores",
-        "parish_volunteers": "Voluntariado parroquial",
-        "mixed": "Mixto",
-        "other": "Otro",
-    },
-    "estimated_cost_range": {
-        "under_1000": "Menos de USD 1.000",
-        "1000_5000": "USD 1.000 a 5.000",
-        "5000_15000": "USD 5.000 a 15.000",
-        "15000_50000": "USD 15.000 a 50.000",
-        "over_50000": "Más de USD 50.000",
-        "unknown": "Por determinar",
-    },
-    "implementation_urgency": {
-        "immediate": "Inmediata",
-        "short_term": "Corto plazo",
-        "medium_term": "Mediano plazo",
-        "follow_up": "Seguimiento",
-        "unknown": "Por determinar",
-    },
-    "technical_viability": {
-        "high": "Alta",
-        "medium": "Media",
-        "low": "Baja",
-        "requires_design": "Requiere diseño",
-        "not_viable": "No viable",
-    },
-}
-
-
-def _project_submission_detail_rows(submission):
-    # PRE: submission is an imported Kobo record with normalized payload data.
-    # POST: returns labelled Ficha 10/11 fields only; territorial forms return none.
-    payload = submission.normalized_payload or {}
-    if (
-        submission.form_definition.form_id == FICHA_11_FORM_ID
-        and submission.form_definition.version == FICHA_11_VERSION
-    ):
-        return (
-            ("Código del Núcleo Vital / comunidad", payload.get("nucleo_code")),
-            ("Nivel de daño físico", payload.get("physical_damage_score")),
-            ("Familias afectadas", payload.get("affected_families_score")),
-            ("Vulnerabilidad social", payload.get("social_vulnerability_score")),
-            ("Interrupción de servicios básicos", payload.get("services_interruption_score")),
-            ("Pérdida de medios de vida", payload.get("livelihood_loss_score")),
-            ("Capacidad parroquial disponible", payload.get("parish_capacity_score")),
-            ("Accesibilidad territorial", payload.get("territorial_accessibility_score")),
-            ("Existencia de aliados", payload.get("allies_availability_score")),
-            ("Potencial de impacto rápido", payload.get("rapid_impact_score")),
-            ("Viabilidad financiera", payload.get("financial_viability_score")),
-            ("Puntaje total", payload.get("priority_total")),
-            ("Semáforo sugerido", payload.get("suggested_semaphore")),
-            ("Semáforo final validado", payload.get("final_semaphore")),
-            ("Prioridad final de intervención", payload.get("final_priority")),
-            ("Síntesis de decisión", payload.get("priority_summary")),
-            ("Microproyectos vinculados", payload.get("linked_microprojects")),
-        )
-    if (
-        submission.form_definition.form_id != FICHA_10_FORM_ID
-        or submission.form_definition.version != FICHA_10_VERSION
-    ):
-        return ()
-    beneficiary_groups = payload.get("beneficiary_group", ())
-    beneficiary_labels = ", ".join(
-        MICROPROJECT_CHOICE_LABELS["beneficiary_group"].get(value, value)
-        for value in beneficiary_groups
-    )
-    return (
-        ("Código del Núcleo Vital", payload.get("nucleo_code")),
-        ("Nombre del microproyecto", payload.get("microproject_name")),
-        (
-            "Componente principal",
-            MICROPROJECT_CHOICE_LABELS["component"].get(
-                payload.get("component"), payload.get("component")
-            ),
-        ),
-        ("Problema que atiende", payload.get("problem_summary")),
-        ("Objetivo específico", payload.get("specific_objective")),
-        ("Población beneficiaria principal", beneficiary_labels),
-        ("Actividades principales", payload.get("main_activities")),
-        (
-            "Rango de costo estimado",
-            MICROPROJECT_CHOICE_LABELS["estimated_cost_range"].get(
-                payload.get("estimated_cost_range"),
-                payload.get("estimated_cost_range"),
-            ),
-        ),
-        (
-            "Urgencia de implementación",
-            MICROPROJECT_CHOICE_LABELS["implementation_urgency"].get(
-                payload.get("implementation_urgency"),
-                payload.get("implementation_urgency"),
-            ),
-        ),
-        (
-            "Viabilidad técnica inicial",
-            MICROPROJECT_CHOICE_LABELS["technical_viability"].get(
-                payload.get("technical_viability"), payload.get("technical_viability")
-            ),
-        ),
-        ("Resultado esperado verificable", payload.get("expected_result")),
-    )
-
-
-def _project_submission_detail_title(submission) -> str:
-    # PRE: submission has its form definition loaded.
-    # POST: returns a form-specific internal detail title without exposing metadata.
-    if (
-        submission.form_definition.form_id == FICHA_11_FORM_ID
-        and submission.form_definition.version == FICHA_11_VERSION
-    ):
-        return "Matriz de priorización y semáforo"
-    if (
-        submission.form_definition.form_id == FICHA_10_FORM_ID
-        and submission.form_definition.version == FICHA_10_VERSION
-    ):
-        return "Microproyecto priorizado"
-    return "Proyecto y territorio"
-
-
-def _project_pending_submission_summary(submission) -> str:
-    """
-    PRE: submission is normalized and belongs to a supported Kobo form role.
-    POST: returns a concise non-sensitive summary for an internal review list.
-    """
-    payload = submission.normalized_payload or {}
-    if submission.asset.form_role == KoboAsset.FormRole.PRIORITIZED_MICROPROJECT:
-        return payload.get("microproject_name") or "Microproyecto sin nombre"
-    if submission.asset.form_role == KoboAsset.FormRole.PRIORITIZATION_MATRIX:
-        priority = payload.get("final_priority") or "sin prioridad final"
-        return f"Prioridad {priority}"
-    return (
-        payload.get("communities_covered")
-        or submission.primary_community
-        or "Sin resumen territorial"
-    )
-
-
-def _project_pending_submission_rows(project):
-    """
-    PRE: project is persisted and Kobo is enabled for its internal detail.
-    POST: returns display rows for exactly that project's pending submissions.
-    """
-    return tuple(
-        {
-            "submission": submission,
-            "summary": _project_pending_submission_summary(submission),
-        }
-        for submission in get_project_pending_submissions(project)
-    )
-
-
 def _project_submission_history_rows(project):
     """
     PRE: project is persisted and the internal history is being displayed.
@@ -485,7 +390,7 @@ def _project_submission_history_rows(project):
     return tuple(rows)
 
 
-def _detail_context(submission, user, *, review_form=None):
+def _detail_context(submission, user):
     # PRE: submission is loaded and user passed general view authorization.
     # POST: returns detail context for imported rows or automatic-import incidents.
     attachments = list(submission.attachments.all())
@@ -507,7 +412,6 @@ def _detail_context(submission, user, *, review_form=None):
         "attachments": attachments,
         "attachment_status_label": attachment_status_label,
         "has_project": submission.project_id is not None,
-        "review_form": review_form or KoboReviewForm(submission=submission),
         "can_change_submission": can_change_submission,
         "can_view_technical": can_view_technical,
         "can_view_raw_payload": can_view_raw_payload,
@@ -575,7 +479,10 @@ def submission_list(request):
         {
             "submissions": submissions,
             "filters": filters,
-            "status_choices": KoboSubmission.Status.choices,
+            "status_choices": [
+                (value, presentation_label(value) or label)
+                for value, label in KoboSubmission.Status.choices
+            ],
             "form_ids": KoboSubmission.objects.values_list(
                 "form_definition__form_id", flat=True
             ).distinct(),
@@ -592,17 +499,6 @@ def submission_detail(request, pk):
         "kobo/submission_detail.html",
         _detail_context(submission, request.user),
     )
-
-
-@require_POST
-@login_required
-@permission_required(
-    ("kobo.view_kobosubmission", "kobo.change_kobosubmission"),
-    raise_exception=True,
-)
-def review_submission_action(request, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
 
 
 @require_POST
@@ -665,7 +561,6 @@ def project_submission_detail(request, pk):
         project__isnull=False,
         asset__is_active=True,
     )
-    normalized_payload = submission.normalized_payload or {}
     can_view_sensitive = _can_view_sensitive_kobo_data(request.user)
     evidences = submission.attachments.filter(
         status=KoboAttachment.Status.DOWNLOADED
@@ -674,83 +569,33 @@ def project_submission_detail(request, pk):
         evidences = evidences.exclude(
             privacy_level=KoboAttachment.PrivacyLevel.PRIVATE
         )
+    from apps.operations.file_access import build_protected_file_actions
+
+    evidence_list = list(evidences)
+    for evidence in evidence_list:
+        evidence.file_actions = build_protected_file_actions(
+            file_field=evidence.file,
+            file_label=evidence.file.name.rsplit("/", 1)[-1] if evidence.file else "Evidencia",
+            uploaded_at=None,
+            can_download=True,
+            preview_url_name="kobo:project_submission_evidence",
+            download_url_name="kobo:project_submission_evidence_download",
+            url_args=(submission.pk, evidence.pk),
+        )
     return render(
         request,
         "kobo/project_submission_detail.html",
         {
             "submission": submission,
-            "normalized_payload": normalized_payload,
-            "evidences": evidences,
+            "project": submission.project,
+            "presentation": build_imported_submission_detail_context(
+                submission,
+                can_view_sensitive=can_view_sensitive,
+            ),
+            "evidence_items": evidence_list,
             "can_view_sensitive": can_view_sensitive,
-            "project_submission_detail_rows": _project_submission_detail_rows(
-                submission
-            ),
-            "project_submission_detail_title": _project_submission_detail_title(
-                submission
-            ),
-            "sensitive_data": {
-                "parish_delegate": normalized_payload.get("parish_delegate"),
-                "contact_phone": normalized_payload.get("contact_phone"),
-                "main_informant_role": normalized_payload.get("main_informant_role"),
-                "submitted_by": submission.raw_payload.get("_submitted_by"),
-                "device_id": submission.raw_payload.get("deviceid"),
-            },
         },
     )
-
-
-@login_required
-@permission_required("operations.view_project", raise_exception=True)
-def project_pending_submission_list(request, project_pk):
-    # PRE: request user can view operations projects and Kobo is enabled.
-    # POST: renders only the selected project's pending Kobo submissions.
-    _require_kobo_enabled()
-    from apps.operations.models import Project
-
-    project = get_object_or_404(Project, pk=project_pk)
-    return render(
-        request,
-        "kobo/project_pending_submission_list.html",
-        {
-            "project": project,
-            "pending_submission_rows": _project_pending_submission_rows(project),
-            "can_import_kobo_submissions": request.user.has_perm(
-                "operations.change_project"
-            ),
-        },
-    )
-
-
-@login_required
-@permission_required(
-    ("operations.view_project", "operations.change_project"),
-    raise_exception=True,
-)
-def project_pending_submission_review(request, project_pk, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
-
-
-@require_POST
-@login_required
-@permission_required(
-    ("operations.view_project", "operations.change_project"),
-    raise_exception=True,
-)
-def project_pending_submission_import(request, project_pk, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
-
-
-@require_POST
-@login_required
-@permission_required(
-    ("operations.view_project", "operations.change_project"),
-    raise_exception=True,
-)
-def project_pending_submission_reject(request, project_pk, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
 
 
 @login_required
@@ -768,9 +613,6 @@ def project_submission_history(request, project_pk):
         {
             "project": project,
             "history_rows": _project_submission_history_rows(project),
-            "can_restore_kobo_submissions": request.user.has_perm(
-                "operations.change_project"
-            ),
         },
     )
 
@@ -799,34 +641,57 @@ def project_submission_history_detail(request, project_pk, pk):
             "submission": submission,
             "normalized_payload": submission.normalized_payload or {},
             "attachments": submission.attachments.all(),
-            "project_submission_detail_rows": _project_submission_detail_rows(submission),
-            "project_submission_detail_title": _project_submission_detail_title(submission),
+            "project_submission_detail_rows": history_submission_detail_rows(submission),
+            "project_submission_detail_title": history_submission_detail_title(submission),
             "read_only": True,
             "back_to_history": True,
         },
     )
 
 
-@require_POST
 @login_required
-@permission_required(
-    ("operations.view_project", "operations.change_project"),
-    raise_exception=True,
-)
-def project_rejected_submission_restore(request, project_pk, pk):
-    # Legacy manual-review workflow. Not used by the automated Kobo pipeline.
-    raise Http404
+@permission_required("kobo.view_kobosubmission", raise_exception=True)
+def project_submission_evidence(request, pk, attachment_pk):
+    """
+    Protected inline preview for downloaded Kobo evidence.
+    Preserves existing URL name; authorization and privacy gates unchanged.
+    """
+    from apps.operations.file_access import DISPOSITION_INLINE, protected_file_response
+
+    attachment = _authorized_kobo_attachment(request, pk, attachment_pk)
+    return protected_file_response(
+        attachment.file,
+        disposition=DISPOSITION_INLINE,
+        missing_message="La evidencia solicitada no está disponible.",
+        request=request,
+    )
 
 
 @login_required
 @permission_required("kobo.view_kobosubmission", raise_exception=True)
-def project_submission_evidence(request, pk, attachment_pk):
+def project_submission_evidence_download(request, pk, attachment_pk):
+    """Protected attachment download for downloaded Kobo evidence."""
+    from apps.operations.file_access import (
+        DISPOSITION_ATTACHMENT,
+        protected_file_response,
+    )
+
+    attachment = _authorized_kobo_attachment(request, pk, attachment_pk)
+    return protected_file_response(
+        attachment.file,
+        disposition=DISPOSITION_ATTACHMENT,
+        missing_message="La evidencia solicitada no está disponible.",
+        request=request,
+    )
+
+
+def _authorized_kobo_attachment(request, submission_pk, attachment_pk):
     if not settings.KOBO_ENABLED:
         raise Http404
     attachment = get_object_or_404(
         KoboAttachment.objects.select_related("submission"),
         pk=attachment_pk,
-        submission_id=pk,
+        submission_id=submission_pk,
         submission__status=KoboSubmission.Status.IMPORTED,
         submission__project__isnull=False,
         submission__asset__is_active=True,
@@ -839,16 +704,7 @@ def project_submission_evidence(request, pk, attachment_pk):
         raise Http404
     if not attachment.file:
         raise Http404
-    safe_filename = attachment.file.name.rsplit("/", 1)[-1]
-    try:
-        stored_file = attachment.file.open("rb")
-    except (FileNotFoundError, OSError) as exc:
-        raise Http404 from exc
-    return FileResponse(
-        stored_file,
-        content_type=attachment.content_type or "application/octet-stream",
-        filename=safe_filename,
-    )
+    return attachment
 
 
 @login_required

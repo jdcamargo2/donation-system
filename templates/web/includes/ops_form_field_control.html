@@ -1,0 +1,20 @@
+{% load operations_format %}
+{% if field|widget_has_attr:"data-file-upload-preview" %}
+<div class="ops-file-upload" data-file-upload-preview>
+    {{ field }}
+    <div
+        class="ops-file-upload-preview"
+        data-file-upload-list
+        role="list"
+        aria-live="polite"
+        aria-relevant="additions removals text"
+    ></div>
+    <p
+        class="ops-file-upload-summary"
+        data-file-upload-summary
+        aria-live="polite"
+    ></p>
+</div>
+{% else %}
+{{ field }}
+{% endif %}

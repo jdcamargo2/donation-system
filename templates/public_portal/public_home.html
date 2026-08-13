@@ -7,7 +7,7 @@
 {% block content %}
 <section class="public-hero public-home-hero">
     <p class="public-eyebrow">Portal público de transparencia</p>
-    <h1>Conoce cómo se gestionan los recursos y proyectos comunitarios.</h1>
+    <h1>Sistema Integrado de Gestión de Donaciones</h1>
     <p class="public-lead">
         Consulta fondos recibidos, ejecución financiera y avances publicados de los proyectos activos en SIGEDON.
     </p>
@@ -22,6 +22,7 @@
         <div>
             <p class="public-eyebrow">Resumen público</p>
             <h2 id="public-metrics-heading">Cifras principales</h2>
+            <p class="public-metrics-scope">Las cifras financieras corresponden únicamente a proyectos activos y visibles en el portal.</p>
         </div>
     </div>
     <div class="public-grid public-primary-metrics">
@@ -30,10 +31,10 @@
         <div class="public-card-value">{{ summary.project_count }}</div>
         <p>Proyectos actualmente visibles en el portal.</p>
     </article>
-    <article class="public-metric">
-        <div class="public-card-label">Fondos recibidos</div>
-        <div class="public-card-value"><span class="public-money-value">{{ summary.total_received|money_es }} USD</span></div>
-        <p>Donaciones vinculadas a proyectos activos.</p>
+    <article class="public-metric" data-metric="linked-donations">
+        <div class="public-card-label">Donaciones vinculadas</div>
+        <div class="public-card-value"><span class="public-money-value">{{ summary.linked_received_donations_total|money_es }} USD</span></div>
+        <p>Monto total de las donaciones recibidas que financian al menos un proyecto visible.</p>
     </article>
     <article class="public-metric">
         <div class="public-card-label">Recursos ejecutados</div>
@@ -52,9 +53,9 @@
     <h2 id="financial-context-heading">Información financiera</h2>
     <dl>
         <div><dt>Asignado</dt><dd><span class="public-money-value">{{ summary.total_assigned|money_es }} USD</span></dd></div>
-        <div><dt>Disponible</dt><dd><span class="public-money-value">{{ summary.available_balance|money_es }} USD</span></dd></div>
+        <div data-metric="available-to-execute"><dt>Disponible por ejecutar</dt><dd><span class="public-money-value">{{ summary.available_balance|money_es }} USD</span></dd></div>
     </dl>
-    <p>Disponible representa la parte asignada que aún no se ha registrado como ejecutada.</p>
+    <p>Parte de los fondos asignados a proyectos visibles que aún no se ha registrado como ejecutada.</p>
 </section>
 
 <section class="public-section">

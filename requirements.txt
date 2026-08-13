@@ -1,8 +1,12 @@
 asgiref==3.11.1
 bandit==1.9.4
+boto3==1.40.0
 Django==6.0.6
 django-bootstrap5==26.2
 django-countries==9.0.0
+django-storages[s3]==1.14.6
+gunicorn==23.0.0
+packaging==26.2
 markdown-it-py==4.2.0
 mdurl==0.1.2
 psycopg==3.2.9
@@ -13,3 +17,4 @@ rich==15.0.0
 sqlparse==0.5.5
 stevedore==5.9.0
 typing_extensions==4.16.0
+whitenoise==6.12.0

@@ -2,17 +2,38 @@ import re
 from decimal import Decimal
 
 from django import forms
+from django.contrib.admin.widgets import FilteredSelectMultiple
+from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import AdminUserCreationForm, UserChangeForm
+from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
-from .choices import OPERATING_CURRENCY
+from .choices import (
+    EXPENSE_CATEGORY_CHOICES,
+    OPERATING_CURRENCY,
+    PAYMENT_METHOD_CHOICES,
+)
 from .models import (
     Donation, Expense, FundAllocation, Institution, Project, ProjectDocument,
     ProjectMilestone,
-    ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
+    ProjectUpdate, ProjectUpdateReview, ProjectUpdateReviewDecision,
     ProjectUpdateRemediation, SupportingDocument,
 )
-from .project_update_responsibles import eligible_project_update_reporters
+from .project_update_responsibles import (
+    actor_must_self_report_project_update,
+    eligible_project_update_reporters,
+)
+from .role_services import (
+    functional_role_groups,
+    get_user_functional_roles,
+    operation_role_names,
+    set_user_functional_role,
+)
+from .selectors import eligible_donation_donors
+from .upload_limits import attach_private_upload_validator
 
 
 SELECT_PLACEHOLDER = _('Seleccione una opción')
@@ -33,12 +54,72 @@ class MultipleFileInput(forms.ClearableFileInput):
     allow_multiple_selected = True
 
 
+class PrivateClearableFileInput(forms.ClearableFileInput):
+    """Clearable file widget that never renders storage .url links."""
+
+    def get_context(self, name, value, attrs):
+        context = super().get_context(name, value, attrs)
+        # Defense in depth: blank any storage URL before render.
+        context['widget']['url'] = ''
+        return context
+
+    def render(self, name, value, attrs=None, renderer=None):
+        """
+        PRE: value may be a FieldFile; attrs are optional HTML attributes.
+        POST: returns clearable markup with filename text only (no href/url).
+        """
+        from django.forms.utils import flatatt
+        from django.utils.html import format_html
+        from django.utils.safestring import mark_safe
+
+        context = self.get_context(name, value, attrs)
+        widget = context['widget']
+        parts = []
+        if widget.get('is_initial'):
+            parts.append(
+                format_html(
+                    '<p class="file-upload">{}: <strong>{}</strong>',
+                    widget.get('initial_text') or '',
+                    widget.get('value') or '',
+                )
+            )
+            if not widget.get('required'):
+                parts.append(
+                    format_html(
+                        '<span class="clearable-file-input">'
+                        '<input type="checkbox" name="{}" id="{}">'
+                        '<label for="{}">{}</label></span>',
+                        widget['checkbox_name'],
+                        widget['checkbox_id'],
+                        widget['checkbox_id'],
+                        widget['clear_checkbox_label'],
+                    )
+                )
+            parts.append(mark_safe('</p>'))
+        final_attrs = dict(widget.get('attrs') or {})
+        final_attrs['type'] = self.input_type
+        final_attrs['name'] = name
+        parts.append(format_html('<input{}>', flatatt(final_attrs)))
+        return mark_safe(''.join(str(part) for part in parts))
+
+
 class MultipleFileField(forms.FileField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        attach_private_upload_validator(self)
+
     def clean(self, data, initial=None):
         # PRE: data contiene cero o más archivos enviados por el navegador.
-        # POST: devuelve una lista cuyos archivos fueron validados individualmente.
+        # POST: devuelve una lista cuyos archivos fueron validados individualmente
+        #       (incluye el tope compartido SIGEDON_MAX_PRIVATE_UPLOAD_BYTES);
+        #       si required=True y no hay archivos, propaga el ValidationError de FileField.
         files = data if isinstance(data, (list, tuple)) else [data]
-        return [super(MultipleFileField, self).clean(item, initial) for item in files if item]
+        cleaned = [super(MultipleFileField, self).clean(item, initial) for item in files if item]
+        if cleaned:
+            return cleaned
+        if self.required:
+            super(MultipleFileField, self).clean(None, initial)
+        return []
 
 
 # PRE: value is a submitted monetary value or an empty value accepted by the field.
@@ -128,6 +209,11 @@ class TerminalActionConfirmationForm(forms.Form):
 
 
 class BootstrapFormMixin:
+    def _attach_private_upload_validators(self):
+        for field in self.fields.values():
+            if isinstance(field, forms.FileField):
+                attach_private_upload_validator(field)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for _field_name, field in self.fields.items():
@@ -152,6 +238,7 @@ class BootstrapFormMixin:
             field.widget.attrs['class'] = ' '.join(current_classes)
             if isinstance(field.widget, forms.Textarea):
                 field.widget.attrs['rows'] = 3
+        self._attach_private_upload_validators()
 
 
 class ProjectUpdateRemediationForm(BootstrapFormMixin, forms.ModelForm):
@@ -171,7 +258,13 @@ class ProjectUpdateRemediationResolveForm(BootstrapFormMixin, forms.Form):
 
 class ProjectUpdateRemediationAttachmentForm(BootstrapFormMixin, forms.Form):
     title = forms.CharField(required=False, max_length=200)
-    file = forms.FileField()
+    file = forms.FileField(
+        widget=forms.FileInput(
+            attrs={
+                'data-file-upload-preview': 'true',
+            }
+        ),
+    )
 
 
 class InstitutionForm(BootstrapFormMixin, forms.ModelForm):
@@ -200,6 +293,17 @@ class InstitutionForm(BootstrapFormMixin, forms.ModelForm):
             'status': _('Estado'),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # PrivateClearableFileInput keeps clear controls without storage .url.
+        self.fields['legal_document'].widget = PrivateClearableFileInput(
+            attrs={
+                'class': 'form-control',
+                'data-file-upload-preview': 'true',
+            }
+        )
+        attach_private_upload_validator(self.fields['legal_document'])
+
 
 class ProjectForm(BootstrapFormMixin, forms.ModelForm):
     estimated_budget = MoneyDecimalField(
@@ -214,7 +318,6 @@ class ProjectForm(BootstrapFormMixin, forms.ModelForm):
             'name',
             'description',
             'objective',
-            'responsible_unit',
             'location',
             'estimated_budget',
             'start_date',
@@ -224,7 +327,6 @@ class ProjectForm(BootstrapFormMixin, forms.ModelForm):
             'name': _('Nombre'),
             'description': _('Descripción'),
             'objective': _('Objetivo'),
-            'responsible_unit': _('Unidad responsable'),
             'location': _('Ubicación'),
             'estimated_budget': _('Presupuesto estimado'),
             'start_date': _('Fecha de inicio'),
@@ -260,17 +362,35 @@ class ProjectMilestoneForm(BootstrapFormMixin, forms.ModelForm):
 
 
 class ProjectUpdateResponsibleFormMixin:
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user=None, **kwargs):
+        # PRE: optional authenticated actor for role-aware reported_by presentation.
+        # POST: Operator sees a disabled self-reporter field; Admin/superuser keep the selector.
         super().__init__(*args, **kwargs)
-        self.fields['reported_by'].required = True
-        self.fields['reported_by'].queryset = eligible_project_update_reporters()
+        field = self.fields['reported_by']
+        field.label = _('Persona responsable del avance')
+        if actor_must_self_report_project_update(user):
+            field.queryset = get_user_model()._default_manager.filter(pk=user.pk)
+            field.initial = user
+            field.disabled = True
+            field.required = False
+            field.empty_label = None
+            field.help_text = _(
+                'El responsable se asigna automáticamente al usuario que registra el avance.'
+            )
+        else:
+            field.required = True
+            field.queryset = eligible_project_update_reporters()
 
 
 class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, forms.ModelForm):
     attachments = MultipleFileField(
         label=_('Adjuntos'),
         required=False,
-        widget=MultipleFileInput,
+        help_text=_('Puede seleccionar varios archivos a la vez.'),
+        widget=MultipleFileInput(attrs={
+            'data-file-upload': 'multiple',
+            'data-file-upload-preview': 'true',
+        }),
     )
 
     class Meta:
@@ -280,7 +400,6 @@ class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, f
             'title',
             'description',
             'update_date',
-            'progress_percentage',
             'reported_by',
         ]
         labels = {
@@ -288,17 +407,29 @@ class ProjectUpdateForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, f
             'title': _('Título'),
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
-            'progress_percentage': _('Porcentaje de progreso'),
             'reported_by': _('Persona responsable del avance'),
         }
         widgets = {'update_date': build_date_widget()}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        project_qs = Project.objects.filter(status=Project.Status.ACTIVE)
+        if self.instance.pk and self.instance.project_id:
+            project_qs = Project.objects.filter(
+                Q(status=Project.Status.ACTIVE) | Q(pk=self.instance.project_id)
+            )
+        self.fields['project'].queryset = project_qs
 
 
 class ProjectUpdateForProjectForm(ProjectUpdateResponsibleFormMixin, BootstrapFormMixin, forms.ModelForm):
     attachments = MultipleFileField(
         label=_('Adjuntos'),
         required=False,
-        widget=MultipleFileInput,
+        help_text=_('Puede seleccionar varios archivos a la vez.'),
+        widget=MultipleFileInput(attrs={
+            'data-file-upload': 'multiple',
+            'data-file-upload-preview': 'true',
+        }),
     )
 
     class Meta:
@@ -307,14 +438,12 @@ class ProjectUpdateForProjectForm(ProjectUpdateResponsibleFormMixin, BootstrapFo
             'title',
             'description',
             'update_date',
-            'progress_percentage',
             'reported_by',
         ]
         labels = {
             'title': _('Título'),
             'description': _('Descripción'),
             'update_date': _('Fecha del avance'),
-            'progress_percentage': _('Porcentaje de progreso'),
             'reported_by': _('Persona responsable del avance'),
         }
         widgets = {'update_date': build_date_widget()}
@@ -347,13 +476,24 @@ class ProjectDocumentForm(BootstrapFormMixin, forms.ModelForm):
             'file': _('Archivo'),
             'description': _('Descripción'),
         }
+        widgets = {
+            'file': forms.FileInput(
+                attrs={
+                    'data-file-upload-preview': 'true',
+                }
+            ),
+        }
 
 
-class ProjectUpdateAttachmentForm(BootstrapFormMixin, forms.ModelForm):
-    class Meta:
-        model = ProjectUpdateAttachment
-        fields = ('title', 'file')
-        labels = {'title': _('Título'), 'file': _('Archivo')}
+class ProjectUpdateAttachmentForm(BootstrapFormMixin, forms.Form):
+    files = MultipleFileField(
+        label=_('Archivos'),
+        help_text=_('Puede seleccionar varios archivos a la vez.'),
+        widget=MultipleFileInput(attrs={
+            'data-file-upload': 'multiple',
+            'data-file-upload-preview': 'true',
+        }),
+    )
 
 
 def format_usd_amount(value: Decimal) -> str:
@@ -422,6 +562,53 @@ class DonationForm(BootstrapFormMixin, forms.ModelForm):
             'received_date': build_date_widget(),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.instance.pk:
+            self.fields['donation_type'].initial = None
+            self.fields['donor'].queryset = eligible_donation_donors()
+        else:
+            self.fields['donor'].queryset = eligible_donation_donors(
+                current_donor_id=self.instance.donor_id,
+            )
+
+    def clean(self):
+        """
+        PRE: cleaned fields hold the proposed donation edit or prior field errors.
+        POST: rejects amount below non-annulled allocations and inactive donor replacement early.
+        """
+        cleaned_data = super().clean()
+        amount = cleaned_data.get('amount')
+        donor = cleaned_data.get('donor')
+
+        if self.instance.pk and amount is not None and 'amount' not in self.errors:
+            allocated_total = self.instance.total_assigned
+            if amount < allocated_total:
+                self.add_error(
+                    'amount',
+                    _(
+                        'El importe de la donación no puede ser inferior al total ya asignado '
+                        '(%(allocated_total)s USD).'
+                    )
+                    % {'allocated_total': allocated_total},
+                )
+
+        if donor is not None and donor.status != Institution.Status.ACTIVE:
+            if not self.instance.pk or self.instance.donor_id != donor.pk:
+                if not self.instance.pk:
+                    self.add_error(
+                        'donor',
+                        _('Solo instituciones activas pueden registrar nuevas donaciones.'),
+                    )
+                else:
+                    self.add_error(
+                        'donor',
+                        _('No se puede reemplazar el donante por una institución inactiva.'),
+                    )
+
+        return cleaned_data
+
+
 class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
     donation = DonationWithBalanceChoiceField(
         queryset=Donation.objects.none(),
@@ -447,7 +634,7 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
         labels = {
             'donation': _('Donación'),
             'project': _('Proyecto'),
-            'budget_category': _('Categoría presupuestaria'),
+            'budget_category': _('Categoría'),
             'amount': _('Monto'),
             'responsible_person': _('Responsable'),
             'allocation_date': _('Fecha de asignación'),
@@ -464,17 +651,21 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         current_donation_id = self.instance.donation_id if self.instance.pk else None
-        donations = Donation.objects.filter(currency=OPERATING_CURRENCY).exclude(
-            status=Donation.Status.ANNULLED
+        donations = Donation.objects.filter(
+            currency=OPERATING_CURRENCY,
+            status=Donation.Status.RECEIVED,
         )
         eligible_donation_ids = [
             donation.pk for donation in donations
             if donation.available_balance > 0 or donation.pk == current_donation_id
         ]
         self.fields['donation'].queryset = donations.filter(pk__in=eligible_donation_ids)
-        self.fields['project'].queryset = Project.objects.exclude(
-            status__in=(Project.Status.CLOSED, Project.Status.ANNULLED)
-        )
+        project_qs = Project.objects.filter(status=Project.Status.ACTIVE)
+        if self.instance.pk and self.instance.project_id:
+            project_qs = Project.objects.filter(
+                Q(status=Project.Status.ACTIVE) | Q(pk=self.instance.project_id)
+            )
+        self.fields['project'].queryset = project_qs
         selected_donation_id = self.data.get(self.add_prefix('donation')) or current_donation_id
         selected_donation = donations.filter(pk=selected_donation_id).first() if selected_donation_id else None
         if selected_donation:
@@ -512,6 +703,13 @@ class FundAllocationForm(BootstrapFormMixin, forms.ModelForm):
 
 
 class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
+    """
+    Edit-only form for existing Expense records.
+
+    New expenses are created exclusively through Expense Request fulfillment;
+    this form never calls create_expense().
+    """
+
     allocation = AllocationWithBalanceChoiceField(
         queryset=FundAllocation.objects.none(),
         label=_('Asignación'),
@@ -522,7 +720,15 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
         help_text=_('Ingrese el monto en USD. Ejemplo: 1.500,00'),
     )
     support_title = forms.CharField(required=False, max_length=160, label=_('Referencia o título del soporte'))
-    support_file = forms.FileField(required=False, label=_('Documento soporte'))
+    support_file = forms.FileField(
+        required=False,
+        label=_('Documento soporte'),
+        widget=forms.FileInput(
+            attrs={
+                'data-file-upload-preview': 'true',
+            }
+        ),
+    )
 
     class Meta:
         model = Expense
@@ -557,21 +763,28 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
 
     def clean(self):
         """
-        PRE: submitted expense data may create a record or edit an existing registered expense.
-        POST: requires protected support for every resulting expense and never exposes lifecycle state.
+        PRE: submitted data edits an existing registered expense with a bound instance.pk.
+        POST: requires protected support and applies UX balance hints; service remains authoritative.
         """
         cleaned_data = super().clean()
         support_file = cleaned_data.get('support_file')
-        has_existing_support = self.instance.pk and self.instance.supporting_documents.exists()
+        has_existing_support = self.instance.supporting_documents.exists()
         if not support_file and not has_existing_support:
             self.add_error('support_file', _('Falta el documento soporte obligatorio para verificar el gasto.'))
         allocation = cleaned_data.get('allocation')
         amount = cleaned_data.get('amount')
-        if allocation and allocation.status != FundAllocation.Status.ACTIVE:
+        is_current_allocation = (
+            allocation is not None and allocation.pk == self.instance.allocation_id
+        )
+        if (
+            allocation
+            and allocation.status != FundAllocation.Status.ACTIVE
+            and not is_current_allocation
+        ):
             self.add_error('allocation', _('La asignación seleccionada no está operativa y no acepta gastos.'))
         elif allocation and amount is not None:
             available = allocation.available_balance
-            if self.instance.pk and self.instance.allocation_id == allocation.pk:
+            if is_current_allocation:
                 available += self.instance.amount
             if available <= 0:
                 self.add_error('allocation', _('La asignación seleccionada no tiene saldo disponible.'))
@@ -583,21 +796,23 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        current_allocation_id = self.instance.allocation_id if self.instance.pk else None
-        allocations = FundAllocation.objects.filter(
-            donation__currency=OPERATING_CURRENCY,
-            status=FundAllocation.Status.ACTIVE,
+        if not getattr(self.instance, 'pk', None):
+            raise ValueError('ExpenseForm only supports existing Expense instances.')
+        from .selectors import operational_fund_allocation_choices
+
+        current_allocation_id = self.instance.allocation_id
+        self.fields['allocation'].queryset = operational_fund_allocation_choices(
+            include_allocation_id=current_allocation_id,
         )
-        eligible_allocation_ids = [
-            allocation.pk for allocation in allocations
-            if allocation.available_balance > 0 or allocation.pk == current_allocation_id
-        ]
-        self.fields['allocation'].queryset = allocations.filter(pk__in=eligible_allocation_ids)
         selected_allocation_id = self.data.get(self.add_prefix('allocation')) or current_allocation_id
-        selected_allocation = allocations.filter(pk=selected_allocation_id).first() if selected_allocation_id else None
+        selected_allocation = (
+            self.fields['allocation'].queryset.filter(pk=selected_allocation_id).first()
+            if selected_allocation_id
+            else None
+        )
         if selected_allocation:
             available = selected_allocation.available_balance
-            if self.instance.pk and self.instance.allocation_id == selected_allocation.pk:
+            if selected_allocation.pk == self.instance.allocation_id:
                 available += self.instance.amount
             self.fields['amount'].help_text = _(
                 'Ejecutado: %(executed)s. Máximo disponible para este gasto: %(available)s.'
@@ -613,37 +828,302 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
             'Indique la referencia, número o título que identifica el soporte.'
         )
         self.fields['support_file'].help_text = _(
-            'Obligatorio al crear el gasto. Adjunte el archivo que permite verificar la operación.'
+            'Obligatorio si el gasto aún no tiene soporte. Adjunte el archivo que permite verificar la operación.'
         )
 
-    # PRE: form.is_valid() has returned True and the expense can be saved.
-    # POST: returns an unsaved instance for commit=False, otherwise persists through transactional expense services.
+    # PRE: form.is_valid() has returned True for an existing editable expense.
+    # POST: returns an unsaved instance for commit=False, otherwise persists via update_expense only.
     def save(self, commit=True):
         expense = super().save(commit=False)
         if not commit:
             return expense
-        from .services import create_expense, update_expense
+        if not expense.pk:
+            raise ValueError('ExpenseForm only supports existing Expense instances.')
+        from .services import update_expense
 
-        service_data = {
-            'allocation': self.cleaned_data['allocation'],
-            'expense_date': self.cleaned_data['expense_date'],
-            'category': self.cleaned_data['category'],
-            'amount': self.cleaned_data['amount'],
-            'reason': self.cleaned_data['reason'],
-            'provider_or_recipient': self.cleaned_data['provider_or_recipient'],
-            'payment_method': self.cleaned_data['payment_method'],
-            'description': self.cleaned_data.get('description', ''),
-            'observations': self.cleaned_data.get('observations', ''),
-            'support_title': self.cleaned_data.get('support_title', ''),
-            'support_file': self.cleaned_data.get('support_file'),
-        }
-        if expense.pk:
-            expense = update_expense(expense=expense, **service_data)
-        else:
-            expense = create_expense(**service_data)
+        expense = update_expense(
+            expense=expense,
+            allocation=self.cleaned_data['allocation'],
+            expense_date=self.cleaned_data['expense_date'],
+            category=self.cleaned_data['category'],
+            amount=self.cleaned_data['amount'],
+            reason=self.cleaned_data['reason'],
+            provider_or_recipient=self.cleaned_data['provider_or_recipient'],
+            payment_method=self.cleaned_data['payment_method'],
+            description=self.cleaned_data.get('description', ''),
+            observations=self.cleaned_data.get('observations', ''),
+            support_title=self.cleaned_data.get('support_title', ''),
+            support_file=self.cleaned_data.get('support_file'),
+        )
         self.instance = expense
         self.save_m2m()
         return expense
+
+
+class ExpenseRequestAllocationChoiceField(forms.ModelChoiceField):
+    """Allocation picker for Expense Request forms with safe Operator-facing labels."""
+
+    include_project_in_label = False
+
+    def label_from_instance(self, allocation):
+        # PRE: allocation belongs to the annotated operational queryset.
+        # POST: returns category + available balance; never donor/donation code/__str__.
+        label = _('%(category)s · Disponible: %(available)s') % {
+            'category': allocation.get_budget_category_display(),
+            'available': format_usd_amount(allocation.available_balance),
+        }
+        if self.include_project_in_label:
+            project = allocation.project
+            label = _('%(label)s · %(project_code)s · %(project_name)s') % {
+                'label': label,
+                'project_code': project.code,
+                'project_name': project.name,
+            }
+        return label
+
+
+class ExpenseRequestApproveForm(BootstrapFormMixin, forms.Form):
+    """
+    Committee approval confirmation form.
+
+    Financial values and actor come from the persisted request and request.user;
+    this form never accepts amount, allocation, status, or actor from POST.
+    """
+
+    decision_note = forms.CharField(
+        label=_('Observación del Comité'),
+        required=False,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 3}),
+        help_text=_(
+            'La aprobación reservará el monto solicitado en la asignación seleccionada.'
+        ),
+    )
+
+
+class ExpenseRequestFulfillmentForm(BootstrapFormMixin, forms.Form):
+    """
+    Administrator fulfillment form: converts an APPROVED_RESERVED request into an Expense.
+
+    Allocation, request identity, reserved amount, currency, and status come from the
+    persisted request and fulfill_expense_request; this form never accepts them from POST.
+    """
+
+    expense_date = forms.DateField(
+        label=_('Fecha del gasto'),
+        help_text=_('Formato: dd/mm/aaaa.'),
+        widget=build_date_widget(),
+        input_formats=DATE_INPUT_FORMATS,
+    )
+    amount = MoneyDecimalField(
+        label=_('Monto'),
+        min_value=Decimal('0.01'),
+    )
+    category = forms.ChoiceField(
+        label=_('Categoría'),
+        choices=EXPENSE_CATEGORY_CHOICES,
+    )
+    reason = forms.CharField(
+        label=_('Motivo'),
+        max_length=220,
+        strip=True,
+    )
+    provider_or_recipient = forms.CharField(
+        label=_('Proveedor o destinatario'),
+        max_length=160,
+        strip=True,
+    )
+    payment_method = forms.ChoiceField(
+        label=_('Método de pago'),
+        choices=PAYMENT_METHOD_CHOICES,
+    )
+    description = forms.CharField(
+        label=_('Descripción'),
+        required=False,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+    observations = forms.CharField(
+        label=_('Observaciones'),
+        required=False,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 2}),
+    )
+    support_file = forms.FileField(
+        label=_('Documento soporte'),
+        widget=forms.FileInput(
+            attrs={
+                'data-file-upload-preview': 'true',
+            }
+        ),
+        help_text=_(
+            'Obligatorio. Adjunte el archivo que permite verificar la operación.'
+        ),
+    )
+    support_title = forms.CharField(
+        required=False,
+        max_length=160,
+        label=_('Referencia o título del soporte'),
+        help_text=_(
+            'Indique la referencia, número o título que identifica el soporte.'
+        ),
+    )
+    support_notes = forms.CharField(
+        label=_('Notas del soporte'),
+        required=False,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 2}),
+        help_text=_('Opcional. Use este campo para aclaraciones internas sobre el soporte.'),
+    )
+
+    def __init__(self, *args, reserved_amount=None, **kwargs):
+        # PRE: reserved_amount is the persisted request reservation (authoritative max).
+        # POST: caps amount validation and help text; never trusts POST for the ceiling.
+        super().__init__(*args, **kwargs)
+        self.reserved_amount = reserved_amount
+        if reserved_amount is not None:
+            self.fields['amount'].max_value = reserved_amount
+            self.fields['amount'].help_text = _(
+                'Máximo según la reserva: %(max)s. El saldo no utilizado se liberará '
+                'automáticamente.'
+            ) % {'max': format_usd_amount(reserved_amount)}
+        else:
+            self.fields['amount'].help_text = _(
+                'El monto no puede superar la reserva de la solicitud. Ejemplo: 1.500,00.'
+            )
+
+    def clean_reason(self):
+        reason = self.cleaned_data['reason'].strip()
+        if not reason:
+            raise ValidationError(_('El motivo del gasto es obligatorio.'))
+        return reason
+
+    def clean_provider_or_recipient(self):
+        provider = self.cleaned_data['provider_or_recipient'].strip()
+        if not provider:
+            raise ValidationError(_('El proveedor o destinatario es obligatorio.'))
+        return provider
+
+    def clean_amount(self):
+        # PRE: amount passed MoneyDecimalField parsing and min_value.
+        # POST: rejects non-positive or above-reservation values; service remains authoritative.
+        amount = self.cleaned_data['amount']
+        if amount is None:
+            return amount
+        if amount <= 0:
+            raise ValidationError(_('El monto del gasto debe ser mayor que cero.'))
+        if self.reserved_amount is not None and amount > self.reserved_amount:
+            raise ValidationError(
+                _('El monto no puede superar la reserva de %(max)s.')
+                % {'max': format_usd_amount(self.reserved_amount)}
+            )
+        return amount
+
+
+class ExpenseRequestAttachmentForm(BootstrapFormMixin, forms.Form):
+    """
+    Optional attachment upload for a pending Expense Request.
+
+    Parent request and uploader are set by the view/service, never from POST.
+    """
+
+    title = forms.CharField(
+        label=_('Título'),
+        max_length=160,
+        help_text=_('Se aplica a todos los archivos cargados en este envío.'),
+    )
+    notes = forms.CharField(
+        label=_('Notas'),
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3}),
+        help_text=_('Opcional. Aclaraciones internas sobre los adjuntos.'),
+    )
+    files = MultipleFileField(
+        label=_('Archivos'),
+        help_text=_('Puede seleccionar varios archivos a la vez.'),
+        widget=MultipleFileInput(attrs={
+            'data-file-upload': 'multiple',
+            'data-file-upload-preview': 'true',
+        }),
+    )
+
+
+class ExpenseRequestForm(BootstrapFormMixin, forms.Form):
+    """
+    Global or project-scoped Expense Request create/update form.
+
+    Does not call ModelForm.save(); views must invoke expense_request_services.
+    """
+
+    fund_allocation = ExpenseRequestAllocationChoiceField(
+        queryset=FundAllocation.objects.none(),
+        label=_('Asignación'),
+        help_text=_(
+            'La solicitud no reserva fondos hasta que sea aprobada por el Comité.'
+        ),
+        error_messages={
+            'invalid_choice': _(
+                'La asignación seleccionada no está disponible para esta solicitud.'
+            ),
+        },
+    )
+    requested_amount = MoneyDecimalField(
+        label=_('Monto solicitado'),
+        min_value=Decimal('0.01'),
+        help_text=_(
+            'El monto será validado nuevamente al momento de la aprobación. Ejemplo: 1.500,00.'
+        ),
+    )
+    purpose = forms.CharField(
+        label=_('Propósito'),
+        max_length=220,
+        strip=True,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+    requested_date = forms.DateField(
+        label=_('Fecha de solicitud'),
+        help_text=_('Formato: dd/mm/aaaa.'),
+        widget=build_date_widget(),
+    )
+
+    def __init__(
+        self,
+        *args,
+        project=None,
+        include_project_in_label=False,
+        include_allocation_id=None,
+        **kwargs,
+    ):
+        # PRE: optional project scopes allocation choices; include_allocation_id keeps edit row.
+        # POST: binds annotated queryset and label policy without mutating domain state.
+        from .selectors import expense_request_allocation_choices
+
+        super().__init__(*args, **kwargs)
+        self.project = project
+        self.fields['fund_allocation'].include_project_in_label = include_project_in_label
+        self.fields['fund_allocation'].queryset = expense_request_allocation_choices(
+            project=project,
+            include_allocation_id=include_allocation_id,
+        )
+
+    def clean_purpose(self):
+        purpose = self.cleaned_data['purpose'].strip()
+        if not purpose:
+            raise ValidationError(_('El propósito de la solicitud es obligatorio.'))
+        return purpose
+
+
+class ExpenseRequestForProjectForm(ExpenseRequestForm):
+    """Project-context create form: allocations limited to the URL project."""
+
+    def __init__(self, *args, project, **kwargs):
+        # PRE: project is the authorized parent from the create-for-project route.
+        # POST: scopes allocation choices to that project without a mutable project input.
+        if project is None:
+            raise ValueError('ExpenseRequestForProjectForm requires a project.')
+        kwargs.setdefault('include_project_in_label', False)
+        kwargs['project'] = project
+        super().__init__(*args, **kwargs)
 
 
 class ExpenseAnnulmentForm(BootstrapFormMixin, forms.Form):
@@ -679,3 +1159,347 @@ class SupportingDocumentForm(BootstrapFormMixin, forms.ModelForm):
             'document': _('Adjunte el comprobante, factura, recibo o evidencia documental del gasto.'),
             'notes': _('Opcional. Use este campo para aclaraciones internas sobre el soporte.'),
         }
+        widgets = {
+            'document': forms.FileInput(
+                attrs={
+                    'data-file-upload-preview': 'true',
+                }
+            ),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Django admin: single functional SIGEDON role + technical groups
+# ---------------------------------------------------------------------------
+
+FUNCTIONAL_ROLE_HELP = _(
+    'Como máximo un rol funcional SIGEDON. Deje «Ninguno» para cuentas de '
+    'servicio o superusuarios sin rol operativo.'
+)
+TECHNICAL_GROUPS_HELP = _(
+    'Grupos técnicos no funcionales. Los roles SIGEDON se asignan arriba '
+    'en «Rol funcional SIGEDON».'
+)
+MULTI_ROLE_INCONSISTENCY = _(
+    'Este usuario tiene más de un rol funcional SIGEDON. Seleccione un único '
+    'rol (o «Ninguno») y guarde para reparar la inconsistencia.'
+)
+
+
+class SigedonUserRoleFormMixin:
+    """
+    Shared admin-form behavior: one optional functional role, technical groups
+    excluding canonical roles, and an M2M save path that does not wipe the role.
+
+    Concrete forms must declare ``functional_role`` themselves so Django's
+    DeclarativeFieldsMetaclass registers it (plain mixins do not).
+    """
+
+    def _configure_role_fields(self):
+        """
+        PRE: form fields include functional_role and groups.
+        POST: querysets and labels separate canonical roles from technical groups.
+        """
+        self.fields['functional_role'].queryset = functional_role_groups()
+        self.fields['functional_role'].empty_label = _('Ninguno')
+        self.fields['functional_role'].required = False
+        self.fields['functional_role'].help_text = FUNCTIONAL_ROLE_HELP
+
+        groups_field = self.fields['groups']
+        groups_field.queryset = (
+            Group.objects.exclude(name__in=operation_role_names()).order_by('name')
+        )
+        groups_field.label = _('Grupos técnicos adicionales')
+        groups_field.required = False
+        groups_field.help_text = TECHNICAL_GROUPS_HELP
+
+    def _set_functional_role_initial(self):
+        """
+        PRE: self.instance may be a persisted user.
+        POST: initial functional_role reflects 0/1 roles; multi-role stays empty
+              and records a repairable inconsistency flag.
+        """
+        self._functional_role_inconsistency = False
+        if not self.instance.pk:
+            self.fields['functional_role'].initial = None
+            return
+        roles = list(get_user_functional_roles(self.instance))
+        if len(roles) == 1:
+            self.fields['functional_role'].initial = roles[0]
+        else:
+            self.fields['functional_role'].initial = None
+            if len(roles) > 1:
+                self._functional_role_inconsistency = True
+
+    def full_clean(self):
+        super().full_clean()
+        # Unbound change forms short-circuit validation; still surface multi-role
+        # inconsistency so the admin can repair it on the next valid POST.
+        if (
+            not self.is_bound
+            and getattr(self, '_functional_role_inconsistency', False)
+        ):
+            # Unbound full_clean never builds cleaned_data; seed it so add_error works.
+            self.cleaned_data = {}
+            self.add_error(None, MULTI_ROLE_INCONSISTENCY)
+
+    def clean_functional_role(self):
+        """
+        PRE: functional_role is empty or a Group from the functional queryset.
+        POST: returns None or a canonical role group.
+        """
+        role = self.cleaned_data.get('functional_role')
+        if role is None:
+            return None
+        if role.name not in operation_role_names():
+            raise ValidationError(
+                _('El rol seleccionado no es un rol funcional SIGEDON canónico.')
+            )
+        return role
+
+    def clean_groups(self):
+        """
+        PRE: groups contains submitted technical group selections.
+        POST: rejects any canonical functional role smuggled into the field.
+        """
+        groups = list(self.cleaned_data.get('groups') or [])
+        canonical = set(operation_role_names())
+        illicit = [group.name for group in groups if group.name in canonical]
+        if illicit:
+            raise ValidationError(
+                _(
+                    'Los roles funcionales SIGEDON no pueden asignarse como '
+                    'grupos técnicos: %(roles)s.'
+                )
+                % {'roles': ', '.join(illicit)}
+            )
+        return groups
+
+    def clean(self):
+        """
+        PRE: field-level cleaning has run.
+        POST: at most one functional role is represented by the form payload.
+        """
+        cleaned_data = super().clean()
+        role = cleaned_data.get('functional_role')
+        technical = cleaned_data.get('groups') or []
+        functional_from_technical = [
+            group for group in technical if group.name in operation_role_names()
+        ]
+        represented = ([role] if role else []) + functional_from_technical
+        if len(represented) > 1:
+            raise ValidationError(
+                _('Solo se permite un rol funcional SIGEDON por usuario.')
+            )
+        return cleaned_data
+
+    def _save_m2m(self):
+        """
+        Stock ModelForm._save_m2m would call groups.set(technical_only) and wipe
+        the functional SIGEDON role that is excluded from the groups queryset.
+        Persist direct permissions and technical groups explicitly, then apply
+        the selected functional role once via set_user_functional_role.
+        """
+        cleaned_data = self.cleaned_data
+        with transaction.atomic():
+            if 'user_permissions' in cleaned_data:
+                self.instance.user_permissions.set(cleaned_data['user_permissions'])
+
+            # Authoritative for non-functional groups only; deselect removes.
+            submitted_technical = list(cleaned_data.get('groups') or [])
+            existing_technical = list(
+                self.instance.groups.exclude(name__in=operation_role_names())
+            )
+            if existing_technical:
+                self.instance.groups.remove(*existing_technical)
+            if submitted_technical:
+                self.instance.groups.add(*submitted_technical)
+
+            set_user_functional_role(
+                self.instance,
+                cleaned_data.get('functional_role'),
+            )
+
+
+class SigedonUserChangeForm(SigedonUserRoleFormMixin, UserChangeForm):
+    functional_role = forms.ModelChoiceField(
+        label=_('Rol funcional SIGEDON'),
+        queryset=Group.objects.none(),
+        required=False,
+        empty_label=_('Ninguno'),
+        help_text=FUNCTIONAL_ROLE_HELP,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._configure_role_fields()
+        self._set_functional_role_initial()
+
+
+class SigedonAdminUserCreationForm(SigedonUserRoleFormMixin, AdminUserCreationForm):
+    functional_role = forms.ModelChoiceField(
+        label=_('Rol funcional SIGEDON'),
+        queryset=Group.objects.none(),
+        required=False,
+        empty_label=_('Ninguno'),
+        help_text=FUNCTIONAL_ROLE_HELP,
+    )
+    groups = forms.ModelMultipleChoiceField(
+        label=_('Grupos técnicos adicionales'),
+        queryset=Group.objects.none(),
+        required=False,
+        help_text=TECHNICAL_GROUPS_HELP,
+        widget=FilteredSelectMultiple(_('Grupos técnicos adicionales'), is_stacked=False),
+    )
+    user_permissions = forms.ModelMultipleChoiceField(
+        label=_('Permisos de usuario'),
+        queryset=Permission.objects.all(),
+        required=False,
+        widget=FilteredSelectMultiple(_('Permisos de usuario'), is_stacked=False),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['user_permissions'].queryset = (
+            Permission.objects.select_related('content_type').order_by(
+                'content_type__app_label',
+                'content_type__model',
+                'codename',
+            )
+        )
+        self._configure_role_fields()
+        self.fields['functional_role'].initial = None
+
+
+class InstitutionalUserCreateForm(forms.Form):
+    """
+    Superuser panel: create a normal institutional user only.
+    Never exposes is_superuser, is_staff, groups or permissions fields.
+    """
+
+    username = forms.CharField(label=_('Usuario'), max_length=150)
+    first_name = forms.CharField(label=_('Nombre'), max_length=150, required=False)
+    last_name = forms.CharField(label=_('Apellido'), max_length=150, required=False)
+    email = forms.EmailField(label=_('Correo'), required=False)
+    functional_role = forms.ModelChoiceField(
+        label=_('Rol funcional'),
+        queryset=Group.objects.none(),
+        required=True,
+        empty_label=SELECT_PLACEHOLDER,
+    )
+    temporary_password = forms.CharField(
+        label=_('Contraseña temporal'),
+        widget=forms.PasswordInput(render_value=False),
+        strip=False,
+    )
+    temporary_password_confirmation = forms.CharField(
+        label=_('Confirmación de contraseña temporal'),
+        widget=forms.PasswordInput(render_value=False),
+        strip=False,
+    )
+    is_active = forms.BooleanField(
+        label=_('Cuenta activa'),
+        required=False,
+        initial=True,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['functional_role'].queryset = functional_role_groups()
+
+    def clean_username(self):
+        username = self.cleaned_data['username'].strip()
+        UserModel = get_user_model()
+        if UserModel.objects.filter(username=username).exists():
+            raise ValidationError(_('Ya existe un usuario con este nombre.'))
+        return username
+
+    def clean(self):
+        cleaned = super().clean()
+        password = cleaned.get('temporary_password')
+        confirmation = cleaned.get('temporary_password_confirmation')
+        if password or confirmation:
+            if password != confirmation:
+                self.add_error(
+                    'temporary_password_confirmation',
+                    _('Las contraseñas no coinciden.'),
+                )
+            elif password:
+                from django.contrib.auth.password_validation import validate_password
+
+                user = get_user_model()(
+                    username=cleaned.get('username') or '',
+                    email=cleaned.get('email') or '',
+                    first_name=cleaned.get('first_name') or '',
+                    last_name=cleaned.get('last_name') or '',
+                )
+                try:
+                    validate_password(password, user=user)
+                except ValidationError as error:
+                    self.add_error('temporary_password', error)
+        return cleaned
+
+
+class InstitutionalUserUpdateForm(forms.Form):
+    """Edit non-secret profile fields for a normal institutional user."""
+
+    first_name = forms.CharField(label=_('Nombre'), max_length=150, required=False)
+    last_name = forms.CharField(label=_('Apellido'), max_length=150, required=False)
+    email = forms.EmailField(label=_('Correo'), required=False)
+    functional_role = forms.ModelChoiceField(
+        label=_('Rol funcional'),
+        queryset=Group.objects.none(),
+        required=True,
+        empty_label=SELECT_PLACEHOLDER,
+    )
+    is_active = forms.BooleanField(label=_('Cuenta activa'), required=False)
+
+    def __init__(self, *args, **kwargs):
+        self.instance = kwargs.pop('instance', None)
+        super().__init__(*args, **kwargs)
+        self.fields['functional_role'].queryset = functional_role_groups()
+        if self.instance is not None and not self.is_bound:
+            self.fields['first_name'].initial = self.instance.first_name
+            self.fields['last_name'].initial = self.instance.last_name
+            self.fields['email'].initial = self.instance.email
+            self.fields['is_active'].initial = self.instance.is_active
+            roles = list(get_user_functional_roles(self.instance))
+            if len(roles) == 1:
+                self.fields['functional_role'].initial = roles[0]
+
+
+class InstitutionalUserPasswordResetForm(forms.Form):
+    """Superuser temporary password reset; never shows current password."""
+
+    temporary_password = forms.CharField(
+        label=_('Nueva contraseña temporal'),
+        widget=forms.PasswordInput(render_value=False),
+        strip=False,
+    )
+    temporary_password_confirmation = forms.CharField(
+        label=_('Confirmación'),
+        widget=forms.PasswordInput(render_value=False),
+        strip=False,
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned = super().clean()
+        password = cleaned.get('temporary_password')
+        confirmation = cleaned.get('temporary_password_confirmation')
+        if password != confirmation:
+            self.add_error(
+                'temporary_password_confirmation',
+                _('Las contraseñas no coinciden.'),
+            )
+        elif password:
+            from django.contrib.auth.password_validation import validate_password
+
+            try:
+                validate_password(password, user=self.user)
+            except ValidationError as error:
+                self.add_error('temporary_password', error)
+        return cleaned

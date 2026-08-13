@@ -8,55 +8,81 @@ El portal público permite publicar información institucional autorizada sin ex
 
 Su propósito es ofrecer una vista básica de transparencia sobre:
 
-* proyectos activos;
+* proyectos activos y públicos;
 * avances publicados;
 * métricas agregadas;
 * datos JSON autorizados.
 
-La ruta principal es:
+La ruta principal es la raíz del sitio:
 
 ```text
-/transparency/
+/
 ```
 
 ## 2. Rutas públicas
 
+Rutas canónicas (español), montadas en la raíz del sitio:
+
 ```text
-/transparency/
-/transparency/projects/
-/transparency/projects/<id>/
-/transparency/updates/
-/transparency/data/projects.json
-/transparency/data/metrics.json
+/
+/proyectos/
+/proyectos/<pk>/
+/avances/
+/avances/<pk>/
+/avances/<update_id>/documentos/<attachment_id>/descargar/
+/avances/<update_id>/documentos/<attachment_id>/vista-previa/
+/datos/proyectos.json
+/datos/metricas.json
 ```
 
 ### Descripción
 
-* `/transparency/`: página principal del portal.
-* `/transparency/projects/`: listado de proyectos publicados.
-* `/transparency/projects/<id>/`: detalle público de un proyecto.
-* `/transparency/updates/`: feed de avances publicados.
-* `/transparency/data/projects.json`: salida JSON autorizada de proyectos.
-* `/transparency/data/metrics.json`: salida JSON autorizada de métricas agregadas.
+* `/`: página principal del portal.
+* `/proyectos/`: listado de proyectos publicados.
+* `/proyectos/<pk>/`: detalle público de un proyecto.
+* `/avances/`: feed de avances publicados.
+* `/avances/<pk>/`: detalle público de un avance publicado.
+* `/avances/<update_id>/documentos/<attachment_id>/descargar/`:
+  descarga anónima de un adjunto de avance explícitamente público.
+* `/avances/<update_id>/documentos/<attachment_id>/vista-previa/`:
+  vista previa anónima solo para tipos ya considerados seguros.
+* `/datos/proyectos.json`: salida JSON autorizada de proyectos.
+* `/datos/metricas.json`: salida JSON autorizada de métricas agregadas.
 
 Las rutas JSON no constituyen una API pública avanzada.
 
+### Redirecciones heredadas (`/transparency/**`)
+
+Las rutas antiguas bajo `/transparency/` (`/transparency/`,
+`/transparency/projects/`, `/transparency/projects/<id>/`,
+`/transparency/updates/`, `/transparency/updates/<id>/`,
+`/transparency/updates/<update-id>/documents/<attachment-id>/download/`,
+`/transparency/updates/<update-id>/documents/<attachment-id>/preview/`,
+`/transparency/data/projects.json`, `/transparency/data/metrics.json`)
+permanecen activas exclusivamente como **redirecciones permanentes `301`**
+hacia su equivalente canónico. Solo aceptan `GET`/`HEAD`; nunca ejecutan
+selectores públicos ni renderizan contenido propio. Únicamente el parámetro
+de consulta `page` se preserva en la redirección; el resto se descarta.
+
 ## 3. Proyectos publicados
 
-Solo se publican proyectos en estado:
+Un proyecto aparece en el portal solo cuando cumple ambas condiciones:
 
 ```text
-ACTIVE
+Project.status == ACTIVE
+AND
+Project.is_public == True
 ```
 
-Los proyectos:
+### Reglas
 
-* suspendidos;
-* cerrados;
-* anulados;
-* planificados;
-
-no deben aparecer en el portal público, salvo que una regla futura de publicación indique expresamente lo contrario.
+* `ACTIVE` solo es insuficiente.
+* `is_public=True` solo es insuficiente.
+* Un proyecto `ACTIVE` privado no aparece en listado ni detalle públicos.
+* Un proyecto `CLOSED` permanece oculto aunque exista un dato inconsistente con
+  `is_public=True`; los selectores públicos filtran por ambas condiciones.
+* No existen estados `PLANNED`, `SUSPENDED` ni `ANNULLED` para `Project`; la
+  elegibilidad pública se define únicamente con `ACTIVE` + `is_public`.
 
 ## 4. Avances publicados
 
@@ -66,32 +92,99 @@ Solo se muestran avances en estado:
 PUBLISHED
 ```
 
-Además, el proyecto asociado debe continuar en estado:
+Además, el proyecto padre debe cumplir:
 
 ```text
-ACTIVE
+status == ACTIVE
+AND
+is_public == True
 ```
 
 ### Reglas
 
-* Los avances en estado `DRAFT` no se publican.
-* Un avance publicado no aparece si su proyecto deja de estar activo.
+* Los avances en estado `UNPUBLISHED` no se publican.
+* Un avance publicado no aparece si su proyecto deja de estar activo o deja de
+  ser público.
 * Los datos privados asociados al avance permanecen protegidos.
 * La publicación del avance no implica la publicación automática de todos sus adjuntos.
+* Asignaciones y métricas públicas respetan el mismo límite de visibilidad del
+  proyecto (`ACTIVE` + `is_public=True`).
+
+## 4.1 Documentos de avance públicos
+
+Los adjuntos de `ProjectUpdateAttachment` son **privados por defecto**
+(`is_public=False`). Publicar el avance **no** publica sus archivos.
+
+Un documento de avance es visible y descargable en el portal solo cuando se
+cumplen **todas** estas condiciones:
+
+```text
+ProjectUpdateAttachment.is_public == True
+AND
+ProjectUpdate.status == PUBLISHED
+AND
+Project.status == ACTIVE
+AND
+Project.is_public == True
+AND
+el objeto de almacenamiento existe
+```
+
+### Reglas
+
+* La marca pública es explícita y la autoriza `operations.publish_projectupdate`
+  (mismo permiso que publica el avance), mediante POST CSRF en el detalle interno.
+* Retirar la marca pública oculta el documento del portal sin borrar el archivo.
+* Si el proyecto o el avance dejan de ser públicos, el documento desaparece del
+  portal automáticamente aunque conserve `is_public=True`.
+* Los adjuntos de remediación, documentos de proyecto, soportes de gasto,
+  adjuntos de solicitud de gasto y documentos legales de institución **no**
+  tienen ruta pública.
+* La entrega pública usa rutas dedicadas bajo `/avances/.../documentos/...`
+  con cabeceras sanitizadas (`Content-Disposition`, `Content-Type`,
+  `X-Content-Type-Options: nosniff`). No se expone `/media/`, ni la ruta
+  autenticada privada, ni un bucket público.
+* Ante fallo de elegibilidad o archivo ausente la respuesta es `404` (nunca
+  `403`), para no revelar existencia de archivos privados.
+* HTML/SVG y tipos no previsualizables no se sirven en línea.
 
 ## 5. Métricas públicas
+
+Alcance financiero público: solo proyectos `ACTIVE` con `is_public=True`.
+Los totales internos del dashboard institucional **no** deben igualarse a estos
+agregados públicos: la diferencia de alcance es intencional.
 
 Las métricas públicas:
 
 * utilizan USD como moneda operativa;
-* excluyen donaciones anuladas;
-* excluyen asignaciones anuladas;
-* excluyen gastos anulados;
+* incluyen en **Donaciones vinculadas** (`linked_received_donations_total`) el
+  monto completo de cada donación distinta en estado `RECEIVED` vinculada a al
+  menos una asignación pública elegible (proyecto activo y visible; asignación
+  no anulada). No es el monto asignado a esos proyectos ni el total institucional
+  de fondos recibidos;
+* excluyen donaciones `REGISTERED` y `ANNULLED` del total vinculado;
+* **Asignado** (`total_assigned`) es la suma de asignaciones no anuladas a
+  proyectos visibles;
+* **Recursos ejecutados** (`total_executed`) es la suma de gastos no anulados
+  sobre esas asignaciones;
+* **Disponible por ejecutar** (`available_balance`) = `max(asignado − ejecutado, 0)`.
+  No representa fondos institucionales sin asignar;
+* las reservas de solicitudes de gasto (`APPROVED_RESERVED`) **no** se restan
+  del disponible público;
 * no convierten monedas;
 * utilizan únicamente agregados autorizados;
 * no exponen registros financieros individuales.
 
 Las métricas públicas se expresan exclusivamente en USD.
+
+Etiquetas de la portada pública:
+
+* «Donaciones vinculadas» — donaciones recibidas que financian al menos un
+  proyecto visible;
+* «Asignado» — fondos efectivamente asignados a proyectos visibles;
+* «Disponible por ejecutar» — parte asignada aún no registrada como ejecutada;
+* nota de alcance: las cifras corresponden únicamente a proyectos activos y
+  visibles en el portal.
 
 ## 6. Datos publicados
 
@@ -104,12 +197,15 @@ El portal puede exponer, según el contexto:
 * ubicación general;
 * estado;
 * fechas relevantes;
-* porcentaje de progreso;
+* progreso del proyecto derivado de hitos (cuando se publique);
 * avances publicados;
+* documentos de avance explícitamente marcados como públicos;
 * métricas agregadas;
 * información institucional autorizada.
 
 La selección exacta debe realizarse mediante selectores públicos específicos.
+
+`ProjectUpdate` no expone un porcentaje de progreso propio; cualquier porcentaje de progreso de proyecto es independiente del contenido del avance.
 
 ## 7. Datos no publicados
 
@@ -122,6 +218,8 @@ El portal no debe exponer:
 * gastos individuales;
 * auditoría;
 * documentos privados;
+* adjuntos de avance no marcados como públicos;
+* adjuntos de remediación;
 * soportes financieros;
 * payloads Kobo;
 * notas internas;
@@ -172,6 +270,17 @@ Tiempos de caché de referencia:
 * La caché no sustituye las validaciones de publicación.
 * Una respuesta obtenida desde caché debe haber sido generada previamente mediante selectores públicos autorizados.
 * Los tiempos pueden ajustarse según la infraestructura y la frecuencia de actualización.
+* Las páginas públicas pueden cachearse brevemente según la tabla anterior.
+* Tras un cambio exitoso del ciclo de publicación del proyecto (publicar,
+  retirar del portal, o terminar un proyecto que estaba público), o tras
+  mutaciones financieras relevantes que pueden alterar métricas visibles
+  (recepción/anulación de donaciones, altas/cambios/anulaciones de
+  asignaciones, registro/corrección/anulación de gastos, cumplimiento de
+  solicitud de gasto que crea un gasto), la aplicación invalida la caché del
+  portal **después del commit** (`transaction.on_commit`). La implementación
+  actual limpia el cache por defecto de forma amplia (`cache.clear()`); no se
+  promete invalidación confiable por clave individual de vista. Las mutaciones
+  revertidas no invalidan.
 
 ## 10. Separación arquitectónica
 
@@ -216,8 +325,8 @@ La selección de información debe realizarse mediante consultas o selectores di
 
 Estos selectores deben:
 
-* filtrar por estado;
-* excluir información anulada;
+* filtrar por `status=ACTIVE` e `is_public=True` en proyectos;
+* excluir información anulada de entidades que admiten anulación;
 * limitar campos;
 * aplicar reglas de privacidad;
 * calcular agregados autorizados;
@@ -230,13 +339,15 @@ No debe enviarse al template un objeto completo si solo se requiere una parte de
 
 El portal público se considera correctamente protegido cuando:
 
-* solo aparecen proyectos activos;
-* solo aparecen avances publicados;
+* solo aparecen proyectos con `ACTIVE` e `is_public=True`;
+* solo aparecen avances publicados de esos proyectos;
 * no se exponen datos privados;
 * no se exponen entidades anuladas;
 * las métricas utilizan únicamente USD;
 * los endpoints JSON contienen solo campos autorizados;
 * los documentos privados no son accesibles directamente;
+* solo los adjuntos de avance con `is_public=True` (y padre público) aparecen
+  y se descargan por la ruta pública dedicada;
 * las páginas y respuestas JSON son consistentes;
 * la caché no permite filtrar información restringida;
 * las pruebas automatizadas cubren publicación, exclusión y privacidad.

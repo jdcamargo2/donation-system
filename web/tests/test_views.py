@@ -3,14 +3,35 @@ from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.test import TestCase
-from django.test import override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ProjectUpdate
+from apps.operations.models import (
+    Donation,
+    Expense,
+    ExpenseRequest,
+    FundAllocation,
+    Institution,
+    Project,
+    SupportingDocument,
+)
 from apps.operations.services import publish_project_update, register_advance
-from apps.operations.tests.helpers import TEST_DATE, create_allocation, create_donation, create_expense, create_institution, create_project, create_user
+from apps.operations.tests.helpers import (
+    TEST_DATE,
+    create_allocation,
+    create_approved_reserved_request,
+    create_donation,
+    create_expense,
+    create_institution,
+    create_project,
+    create_user,
+)
+from web.tests.test_required_field_indicators import assert_required_marker, field_label, inventory_labels
+
+GOVERNANCE_EXPENSE_MESSAGE = (
+    'El gasto debe registrarse desde una solicitud de gasto aprobada.'
+)
 
 
 class AuthenticatedViewTests(TestCase):
@@ -18,11 +39,28 @@ class AuthenticatedViewTests(TestCase):
         self.user = create_user()
         self.donor = create_institution()
         self.project = create_project()
+        self.project.status = Project.Status.ACTIVE
+        self.project.save(update_fields=('status',))
         self.donation = create_donation(donor=self.donor, amount=Decimal('100.00'))
-        self.allocation = create_allocation(donation=self.donation, project=self.project, amount=Decimal('50.00'))
+        self.allocation = create_allocation(
+            donation=self.donation, project=self.project, amount=Decimal('50.00')
+        )
         self.expense = create_expense(allocation=self.allocation, amount=Decimal('10.00'))
 
+    def test_allocation_create_budget_category_label_is_categoria(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('allocation_create'))
+        self.assertEqual(response.status_code, 200)
+        labels = inventory_labels(response.content.decode())
+        label = field_label(labels, 'budget_category')
+
+        self.assertIsNotNone(label)
+        self.assertEqual(label['text'].replace('*', '').strip(), 'Categoría')
+        self.assertNotIn('Categoría presupuestaria', label['text'])
+        assert_required_marker(self, labels, 'budget_category')
+
     def test_anonymous_users_are_redirected_from_protected_views(self):
+        # LoginRequiredMixin runs before governance redirect on expense_create.
         protected_urls = [
             reverse('dashboard'),
             reverse('institution_list'),
@@ -39,6 +77,7 @@ class AuthenticatedViewTests(TestCase):
             reverse('allocation_update', args=[self.allocation.pk]),
             reverse('expense_list'),
             reverse('expense_create'),
+            reverse('expense_detail', args=[self.expense.pk]),
             reverse('expense_update', args=[self.expense.pk]),
             reverse('audit_log_list'),
         ]
@@ -66,7 +105,7 @@ class AuthenticatedViewTests(TestCase):
             reverse('allocation_create'),
             reverse('allocation_update', args=[self.allocation.pk]),
             reverse('expense_list'),
-            reverse('expense_create'),
+            reverse('expense_detail', args=[self.expense.pk]),
             reverse('expense_update', args=[self.expense.pk]),
             reverse('audit_log_list'),
         ]
@@ -74,6 +113,58 @@ class AuthenticatedViewTests(TestCase):
         for url in urls:
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_legacy_expense_create_get_and_post_redirect_without_creating(self):
+        self.client.force_login(self.user)
+        expenses_before = Expense.objects.count()
+        docs_before = SupportingDocument.objects.count()
+
+        get_response = self.client.get(reverse('expense_create'))
+        self.assertEqual(get_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), get_response['Location'])
+        self.assertIn('status=approved_reserved', get_response['Location'])
+        self.assertEqual(get_response.content, b'')
+
+        post_response = self.client.post(
+            reverse('expense_create'),
+            data={
+                'allocation': self.allocation.pk,
+                'expense_date': TEST_DATE,
+                'category': 'food',
+                'amount': '10.00',
+                'currency': 'USD',
+                'reason': 'Intento directo desde vistas',
+                'provider_or_recipient': 'Provider A',
+                'payment_method': 'bank_transfer',
+                'description': '',
+                'observations': '',
+                'support_file': SimpleUploadedFile('expense.pdf', b'%PDF soporte'),
+            },
+        )
+        self.assertEqual(post_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), post_response['Location'])
+        self.assertIn('status=approved_reserved', post_response['Location'])
+        self.assertEqual(Expense.objects.count(), expenses_before)
+        self.assertEqual(SupportingDocument.objects.count(), docs_before)
+
+        follow = self.client.get(get_response['Location'], follow=True)
+        self.assertContains(follow, GOVERNANCE_EXPENSE_MESSAGE)
+
+    def test_fulfillment_route_accessible_for_approved_reserved_admin(self):
+        approved = create_approved_reserved_request(
+            fund_allocation=self.allocation,
+            requested_by=self.user,
+            decided_by=self.user,
+            requested_amount=Decimal('15.00'),
+            purpose='Solicitud para acceso de cumplimiento',
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse('expense_request_fulfill', args=[approved.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, approved.code)
+        self.assertEqual(approved.status, ExpenseRequest.Status.APPROVED_RESERVED)
 
     def test_list_views_render_tables_inside_responsive_containers(self):
         self.client.force_login(self.user)
@@ -108,12 +199,18 @@ class AuthenticationLayoutTests(TestCase):
         self.assertContains(response, 'login-card')
         self.assertContains(response, 'name="username"')
         self.assertContains(response, 'name="password"')
+        self.assertContains(response, 'Acceso institucional')
         self.assertContains(response, 'Iniciar sesión')
+        self.assertContains(response, 'Volver al portal público')
+        self.assertNotContains(response, 'password_reset')
+        self.assertNotContains(response, 'Registrarse')
+        self.assertNotContains(response, 'Crear cuenta')
         self.assertNotContains(response, 'class="sigedon-sidebar"')
         self.assertNotContains(response, 'class="ops-topbar"')
         self.assertNotContains(response, 'class="sigedon-main-wrapper"')
         self.assertNotContains(response, 'web/css/sigedon.css')
         self.assertNotContains(response, 'web/js/ops_forms.js')
+        self.assertNotContains(response, 'web/js/file_upload_preview.js')
         self.assertNotContains(response, 'flatpickr')
         self.assertNotContains(response, 'autoNumeric')
 
@@ -136,7 +233,7 @@ class AuthenticationLayoutTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'registration/auth_base.html')
-        self.assertContains(response, 'Iniciar sesión')
+        self.assertContains(response, 'Acceso institucional')
         self.assertNotContains(response, 'class="sigedon-sidebar"')
 
     def test_valid_credentials_redirect_to_dashboard(self):
@@ -167,6 +264,7 @@ class AuthenticationLayoutTests(TestCase):
         self.assertNotIn('flatpickr', source)
         self.assertNotIn('autoNumeric', source)
         self.assertNotIn('ops_forms.js', source)
+        self.assertNotIn('file_upload_preview.js', source)
         self.assertIn("web/css/auth.css", source)
         self.assertIn('{% block title %}', source)
         self.assertIn('{% block extra_css %}', source)
@@ -209,19 +307,19 @@ class OperationalDetailViewTests(TestCase):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
         self.assertContains(response, 'Presupuesto')
-        self.assertContains(response, 'Financiado')
+        self.assertContains(response, 'Fondos asignados')
         self.assertContains(response, 'Ejecución')
         self.assertContains(response, 'La Guaira')
         self.assertContains(response, 'Sin hitos definidos')
         self.assertContains(
             response,
-            'No hay avances publicados ni borradores registrados para este proyecto.',
+            'No hay avances publicados ni avances no publicados registrados para este proyecto.',
         )
         self.assertContains(response, 'Este proyecto todavía no tiene documentos.')
 
-    def test_authorized_user_sees_published_and_draft_updates(self):
-        draft = register_advance(
-            self.project.pk, 'Borrador interno', 'Detalle', created_by=self.user, reported_by=self.user
+    def test_authorized_user_sees_published_and_unpublished_updates(self):
+        unpublished = register_advance(
+            self.project.pk, 'No publicado interno', 'Detalle', created_by=self.user, reported_by=self.user
         )
         published = register_advance(
             self.project.pk, 'Publicado operativo', 'Detalle', created_by=self.user, reported_by=self.user
@@ -230,12 +328,12 @@ class OperationalDetailViewTests(TestCase):
 
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
-        self.assertContains(response, draft.title)
+        self.assertContains(response, unpublished.title)
         self.assertContains(response, published.title)
 
     def test_user_without_update_view_permission_sees_only_published_updates(self):
-        draft = register_advance(
-            self.project.pk, 'Borrador privado', 'Detalle', created_by=self.user, reported_by=self.user
+        unpublished = register_advance(
+            self.project.pk, 'No publicado privado', 'Detalle', created_by=self.user, reported_by=self.user
         )
         published = register_advance(
             self.project.pk, 'Publicado visible', 'Detalle', created_by=self.user, reported_by=self.user
@@ -248,7 +346,7 @@ class OperationalDetailViewTests(TestCase):
         response = self.client.get(reverse('project_detail', args=[self.project.pk]))
 
         self.assertContains(response, published.title)
-        self.assertNotContains(response, draft.title)
+        self.assertNotContains(response, unpublished.title)
 
     def test_donation_detail_renders_restrictions_and_related_allocations(self):
         response = self.client.get(reverse('donation_detail', args=[self.donation.pk]))
@@ -296,12 +394,34 @@ class OperationalDetailViewTests(TestCase):
     def test_internal_base_loads_local_form_assets(self):
         source = Path('templates/base.html').read_text()
 
+        self.assertIn("vendor/bootstrap/5.3.3/css/bootstrap.min.css", source)
+        self.assertIn(
+            "vendor/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css",
+            source,
+        )
+        self.assertIn("vendor/bootstrap/5.3.3/js/bootstrap.bundle.min.js", source)
+        self.assertIn(
+            "vendor/sweetalert2/11.26.25/sweetalert2.all.min.js",
+            source,
+        )
         self.assertIn("vendor/flatpickr/flatpickr.min.css", source)
         self.assertIn("vendor/flatpickr/flatpickr.min.js", source)
         self.assertIn("vendor/flatpickr/l10n/es.js", source)
         self.assertIn("vendor/autonumeric/autoNumeric.min.js", source)
         self.assertIn("web/js/ops_forms.js", source)
+        self.assertIn("web/js/file_upload_preview.js", source)
+        self.assertEqual(source.count("web/js/file_upload_preview.js"), 1)
+        self.assertLess(
+            source.index("vendor/bootstrap/5.3.3/css/bootstrap.min.css"),
+            source.index("web/css/sigedon.css"),
+        )
+        self.assertLess(
+            source.index("vendor/bootstrap/5.3.3/js/bootstrap.bundle.min.js"),
+            source.index("vendor/sweetalert2/11.26.25/sweetalert2.all.min.js"),
+        )
         self.assertLess(source.index("vendor/autonumeric/autoNumeric.min.js"), source.index("web/js/ops_forms.js"))
+        self.assertLess(source.index("web/js/ops_forms.js"), source.index("web/js/file_upload_preview.js"))
+        self.assertNotIn("cdn.jsdelivr.net", source)
         self.assertNotIn("cdn.jsdelivr.net/npm/flatpickr", source)
         self.assertNotIn("cdn.jsdelivr.net/npm/autonumeric", source)
         self.assertNotIn("cdn.jsdelivr.net/npm/autoNumeric", source)
@@ -332,15 +452,42 @@ class OperationalDetailViewTests(TestCase):
         self.assertIn('min-height: 130px;', source)
         self.assertIn('max-height: 240px;', source)
         self.assertIn('.ops-field:has(.ops-textarea)', source)
+        self.assertIn('.ops-form-grid .ops-field:has(input[type="file"])', source)
         self.assertIn('grid-column: 1 / -1;', source)
         self.assertIn('input[type="number"]::-webkit-inner-spin-button', source)
         self.assertIn('-moz-appearance: textfield;', source)
+        self.assertIn('.ops-file-upload', source)
+        self.assertIn('.ops-file-upload-preview', source)
+        self.assertIn('.ops-file-upload-item', source)
+        self.assertIn('.ops-file-upload-thumbnail', source)
+        self.assertIn('.ops-file-upload-meta', source)
+        self.assertIn('.ops-file-upload-name', source)
+        self.assertIn('.ops-file-upload-details', source)
+        self.assertIn('.ops-file-upload-remove', source)
+        self.assertIn('.ops-file-upload-summary', source)
 
     def test_generic_form_template_marks_fields_for_compact_grid_layout(self):
         source = Path('templates/web/object_form.html').read_text()
 
         self.assertIn('ops-form-grid', source)
         self.assertIn('ops-form-field ops-field', source)
+        self.assertIn('web/includes/ops_form_field_control.html', source)
+        self.assertIn('web/includes/ops_form_field_label.html', source)
+
+    def test_file_upload_preview_javascript_is_progressive_and_local_only(self):
+        source = Path('static/web/js/file_upload_preview.js').read_text()
+
+        self.assertIn("document.addEventListener('DOMContentLoaded'", source)
+        self.assertIn('htmx:afterSwap', source)
+        self.assertIn('.ops-file-upload[data-file-upload-preview]', source)
+        self.assertIn('DataTransfer', source)
+        self.assertIn('URL.createObjectURL', source)
+        self.assertIn('URL.revokeObjectURL', source)
+        self.assertNotIn('innerHTML', source)
+        self.assertNotIn('localStorage', source)
+        self.assertNotIn('sessionStorage', source)
+        self.assertNotIn('fetch(', source)
+        self.assertNotIn('XMLHttpRequest', source)
 
 
 class CrudFlowTests(TestCase):
@@ -375,7 +522,6 @@ class CrudFlowTests(TestCase):
                 'name': 'New Project',
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': '',
                 'estimated_budget': '1000.00',
                 'start_date': '',
@@ -411,6 +557,8 @@ class CrudFlowTests(TestCase):
                 'notes': '',
             },
         )
+        expenses_before = Expense.objects.count()
+        docs_before = SupportingDocument.objects.count()
         expense_response = self.client.post(
             reverse('expense_create'),
             data={
@@ -432,7 +580,9 @@ class CrudFlowTests(TestCase):
         self.assertRedirects(project_response, reverse('project_list'))
         self.assertRedirects(donation_response, reverse('donation_list'))
         self.assertRedirects(allocation_response, reverse('allocation_list'))
-        self.assertRedirects(expense_response, reverse('expense_list'))
+        self.assertEqual(expense_response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), expense_response['Location'])
+        self.assertIn('status=approved_reserved', expense_response['Location'])
         self.assertTrue(Institution.objects.filter(name='New Donor').exists())
         created_project = Project.objects.get(name='New Project')
         created_donation = Donation.objects.get(
@@ -446,8 +596,9 @@ class CrudFlowTests(TestCase):
         self.assertEqual(Donation.objects.filter(code=created_donation.code).count(), 1)
         self.assertEqual(created_donation.currency, 'USD')
         self.assertTrue(FundAllocation.objects.filter(budget_category='health_psychosocial').exists())
-        created_expense = Expense.objects.get(reason='Purchase')
-        self.assertEqual(created_expense.currency, 'USD')
+        self.assertEqual(Expense.objects.count(), expenses_before)
+        self.assertEqual(SupportingDocument.objects.count(), docs_before)
+        self.assertFalse(Expense.objects.filter(reason='Purchase').exists())
 
     def test_invalid_create_data_shows_errors_without_creating_invalid_object(self):
         response = self.client.post(

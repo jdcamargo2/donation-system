@@ -8,117 +8,390 @@
     <div>
         <div class="ops-kicker">Resumen operativo</div>
         <h1>Panel financiero</h1>
-        <p>Trazabilidad básica de donaciones, asignaciones y gastos.</p>
+        <p>Estado general de los recursos y su ejecución.</p>
     </div>
 </div>
 
-<div class="card border-0 mb-4 ops-action-panel">
-    <div class="card-body">
-        <h2 class="h5 mb-3">Accesos rápidos</h2>
-        <div class="row g-3 ops-action-grid">
-            <div class="col-lg-4">
-                <div class="ops-action-group">
-                    <div class="ops-action-group-title">Consulta</div>
-                    {% if perms.operations.view_project %}
-                        <a class="btn btn-outline-primary" href="{% url 'project_list' %}">Ver proyectos</a>
-                    {% endif %}
-                    {% if perms.operations.view_donation %}
-                        <a class="btn btn-outline-primary" href="{% url 'donation_list' %}">Consultar donaciones</a>
-                    {% endif %}
-                    {% if perms.operations.view_expense %}
-                        <a class="btn btn-outline-primary" href="{% url 'expense_list' %}">Consultar gastos</a>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="col-lg-4">
-                <div class="ops-action-group">
-                    <div class="ops-action-group-title">Registro</div>
-                    {% if perms.operations.add_projectupdate %}
-                        <a class="btn btn-primary" href="{% url 'project_update_list' %}">Registrar avances</a>
-                    {% endif %}
-                    {% if perms.operations.add_project %}
-                        <a class="btn btn-outline-primary" href="{% url 'project_create' %}">Crear proyecto</a>
-                    {% endif %}
-                    {% if perms.operations.add_expense %}
-                        <a class="btn btn-outline-primary" href="{% url 'expense_create' %}">Crear gasto</a>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="col-lg-4">
-                <div class="ops-action-group">
-                    <div class="ops-action-group-title">Auditoría</div>
-                    {% if perms.operations.view_auditlog %}
-                        <a class="btn btn-outline-secondary" href="{% url 'audit_log_list' %}">Ver auditoría</a>
-                    {% endif %}
-                    {% if perms.operations.add_donation %}
-                        <a class="btn btn-outline-primary" href="{% url 'donation_create' %}">Crear donación</a>
-                    {% endif %}
-                    {% if perms.operations.add_fundallocation %}
-                        <a class="btn btn-outline-primary" href="{% url 'allocation_create' %}">Crear asignación</a>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-{% if can_view_donations or can_view_allocations or can_view_expenses %}
+{% if financial_kpis %}
     <div class="row g-3 mb-4 ops-metric-grid">
-        {% if can_view_donations %}
-            <div class="col-md-3">
+        {% for kpi in financial_kpis %}
+            <div class="col-md-6 col-xl-3">
                 <div class="card h-100 border-0 ops-metric-card">
                     <div class="card-body">
-                        <div class="ops-metric-label">Donaciones recibidas USD</div>
-                        <div class="ops-metric-value">{{ total_donations|money_es }}</div>
+                        <div class="ops-metric-label">{{ kpi.label }}</div>
+                        <div class="ops-metric-value ops-money text-nowrap">
+                            {% if kpi.url %}
+                                <a class="ops-metric-link" href="{{ kpi.url }}">{{ kpi.value|money_es }} {{ kpi.currency }}</a>
+                            {% else %}
+                                {{ kpi.value|money_es }} {{ kpi.currency }}
+                            {% endif %}
+                        </div>
+                        <p class="ops-metric-helper mb-0">{{ kpi.helper }}</p>
                     </div>
                 </div>
             </div>
-        {% endif %}
-
-        {% if can_view_allocations %}
-            <div class="col-md-3">
-                <div class="card h-100 border-0 ops-metric-card">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Asignado USD</div>
-                        <div class="ops-metric-value">{{ total_assigned|money_es }}</div>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
-
-        {% if can_view_expenses %}
-            <div class="col-md-3">
-                <div class="card h-100 border-0 ops-metric-card">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Ejecutado USD</div>
-                        <div class="ops-metric-value">{{ total_executed|money_es }}</div>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
-
-        {% if can_view_available_balance %}
-            <div class="col-md-3">
-                <div class="card h-100 border-0 ops-metric-card ops-metric-card-available">
-                    <div class="card-body">
-                        <div class="ops-metric-label">Disponible USD</div>
-                        <div class="ops-metric-value">{{ available_balance|money_es }}</div>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
+        {% endfor %}
     </div>
+
+    {% if financial_ratios %}
+        <div class="row g-3 mb-4 ops-ratio-grid">
+            {% for ratio in financial_ratios %}
+                <div class="col-lg-6">
+                    <div class="card h-100 border-0 ops-metric-card ops-ratio-card">
+                        <div class="card-body">
+                            <div class="ops-metric-label">{{ ratio.label }}</div>
+                            <div class="ops-ratio-percentage">
+                                {% if ratio.percentage is None %}
+                                    —
+                                {% else %}
+                                    {{ ratio.percentage|percentage_es }} %
+                                {% endif %}
+                            </div>
+                            <div class="ops-ratio-amounts ops-money text-nowrap">
+                                {{ ratio.numerator|money_es }} de {{ ratio.denominator|money_es }} {{ ratio.currency }}
+                            </div>
+                            {% if ratio.percentage is None %}
+                                <div
+                                    class="ops-financial-progress"
+                                    role="progressbar"
+                                    aria-valuemin="0"
+                                    aria-valuemax="100"
+                                    aria-label="{{ ratio.label }}: sin datos"
+                                >
+                                    <span style="width: 0%"></span>
+                                </div>
+                                <p class="ops-metric-helper mb-0">{{ ratio.empty_helper }}</p>
+                            {% else %}
+                                <div
+                                    class="ops-financial-progress"
+                                    role="progressbar"
+                                    aria-valuemin="0"
+                                    aria-valuemax="100"
+                                    aria-valuenow="{{ ratio.visual_width }}"
+                                    aria-label="{{ ratio.label }}: {{ ratio.percentage|percentage_es }} por ciento"
+                                >
+                                    <span style="width: {{ ratio.visual_width }}%"></span>
+                                </div>
+                                <p class="ops-metric-helper mb-0">{{ ratio.helper }}</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
 {% else %}
     <div class="alert alert-light border mb-4" role="status">
-        Las métricas financieras se muestran según los permisos asignados a tu cuenta.
+        El panel muestra información acorde con tus permisos.
     </div>
 {% endif %}
 
+{% if expense_request_queues %}
+    <section class="mb-4 ops-expense-request-queues" aria-labelledby="expense-request-queues-title">
+        <h2 id="expense-request-queues-title" class="h5 ops-section-title">
+            {{ expense_request_section_title }}
+        </h2>
+        {% if expense_request_queues_have_items %}
+            {% for queue in expense_request_queues %}
+                {% if queue.total_count %}
+                    <div class="card border-0 ops-table-card ops-detail-card mb-3">
+                        <div class="card-body">
+                            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                                <div>
+                                    {% if queue.key == 'fulfillment' or queue.key == 'decision' %}
+                                        <h3 class="h6 mb-1">{{ queue.title }}</h3>
+                                        {% if queue.description %}
+                                            <p class="small text-muted mb-0">{{ queue.description }}</p>
+                                        {% endif %}
+                                    {% else %}
+                                        <p class="small text-muted mb-0">{{ queue.description }}</p>
+                                    {% endif %}
+                                </div>
+                                <span class="badge ops-status-badge" aria-label="{{ queue.total_count }} solicitudes">
+                                    {{ queue.total_count }}
+                                </span>
+                            </div>
+                            <ul class="list-unstyled mb-0 ops-expense-request-queue-list">
+                                {% for item in queue.items %}
+                                    <li class="ops-expense-request-queue-row {% if not forloop.last %}border-bottom pb-3 mb-3{% endif %}">
+                                        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-semibold">
+                                                    {{ item.code }} · {{ item.title|truncatechars:80 }}
+                                                </div>
+                                                <div class="small text-muted">{{ item.project_label }}</div>
+                                                <div class="small">
+                                                    <span class="ops-money text-nowrap">{{ item.amount|money_es }} {{ item.currency }}</span>
+                                                    <span class="text-muted"> · </span>
+                                                    <span class="badge ops-status-badge">{{ item.status_label }}</span>
+                                                    <span class="text-muted"> · {{ item.date_label }}</span>
+                                                </div>
+                                            </div>
+                                            <div class="ops-row-actions">
+                                                <a
+                                                    class="btn btn-sm {% if item.action_style == 'primary' %}btn-primary{% else %}btn-outline-secondary{% endif %} w-100 w-md-auto"
+                                                    href="{{ item.action_url }}"
+                                                >
+                                                    {{ item.action_label }}
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                            {% if queue.show_view_all %}
+                                <div class="mt-3">
+                                    <a class="btn btn-sm btn-outline-secondary" href="{{ queue.list_url }}">Ver todas</a>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endif %}
+            {% endfor %}
+        {% else %}
+            <div class="alert alert-light border mb-0" role="status">
+                {{ expense_request_empty_message }}
+            </div>
+        {% endif %}
+    </section>
+{% endif %}
+
+{% if project_update_governance.show_section %}
+    <section class="mb-4 ops-project-update-governance" aria-labelledby="project-update-governance-title">
+        <h2 id="project-update-governance-title" class="h5 ops-section-title">
+            Gobernanza de avances
+        </h2>
+        {% if project_update_governance.review %}
+            {% with queue=project_update_governance.review %}
+                <div class="card border-0 ops-table-card ops-detail-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <div>
+                                <h3 class="h6 mb-1">{{ queue.title }}</h3>
+                                {% if queue.description %}
+                                    <p class="small text-muted mb-0">{{ queue.description }}</p>
+                                {% endif %}
+                            </div>
+                            <span class="badge ops-status-badge" aria-label="{{ queue.total_count }} pendientes de revisión">
+                                {{ queue.total_count }}
+                            </span>
+                        </div>
+                        {% if queue.items %}
+                            <ul class="list-unstyled mb-0 ops-expense-request-queue-list">
+                                {% for item in queue.items %}
+                                    <li class="ops-expense-request-queue-row {% if not forloop.last %}border-bottom pb-3 mb-3{% endif %}">
+                                        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-semibold">{{ item.identifier|truncatechars:80 }}</div>
+                                                <div class="small text-muted">{{ item.project_label }}</div>
+                                                <div class="small text-muted">
+                                                    {{ item.date_label }}
+                                                    {% if item.reporter_label %} · {{ item.reporter_label }}{% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="ops-row-actions">
+                                                <a class="btn btn-sm btn-primary w-100 w-md-auto" href="{{ item.action_url }}">
+                                                    {{ item.action_label }}
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <div class="alert alert-light border mb-0" role="status">
+                                {{ queue.empty_message }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endwith %}
+        {% endif %}
+        {% if project_update_governance.decision %}
+            {% with queue=project_update_governance.decision %}
+                <div class="card border-0 ops-table-card ops-detail-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <div>
+                                <h3 class="h6 mb-1">{{ queue.title }}</h3>
+                                {% if queue.description %}
+                                    <p class="small text-muted mb-0">{{ queue.description }}</p>
+                                {% endif %}
+                            </div>
+                            <span class="badge ops-status-badge" aria-label="{{ queue.total_count }} pendientes de decisión">
+                                {{ queue.total_count }}
+                            </span>
+                        </div>
+                        {% if queue.items %}
+                            <ul class="list-unstyled mb-0 ops-expense-request-queue-list">
+                                {% for item in queue.items %}
+                                    <li class="ops-expense-request-queue-row {% if not forloop.last %}border-bottom pb-3 mb-3{% endif %}">
+                                        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-semibold">{{ item.identifier|truncatechars:80 }}</div>
+                                                <div class="small text-muted">{{ item.project_label }}</div>
+                                                <div class="small text-muted">
+                                                    {{ item.date_label }}
+                                                    {% if item.reviewer_label %} · {{ item.reviewer_label }}{% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="ops-row-actions">
+                                                <a class="btn btn-sm btn-primary w-100 w-md-auto" href="{{ item.action_url }}">
+                                                    {{ item.action_label }}
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <div class="alert alert-light border mb-0" role="status">
+                                {{ queue.empty_message }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endwith %}
+        {% endif %}
+        {% if project_update_governance.remediation %}
+            {% with queue=project_update_governance.remediation %}
+                <div class="card border-0 ops-table-card ops-detail-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <div>
+                                <h3 class="h6 mb-1">{{ queue.title }}</h3>
+                                {% if queue.description %}
+                                    <p class="small text-muted mb-0">{{ queue.description }}</p>
+                                {% endif %}
+                            </div>
+                            <span class="badge ops-status-badge" aria-label="{{ queue.total_count }} remediaciones por resolver">
+                                {{ queue.total_count }}
+                            </span>
+                        </div>
+                        {% if queue.items %}
+                            <ul class="list-unstyled mb-0 ops-expense-request-queue-list">
+                                {% for item in queue.items %}
+                                    <li class="ops-expense-request-queue-row {% if not forloop.last %}border-bottom pb-3 mb-3{% endif %}">
+                                        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-semibold">{{ item.identifier|truncatechars:80 }}</div>
+                                                <div class="small text-muted">{{ item.project_label }}</div>
+                                                <div class="small text-muted">
+                                                    {{ item.date_label }}
+                                                    {% if item.reporter_label %} · {{ item.reporter_label }}{% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="ops-row-actions">
+                                                <a class="btn btn-sm btn-primary w-100 w-md-auto" href="{{ item.action_url }}">
+                                                    {{ item.action_label }}
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <div class="alert alert-light border mb-0" role="status">
+                                {{ queue.empty_message }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endwith %}
+        {% endif %}
+    </section>
+{% endif %}
+
+{% if show_project_financial_section %}
+    <section class="mb-4 ops-project-financial-section" aria-labelledby="project-financial-section-title">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+            <h2 id="project-financial-section-title" class="h5 ops-section-title mb-0">
+                Estado financiero por proyecto
+            </h2>
+            {% if show_all_projects_link %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ all_projects_url }}">
+                    Ver todos los proyectos
+                </a>
+            {% endif %}
+        </div>
+        {% if project_financial_rows %}
+            <div class="card border-0 ops-table-card">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 ops-project-financial-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Proyecto</th>
+                                <th scope="col">Fondos asignados</th>
+                                <th scope="col">Gastos registrados</th>
+                                <th scope="col">Reservado</th>
+                                <th scope="col">Disponible operativo</th>
+                                <th scope="col">Ejecución</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in project_financial_rows %}
+                                <tr>
+                                    <td>
+                                        <a class="fw-semibold text-decoration-none ops-project-financial-identity" href="{{ row.detail_url }}">
+                                            {{ row.project_label }}
+                                        </a>
+                                        <span class="badge ops-status-badge d-inline-block mt-1">{{ row.status_label }}</span>
+                                    </td>
+                                    <td class="ops-money text-nowrap">{{ row.assigned|money_es }} USD</td>
+                                    <td class="ops-money text-nowrap">{{ row.spent|money_es }} USD</td>
+                                    <td class="ops-money text-nowrap">{{ row.reserved|money_es }} USD</td>
+                                    <td class="ops-money text-nowrap">{{ row.available|money_es }} USD</td>
+                                    <td>
+                                        <div class="ops-ratio-percentage">
+                                            {% if row.execution_percentage is None %}
+                                                —
+                                            {% else %}
+                                                {{ row.execution_percentage|percentage_es }} %
+                                            {% endif %}
+                                        </div>
+                                        {% if row.execution_percentage is None %}
+                                            <div
+                                                class="ops-financial-progress ops-financial-progress-compact"
+                                                role="progressbar"
+                                                aria-valuemin="0"
+                                                aria-valuemax="100"
+                                                aria-label="{{ row.project_label }}: ejecución sin datos"
+                                            >
+                                                <span style="width: 0%"></span>
+                                            </div>
+                                        {% else %}
+                                            <div
+                                                class="ops-financial-progress ops-financial-progress-compact"
+                                                role="progressbar"
+                                                aria-valuemin="0"
+                                                aria-valuemax="100"
+                                                aria-valuenow="{{ row.visual_width }}"
+                                                aria-label="{{ row.project_label }}: {{ row.execution_percentage|percentage_es }} por ciento"
+                                            >
+                                                <span style="width: {{ row.visual_width }}%"></span>
+                                            </div>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% else %}
+            <div class="alert alert-light border mb-0" role="status">
+                {{ project_financial_empty_message }}
+            </div>
+        {% endif %}
+    </section>
+{% endif %}
+
 {% if can_view_donations or can_view_expenses or can_view_audit %}
+    <h2 class="h5 ops-section-title">Actividad reciente</h2>
     <div class="row g-4">
         {% if can_view_donations %}
             <div class="col-lg-4">
-                <h2 class="h5 ops-section-title">Ingresos</h2>
+                <h3 class="h6 ops-section-subtitle">Ingresos</h3>
                 <div class="list-group ops-activity-list">
                     {% for donation in recent_donations %}
                         <a class="list-group-item list-group-item-action" href="{% url 'donation_detail' donation.pk %}">
@@ -139,7 +412,7 @@
 
         {% if can_view_expenses %}
             <div class="col-lg-4">
-                <h2 class="h5 ops-section-title">Gastos recientes</h2>
+                <h3 class="h6 ops-section-subtitle">Gastos</h3>
                 <div class="list-group ops-activity-list">
                     {% for expense in recent_expenses %}
                         <a class="list-group-item list-group-item-action" href="{% url 'expense_detail' expense.pk %}">
@@ -157,7 +430,7 @@
 
         {% if can_view_audit %}
             <div class="col-lg-4">
-                <h2 class="h5 ops-section-title">Acciones recientes de auditoría</h2>
+                <h3 class="h6 ops-section-subtitle">Auditoría</h3>
                 <div class="list-group ops-activity-list">
                     {% for log in recent_audit_logs %}
                         <a class="list-group-item list-group-item-action" href="{% url 'audit_log_list' %}">

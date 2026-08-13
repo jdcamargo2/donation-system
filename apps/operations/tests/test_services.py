@@ -12,8 +12,10 @@ from django.contrib.auth.models import Permission
 from apps.operations.models import Donation, Expense, FundAllocation, Institution, Project, ZERO_MONEY
 from apps.operations.services import (
     _validate_operating_currency,
-    create_expense as create_expense_service,
+    create_expense as create_expense_public,
+    create_expense_legacy as create_expense_service,
     create_fund_allocation,
+    dashboard_ratio_percentage,
     get_allocation_financial_summary,
     get_dashboard_metrics,
     get_donation_financial_summary,
@@ -140,6 +142,7 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(summary['allocated_amount'], Decimal('90.00'))
         self.assertEqual(summary['executed_amount'], Decimal('30.00'))
+        self.assertEqual(summary['reserved_amount'], Decimal('0.00'))
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
 
     def test_get_project_financial_summary_calculates_balances(self):
@@ -152,7 +155,9 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(summary['funded_amount'], Decimal('100.00'))
         self.assertEqual(summary['executed_amount'], Decimal('40.00'))
+        self.assertEqual(summary['reserved_amount'], Decimal('0.00'))
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
+        self.assertEqual(summary['execution_percentage'], Decimal('40.0'))
 
     def test_project_financial_summary_excludes_annulled_movements(self):
         project = self.create_project(code='PRJ-SVC-USD-ONLY')
@@ -167,7 +172,9 @@ class OperationServiceTests(TestCase):
 
         self.assertEqual(summary['funded_amount'], Decimal('100.00'))
         self.assertEqual(summary['executed_amount'], Decimal('40.00'))
+        self.assertEqual(summary['reserved_amount'], Decimal('0.00'))
         self.assertEqual(summary['available_amount'], Decimal('60.00'))
+        self.assertEqual(summary['execution_percentage'], Decimal('40.0'))
 
     def test_get_dashboard_metrics_returns_expected_keys_with_empty_database(self):
         user = get_user_model().objects.create_user(
@@ -192,9 +199,29 @@ class OperationServiceTests(TestCase):
         self.assertEqual(metrics['total_assigned'], ZERO_MONEY)
         self.assertEqual(metrics['total_executed'], ZERO_MONEY)
         self.assertEqual(metrics['available_balance'], ZERO_MONEY)
+        self.assertEqual(
+            [item['key'] for item in metrics['financial_kpis']],
+            ['received', 'assigned', 'spent', 'unallocated'],
+        )
+        self.assertEqual(
+            [item['key'] for item in metrics['financial_ratios']],
+            ['assignment', 'execution'],
+        )
+        self.assertIsNone(metrics['financial_ratios'][0]['percentage'])
+        self.assertIsNone(metrics['financial_ratios'][1]['percentage'])
         self.assertIn('recent_donations', metrics)
         self.assertIn('recent_expenses', metrics)
         self.assertIn('recent_audit_logs', metrics)
+        self.assertIn('expense_request_queues', metrics)
+        self.assertEqual(metrics['expense_request_queues'], [])
+        self.assertFalse(metrics['expense_request_queues_have_items'])
+        self.assertTrue(metrics['show_project_financial_section'])
+        self.assertEqual(metrics['project_financial_rows'], [])
+        self.assertFalse(metrics['show_all_projects_link'])
+        self.assertEqual(
+            metrics['project_financial_empty_message'],
+            'No hay proyectos registrados.',
+        )
 
     def test_get_dashboard_metrics_hides_data_without_permissions(self):
         user = get_user_model().objects.create_user(
@@ -208,9 +235,55 @@ class OperationServiceTests(TestCase):
         self.assertIsNone(metrics['total_assigned'])
         self.assertIsNone(metrics['total_executed'])
         self.assertIsNone(metrics['available_balance'])
+        self.assertEqual(metrics['financial_kpis'], [])
+        self.assertEqual(metrics['financial_ratios'], [])
+        self.assertEqual(metrics['expense_request_queues'], [])
+        self.assertFalse(metrics['expense_request_queues_have_items'])
+        self.assertFalse(metrics['show_project_financial_section'])
+        self.assertEqual(metrics['project_financial_rows'], [])
         self.assertFalse(metrics['recent_donations'].exists())
         self.assertFalse(metrics['recent_expenses'].exists())
         self.assertFalse(metrics['recent_audit_logs'].exists())
+
+    def test_get_dashboard_metrics_counts_only_received_donations(self):
+        user = get_user_model().objects.create_user(
+            username='dashboard-received-only',
+            password='pass-12345',
+        )
+        user.user_permissions.add(
+            *Permission.objects.filter(
+                content_type__app_label='operations',
+                codename='view_donation',
+            )
+        )
+        self.create_donation(code='DON-REG', amount=Decimal('40.00'))
+        Donation.objects.filter(code='DON-REG').update(status=Donation.Status.REGISTERED)
+        self.create_donation(code='DON-REC', amount=Decimal('25.00'))
+        self.create_donation(code='DON-ANN', amount=Decimal('90.00'))
+        Donation.objects.filter(code='DON-ANN').update(status=Donation.Status.ANNULLED)
+
+        metrics = get_dashboard_metrics(user=user)
+
+        self.assertEqual(metrics['total_donations'], Decimal('25.00'))
+        self.assertEqual(metrics['financial_kpis'][0]['key'], 'received')
+        self.assertEqual(metrics['financial_kpis'][0]['value'], Decimal('25.00'))
+        self.assertIsInstance(metrics['financial_kpis'][0]['value'], Decimal)
+
+    def test_dashboard_ratio_percentage_handles_zero_and_decimals(self):
+        self.assertIsNone(dashboard_ratio_percentage(Decimal('10.00'), ZERO_MONEY))
+        self.assertIsNone(dashboard_ratio_percentage(ZERO_MONEY, ZERO_MONEY))
+        self.assertEqual(
+            dashboard_ratio_percentage(Decimal('80.00'), Decimal('100.00')),
+            Decimal('80.0'),
+        )
+        self.assertEqual(
+            dashboard_ratio_percentage(Decimal('50.00'), Decimal('80.00')),
+            Decimal('62.5'),
+        )
+        self.assertIsInstance(
+            dashboard_ratio_percentage(Decimal('1.00'), Decimal('3.00')),
+            Decimal,
+        )
 
     def test_create_fund_allocation_rejects_over_allocation(self):
         donation = self.create_donation(amount=Decimal('100.00'))
@@ -259,35 +332,26 @@ class OperationServiceTests(TestCase):
         self.assertEqual(allocation.donation, donation)
         self.assertEqual(allocation.amount, Decimal('20.00'))
 
-    def test_create_fund_allocation_accepts_planned_or_active_project(self):
-        for status in (Project.Status.PLANNED, Project.Status.ACTIVE):
-            with self.subTest(status=status):
-                donation = self.create_donation(code=f'DON-ALLOC-{status}', amount=Decimal('100.00'))
-                project = self.create_project(code=f'PRJ-ALLOC-{status}', status=status)
+    def test_create_fund_allocation_accepts_active_project(self):
+        donation = self.create_donation(amount=Decimal('100.00'))
+        project = self.create_project(code='PRJ-ALLOC-ACTIVE', status=Project.Status.ACTIVE)
 
-                allocation = create_fund_allocation(
-                    **self.allocation_service_data(donation, project, Decimal('20.00'))
-                )
-
-                self.assertEqual(allocation.project, project)
-
-    def test_create_fund_allocation_rejects_non_operational_project(self):
-        rejected_statuses = (
-            Project.Status.SUSPENDED,
-            Project.Status.CLOSED,
-            Project.Status.ANNULLED,
+        allocation = create_fund_allocation(
+            **self.allocation_service_data(donation, project, Decimal('20.00'))
         )
-        for status in rejected_statuses:
-            with self.subTest(status=status):
-                donation = self.create_donation(code=f'DON-ALLOC-{status}', amount=Decimal('100.00'))
-                project = self.create_project(code=f'PRJ-ALLOC-{status}', status=status)
 
-                with self.assertRaisesMessage(ValidationError, 'admiten asignaciones'):
-                    create_fund_allocation(
-                        **self.allocation_service_data(donation, project, Decimal('20.00'))
-                    )
+        self.assertEqual(allocation.project, project)
 
-                self.assertFalse(donation.allocations.exists())
+    def test_create_fund_allocation_rejects_closed_project(self):
+        donation = self.create_donation(code='DON-ALLOC-CLOSED', amount=Decimal('100.00'))
+        project = self.create_project(code='PRJ-ALLOC-CLOSED', status=Project.Status.CLOSED)
+
+        with self.assertRaisesMessage(ValidationError, 'admiten asignaciones'):
+            create_fund_allocation(
+                **self.allocation_service_data(donation, project, Decimal('20.00'))
+            )
+
+        self.assertFalse(donation.allocations.exists())
 
     def test_update_fund_allocation_excludes_its_previous_amount(self):
         donation = self.create_donation(amount=Decimal('100.00'))
@@ -302,10 +366,10 @@ class OperationServiceTests(TestCase):
         self.assertEqual(updated.amount, Decimal('100.00'))
         self.assertEqual(donation.available_balance, ZERO_MONEY)
 
-    def test_update_fund_allocation_rejects_reassignment_to_non_operational_project(self):
+    def test_update_fund_allocation_rejects_reassignment_to_closed_project(self):
         donation = self.create_donation(amount=Decimal('100.00'))
         original_project = self.create_project(code='PRJ-ORIGINAL')
-        target_project = self.create_project(code='PRJ-SUSPENDED', status=Project.Status.SUSPENDED)
+        target_project = self.create_project(code='PRJ-CLOSED-TARGET', status=Project.Status.CLOSED)
         allocation = self.create_allocation(
             donation=donation,
             project=original_project,
@@ -401,29 +465,30 @@ class OperationServiceTests(TestCase):
         self.assertEqual(expense.allocation, allocation)
         self.assertEqual(expense.amount, Decimal('20.00'))
 
-    def test_create_expense_service_rejects_non_active_project(self):
-        rejected_statuses = (
-            Project.Status.PLANNED,
-            Project.Status.SUSPENDED,
-            Project.Status.CLOSED,
-            Project.Status.ANNULLED,
+    def test_public_create_expense_rejects_direct_standalone_path(self):
+        allocation = self.create_allocation(amount=Decimal('60.00'))
+        with self.assertRaisesMessage(
+            ValidationError,
+            'El gasto debe registrarse desde una solicitud de gasto aprobada.',
+        ):
+            create_expense_public(**self.expense_service_data(allocation, Decimal('20.00')))
+        self.assertFalse(allocation.expenses.exists())
+
+    def test_create_expense_service_rejects_closed_project(self):
+        project = self.create_project(code='PRJ-EXP-CLOSED', status=Project.Status.CLOSED)
+        donation = self.create_donation(code='DON-EXP-CLOSED', amount=Decimal('100.00'))
+        allocation = self.create_allocation(
+            donation=donation,
+            project=project,
+            amount=Decimal('60.00'),
         )
-        for status in rejected_statuses:
-            with self.subTest(status=status):
-                project = self.create_project(code=f'PRJ-EXP-{status}', status=status)
-                donation = self.create_donation(code=f'DON-EXP-{status}', amount=Decimal('100.00'))
-                allocation = self.create_allocation(
-                    donation=donation,
-                    project=project,
-                    amount=Decimal('60.00'),
-                )
 
-                with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
-                    create_expense_service(
-                        **self.expense_service_data(allocation, Decimal('20.00'))
-                    )
+        with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+            create_expense_service(
+                **self.expense_service_data(allocation, Decimal('20.00'))
+            )
 
-                self.assertFalse(allocation.expenses.exists())
+        self.assertFalse(allocation.expenses.exists())
 
     def test_update_expense_excludes_its_previous_amount(self):
         allocation = self.create_allocation(amount=Decimal('60.00'))
@@ -450,18 +515,18 @@ class OperationServiceTests(TestCase):
         self.assertEqual(expense.amount, Decimal('20.00'))
         self.assertEqual(expense.currency, 'USD')
 
-    def test_update_expense_rejects_reassignment_to_non_active_project(self):
+    def test_update_expense_rejects_reassignment_to_closed_project(self):
         original_allocation = self.create_allocation(amount=Decimal('70.00'))
         expense = self.create_expense(allocation=original_allocation, amount=Decimal('30.00'))
-        target_project = self.create_project(code='PRJ-EXP-SUSPENDED', status=Project.Status.SUSPENDED)
-        target_donation = self.create_donation(code='DON-EXP-SUSPENDED', amount=Decimal('100.00'))
+        target_project = self.create_project(code='PRJ-EXP-CLOSED-TARGET', status=Project.Status.CLOSED)
+        target_donation = self.create_donation(code='DON-EXP-CLOSED-TARGET', amount=Decimal('100.00'))
         target_allocation = self.create_allocation(
             donation=target_donation,
             project=target_project,
             amount=Decimal('70.00'),
         )
 
-        with self.assertRaisesMessage(ValidationError, 'admiten gastos y avances'):
+        with self.assertRaisesMessage(ValidationError, 'proyecto de destino no está activo'):
             update_expense_service(
                 expense=expense,
                 **self.expense_service_data(target_allocation, Decimal('20.00')),

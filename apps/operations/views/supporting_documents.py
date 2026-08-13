@@ -4,11 +4,7 @@ from django.core.exceptions import ValidationError
 
 from django.shortcuts import get_object_or_404
 
-from django.http import (
-    FileResponse,
-    Http404,
-    HttpResponseRedirect,
-)
+from django.http import HttpResponseRedirect
 
 from django.urls import reverse
 
@@ -17,7 +13,6 @@ from django.utils.translation import gettext_lazy as _
 from django.views.generic import (
     CreateView,
     DeleteView,
-    DetailView,
 )
 
 from ..forms import SupportingDocumentForm
@@ -77,27 +72,6 @@ class SupportingDocumentCreateForExpenseView(OperationsPermissionRequiredMixin, 
 
     def get_success_url(self):
         return reverse('expense_detail', args=[self.expense.pk])
-
-
-class SupportingDocumentDownloadView(OperationsPermissionRequiredMixin, DetailView):
-    permission_required = 'operations.view_supportingdocument'
-    model = SupportingDocument
-
-    # PRE: the requester is authenticated and has permission to view supporting documents.
-    # POST: streams the requested document as an attachment without exposing its storage path.
-    def get(self, request, *args, **kwargs):
-        document = self.get_object()
-        if not document.document.name:
-            raise Http404(_('El documento soporte no tiene un archivo asociado.'))
-        try:
-            file_handle = document.document.open('rb')
-        except (FileNotFoundError, OSError) as exc:
-            raise Http404(_('El archivo del documento soporte no está disponible.')) from exc
-        return FileResponse(
-            file_handle,
-            as_attachment=True,
-            filename=document.document.name.rsplit('/', 1)[-1],
-        )
 
 
 class SupportingDocumentDeleteView(OperationsPermissionRequiredMixin, DeleteView):

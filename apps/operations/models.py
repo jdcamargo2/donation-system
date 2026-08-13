@@ -2,7 +2,6 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -27,6 +26,7 @@ OPERATIONAL_CODE_PREFIXES = {
     'donation': 'DON',
     'fund_allocation': 'ASG',
     'expense': 'GAS',
+    'expense_request': 'SGS',
 }
 
 
@@ -110,24 +110,36 @@ class Institution(models.Model):
         return self.name
 
 
+class ProjectDeletionForbiddenError(ValidationError):
+    """Raised when application code attempts to delete a project."""
+
+
+class ProjectQuerySet(models.QuerySet):
+    """Query operations that permanently reject Project deletion."""
+
+    def delete(self):
+        """
+        PRE: queryset targets persisted projects.
+        POST: always rejects bulk deletion without changing project rows.
+        """
+        raise ProjectDeletionForbiddenError(_('Los proyectos no pueden eliminarse.'))
+
+
 class Project(models.Model):
     class Status(models.TextChoices):
-        PLANNED = 'planned', _('Planificado')
         ACTIVE = 'active', _('Activo')
-        SUSPENDED = 'suspended', _('Suspendido')
         CLOSED = 'closed', _('Cerrado')
-        ANNULLED = 'annulled', _('Anulado')
 
     code = models.CharField(max_length=40, unique=True)
     name = models.CharField(max_length=180)
     description = models.TextField(blank=True)
     objective = models.TextField(blank=True)
-    responsible_unit = models.CharField(max_length=120, blank=True)
     location = models.CharField(max_length=160, blank=True)
     estimated_budget = models.DecimalField(max_digits=14, decimal_places=2, default=ZERO_MONEY)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PLANNED)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    is_public = models.BooleanField(default=False)
     terminal_reason = models.TextField(blank=True, editable=False)
     terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
     terminal_by = models.ForeignKey(
@@ -140,11 +152,18 @@ class Project(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = ProjectQuerySet.as_manager()
 
     class Meta:
         ordering = ['code']
         verbose_name = _('proyecto')
         verbose_name_plural = _('proyectos')
+        permissions = [
+            (
+                'manage_project_publication',
+                _('Puede publicar y retirar proyectos del portal público'),
+            ),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(estimated_budget__gte=ZERO_MONEY),
@@ -164,6 +183,13 @@ class Project(models.Model):
         with transaction.atomic():
             self.code = reserve_operational_code(namespace='project', prefix='PRJ')
             return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """
+        PRE: self is a project targeted for instance deletion.
+        POST: always rejects deletion and preserves the project.
+        """
+        raise ProjectDeletionForbiddenError(_('Los proyectos no pueden eliminarse.'))
 
     def clean(self):
         errors = {}
@@ -309,19 +335,14 @@ class ProjectMilestone(models.Model):
 
 class ProjectUpdate(models.Model):
     class Status(models.TextChoices):
-        DRAFT = 'draft', _('Borrador')
+        UNPUBLISHED = 'unpublished', _('No publicado')
         PUBLISHED = 'published', _('Publicado')
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='updates')
     title = models.CharField(max_length=200)
     description = models.TextField()
     update_date = models.DateField(_('fecha del avance'), default=timezone.localdate)
-    progress_percentage = models.PositiveSmallIntegerField(
-        _('porcentaje de progreso'),
-        default=0,
-        validators=[MinValueValidator(0), MaxValueValidator(100)],
-    )
-    status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.UNPUBLISHED)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -346,12 +367,6 @@ class ProjectUpdate(models.Model):
         verbose_name_plural = _('avances de proyecto')
         permissions = [
             ('publish_projectupdate', _('Puede publicar avances de proyecto')),
-        ]
-        constraints = [
-            models.CheckConstraint(
-                condition=models.Q(progress_percentage__gte=0, progress_percentage__lte=100),
-                name='project_update_progress_between_0_and_100',
-            ),
         ]
 
     def __str__(self):
@@ -390,7 +405,7 @@ class ProjectUpdateAttachmentQuerySet(models.QuerySet):
             )
 
     # PRE: queryset targets attachments and kwargs do not move them to a PUBLISHED update.
-    # POST: updates only attachments belonging to DRAFT updates; published attachments remain unchanged.
+    # POST: updates only attachments belonging to UNPUBLISHED updates; published attachments remain unchanged.
     def update(self, **kwargs):
         self._ensure_no_published_attachments()
         target_project = kwargs.get('project_update', kwargs.get('project_update_id'))
@@ -408,7 +423,7 @@ class ProjectUpdateAttachmentQuerySet(models.QuerySet):
         return super().update(**kwargs)
 
     # PRE: queryset targets persisted project-update attachments.
-    # POST: deletes only attachments belonging to DRAFT updates; published attachments remain unchanged.
+    # POST: deletes only attachments belonging to UNPUBLISHED updates; published attachments remain unchanged.
     def delete(self):
         self._ensure_no_published_attachments()
         return super().delete()
@@ -538,6 +553,15 @@ class ProjectUpdateAttachment(models.Model):
     )
     file = models.FileField(upload_to='project_update_attachments/%Y/%m/')
     title = models.CharField(max_length=200, blank=True)
+    is_public = models.BooleanField(
+        _('público en el portal de transparencia'),
+        default=False,
+        help_text=_(
+            'Solo los adjuntos marcados explícitamente como públicos pueden '
+            'aparecer en el portal; el avance y el proyecto padre también deben '
+            'ser públicos.'
+        ),
+    )
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -577,16 +601,29 @@ class ProjectUpdateAttachment(models.Model):
 
     def save(self, *args, **kwargs):
         """
-        PRE: the attachment has a valid parent update and ordinary mutation is requested.
-        POST: persists only an attachment associated with a DRAFT update.
+        PRE: ordinary mutation targets an UNPUBLISHED parent, OR a domain publicity
+             transition sets only ``is_public`` via ``_allow_publicity_transition``.
+        POST: persists the row without weakening published-update immutability for
+              file/title/parent fields.
         """
+        if getattr(self, '_allow_publicity_transition', False):
+            update_fields = kwargs.get('update_fields')
+            if update_fields is not None and set(update_fields) <= {'is_public'}:
+                try:
+                    return super().save(*args, **kwargs)
+                finally:
+                    self._allow_publicity_transition = False
+            self._allow_publicity_transition = False
+            raise ProjectUpdateImmutableError(
+                _('La transición de publicidad solo puede actualizar is_public.')
+            )
         self._ensure_parent_update_is_editable()
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
         """
         PRE: the attachment is persisted and ordinary deletion is requested.
-        POST: deletes only an attachment whose parent update remains DRAFT.
+        POST: deletes only an attachment whose parent update remains UNPUBLISHED.
         """
         self._ensure_parent_update_is_editable()
         return super().delete(*args, **kwargs)
@@ -806,10 +843,57 @@ class Donation(models.Model):
             return super().save(*args, **kwargs)
 
     def clean(self):
+        """
+        PRE: amount/donor may be partially present during form or service validation.
+        POST: rejects non-positive amounts; when pk exists, rejects amount below non-annulled
+        allocated total; rejects inactive donors on create or donor replacement.
+        Limitation: historical inactive donor retention is allowed when donor_id is unchanged;
+        create/update donor eligibility remains authoritative in services/forms under concurrency.
+        """
         # PRE: amount may be absent when field validation has already rejected submitted data.
         # POST: rejects non-positive numeric amounts without masking field errors for missing or invalid values.
+        errors = {}
         if self.amount is not None and self.amount <= ZERO_MONEY:
-            raise ValidationError({'amount': _('El monto de la donación debe ser positivo.')})
+            errors['amount'] = _('El monto de la donación debe ser positivo.')
+
+        if self.pk and self.amount is not None and 'amount' not in errors:
+            allocated_total = self.total_assigned
+            if self.amount < allocated_total:
+                errors['amount'] = _(
+                    'El importe de la donación no puede ser inferior al total ya asignado '
+                    '(%(allocated_total)s USD).'
+                ) % {'allocated_total': allocated_total}
+
+        if self.donor_id is not None:
+            donor_status = None
+            if getattr(self, 'donor', None) is not None and self.donor.pk == self.donor_id:
+                donor_status = self.donor.status
+            else:
+                donor_status = (
+                    Institution.objects.filter(pk=self.donor_id)
+                    .values_list('status', flat=True)
+                    .first()
+                )
+            if donor_status == Institution.Status.INACTIVE:
+                previous_donor_id = None
+                if self.pk:
+                    previous_donor_id = (
+                        type(self).objects.filter(pk=self.pk)
+                        .values_list('donor_id', flat=True)
+                        .first()
+                    )
+                if previous_donor_id != self.donor_id:
+                    if previous_donor_id is None:
+                        errors['donor'] = _(
+                            'Solo instituciones activas pueden registrar nuevas donaciones.'
+                        )
+                    else:
+                        errors['donor'] = _(
+                            'No se puede reemplazar el donante por una institución inactiva.'
+                        )
+
+        if errors:
+            raise ValidationError(errors)
 
     @property
     def total_assigned(self):
@@ -932,10 +1016,21 @@ class FundAllocation(models.Model):
         ).aggregate(total=Sum('amount'))['total'] or ZERO_MONEY
 
     @property
+    def reserved_amount(self):
+        # PRE: this allocation may carry list annotations or require an authoritative aggregation.
+        # POST: returns active APPROVED_RESERVED reserved total; never None.
+        if hasattr(self, 'annotated_reserved_amount'):
+            annotated = self.annotated_reserved_amount
+            return annotated if annotated is not None else ZERO_MONEY
+        from .financials import get_allocation_reserved_amount
+
+        return get_allocation_reserved_amount(self)
+
+    @property
     def available_balance(self):
         if hasattr(self, 'annotated_available_balance'):
             return self.annotated_available_balance
-        balance = self.amount - self.executed_amount
+        balance = self.amount - self.executed_amount - self.reserved_amount
         return max(balance, ZERO_MONEY)
 
     @property
@@ -1077,6 +1172,661 @@ class SupportingDocument(models.Model):
         return self.title
 
 
+class ExpenseRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING_DECISION = 'pending_decision', _('Pendiente de decisión')
+        APPROVED_RESERVED = (
+            'approved_reserved',
+            _('Aprobada · Fondos reservados'),
+        )
+        DENIED = 'denied', _('Denegada')
+        WITHDRAWN = 'withdrawn', _('Retirada')
+        FULFILLED = 'fulfilled', _('Gasto registrado')
+        ANNULLED = 'annulled', _('Anulada')
+
+    code = models.CharField(max_length=40, unique=True, editable=False)
+    fund_allocation = models.ForeignKey(
+        FundAllocation,
+        on_delete=models.PROTECT,
+        related_name='expense_requests',
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='expense_requests',
+    )
+    requested_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    purpose = models.CharField(max_length=220)
+    requested_date = models.DateField()
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.PENDING_DECISION,
+    )
+    decision_note = models.TextField(blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name='decided_expense_requests',
+    )
+    decided_at = models.DateTimeField(null=True, blank=True, editable=False)
+    reserved_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        editable=False,
+    )
+    reserved_at = models.DateTimeField(null=True, blank=True, editable=False)
+    expense = models.OneToOneField(
+        Expense,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='source_expense_request',
+    )
+    terminal_reason = models.TextField(blank=True, editable=False)
+    terminal_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name='terminal_expense_requests',
+    )
+    terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-requested_date', '-created_at']
+        verbose_name = _('solicitud de gasto')
+        verbose_name_plural = _('solicitudes de gasto')
+        permissions = [
+            (
+                'decide_expenserequest',
+                _('Puede aprobar o denegar solicitudes de gasto'),
+            ),
+            (
+                'fulfill_expenserequest',
+                _('Puede registrar el gasto de una solicitud aprobada'),
+            ),
+            (
+                'withdraw_expenserequest',
+                _('Puede retirar solicitudes de gasto propias'),
+            ),
+            (
+                'annul_expenserequest',
+                _('Puede anular solicitudes de gasto'),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['status'], name='ops_expreq_status_idx'),
+            models.Index(
+                fields=['fund_allocation', 'status'],
+                name='ops_expreq_alloc_status_idx',
+            ),
+            models.Index(
+                fields=['requested_by', 'status'],
+                name='ops_expreq_req_by_status_idx',
+            ),
+            models.Index(fields=['-requested_date'], name='ops_expreq_req_date_idx'),
+            models.Index(fields=['-decided_at'], name='ops_expreq_decided_at_idx'),
+            models.Index(fields=['-created_at'], name='ops_expreq_created_at_idx'),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(requested_amount__gt=ZERO_MONEY),
+                name='operations_expenserequest_requested_amount_gt_zero',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(reserved_amount__isnull=True)
+                    | models.Q(reserved_amount__gte=ZERO_MONEY)
+                ),
+                name='operations_expenserequest_reserved_amount_gte_zero',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(reserved_amount__isnull=True)
+                    | models.Q(reserved_amount__lte=models.F('requested_amount'))
+                ),
+                name='operations_expenserequest_reserved_lte_requested',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='fulfilled')
+                    | models.Q(expense__isnull=False)
+                ),
+                name='operations_expenserequest_fulfilled_requires_expense',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status='fulfilled')
+                    | models.Q(expense__isnull=True)
+                ),
+                name='operations_expenserequest_non_fulfilled_no_expense',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status__in=['approved_reserved', 'fulfilled'])
+                    | (
+                        models.Q(decided_by__isnull=False)
+                        & models.Q(decided_at__isnull=False)
+                        & models.Q(reserved_amount__isnull=False)
+                        & models.Q(reserved_at__isnull=False)
+                    )
+                ),
+                name='operations_expenserequest_approved_fulfilled_meta',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='denied')
+                    | (
+                        models.Q(decided_by__isnull=False)
+                        & models.Q(decided_at__isnull=False)
+                        & ~models.Q(decision_note='')
+                    )
+                ),
+                name='operations_expenserequest_denied_requires_decision',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status__in=['withdrawn', 'annulled'])
+                    | (
+                        models.Q(terminal_by__isnull=False)
+                        & models.Q(terminal_at__isnull=False)
+                        & ~models.Q(terminal_reason='')
+                    )
+                ),
+                name='operations_expenserequest_terminal_requires_meta',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='pending_decision')
+                    | (
+                        models.Q(decided_by__isnull=True)
+                        & models.Q(decided_at__isnull=True)
+                        & models.Q(decision_note='')
+                        & models.Q(reserved_amount__isnull=True)
+                        & models.Q(reserved_at__isnull=True)
+                        & models.Q(expense__isnull=True)
+                        & models.Q(terminal_by__isnull=True)
+                        & models.Q(terminal_at__isnull=True)
+                        & models.Q(terminal_reason='')
+                    )
+                ),
+                name='operations_expenserequest_pending_clean_slate',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='denied')
+                    | (
+                        models.Q(reserved_amount__isnull=True)
+                        & models.Q(reserved_at__isnull=True)
+                        & models.Q(expense__isnull=True)
+                        & models.Q(terminal_by__isnull=True)
+                        & models.Q(terminal_at__isnull=True)
+                        & models.Q(terminal_reason='')
+                    )
+                ),
+                name='operations_expenserequest_denied_no_reservation',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='withdrawn')
+                    | (
+                        models.Q(decided_by__isnull=True)
+                        & models.Q(decided_at__isnull=True)
+                        & models.Q(decision_note='')
+                        & models.Q(reserved_amount__isnull=True)
+                        & models.Q(reserved_at__isnull=True)
+                        & models.Q(expense__isnull=True)
+                    )
+                ),
+                name='operations_expenserequest_withdrawn_no_decision',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='approved_reserved')
+                    | (
+                        models.Q(expense__isnull=True)
+                        & models.Q(terminal_by__isnull=True)
+                        & models.Q(terminal_at__isnull=True)
+                        & models.Q(terminal_reason='')
+                    )
+                ),
+                name='operations_expenserequest_approved_no_terminal',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='fulfilled')
+                    | (
+                        models.Q(terminal_by__isnull=True)
+                        & models.Q(terminal_at__isnull=True)
+                        & models.Q(terminal_reason='')
+                    )
+                ),
+                name='operations_expenserequest_fulfilled_no_terminal',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='annulled')
+                    | models.Q(expense__isnull=True)
+                ),
+                name='operations_expenserequest_annulled_no_expense',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.code} · {self.get_status_display()}'
+
+    def save(self, *args, **kwargs):
+        # PRE: explicit codes are supplied only by trusted fixtures, migrations, or seed data.
+        # POST: creates with one reserved SGS code or preserves the existing code on update.
+        ensure_operational_code_is_immutable(self, self.code)
+        if self.code:
+            return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.code = reserve_operational_code(
+                namespace='expense_request',
+                prefix='SGS',
+            )
+            return super().save(*args, **kwargs)
+
+    def clean(self):
+        # PRE: numeric and status metadata may be partially present during form validation.
+        # POST: rejects inconsistent present values without enforcing actor authorization.
+        errors = {}
+        if self.requested_amount is not None and self.requested_amount <= ZERO_MONEY:
+            errors['requested_amount'] = _('El monto solicitado debe ser positivo.')
+        if self.reserved_amount is not None and self.reserved_amount < ZERO_MONEY:
+            errors['reserved_amount'] = _('El monto reservado no puede ser negativo.')
+        if (
+            self.reserved_amount is not None
+            and self.requested_amount is not None
+            and self.reserved_amount > self.requested_amount
+        ):
+            errors['reserved_amount'] = _(
+                'El monto reservado no puede superar el monto solicitado.'
+            )
+
+        has_decision = self.decided_by_id is not None or self.decided_at is not None
+        has_reservation = (
+            self.reserved_amount is not None or self.reserved_at is not None
+        )
+        has_terminal = (
+            self.terminal_by_id is not None
+            or self.terminal_at is not None
+            or bool((self.terminal_reason or '').strip())
+        )
+        decision_note_present = bool((self.decision_note or '').strip())
+        terminal_reason_present = bool((self.terminal_reason or '').strip())
+
+        if self.status == self.Status.PENDING_DECISION:
+            if has_decision or decision_note_present or has_reservation or self.expense_id or has_terminal:
+                errors['status'] = _(
+                    'Una solicitud pendiente no admite metadatos de decisión, reserva, gasto o cierre.'
+                )
+        elif self.status == self.Status.APPROVED_RESERVED:
+            if self.decided_by_id is None or self.decided_at is None:
+                errors['status'] = _('Una solicitud aprobada exige datos de decisión.')
+            if self.reserved_amount is None or self.reserved_at is None:
+                errors['reserved_amount'] = _(
+                    'Una solicitud aprobada exige metadatos de reserva.'
+                )
+            if self.expense_id or has_terminal:
+                errors['status'] = _(
+                    'Una solicitud aprobada con reserva no admite gasto enlazado ni cierre.'
+                )
+        elif self.status == self.Status.DENIED:
+            if self.decided_by_id is None or self.decided_at is None:
+                errors['status'] = _('Una solicitud denegada exige datos de decisión.')
+            if not decision_note_present:
+                errors['decision_note'] = _(
+                    'La denegación exige una nota de decisión significativa.'
+                )
+            if has_reservation or self.expense_id or has_terminal:
+                errors['status'] = _(
+                    'Una solicitud denegada no admite reserva, gasto enlazado ni cierre.'
+                )
+        elif self.status == self.Status.WITHDRAWN:
+            if self.terminal_by_id is None or self.terminal_at is None:
+                errors['status'] = _('Una solicitud retirada exige metadatos de cierre.')
+            if not terminal_reason_present:
+                errors['terminal_reason'] = _(
+                    'El retiro exige un motivo de cierre significativo.'
+                )
+            if has_decision or decision_note_present or has_reservation or self.expense_id:
+                errors['status'] = _(
+                    'Una solicitud retirada no admite decisión, reserva ni gasto enlazado.'
+                )
+        elif self.status == self.Status.FULFILLED:
+            if self.expense_id is None:
+                errors['expense'] = _('Una solicitud cumplida exige un gasto enlazado.')
+            if self.decided_by_id is None or self.decided_at is None:
+                errors['status'] = _('Una solicitud cumplida exige datos de decisión.')
+            if self.reserved_amount is None or self.reserved_at is None:
+                errors['reserved_amount'] = _(
+                    'Una solicitud cumplida exige metadatos de reserva.'
+                )
+            if has_terminal:
+                errors['status'] = _('Una solicitud cumplida no admite metadatos de cierre.')
+        elif self.status == self.Status.ANNULLED:
+            if self.terminal_by_id is None or self.terminal_at is None:
+                errors['status'] = _('Una solicitud anulada exige metadatos de cierre.')
+            if not terminal_reason_present:
+                errors['terminal_reason'] = _(
+                    'La anulación exige un motivo de cierre significativo.'
+                )
+            if self.expense_id:
+                errors['expense'] = _('Una solicitud anulada no puede enlazar un gasto.')
+
+        if self.status != self.Status.FULFILLED and self.expense_id:
+            errors['expense'] = _(
+                'Solo una solicitud cumplida puede enlazar un gasto.'
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
+    @classmethod
+    def open_financial_statuses(cls):
+        """
+        PRE: ExpenseRequest status choices are loaded.
+        POST: returns statuses that block financial scope closure (allocation finish / project close).
+        """
+        return (
+            cls.Status.PENDING_DECISION,
+            cls.Status.APPROVED_RESERVED,
+        )
+
+    @property
+    def is_pending_decision(self):
+        return self.status == self.Status.PENDING_DECISION
+
+    @property
+    def has_active_reservation(self):
+        return (
+            self.status == self.Status.APPROVED_RESERVED
+            and self.reserved_amount is not None
+        )
+
+    @property
+    def is_terminal(self):
+        return self.status in {
+            self.Status.DENIED,
+            self.Status.WITHDRAWN,
+            self.Status.FULFILLED,
+            self.Status.ANNULLED,
+        }
+
+    @property
+    def currency(self):
+        return OPERATING_CURRENCY
+
+
+class ExpenseRequestAttachmentMutationError(ValidationError):
+    """Raised when attachment mutation violates the pending-decision freeze rule."""
+
+
+class ExpenseRequestAttachmentQuerySet(models.QuerySet):
+    # PRE: queryset targets persisted expense-request attachments.
+    # POST: returns only when every selected attachment belongs to PENDING_DECISION.
+    def _ensure_pending_decision_attachments(self):
+        if self.exclude(
+            expense_request__status=ExpenseRequest.Status.PENDING_DECISION
+        ).exists():
+            raise ExpenseRequestAttachmentMutationError(
+                _(
+                    'Los adjuntos de solicitudes de gasto solo se pueden modificar '
+                    'mientras la solicitud esté pendiente de decisión.'
+                )
+            )
+
+    def update(self, **kwargs):
+        self._ensure_pending_decision_attachments()
+        target_request = kwargs.get('expense_request', kwargs.get('expense_request_id'))
+        target_request_id = getattr(target_request, 'pk', target_request)
+        if (
+            target_request_id is not None
+            and ExpenseRequest.objects.exclude(
+                status=ExpenseRequest.Status.PENDING_DECISION
+            )
+            .filter(pk=target_request_id)
+            .exists()
+        ):
+            raise ExpenseRequestAttachmentMutationError(
+                _(
+                    'No se pueden asociar adjuntos a solicitudes que no estén '
+                    'pendientes de decisión.'
+                )
+            )
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_pending_decision_attachments()
+        return super().delete()
+
+
+class ExpenseRequestAttachment(models.Model):
+    expense_request = models.ForeignKey(
+        ExpenseRequest,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+    )
+    file = models.FileField(upload_to='expense_request_attachments/%Y/%m/')
+    title = models.CharField(max_length=160)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploaded_expense_request_attachments',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True)
+
+    objects = ExpenseRequestAttachmentQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['uploaded_at']
+        verbose_name = _('adjunto de solicitud de gasto')
+        verbose_name_plural = _('adjuntos de solicitudes de gasto')
+
+    def __str__(self):
+        return f'{self.expense_request.code} · {self.title}'
+
+    # PRE: instance refers to a persisted attachment or a valid target ExpenseRequest.
+    # POST: returns only when parent remains PENDING_DECISION for create/update/delete.
+    def _ensure_parent_is_pending_decision(self):
+        if self.pk and self.__class__.objects.exclude(
+            expense_request__status=ExpenseRequest.Status.PENDING_DECISION
+        ).filter(pk=self.pk).exists():
+            raise ExpenseRequestAttachmentMutationError(
+                _(
+                    'Los adjuntos de solicitudes de gasto solo se pueden modificar '
+                    'mientras la solicitud esté pendiente de decisión.'
+                )
+            )
+        if ExpenseRequest.objects.exclude(
+            status=ExpenseRequest.Status.PENDING_DECISION
+        ).filter(pk=self.expense_request_id).exists():
+            raise ExpenseRequestAttachmentMutationError(
+                _(
+                    'No se pueden asociar adjuntos a solicitudes que no estén '
+                    'pendientes de decisión.'
+                )
+            )
+
+    def save(self, *args, **kwargs):
+        """
+        PRE: the attachment has a valid parent request and ordinary mutation is requested.
+        POST: persists only an attachment associated with a PENDING_DECISION request.
+        """
+        self._ensure_parent_is_pending_decision()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """
+        PRE: the attachment is persisted and ordinary deletion is requested.
+        POST: deletes only an attachment whose parent remains PENDING_DECISION.
+        """
+        self._ensure_parent_is_pending_decision()
+        return super().delete(*args, **kwargs)
+
+
+class ExpenseRequestEventImmutableError(ValidationError):
+    """Raised when application code attempts to mutate expense-request event history."""
+
+
+class ExpenseRequestEventQuerySet(models.QuerySet):
+    """Append-only query operations for expense-request event history."""
+
+    def update(self, **kwargs):
+        raise ExpenseRequestEventImmutableError(
+            _('Los eventos de solicitud de gasto no se pueden modificar.')
+        )
+
+    def delete(self):
+        raise ExpenseRequestEventImmutableError(
+            _('Los eventos de solicitud de gasto no se pueden eliminar.')
+        )
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ExpenseRequestEventImmutableError(
+            _('Los eventos de solicitud de gasto no se pueden modificar en lote.')
+        )
+
+
+class ExpenseRequestEvent(models.Model):
+    class EventType(models.TextChoices):
+        CREATED = 'created', _('Solicitud creada')
+        UPDATED = 'updated', _('Solicitud actualizada')
+        WITHDRAWN = 'withdrawn', _('Solicitud retirada')
+        APPROVED = 'approved', _('Solicitud aprobada')
+        DENIED = 'denied', _('Solicitud denegada')
+        RESERVATION_CREATED = 'reservation_created', _('Reserva creada')
+        ANNULLED = 'annulled', _('Solicitud anulada')
+        RESERVATION_RELEASED = (
+            'reservation_released',
+            _('Reserva liberada'),
+        )
+        EXPENSE_REGISTERED = (
+            'expense_registered',
+            _('Gasto registrado'),
+        )
+        RESERVATION_CONSUMED = (
+            'reservation_consumed',
+            _('Reserva convertida en ejecución'),
+        )
+        UNUSED_RESERVATION_RELEASED = (
+            'unused_reservation_released',
+            _('Reserva no utilizada liberada'),
+        )
+        LINKED_EXPENSE_ANNULLED = (
+            'linked_expense_annulled',
+            _('Gasto enlazado anulado'),
+        )
+
+    expense_request = models.ForeignKey(
+        ExpenseRequest,
+        on_delete=models.PROTECT,
+        related_name='events',
+    )
+    event_type = models.CharField(max_length=40, choices=EventType.choices)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='expense_request_events',
+    )
+    from_status = models.CharField(max_length=30, blank=True)
+    to_status = models.CharField(max_length=30, blank=True)
+    requested_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    reserved_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    executed_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    released_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    allocation_balance_before = models.DecimalField(max_digits=14, decimal_places=2)
+    allocation_balance_after = models.DecimalField(max_digits=14, decimal_places=2)
+    reason = models.TextField(blank=True)
+    # PROTECT (not SET_NULL): append-only events cannot be UPDATEd on expense
+    # delete, and the PostgreSQL statement-level trigger rejects even empty
+    # SET_NULL statements issued by Django's deletion collector.
+    expense = models.ForeignKey(
+        Expense,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='expense_request_events',
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ExpenseRequestEventQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['created_at', 'pk']
+        verbose_name = _('evento de solicitud de gasto')
+        verbose_name_plural = _('eventos de solicitudes de gasto')
+        indexes = [
+            models.Index(
+                fields=['expense_request', 'created_at'],
+                name='ops_expreq_evt_req_created_idx',
+            ),
+            models.Index(
+                fields=['event_type', 'created_at'],
+                name='ops_expreq_evt_type_crtd_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.expense_request.code} · {self.get_event_type_display()}'
+
+    def save(self, *args, **kwargs):
+        """
+        PRE: self represents a new expense-request event with required fields populated.
+        POST: inserts the event once; existing rows cannot be modified.
+        """
+        row_already_exists = (
+            self.pk is not None
+            and type(self).objects.filter(pk=self.pk).exists()
+        )
+        if not self._state.adding or row_already_exists or kwargs.get('force_update'):
+            raise ExpenseRequestEventImmutableError(
+                _('Los eventos de solicitud de gasto existentes no se pueden modificar.')
+            )
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """
+        PRE: self is an expense-request event targeted for instance deletion.
+        POST: always rejects deletion and preserves the event.
+        """
+        raise ExpenseRequestEventImmutableError(
+            _('Los eventos de solicitud de gasto no se pueden eliminar.')
+        )
+
+
 class AuditLogImmutableError(ValidationError):
     """Raised when application code attempts to mutate audit history."""
 
@@ -1127,6 +1877,7 @@ class AuditLog(models.Model):
         CLOSED = 'closed', _('Cerrada')
         EXPENSE_CANCELLED = 'expense_cancelled', _('Gasto anulado')
         PUBLISHED = 'published', _('Publicada')
+        UNPUBLISHED = 'unpublished', _('Retirado del portal')
         COMPLETED = 'completed', _('Completada')
         REOPENED = 'reopened', _('Reabierta')
         REORDERED = 'reordered', _('Reordenada')
@@ -1204,3 +1955,42 @@ class AuditLog(models.Model):
         POST: always rejects deletion and preserves the event.
         """
         raise AuditLogImmutableError(_('Los registros de auditoría no se pueden eliminar.'))
+
+
+class UserAccessProfile(models.Model):
+    """
+    Narrow security profile for institutional account lifecycle.
+
+    Temporary passwords are never stored here. Missing rows default safely to
+    must_change_password=False (deployment superusers are not blocked).
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='access_profile',
+    )
+    must_change_password = models.BooleanField(
+        default=False,
+        verbose_name=_('debe cambiar la contraseña'),
+    )
+    password_reset_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+        verbose_name=_('contraseña restablecida por'),
+    )
+    password_reset_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_('contraseña restablecida en'),
+    )
+
+    class Meta:
+        verbose_name = _('perfil de acceso institucional')
+        verbose_name_plural = _('perfiles de acceso institucional')
+
+    def __str__(self):
+        return f'access-profile:{self.user_id}'

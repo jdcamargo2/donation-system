@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
+import logging
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -15,6 +16,7 @@ from apps.integrations.kobo.models import KoboProcessingEvent, KoboSubmission
 from apps.integrations.kobo.services.importers import import_kobo_submission
 from apps.integrations.kobo.services.territorial_routing import route_normalized_submission
 
+logger = logging.getLogger("sigedon.kobo.import")
 
 KOBO_SYSTEM_USERNAME = "kobo.system"
 KOBO_SYSTEM_EMAIL = "kobo.system@localhost"
@@ -351,7 +353,10 @@ def auto_import_if_eligible(submission: KoboSubmission) -> AutoImportResult:
                     nucleo_code_normalized=submission.nucleo_code_normalized
                 )
             except Exception:
-                pass
+                logger.exception(
+                    "Kobo identity retry unexpected failure submission_id=%s",
+                    submission.pk,
+                )
         return AutoImportResult(
             submission_id=submission.pk,
             outcome=AutoImportOutcome.IMPORTED,

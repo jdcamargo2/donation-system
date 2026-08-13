@@ -6,9 +6,16 @@ from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.operations.models import Project, ProjectUpdate
-from apps.operations.services import register_advance, publish_project_update
+from apps.operations.models import Donation, Project, ProjectUpdate
+from apps.operations.services import (
+    finish_project,
+    publish_project,
+    publish_project_update,
+    register_advance,
+    unpublish_project,
+)
 from apps.operations.tests.helpers import create_allocation, create_donation, create_expense, create_institution, create_project, create_user
+from apps.public_portal.selectors import get_public_transparency_summary
 
 
 class PublicPortalTests(TestCase):
@@ -22,6 +29,7 @@ class PublicPortalTests(TestCase):
         self.institution.save()
         self.project = create_project()
         self.project.status = Project.Status.ACTIVE
+        self.project.is_public = True
         self.project.description = 'Descripción pública del proyecto.'
         self.project.save()
         self.donation = create_donation(donor=self.institution)
@@ -46,19 +54,20 @@ class PublicPortalTests(TestCase):
             project=self.project,
             title='Avance rechazado privado',
             description='No debe mostrarse.',
-            status=ProjectUpdate.Status.DRAFT,
+            status=ProjectUpdate.Status.UNPUBLISHED,
         )
-        self.draft_update = ProjectUpdate.objects.create(
+        self.unpublished_update = ProjectUpdate.objects.create(
             project=self.project,
-            title='Avance borrador privado',
+            title='Avance no publicado privado',
             description='No debe mostrarse.',
-            status=ProjectUpdate.Status.DRAFT,
+            status=ProjectUpdate.Status.UNPUBLISHED,
         )
 
-    def create_approved_update_for_project_status(self, code, project_status):
+    def create_approved_update_for_project_status(self, code, project_status, *, is_public=True):
         project = create_project(code=code, name=f'Proyecto {project_status}')
         project.status = Project.Status.ACTIVE
-        project.save(update_fields=['status'])
+        project.is_public = is_public
+        project.save(update_fields=['status', 'is_public'])
         update = register_advance(
             project_id=project.pk,
             title=f'Avance aprobado {project_status}',
@@ -91,7 +100,7 @@ class PublicPortalTests(TestCase):
         self.assertTemplateUsed(response, 'public_portal/public_base.html')
         self.assertContains(response, 'USD')
         self.assertContains(response, 'SIGEDON Transparencia')
-        self.assertContains(response, 'Conoce cómo se gestionan los recursos y proyectos comunitarios.')
+        self.assertContains(response, 'Sistema Integrado de Gestión de Donaciones')
         self.assertContains(response, 'Portal público de transparencia')
         self.assertContains(response, 'Explorar proyectos')
         self.assertContains(response, 'Ver todos los avances')
@@ -133,28 +142,58 @@ class PublicPortalTests(TestCase):
         self.assertNotContains(response, 'Ubicación')
         self.assertNotContains(response, 'Periodo')
 
-    def test_public_project_list_only_shows_active_projects(self):
-        planned_project = create_project(code='PRJ-PLAN', name='Proyecto planificado')
-        planned_project.status = Project.Status.PLANNED
-        planned_project.save()
-        suspended_project = create_project(code='PRJ-SUSP', name='Proyecto suspendido')
-        suspended_project.status = Project.Status.SUSPENDED
-        suspended_project.save()
+    def test_public_project_list_only_shows_active_public_projects(self):
+        private_active = create_project(code='PRJ-PRIVATE-ACTIVE', name='Activo no público')
+        private_active.status = Project.Status.ACTIVE
+        private_active.is_public = False
+        private_active.save(update_fields=['status', 'is_public'])
+        closed_public = create_project(code='PRJ-CLOSED-PUBLIC', name='Cerrado público')
+        closed_public.status = Project.Status.CLOSED
+        closed_public.is_public = True
+        closed_public.save(update_fields=['status', 'is_public'])
 
         response = self.client.get(reverse('public_portal:public_project_list'))
 
         self.assertContains(response, self.project.name)
-        self.assertNotContains(response, planned_project.name)
-        self.assertNotContains(response, suspended_project.name)
+        self.assertNotContains(response, private_active.name)
+        self.assertNotContains(response, closed_public.name)
 
-    def test_public_project_detail_for_non_active_project_returns_404(self):
-        planned_project = create_project(code='PRJ-PRIVATE', name='Proyecto no publicable')
-        planned_project.status = Project.Status.PLANNED
-        planned_project.save()
+    def test_public_project_detail_for_non_public_project_returns_404(self):
+        private_project = create_project(code='PRJ-PRIVATE', name='Proyecto no publicable')
+        private_project.status = Project.Status.ACTIVE
+        private_project.is_public = False
+        private_project.save(update_fields=['status', 'is_public'])
 
-        response = self.client.get(reverse('public_portal:public_project_detail', args=[planned_project.pk]))
+        response = self.client.get(reverse('public_portal:public_project_detail', args=[private_project.pk]))
 
         self.assertEqual(response.status_code, 404)
+
+    def test_publication_lifecycle_services_control_public_visibility_and_cache(self):
+        private_project = create_project(code='PRJ-LIFECYCLE-PUB', name='Ciclo de publicación')
+        detail_url = reverse('public_portal:public_project_detail', args=[private_project.pk])
+        list_url = reverse('public_portal:public_project_list')
+
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+        self.assertNotContains(self.client.get(list_url), private_project.name)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            publish_project(project_id=private_project.pk, actor=self.user)
+        self.assertEqual(self.client.get(detail_url).status_code, 200)
+        self.assertContains(self.client.get(list_url), private_project.name)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            unpublish_project(project_id=private_project.pk, actor=self.user)
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+        self.assertNotContains(self.client.get(list_url), private_project.name)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            publish_project(project_id=private_project.pk, actor=self.user)
+            finish_project(private_project.pk, actor=self.user)
+        private_project.refresh_from_db()
+        self.assertEqual(private_project.status, Project.Status.CLOSED)
+        self.assertFalse(private_project.is_public)
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+        self.assertNotContains(self.client.get(list_url), private_project.name)
 
     def test_public_project_detail_returns_200_without_login(self):
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
@@ -171,7 +210,6 @@ class PublicPortalTests(TestCase):
         self.project.start_date = date(2026, 1, 15)
         self.project.end_date = date(2026, 6, 30)
         self.project.objective = 'Fortalecer la respuesta comunitaria.'
-        self.project.responsible_unit = 'Unidad interna no publicada'
         self.project.save()
 
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
@@ -190,19 +228,18 @@ class PublicPortalTests(TestCase):
         self.assertContains(response, 'Disponible por ejecutar')
         self.assertContains(response, 'Las cifras están expresadas en dólares estadounidenses.')
         self.assertContains(response, 'Fortalecer la respuesta comunitaria.')
-        self.assertContains(response, 'href="/transparency/#metodologia"', html=False)
+        self.assertContains(response, 'href="/#metodologia"', html=False)
         self.assertEqual(content.count('<h1'), 1)
         self.assertIn('public-financial-summary', content)
         self.assertIn('public-project-information', content)
         self.assertIn('public-project-updates', content)
         self.assertIn('public-methodology-note', content)
-        self.assertNotIn('Unidad interna no publicada', content)
         self.assertNotIn('>Activo<', content)
         self.assertNotIn('Presupuesto estimado', content)
         self.assertNotIn('public-notice-inline', content)
 
     def test_public_project_detail_empty_updates_explains_publication_policy(self):
-        self.approved_update.status = ProjectUpdate.Status.DRAFT
+        self.approved_update.status = ProjectUpdate.Status.UNPUBLISHED
         self.approved_update.save(update_fields=['status'])
 
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
@@ -244,8 +281,8 @@ class PublicPortalTests(TestCase):
                 self.assertEqual(content.count('aria-current="page"'), 1)
 
     def test_public_list_empty_states_use_the_publication_messages(self):
-        self.project.status = Project.Status.SUSPENDED
-        self.project.save(update_fields=['status'])
+        self.project.is_public = False
+        self.project.save(update_fields=['is_public'])
 
         projects_response = self.client.get(reverse('public_portal:public_project_list'))
         updates_response = self.client.get(reverse('public_portal:public_updates_feed'))
@@ -269,17 +306,17 @@ class PublicPortalTests(TestCase):
         public_url = reverse('public_portal:public_project_update_detail', args=[self.approved_update.pk])
 
         response = self.client.get(public_url)
-        draft_response = self.client.get(
+        unpublished_response = self.client.get(
             reverse('public_portal:public_project_update_detail', args=[self.pending_update.pk])
         )
         missing_response = self.client.get(reverse('public_portal:public_project_update_detail', args=[999999]))
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'public_portal/public_project_update_detail.html')
-        self.assertEqual(draft_response.status_code, 404)
+        self.assertEqual(unpublished_response.status_code, 404)
         self.assertEqual(missing_response.status_code, 404)
 
-        self.project.status = Project.Status.SUSPENDED
+        self.project.status = Project.Status.CLOSED
         self.project.save(update_fields=['status'])
         inactive_project_response = self.client.get(public_url)
 
@@ -347,7 +384,7 @@ class PublicPortalTests(TestCase):
         self.assertContains(response, self.approved_update.title)
         self.assertNotContains(response, self.pending_update.title)
         self.assertNotContains(response, self.rejected_update.title)
-        self.assertNotContains(response, self.draft_update.title)
+        self.assertNotContains(response, self.unpublished_update.title)
 
     def test_public_updates_feed_only_shows_approved_updates(self):
         response = self.client.get(reverse('public_portal:public_updates_feed'))
@@ -355,32 +392,33 @@ class PublicPortalTests(TestCase):
         self.assertContains(response, self.approved_update.title)
         self.assertNotContains(response, self.pending_update.title)
         self.assertNotContains(response, self.rejected_update.title)
-        self.assertNotContains(response, self.draft_update.title)
+        self.assertNotContains(response, self.unpublished_update.title)
 
     def test_public_project_detail_does_not_expose_operational_file_urls(self):
         response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
         self.assertNotContains(response, '/media/')
 
-    def test_public_portal_does_not_show_draft_update(self):
+    def test_public_portal_does_not_show_unpublished_update(self):
         detail_response = self.client.get(reverse('public_portal:public_project_detail', args=[self.project.pk]))
         feed_response = self.client.get(reverse('public_portal:public_updates_feed'))
         self.assertNotContains(detail_response, self.pending_update.title)
         self.assertNotContains(feed_response, self.pending_update.title)
 
-    def test_public_portal_does_not_show_approved_evidence_from_non_active_project(self):
-        private_project = create_project(code='PRJ-NO-PUBLIC', name='Proyecto suspendido con evidencia')
+    def test_public_portal_does_not_show_approved_evidence_from_non_public_project(self):
+        private_project = create_project(code='PRJ-NO-PUBLIC', name='Proyecto privado con evidencia')
         private_project.status = Project.Status.ACTIVE
-        private_project.save()
+        private_project.is_public = True
+        private_project.save(update_fields=['status', 'is_public'])
         private_update = register_advance(
             project_id=private_project.pk,
             title='Avance aprobado que dejo de ser público',
-            description='No debe aparecer cuando el proyecto deja de estar activo.',
+            description='No debe aparecer cuando el proyecto deja de estar público.',
             created_by=self.user,
             reported_by=self.reporter,
         )
         publish_project_update(private_update.pk, self.user)
-        private_project.status = Project.Status.SUSPENDED
-        private_project.save(update_fields=['status'])
+        private_project.is_public = False
+        private_project.save(update_fields=['is_public'])
 
         feed_response = self.client.get(reverse('public_portal:public_updates_feed'))
         home_response = self.client.get(reverse('public_portal:public_home'))
@@ -403,8 +441,12 @@ class PublicPortalTests(TestCase):
         self.assertNotContains(feed_response, closed_update.title)
         self.assertEqual(detail_response.status_code, 404)
 
-    def test_published_update_count_excludes_suspended_and_closed_projects(self):
-        self.create_approved_update_for_project_status('PRJ-SUSP-COUNT', Project.Status.SUSPENDED)
+    def test_published_update_count_excludes_private_and_closed_projects(self):
+        self.create_approved_update_for_project_status(
+            'PRJ-PRIVATE-COUNT',
+            Project.Status.ACTIVE,
+            is_public=False,
+        )
         self.create_approved_update_for_project_status('PRJ-CLOSED-COUNT', Project.Status.CLOSED)
 
         response = self.client.get(reverse('public_portal:public_home'))
@@ -412,9 +454,10 @@ class PublicPortalTests(TestCase):
         self.assertEqual(response.context['summary']['published_update_count'], 1)
 
     def test_every_update_in_public_feed_links_to_an_available_public_detail(self):
-        suspended_project, suspended_update = self.create_approved_update_for_project_status(
-            'PRJ-SUSP-LINK',
-            Project.Status.SUSPENDED,
+        private_project, private_update = self.create_approved_update_for_project_status(
+            'PRJ-PRIVATE-LINK',
+            Project.Status.ACTIVE,
+            is_public=False,
         )
         closed_project, closed_update = self.create_approved_update_for_project_status(
             'PRJ-CLOSED-LINK',
@@ -423,9 +466,9 @@ class PublicPortalTests(TestCase):
 
         response = self.client.get(reverse('public_portal:public_updates_feed'))
 
-        self.assertNotContains(response, reverse('public_portal:public_project_detail', args=[suspended_project.pk]))
+        self.assertNotContains(response, reverse('public_portal:public_project_detail', args=[private_project.pk]))
         self.assertNotContains(response, reverse('public_portal:public_project_detail', args=[closed_project.pk]))
-        self.assertNotContains(response, suspended_update.title)
+        self.assertNotContains(response, private_update.title)
         self.assertNotContains(response, closed_update.title)
         for update in response.context['updates']:
             detail_url = reverse('public_portal:public_project_update_detail', args=[update.pk])
@@ -454,7 +497,7 @@ class PublicPortalTests(TestCase):
         response = self.client.get(reverse('public_portal:public_home'))
         summary = response.context['summary']
 
-        self.assertEqual(summary['total_received'], self.donation.amount)
+        self.assertEqual(summary['linked_received_donations_total'], self.donation.amount)
         self.assertEqual(summary['total_assigned'], self.allocation.amount)
         self.assertEqual(summary['total_executed'], self.expense.amount)
         self.assertEqual(summary['available_balance'], self.allocation.amount - self.expense.amount)
@@ -522,7 +565,7 @@ class PublicPortalTests(TestCase):
         response = self.client.get(reverse('public_portal:public_home'))
 
         self.assertContains(response, 'Metodología')
-        self.assertContains(response, 'href="/transparency/#metodologia"')
+        self.assertContains(response, 'href="/#metodologia"')
         self.assertContains(response, 'solo proyectos ACTIVE y avances PUBLISHED')
         self.assertContains(response, 'TTL de caché')
         self.assertNotContains(response, 'Datos abiertos')
@@ -550,7 +593,10 @@ class PublicPortalTests(TestCase):
         stylesheet = Path('static/public_portal/css/public_portal.css').read_text()
 
         self.assertEqual(source.count('class="public-money-value"'), 4)
-        self.assertIn('{{ summary.total_received|money_es }} USD</span>', source)
+        self.assertIn(
+            '{{ summary.linked_received_donations_total|money_es }} USD</span>',
+            source,
+        )
         self.assertIn('{{ summary.total_executed|money_es }} USD</span>', source)
         self.assertIn('white-space: nowrap;', stylesheet)
         self.assertIn('font-size: clamp(1.2rem, 2.4vw, 2rem);', stylesheet)
@@ -577,7 +623,6 @@ class PublicPortalTests(TestCase):
             'dashboard',
             'admin',
             'logout',
-            'login',
             'request.user',
             'user.is_authenticated',
             'project_update_create',
@@ -585,17 +630,27 @@ class PublicPortalTests(TestCase):
             'project_update_publish',
             'project_update_update',
             'project_update_delete',
+            'Gestión de usuarios',
+            'user_access_list',
+            'sigedon-sidebar',
         ]
 
         for term in forbidden_terms:
             with self.subTest(term=term):
                 self.assertNotIn(term, source)
 
+        # Discreet institutional access is allowed; no operational menu.
+        self.assertIn('Acceso institucional', source)
+        self.assertIn('/accounts/login/?next=/panel/', source)
+        self.assertNotIn("{% url 'login'", source)
+        self.assertNotIn("{% url 'dashboard'", source)
+
     def test_public_project_list_is_paginated_by_twenty(self):
         for index in range(21):
             project = create_project(code=f'PRJ-PUB-{index:03d}', name=f'Proyecto público {index}')
             project.status = Project.Status.ACTIVE
-            project.save()
+            project.is_public = True
+            project.save(update_fields=['status', 'is_public'])
 
         response = self.client.get(reverse('public_portal:public_project_list'))
 
@@ -606,7 +661,8 @@ class PublicPortalTests(TestCase):
         for index in range(21):
             project = create_project(code=f'PRJ-UPD-{index:03d}', name=f'Proyecto avance {index}')
             project.status = Project.Status.ACTIVE
-            project.save()
+            project.is_public = True
+            project.save(update_fields=['status', 'is_public'])
             update = register_advance(
                 project_id=project.pk,
                 title=f'Avance aprobado {index}',
@@ -625,7 +681,8 @@ class PublicPortalTests(TestCase):
         for index in range(21):
             project = create_project(code=f'PRJ-PAGE-{index:03d}', name=f'Proyecto paginado {index}')
             project.status = Project.Status.ACTIVE
-            project.save()
+            project.is_public = True
+            project.save(update_fields=['status', 'is_public'])
 
         response = self.client.get(reverse('public_portal:public_project_list'))
         content = response.content.decode()
@@ -638,7 +695,8 @@ class PublicPortalTests(TestCase):
         for index in range(21):
             project = create_project(code=f'PRJ-QUERY-{index:03d}', name=f'Proyecto consulta {index}')
             project.status = Project.Status.ACTIVE
-            project.save()
+            project.is_public = True
+            project.save(update_fields=['status', 'is_public'])
 
         response = self.client.get(f"{reverse('public_portal:public_project_list')}?source=home")
 
@@ -662,3 +720,176 @@ class PublicPortalTests(TestCase):
         self.assertIn('code', projects_response.json()['projects'][0])
         self.assertIn('metrics', metrics_response.json())
         self.assertIn('project_count', metrics_response.json()['metrics'])
+        self.assertIn(
+            'linked_received_donations_total',
+            metrics_response.json()['metrics'],
+        )
+        self.assertNotIn('total_received', metrics_response.json()['metrics'])
+
+
+class PublicFinancialMetricSemanticsTests(TestCase):
+    """BUG-E2E-005: linked RECEIVED donations vs assigned/executed scope."""
+
+    def setUp(self):
+        cache.clear()
+        self.institution = create_institution()
+        self.public_project = create_project(code='PRJ-PUB-MET', name='Público métricas')
+        self.public_project.status = Project.Status.ACTIVE
+        self.public_project.is_public = True
+        self.public_project.save(update_fields=['status', 'is_public'])
+
+    def test_registered_donation_with_public_allocation_does_not_count(self):
+        donation = create_donation(
+            code='DON-REG-MET',
+            donor=self.institution,
+            amount=Decimal('500.00'),
+            status=Donation.Status.REGISTERED,
+        )
+        create_allocation(
+            donation=donation,
+            project=self.public_project,
+            amount=Decimal('200.00'),
+        )
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('0.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('200.00'))
+
+    def test_received_donation_with_public_allocation_counts_once(self):
+        donation = create_donation(
+            code='DON-REC-MET',
+            donor=self.institution,
+            amount=Decimal('500.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        create_allocation(
+            donation=donation,
+            project=self.public_project,
+            amount=Decimal('200.00'),
+        )
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('500.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('200.00'))
+
+    def test_one_donation_with_multiple_public_allocations_is_not_double_counted(self):
+        second_public = create_project(code='PRJ-PUB-MET-2', name='Segundo público')
+        second_public.status = Project.Status.ACTIVE
+        second_public.is_public = True
+        second_public.save(update_fields=['status', 'is_public'])
+        donation = create_donation(
+            code='DON-MULTI-MET',
+            donor=self.institution,
+            amount=Decimal('1000.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        create_allocation(donation=donation, project=self.public_project, amount=Decimal('300.00'))
+        create_allocation(donation=donation, project=second_public, amount=Decimal('400.00'))
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('1000.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('700.00'))
+
+    def test_donation_linked_only_to_private_project_is_excluded(self):
+        private = create_project(code='PRJ-PRIV-MET', name='Privado')
+        private.status = Project.Status.ACTIVE
+        private.is_public = False
+        private.save(update_fields=['status', 'is_public'])
+        donation = create_donation(
+            code='DON-PRIV-MET',
+            donor=self.institution,
+            amount=Decimal('800.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        create_allocation(donation=donation, project=private, amount=Decimal('500.00'))
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('0.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('0.00'))
+
+    def test_closed_public_project_is_excluded_by_project_scope(self):
+        closed = create_project(code='PRJ-CLOSED-MET', name='Cerrado')
+        closed.status = Project.Status.CLOSED
+        closed.is_public = True
+        closed.save(update_fields=['status', 'is_public'])
+        donation = create_donation(
+            code='DON-CLOSED-MET',
+            donor=self.institution,
+            amount=Decimal('900.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        create_allocation(donation=donation, project=closed, amount=Decimal('400.00'))
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['linked_received_donations_total'], Decimal('0.00'))
+        self.assertEqual(summary['total_assigned'], Decimal('0.00'))
+
+    def test_assigned_executed_available_formulas_remain_unchanged(self):
+        donation = create_donation(
+            code='DON-FORM-MET',
+            donor=self.institution,
+            amount=Decimal('1000.00'),
+            status=Donation.Status.RECEIVED,
+        )
+        allocation = create_allocation(
+            donation=donation,
+            project=self.public_project,
+            amount=Decimal('400.00'),
+        )
+        expense = create_expense(allocation=allocation, amount=Decimal('125.00'))
+
+        summary = get_public_transparency_summary()
+
+        self.assertEqual(summary['total_assigned'], Decimal('400.00'))
+        self.assertEqual(summary['total_executed'], Decimal('125.00'))
+        self.assertEqual(summary['available_balance'], Decimal('275.00'))
+        self.assertEqual(
+            summary['available_balance'],
+            max(summary['total_assigned'] - summary['total_executed'], Decimal('0.00')),
+        )
+        self.assertEqual(expense.amount, Decimal('125.00'))
+
+
+class PublicHomeMetricLabelTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        project = create_project(code='PRJ-LABEL', name='Etiquetas')
+        project.status = Project.Status.ACTIVE
+        project.is_public = True
+        project.save(update_fields=['status', 'is_public'])
+
+    def test_public_home_uses_clarified_financial_labels_and_scope_note(self):
+        response = self.client.get(reverse('public_portal:public_home'))
+        content = response.content.decode()
+
+        self.assertContains(response, 'Donaciones vinculadas')
+        self.assertContains(
+            response,
+            'Monto total de las donaciones recibidas que financian al menos un proyecto visible.',
+        )
+        self.assertContains(response, 'Disponible por ejecutar')
+        self.assertContains(
+            response,
+            'Parte de los fondos asignados a proyectos visibles que aún no se ha registrado como ejecutada.',
+        )
+        self.assertContains(
+            response,
+            'Las cifras financieras corresponden únicamente a proyectos activos y visibles en el portal.',
+        )
+        self.assertContains(response, 'Asignado')
+        self.assertContains(response, 'Recursos ejecutados')
+        # Old primary card heading must not remain on the linked-donations card.
+        linked_card_start = content.index('data-metric="linked-donations"')
+        linked_card_end = content.index('</article>', linked_card_start)
+        linked_card = content[linked_card_start:linked_card_end]
+        self.assertNotIn('Fondos recibidos', linked_card)
+        available_start = content.index('data-metric="available-to-execute"')
+        available_end = content.index('</div>', available_start)
+        available_card = content[available_start:available_end]
+        self.assertNotIn('>Disponible<', available_card)
+        self.assertIn('Disponible por ejecutar', available_card)

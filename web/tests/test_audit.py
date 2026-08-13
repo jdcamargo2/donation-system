@@ -1,23 +1,41 @@
 from decimal import Decimal
 import re
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils.text import capfirst
 
-from apps.operations.models import AuditLog, Donation, Expense, FundAllocation, Project
+from apps.operations.models import (
+    AuditLog,
+    Donation,
+    Expense,
+    ExpenseRequest,
+    FundAllocation,
+    Project,
+    SupportingDocument,
+)
 from apps.operations.pagination import build_pagination_page_numbers, parse_page_size
 from apps.operations.tests.helpers import (
     TEST_DATE,
     create_allocation,
     create_donation,
     create_expense,
+    create_fulfilled_expense_request,
     create_institution,
     create_project,
+    create_support_upload,
     create_user,
 )
+
+GOVERNANCE_EXPENSE_MESSAGE = (
+    'El gasto debe registrarse desde una solicitud de gasto aprobada.'
+)
+REQUEST_MODEL_NAME = capfirst(ExpenseRequest._meta.verbose_name)
+EXPENSE_MODEL_NAME = capfirst(Expense._meta.verbose_name)
 
 SIGEDON_CSS = Path(__file__).resolve().parents[2] / 'static' / 'web' / 'css' / 'sigedon.css'
 
@@ -33,6 +51,7 @@ AUDIT_ACTION_SEMANTIC_CLASSES = {
     AuditLog.Action.CLOSED: 'ops-audit-action-closed',
     AuditLog.Action.EXPENSE_CANCELLED: 'ops-audit-action-expense_cancelled',
     AuditLog.Action.PUBLISHED: 'ops-audit-action-published',
+    AuditLog.Action.UNPUBLISHED: 'ops-audit-action-unpublished',
     AuditLog.Action.COMPLETED: 'ops-audit-action-completed',
     AuditLog.Action.REOPENED: 'ops-audit-action-reopened',
     AuditLog.Action.REORDERED: 'ops-audit-action-reordered',
@@ -113,6 +132,11 @@ class BuildPaginationPageNumbersTests(TestCase):
 
 class AuditTests(TestCase):
     def setUp(self):
+        self.media = TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        self.override = override_settings(MEDIA_ROOT=self.media.name)
+        self.override.enable()
+        self.addCleanup(self.override.disable)
         self.user = create_user()
         self.client.force_login(self.user)
         self.donor = create_institution()
@@ -124,6 +148,9 @@ class AuditTests(TestCase):
             donation=self.donation, project=self.project, amount=Decimal('50.00')
         )
         self.expense = create_expense(allocation=self.allocation, amount=Decimal('10.00'))
+        self.requester = create_user(username='audit-er-requester')
+        self.committee = create_user(username='audit-er-committee')
+        self.admin_actor = create_user(username='audit-er-admin')
 
     def test_creating_donation_records_audit_log(self):
         self.client.post(
@@ -206,33 +233,68 @@ class AuditTests(TestCase):
             2,
         )
 
-    def test_creating_and_updating_expense_records_audit_logs(self):
-        self.client.post(
-            reverse('expense_create'),
-            data={
-                'allocation': self.allocation.pk,
-                'expense_date': TEST_DATE,
-                'category': 'food',
-                'amount': '5.00',
-                'currency': 'USD',
-                'reason': 'New expense',
-                'provider_or_recipient': 'Provider A',
-                'payment_method': 'bank_transfer',
-                'description': '',
-                'observations': '',
-                'support_file': SimpleUploadedFile('create.pdf', b'%PDF soporte'),
-            },
+    def test_expense_request_fulfillment_and_update_record_audit_logs(self):
+        audits_before = AuditLog.objects.count()
+        fulfilled, expense, _document = create_fulfilled_expense_request(
+            allocation=self.allocation,
+            requester=self.requester,
+            committee_actor=self.committee,
+            admin_actor=self.admin_actor,
+            requested_amount=Decimal('5.00'),
+            purpose='New expense',
+            reason='New expense',
+            provider_or_recipient='Provider A',
+            payment_method='bank_transfer',
+            category='food',
+            support_file=create_support_upload('create-audit.pdf'),
         )
+
+        request_created = AuditLog.objects.filter(
+            action=AuditLog.Action.CREATED,
+            model_name=REQUEST_MODEL_NAME,
+            entity_id=str(fulfilled.pk),
+            user=self.requester,
+        )
+        self.assertEqual(request_created.count(), 1)
+
+        request_approved = AuditLog.objects.filter(
+            action=AuditLog.Action.VALIDATED,
+            model_name=REQUEST_MODEL_NAME,
+            entity_id=str(fulfilled.pk),
+            user=self.committee,
+        )
+        self.assertEqual(request_approved.count(), 1)
+
+        request_fulfilled = AuditLog.objects.filter(
+            action=AuditLog.Action.EXECUTED,
+            model_name=REQUEST_MODEL_NAME,
+            entity_id=str(fulfilled.pk),
+            user=self.admin_actor,
+        )
+        self.assertEqual(request_fulfilled.count(), 1)
+
+        expense_registered = AuditLog.objects.filter(
+            action=AuditLog.Action.EXECUTED,
+            model_name=EXPENSE_MODEL_NAME,
+            entity_id=str(expense.pk),
+            user=self.admin_actor,
+        )
+        self.assertEqual(expense_registered.count(), 1)
+
+        # Lifecycle creates exactly four financial mutation audits for this chain.
+        self.assertEqual(AuditLog.objects.count(), audits_before + 4)
+
+        self.client.force_login(self.admin_actor)
         self.client.post(
-            reverse('expense_update', args=[self.expense.pk]),
+            reverse('expense_update', args=[expense.pk]),
             data={
                 'allocation': self.allocation.pk,
                 'expense_date': TEST_DATE,
                 'category': 'food',
-                'amount': '15.00',
+                'amount': '4.00',
                 'currency': 'USD',
-                'reason': self.expense.reason,
-                'provider_or_recipient': self.expense.provider_or_recipient,
+                'reason': expense.reason,
+                'provider_or_recipient': expense.provider_or_recipient,
                 'payment_method': 'bank_transfer',
                 'description': '',
                 'observations': '',
@@ -242,16 +304,59 @@ class AuditTests(TestCase):
 
         self.assertEqual(
             AuditLog.objects.filter(
-                action=AuditLog.Action.EXECUTED, model_name='Gasto'
+                action=AuditLog.Action.UPDATED,
+                model_name=EXPENSE_MODEL_NAME,
+                entity_id=str(expense.pk),
+                user=self.admin_actor,
             ).count(),
             1,
         )
         self.assertEqual(
             AuditLog.objects.filter(
-                action=AuditLog.Action.UPDATED, model_name='Gasto'
+                action=AuditLog.Action.EXECUTED,
+                model_name=EXPENSE_MODEL_NAME,
+                entity_id=str(expense.pk),
             ).count(),
             1,
         )
+
+    def test_blocked_expense_create_creates_no_financial_mutation_audit(self):
+        expenses_before = Expense.objects.count()
+        docs_before = SupportingDocument.objects.count()
+        audits_before = AuditLog.objects.count()
+
+        response = self.client.post(
+            reverse('expense_create'),
+            data={
+                'allocation': self.allocation.pk,
+                'expense_date': TEST_DATE,
+                'category': 'food',
+                'amount': '5.00',
+                'currency': 'USD',
+                'reason': 'Blocked direct create',
+                'provider_or_recipient': 'Provider A',
+                'payment_method': 'bank_transfer',
+                'description': '',
+                'observations': '',
+                'support_file': create_support_upload('blocked-audit.pdf'),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('expense_request_list'), response['Location'])
+        self.assertIn('status=approved_reserved', response['Location'])
+        self.assertEqual(Expense.objects.count(), expenses_before)
+        self.assertEqual(SupportingDocument.objects.count(), docs_before)
+        self.assertEqual(AuditLog.objects.count(), audits_before)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action=AuditLog.Action.EXECUTED,
+                model_name=EXPENSE_MODEL_NAME,
+            ).exists()
+        )
+
+        follow = self.client.get(response['Location'], follow=True)
+        self.assertContains(follow, GOVERNANCE_EXPENSE_MESSAGE)
 
     def test_delete_audit_logging_is_not_implemented_yet(self):
         # TODO: Add delete audit assertions when delete views create AuditLog records.
@@ -511,7 +616,9 @@ class AuditLogListPaginationTests(TestCase):
         self.assertNotIn('name="page"', filter_markup)
 
     def test_list_query_count_stays_bounded(self):
-        with self.assertNumQueries(4):
+        # Session + authenticated user + mandatory-password profile check +
+        # paginated AuditLog COUNT + paginated AuditLog page rows.
+        with self.assertNumQueries(5):
             response = self.client.get(self.url, {'page_size': '20'})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.context['logs']), 20)

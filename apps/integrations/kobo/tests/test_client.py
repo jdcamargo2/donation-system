@@ -1,5 +1,6 @@
 from apps.integrations.kobo.client import KoboApiClient, build_kobo_api_client
 from apps.integrations.kobo.errors import KoboAttachmentError
+from apps.integrations.kobo.errors import KoboAttachmentTooLargeError
 from apps.integrations.kobo.errors import KoboAuthenticationError
 from apps.integrations.kobo.errors import KoboConfigurationError
 from apps.integrations.kobo.errors import KoboInvalidResponseError
@@ -38,7 +39,7 @@ class StubHttpTransport:
         self.exception = exception
         self.calls = []
 
-    def get(self, url, *, headers, params, timeout):
+    def get(self, url, *, headers, params, timeout, max_bytes=None):
         # PRE: the client supplies a complete simulated GET request.
         # POST: records the request and returns or raises the configured outcome.
         self.calls.append(
@@ -47,10 +48,23 @@ class StubHttpTransport:
                 "headers": headers,
                 "params": params,
                 "timeout": timeout,
+                "max_bytes": max_bytes,
             }
         )
         if self.exception is not None:
             raise self.exception
+        if max_bytes is not None and len(self.body) > max_bytes:
+            from apps.integrations.kobo.errors import KoboAttachmentTooLargeError
+
+            raise KoboAttachmentTooLargeError("Attachment exceeds the allowed size.")
+        if (
+            max_bytes is not None
+            and self.content_length is not None
+            and self.content_length > max_bytes
+        ):
+            from apps.integrations.kobo.errors import KoboAttachmentTooLargeError
+
+            raise KoboAttachmentTooLargeError("Attachment exceeds the allowed size.")
         return SimpleNamespace(
             status_code=self.status_code,
             body=self.body,
@@ -253,7 +267,8 @@ class KoboApiClientTests(SimpleTestCase):
                 )
                 client = self.create_client(transport)
                 downloaded = client.download_attachment(
-                    "https://kf.example.test/api/attachment/1"
+                    "https://kf.example.test/api/attachment/1",
+                    max_bytes=1024,
                 )
                 self.assertEqual(downloaded.content, content)
                 self.assertEqual(downloaded.content_type, content_type)
@@ -270,7 +285,7 @@ class KoboApiClientTests(SimpleTestCase):
         for url in urls:
             with self.subTest(url=url):
                 with self.assertRaises(KoboAttachmentError):
-                    client.download_attachment(url)
+                    client.download_attachment(url, max_bytes=1024)
         self.assertEqual(transport.calls, [])
 
     def test_download_errors_do_not_expose_token_or_full_url(self):
@@ -282,7 +297,7 @@ class KoboApiClientTests(SimpleTestCase):
         )
 
         with self.assertRaises(KoboIntegrationError) as context:
-            client.download_attachment(full_url)
+            client.download_attachment(full_url, max_bytes=1024)
 
         self.assertNotIn(token, str(context.exception))
         self.assertNotIn(full_url, str(context.exception))
@@ -516,3 +531,115 @@ class KoboApiClientTests(SimpleTestCase):
             client.list_assets()
 
         self.assertNotIn(token, str(context.exception))
+
+
+class BoundedAttachmentReadTests(SimpleTestCase):
+    def test_exact_maximum_succeeds(self):
+        from apps.integrations.kobo.client import _read_bounded_body
+        body = b'a' * 16
+        class FP:
+            def __init__(self, data):
+                self._data = data
+                self.reads = 0
+                self.closed = False
+            def read(self, size=-1):
+                self.reads += 1
+                if not self._data:
+                    return b''
+                if size is None or size < 0:
+                    chunk, self._data = self._data, b''
+                    return chunk
+                chunk, self._data = self._data[:size], self._data[size:]
+                return chunk
+            def close(self):
+                self.closed = True
+        fp = FP(body)
+        self.assertEqual(_read_bounded_body(fp, max_bytes=16, content_length=16), body)
+
+    def test_declared_oversized_rejected_before_body_read(self):
+        from apps.integrations.kobo.client import _read_bounded_body
+        class FP:
+            def __init__(self):
+                self.reads = 0
+            def read(self, size=-1):
+                self.reads += 1
+                return b'x'
+        fp = FP()
+        with self.assertRaises(KoboAttachmentTooLargeError):
+            _read_bounded_body(fp, max_bytes=8, content_length=9)
+        self.assertEqual(fp.reads, 0)
+
+    def test_absent_content_length_stream_over_cap_aborts(self):
+        from apps.integrations.kobo.client import ATTACHMENT_READ_CHUNK_BYTES, _read_bounded_body
+        payload = b'x' * (ATTACHMENT_READ_CHUNK_BYTES * 3 + 10)
+        class FP:
+            def __init__(self, data):
+                self._data = data
+                self.total_read = 0
+            def read(self, size=-1):
+                if not self._data:
+                    return b''
+                chunk, self._data = self._data[:size], self._data[size:]
+                self.total_read += len(chunk)
+                return chunk
+        fp = FP(payload)
+        with self.assertRaises(KoboAttachmentTooLargeError):
+            _read_bounded_body(
+                fp,
+                max_bytes=ATTACHMENT_READ_CHUNK_BYTES,
+                content_length=None,
+            )
+        self.assertLess(fp.total_read, len(payload))
+        self.assertLessEqual(
+            fp.total_read,
+            ATTACHMENT_READ_CHUNK_BYTES + ATTACHMENT_READ_CHUNK_BYTES,
+        )
+
+    def test_false_small_content_length_still_aborts_on_actual_size(self):
+        from apps.integrations.kobo.client import _read_bounded_body
+        class FP:
+            def __init__(self):
+                self._chunks = [b'12345', b'67890', b'']
+            def read(self, size=-1):
+                return self._chunks.pop(0)
+        with self.assertRaises(KoboAttachmentTooLargeError):
+            _read_bounded_body(FP(), max_bytes=8, content_length=4)
+
+    def test_download_size_failure_is_not_retried(self):
+        transport = StubHttpTransport(
+            body=b'x' * 100,
+            content_length=100,
+        )
+        sleeper = RecordingSleeper()
+        client = KoboApiClient(
+            base_url='https://kf.example.test',
+            api_token='token',
+            timeout_seconds=5,
+            transport=transport,
+            max_attempts=3,
+            sleeper=sleeper,
+        )
+        with self.assertRaises(KoboAttachmentTooLargeError):
+            client.download_attachment(
+                'https://kf.example.test/api/attachment/1',
+                max_bytes=10,
+            )
+        self.assertEqual(len(transport.calls), 1)
+        self.assertEqual(sleeper.delays, [])
+        self.assertEqual(transport.calls[0]['max_bytes'], 10)
+
+    def test_size_failure_message_has_no_payload_or_url_secrets(self):
+        secret_url = 'https://kf.example.test/private/signed?token=abc'
+        transport = StubHttpTransport(body=b'secret-payload-bytes', content_length=1000)
+        client = KoboApiClient(
+            base_url='https://kf.example.test',
+            api_token='tok',
+            timeout_seconds=5,
+            transport=transport,
+        )
+        with self.assertRaises(KoboAttachmentTooLargeError) as ctx:
+            client.download_attachment(secret_url, max_bytes=5)
+        message = str(ctx.exception)
+        self.assertNotIn('secret-payload-bytes', message)
+        self.assertNotIn('token=abc', message)
+        self.assertNotIn(secret_url, message)

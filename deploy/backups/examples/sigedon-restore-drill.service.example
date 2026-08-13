@@ -1,0 +1,23 @@
+[Unit]
+Description=SIGEDON isolated restore drill (oneshot; never production)
+Documentation=file:///path/to/sigedon/deploy/backups/README.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sigedon-backup
+Group=sigedon-backup
+WorkingDirectory=/path/to/sigedon
+EnvironmentFile=-/etc/sigedon/restore-drill.env
+# Required gates (isolated targets only):
+# Environment=SIGEDON_RESTORE_DRILL_ENABLED=YES
+# Environment=SIGEDON_RESTORE_CONFIRM=YES
+# Environment=SIGEDON_RESTORE_DB=test_restore_sigedon_drill
+# Environment=SIGEDON_RESTORE_MEDIA_ROOT=/var/tmp/sigedon_restore_drill_media
+# Do NOT set SIGEDON_RESTORE_DB to the production database name.
+ExecStart=/path/to/sigedon/deploy/backups/run_restore_drill.sh
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

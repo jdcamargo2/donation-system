@@ -50,39 +50,6 @@ def get_project_imported_submissions(
     return queryset
 
 
-def get_project_pending_submissions(project):
-    """
-    PRE: project exists and is the internal project selected by the user.
-    POST: returns only its active-asset submissions ready for an operational
-    import, with safe display relations and counts, without modifying state.
-    """
-    return (
-        KoboSubmission.objects.filter(
-            project=project,
-            status=KoboSubmission.Status.READY_FOR_REVIEW,
-            imported_at__isnull=True,
-            asset__is_active=True,
-        )
-        .exclude(
-            routing_status__in=(
-                KoboSubmission.RoutingStatus.PENDING_IDENTITY,
-                KoboSubmission.RoutingStatus.CONFLICT,
-                KoboSubmission.RoutingStatus.ERROR,
-            )
-        )
-        .select_related("form_definition", "asset", "project")
-        .annotate(
-            attachment_count=Count("attachments", distinct=True),
-            downloaded_attachment_count=Count(
-                "attachments",
-                filter=Q(attachments__status=KoboAttachment.Status.DOWNLOADED),
-                distinct=True,
-            ),
-        )
-        .order_by("-received_at", "-pk")
-    )
-
-
 def get_project_submission_history(project):
     """
     PRE: project exists and identifies the internal project being consulted.

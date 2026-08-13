@@ -26,7 +26,7 @@ urlpatterns = [
         views.retry_submission_import,
         name="retry_submission_import",
     ),
-    path("webhook/", views.webhook_submission, name="webhook_submission"),
+    # External webhook is mounted at /integrations/kobo/webhook/ in core.urls.
     path(
         "discovered-assets/",
         views.discovered_asset_list,
@@ -68,24 +68,9 @@ urlpatterns = [
         name="project_submission_evidence",
     ),
     path(
-        "projects/<int:project_pk>/pending-submissions/",
-        views.project_pending_submission_list,
-        name="project_pending_submission_list",
-    ),
-    path(
-        "projects/<int:project_pk>/pending-submissions/<int:pk>/",
-        views.project_pending_submission_review,
-        name="project_pending_submission_review",
-    ),
-    path(
-        "projects/<int:project_pk>/pending-submissions/<int:pk>/import/",
-        views.project_pending_submission_import,
-        name="project_pending_submission_import",
-    ),
-    path(
-        "projects/<int:project_pk>/pending-submissions/<int:pk>/reject/",
-        views.project_pending_submission_reject,
-        name="project_pending_submission_reject",
+        "project-submissions/<int:pk>/evidence/<int:attachment_pk>/download/",
+        views.project_submission_evidence_download,
+        name="project_submission_evidence_download",
     ),
     path(
         "projects/<int:project_pk>/submission-history/",
@@ -97,21 +82,11 @@ urlpatterns = [
         views.project_submission_history_detail,
         name="project_submission_history_detail",
     ),
-    path(
-        "projects/<int:project_pk>/submission-history/<int:pk>/restore/",
-        views.project_rejected_submission_restore,
-        name="project_rejected_submission_restore",
-    ),
     path("submissions/", views.submission_list, name="submission_list"),
     path(
         "submissions/<int:pk>/",
         views.submission_detail,
         name="submission_detail",
-    ),
-    path(
-        "submissions/<int:pk>/review/",
-        views.review_submission_action,
-        name="submission_review",
     ),
     path(
         "submissions/<int:pk>/retry-normalization/",

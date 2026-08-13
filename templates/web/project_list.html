@@ -39,14 +39,32 @@
                                 {{ project.code }}{% if project.location %} · {{ project.location }}{% endif %}
                             </span>
                         </td>
-                        <td><span class="badge ops-status-badge">{{ project.get_status_display }}</span></td>
+                        <td>
+                            <div class="d-inline-flex align-items-center gap-2 flex-wrap">
+                                <span class="badge ops-status-badge">
+                                    {{ project.get_status_display }}
+                                </span>
+
+                                {% if project.is_public %}
+                                    <span class="badge text-bg-success"
+                                          aria-label="Visibilidad: Público">
+                                        Público
+                                    </span>
+                                {% else %}
+                                    <span class="badge text-bg-secondary"
+                                          aria-label="Visibilidad: Privado">
+                                        Privado
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </td>
                         <td class="ops-money text-nowrap">{{ project.estimated_budget|money_es }} USD</td>
                         <td>
                             <span>{{ project.start_date|default:"-" }}</span>
                             <span class="small text-muted d-block">Cierre: {{ project.end_date|default:"-" }}</span>
                         </td>
                         <td class="text-end">
-                            {% if perms.operations.change_project or perms.operations.delete_project %}
+                            {% if perms.operations.change_project %}
                                 <div class="dropdown">
                                     <button
                                         class="btn btn-sm btn-outline-secondary dropdown-toggle"
@@ -60,12 +78,7 @@
                                         Más
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="project-actions-{{ project.pk }}">
-                                        {% if perms.operations.change_project %}
-                                            <li><a class="dropdown-item" href="{% url update_url_name project.pk %}">Editar</a></li>
-                                        {% endif %}
-                                        {% if perms.operations.delete_project %}
-                                            <li><a class="dropdown-item text-danger" href="{% url delete_url_name project.pk %}">Eliminar</a></li>
-                                        {% endif %}
+                                        <li><a class="dropdown-item" href="{% url update_url_name project.pk %}">Editar</a></li>
                                     </ul>
                                 </div>
                             {% endif %}

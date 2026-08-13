@@ -1,13 +1,10 @@
-from django.core.exceptions import PermissionDenied
-
+from django.contrib import messages
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count
-
+from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
-
 from django.urls import reverse_lazy
-
 from django.utils.translation import gettext_lazy as _
-
 from django.views.generic import (
     CreateView,
     DeleteView,
@@ -17,26 +14,22 @@ from django.views.generic import (
 )
 
 from ..forms import DonationForm
-
 from ..models import (
-    AuditLog,
     Donation,
     FundAllocation,
 )
-
 from ..selectors import with_donation_list_metrics
-
 from ..services import (
-    get_donation_financial_summary,
+    DONATION_STATUS_TRANSITIONS,
     OperationalEntityFinalizedError,
     annul_donation,
+    create_donation,
     ensure_operational_entity_is_editable,
-    DONATION_STATUS_TRANSITIONS,
+    get_donation_financial_summary,
     transition_donation_status,
+    update_donation,
 )
-
 from .common import (
-    AuditMixin,
     DeleteAuditMixin,
     DetailMetricsMixin,
     FilteredListContextMixin,
@@ -46,6 +39,7 @@ from .common import (
     StateTransitionContextMixin,
     StateTransitionView,
     TerminalActionView,
+    add_service_errors_to_form,
     apply_list_filters,
 )
 
@@ -85,6 +79,7 @@ class DonationListView(
             text_fields=('code', 'donor__name'), date_field='received_date',
             institution_field='donor_id',
         ).order_by('-received_date', '-created_at', '-pk')
+
 
 class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequiredMixin, RouteContextMixin, DetailMetricsMixin, DetailView):
     permission_required = 'operations.view_donation'
@@ -128,8 +123,8 @@ class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequir
         context['has_more_donation_allocations'] = allocation_count > len(recent_allocations)
         context['can_create_allocation'] = (
             self.request.user.has_perm('operations.add_fundallocation')
+            and self.object.status == Donation.Status.RECEIVED
             and financial_summary['available_amount'] > 0
-            and self.object.status != Donation.Status.ANNULLED
         )
         context['show_edit_in_more'] = (
             context['can_create_allocation']
@@ -139,7 +134,7 @@ class DonationDetailView(StateTransitionContextMixin, OperationsPermissionRequir
         return context
 
 
-class DonationCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, CreateView):
+class DonationCreateView(OperationsPermissionRequiredMixin, RouteContextMixin, CreateView):
     permission_required = 'operations.add_donation'
     model = Donation
     form_class = DonationForm
@@ -147,11 +142,33 @@ class DonationCreateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCon
     success_url = reverse_lazy('donation_list')
     route_prefix = 'donation'
     page_title = _('Nueva donación')
-    audit_action = AuditLog.Action.CREATED
-    audit_summary = _('Donación creada.')
+    success_message = _('Donación creada.')
+
+    def form_valid(self, form):
+        """
+        PRE: form cleaned_data holds a proposed create payload; GET never mutates.
+        POST: delegates to create_donation (authoritative audit) or redisplays field errors.
+        """
+        try:
+            self.object = create_donation(
+                actor=self.request.user,
+                donor=form.cleaned_data['donor'],
+                donation_type=form.cleaned_data['donation_type'],
+                amount=form.cleaned_data['amount'],
+                objective=form.cleaned_data['objective'],
+                restrictions=form.cleaned_data.get('restrictions', ''),
+                commitment_date=form.cleaned_data.get('commitment_date'),
+                received_date=form.cleaned_data.get('received_date'),
+                support_reference=form.cleaned_data.get('support_reference', ''),
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        messages.success(self.request, self.success_message)
+        return HttpResponseRedirect(self.get_success_url())
 
 
-class DonationUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteContextMixin, UpdateView):
+class DonationUpdateView(OperationsPermissionRequiredMixin, RouteContextMixin, UpdateView):
     permission_required = 'operations.change_donation'
     model = Donation
     form_class = DonationForm
@@ -159,7 +176,7 @@ class DonationUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCon
     success_url = reverse_lazy('donation_list')
     route_prefix = 'donation'
     page_title = _('Editar donación')
-    audit_summary = _('Donación actualizada.')
+    success_message = _('Donación actualizada.')
 
     def dispatch(self, request, *args, **kwargs):
         # PRE: request targets ordinary donation editing and permission handling remains authoritative.
@@ -171,6 +188,30 @@ class DonationUpdateView(OperationsPermissionRequiredMixin, AuditMixin, RouteCon
             except OperationalEntityFinalizedError as exc:
                 raise PermissionDenied(exc.messages[0]) from exc
         return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        """
+        PRE: form cleaned_data holds a proposed update; terminal donations already blocked in dispatch.
+        POST: delegates to update_donation (authoritative audit) or redisplays field errors.
+        """
+        try:
+            self.object = update_donation(
+                actor=self.request.user,
+                donation=self.object,
+                donor=form.cleaned_data['donor'],
+                donation_type=form.cleaned_data['donation_type'],
+                amount=form.cleaned_data['amount'],
+                objective=form.cleaned_data['objective'],
+                restrictions=form.cleaned_data.get('restrictions', ''),
+                commitment_date=form.cleaned_data.get('commitment_date'),
+                received_date=form.cleaned_data.get('received_date'),
+                support_reference=form.cleaned_data.get('support_reference', ''),
+            )
+        except ValidationError as error:
+            add_service_errors_to_form(form, error)
+            return self.form_invalid(form)
+        messages.success(self.request, self.success_message)
+        return HttpResponseRedirect(self.get_success_url())
 
 
 class DonationDeleteView(OperationsPermissionRequiredMixin, DeleteAuditMixin, RouteContextMixin, DeleteView):

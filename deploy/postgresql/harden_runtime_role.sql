@@ -5,9 +5,10 @@
 -- PROPOSITO
 --   Separar el rol propietario/migraciones (sigedon_owner) del rol runtime
 --   que usa la aplicacion Django dia a dia (sigedon_app), y limitar
---   explicitamente los privilegios de sigedon_app sobre operations_auditlog
---   para reforzar, a nivel de base de datos, que ese registro es
---   append-only (INSERT y SELECT unicamente).
+--   explicitamente los privilegios de sigedon_app sobre
+--   operations_auditlog y operations_expenserequestevent para reforzar,
+--   a nivel de base de datos, que esos registros son append-only
+--   (INSERT y SELECT unicamente).
 --
 -- COMO EJECUTAR
 --   * Este script debe ejecutarse conectado como el propietario de la base
@@ -109,12 +110,15 @@ GRANT USAGE, SELECT
 
 
 -- -----------------------------------------------------------------------------
--- 4. Endurecimiento especifico de operations_auditlog (append-only)
+-- 4. Endurecimiento especifico de tablas append-only
 -- -----------------------------------------------------------------------------
 -- Se ejecuta DESPUES de los GRANT generales de la seccion 3 para revocar
 -- explicitamente lo que ese otorgamiento amplio pudo haber concedido sobre
--- esta tabla en particular. operations_auditlog es append-only: solo
--- INSERT y SELECT deben permanecer disponibles para sigedon_app.
+-- estas tablas. Ambas son append-only: solo INSERT y SELECT deben
+-- permanecer disponibles para sigedon_app.
+-- Tablas cubiertas (nombres reales de migraciones 0018 / 0029):
+--   public.operations_auditlog
+--   public.operations_expenserequestevent
 GRANT SELECT, INSERT
     ON public.operations_auditlog
     TO sigedon_app;
@@ -125,10 +129,33 @@ REVOKE UPDATE, DELETE, TRUNCATE
 
 -- TRIGGER y REFERENCES no forman parte de los GRANT de la seccion 3, pero se
 -- revocan explicitamente por si fueron concedidos por una migracion de
--- privilegios anterior, un rol heredado, o una configuracion manual previa.
+-- privilegios anterior, un rol heredado, PUBLIC, o una configuracion previa.
 REVOKE TRIGGER, REFERENCES
     ON public.operations_auditlog
     FROM sigedon_app;
+
+-- Misma postura append-only para ExpenseRequestEvent.
+GRANT SELECT, INSERT
+    ON public.operations_expenserequestevent
+    TO sigedon_app;
+
+REVOKE UPDATE, DELETE, TRUNCATE
+    ON public.operations_expenserequestevent
+    FROM sigedon_app;
+
+REVOKE TRIGGER, REFERENCES
+    ON public.operations_expenserequestevent
+    FROM sigedon_app;
+
+-- Revocar privilegios peligrosos tambien desde PUBLIC por si grants
+-- heredados del esquema restauran UPDATE/DELETE/TRUNCATE/TRIGGER.
+REVOKE UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES
+    ON public.operations_auditlog
+    FROM PUBLIC;
+
+REVOKE UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES
+    ON public.operations_expenserequestevent
+    FROM PUBLIC;
 
 
 -- -----------------------------------------------------------------------------
@@ -143,10 +170,10 @@ ALTER DEFAULT PRIVILEGES FOR ROLE sigedon_owner IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE sigedon_owner IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO sigedon_app;
 
--- Si operations_auditlog llegara a recrearse (por ejemplo, en una migracion
--- de reconstruccion excepcional), estos privilegios por defecto NO revocan
--- UPDATE/DELETE/TRUNCATE automaticamente: repetir la seccion 4 manualmente
--- despues de cualquier recreacion de la tabla.
+-- Si operations_auditlog u operations_expenserequestevent llegaran a
+-- recrearse (reconstruccion excepcional), estos privilegios por defecto
+-- NO revocan UPDATE/DELETE/TRUNCATE automaticamente: repetir la seccion 4
+-- manualmente despues de cualquier recreacion de esas tablas.
 
 
 -- -----------------------------------------------------------------------------
@@ -154,7 +181,14 @@ ALTER DEFAULT PRIVILEGES FOR ROLE sigedon_owner IN SCHEMA public
 -- -----------------------------------------------------------------------------
 -- Confirmar visualmente los privilegios resultantes antes de desplegar:
 --   \dp public.operations_auditlog
+--   \dp public.operations_expenserequestevent
 --   \du sigedon_app
 --
--- O bien, desde Django ya configurado con las credenciales de sigedon_app:
+-- O bien, desde Django ya configurado con las credenciales de sigedon_app
+-- (rol runtime final; un éxito bajo sigedon_owner no valida la separación):
 --   python manage.py verify_postgres_security
+--
+-- El comando exige PostgreSQL, verifica AuditLog y ExpenseRequestEvent
+-- append-only (catálogo + sondas con rollback), constraints críticos y
+-- privilegios runtime sobre ambas tablas append-only. No repara grants.
+-- Ver deploy/postgresql/README.md.

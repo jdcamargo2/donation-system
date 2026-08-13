@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% load operations_format %}
+
+{% block title %}{{ title }} - SIGEDON{% endblock %}
+
+{% block content %}
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">Ejecución financiera</div>
+        <h1>{{ title }}</h1>
+        <p>Registre el gasto final a partir de la reserva aprobada. El documento soporte es obligatorio.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Volver a la solicitud</a>
+</div>
+
+<div class="card border-0 ops-form-card">
+    <div class="card-body">
+        <div class="ops-expense-metadata-grid mb-4">
+            <div><span class="ops-detail-label">Solicitud</span><span>{{ expense_request.code }}</span></div>
+            <div>
+                <span class="ops-detail-label">Proyecto</span>
+                <span>{{ expense_request.fund_allocation.project.code }} · {{ expense_request.fund_allocation.project.name }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Categoría presupuestaria de la asignación</span>
+                <span>{{ expense_request.fund_allocation.get_budget_category_display }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Monto solicitado</span>
+                <span class="ops-money text-nowrap">USD {{ fulfill_requested_amount|money_es }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Monto reservado</span>
+                <span class="ops-money text-nowrap">USD {{ fulfill_reserved_amount|money_es }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Saldo disponible actual</span>
+                <span class="ops-money text-nowrap">USD {{ fulfill_available_balance|money_es }}</span>
+            </div>
+            <div>
+                <span class="ops-detail-label">Solicitante</span>
+                <span>{{ requested_by_display }}</span>
+            </div>
+            {% if expense_request.decided_at %}
+                <div>
+                    <span class="ops-detail-label">Fecha de aprobación</span>
+                    <span>{{ expense_request.decided_at }}</span>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="alert alert-warning" role="alert">
+            El gasto se registrará contra la reserva de esta solicitud. Si el monto
+            ejecutado es menor al reservado, la diferencia volverá al saldo disponible.
+        </div>
+
+        <form method="post" enctype="multipart/form-data" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <div class="ops-form-section">
+                <div class="ops-form-grid">
+                    {% for field in form %}
+                        {% if field.is_hidden %}
+                            {{ field }}
+                        {% else %}
+                            <div class="ops-form-field ops-field">
+                                {% include "web/includes/ops_form_field_label.html" with field=field %}
+                                {% include "web/includes/ops_form_field_control.html" with field=field %}
+                                {% if field.help_text %}
+                                    <div class="form-text">{{ field.help_text }}</div>
+                                {% endif %}
+                                {% if field.errors %}
+                                    <div id="{{ field.id_for_label }}_error" class="text-danger small" role="alert">{{ field.errors|striptags }}</div>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="ops-form-actions">
+                <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Volver a la solicitud</a>
+                <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

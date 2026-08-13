@@ -10,8 +10,8 @@
         <h1>Gastos</h1>
         <p>Ejecución real de fondos contra asignaciones aprobadas.</p>
     </div>
-    {% if perms.operations.add_expense %}
-        <a class="btn btn-primary" href="{% url create_url_name %}">Nuevo gasto</a>
+    {% if perms.operations.view_expenserequest %}
+        <a class="btn btn-outline-primary" href="{% url 'expense_request_list' %}">Ver solicitudes de gasto</a>
     {% endif %}
 </div>
 {% include "web/includes/list_filters.html" %}

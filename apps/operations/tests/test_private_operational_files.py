@@ -31,18 +31,18 @@ class PrivateOperationalFileDownloadTests(TestCase):
         )
 
     def test_anonymous_access_redirects_to_login(self):
-        response = self.client.get(reverse('project_update_attachment_download', args=[self.attachment.pk]))
+        response = self.client.get(reverse('project_update_attachment_download', args=[self.project.pk, self.update.pk, self.attachment.pk]))
         self.assertEqual(response.status_code, 302)
 
     def test_authenticated_user_without_permission_receives_403(self):
         user = get_user_model().objects.create_user('no-file-permission', password='pass-12345')
         self.client.force_login(user)
-        response = self.client.get(reverse('project_update_attachment_download', args=[self.attachment.pk]))
+        response = self.client.get(reverse('project_update_attachment_download', args=[self.project.pk, self.update.pk, self.attachment.pk]))
         self.assertEqual(response.status_code, 403)
 
     def test_attachment_download_uses_safe_basename_and_does_not_mutate(self):
         self.client.force_login(self.user)
-        response = self.client.get(reverse('project_update_attachment_download', args=[self.attachment.pk]))
+        response = self.client.get(reverse('project_update_attachment_download', args=[self.project.pk, self.update.pk, self.attachment.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Disposition'], 'attachment; filename="evidence.pdf"')
         self.assertEqual(ProjectUpdateAttachment.objects.count(), 1)
@@ -51,7 +51,7 @@ class PrivateOperationalFileDownloadTests(TestCase):
         publish_project_update(self.update.pk, self.user)
         self.client.force_login(self.user)
 
-        response = self.client.get(reverse('project_update_attachment_download', args=[self.attachment.pk]))
+        response = self.client.get(reverse('project_update_attachment_download', args=[self.project.pk, self.update.pk, self.attachment.pk]))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Disposition'], 'attachment; filename="evidence.pdf"')

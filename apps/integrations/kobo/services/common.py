@@ -45,14 +45,6 @@ class ProcessingBatchResult:
 
 
 @dataclass(frozen=True)
-class ReviewResult:
-    submission_id: int
-    previous_status: str
-    final_status: str
-    reviewed_by_id: int
-
-
-@dataclass(frozen=True)
 class ProjectAssociationResult:
     submission_id: int
     asset_id: int | None
@@ -68,20 +60,6 @@ class OperationalImportResult:
     project_id: int | None
     imported: bool
     already_imported: bool
-
-
-@dataclass(frozen=True)
-class KoboRejectionResult:
-    submission_id: int
-    rejected: bool
-    already_rejected: bool
-
-
-@dataclass(frozen=True)
-class KoboRestoreResult:
-    submission_id: int
-    restored: bool
-    already_ready: bool
 
 
 @dataclass(frozen=True)

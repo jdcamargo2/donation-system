@@ -29,7 +29,7 @@ from apps.operations.services import (
     annul_expense,
     complete_project_milestone,
     create_project_milestone,
-    create_expense,
+    create_expense_legacy as create_expense,
     create_fund_allocation,
     delete_project_milestone,
     move_project_milestone_down,
@@ -655,7 +655,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             project=project,
             title='Avance concurrente',
             description='Pendiente de dos revisores.',
-            status=ProjectUpdate.Status.DRAFT,
+            status=ProjectUpdate.Status.UNPUBLISHED,
             reported_by=reported_by,
         )
         project_update_id = project_update.pk

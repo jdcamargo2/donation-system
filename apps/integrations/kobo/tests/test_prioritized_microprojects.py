@@ -27,7 +27,14 @@ from apps.integrations.kobo.models import (
     KoboTerritorialIdentityConflict,
 )
 from apps.integrations.kobo.services import import_kobo_submission
-from apps.operations.models import AuditLog, Donation, Expense, FundAllocation, Project
+from apps.operations.models import (
+    AuditLog,
+    Donation,
+    Expense,
+    FundAllocation,
+    Project,
+    ProjectDeletionForbiddenError,
+)
 
 
 def canonical_microproject_payload(code="NV-MICROPROJECT", **changes):
@@ -240,8 +247,20 @@ class KoboPrioritizedMicroprojectTests(PrioritizedMicroprojectFixtureMixin, Test
             duplicate.full_clean()
         for protected_object in (identity, self.project, submission, self.importer):
             with self.subTest(protected_object=protected_object):
-                with self.assertRaises(ProtectedError):
-                    protected_object.delete()
+                if isinstance(protected_object, Project):
+                    with self.assertRaises(ProjectDeletionForbiddenError):
+                        protected_object.delete()
+                    self.assertTrue(
+                        Project.objects.filter(pk=protected_object.pk).exists()
+                    )
+                    self.assertTrue(
+                        KoboPrioritizedMicroproject.objects.filter(
+                            pk=microproject.pk
+                        ).exists()
+                    )
+                else:
+                    with self.assertRaises(ProtectedError):
+                        protected_object.delete()
         microproject.name = "Mutación prohibida"
         with self.assertRaises(ValidationError):
             microproject.save()

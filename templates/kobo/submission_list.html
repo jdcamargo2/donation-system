@@ -1,13 +1,14 @@
 {% extends "base.html" %}
+{% load kobo_presentation %}
 
-{% block title %}Submissions Kobo | SIGEDON{% endblock %}
+{% block title %}Formularios Kobo | SIGEDON{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-3">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
             <div class="text-uppercase text-muted small">Integración interna</div>
-            <h1 class="h3 mb-0">Submissions Kobo</h1>
+            <h1 class="h3 mb-0">Formularios Kobo</h1>
         </div>
     </div>
 
@@ -48,7 +49,7 @@
     <div class="card">
         <div class="table-responsive">
             <table class="table table-sm table-hover align-middle mb-0">
-                <thead><tr><th>ID</th><th>Formulario</th><th>External ID</th><th>Zona</th><th>Parroquia</th><th>Comunidad</th><th>Fecha</th><th>Estado</th><th>Recibido</th><th>Adjuntos</th><th>Descargados</th></tr></thead>
+                <thead><tr><th>ID</th><th>Formulario</th><th>Identificador externo</th><th>Zona</th><th>Parroquia</th><th>Comunidad</th><th>Fecha</th><th>Estado</th><th>Recibido</th><th>Adjuntos</th><th>Descargados</th></tr></thead>
                 <tbody>
                 {% for submission in submissions %}
                     <tr>
@@ -59,13 +60,13 @@
                         <td>{{ submission.parish|default:"—" }}</td>
                         <td>{{ submission.primary_community|default:"—" }}</td>
                         <td>{{ submission.assessment_date|default:"—" }}</td>
-                        <td>{{ submission.get_status_display }}</td>
+                        <td>{{ submission.status|kobo_label }}</td>
                         <td>{{ submission.received_at }}</td>
                         <td>{{ submission.attachment_count }}</td>
                         <td>{{ submission.downloaded_attachment_count }}</td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="11" class="text-center text-muted py-4">No hay submissions.</td></tr>
+                    <tr><td colspan="11" class="text-center text-muted py-4">No hay formularios.</td></tr>
                 {% endfor %}
                 </tbody>
             </table>

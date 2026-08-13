@@ -1,5 +1,6 @@
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+import logging
 
 from apps.integrations.kobo.contracts import (
     PastoralZone,
@@ -26,12 +27,11 @@ from apps.integrations.kobo.models import (
 from apps.operations.models import AuditLog, Project
 from apps.operations.services import log_action
 
+logger = logging.getLogger("sigedon.kobo.processing")
 
 MAX_RECONCILIATION_BATCH = 100
 MAX_REASON_LENGTH = 500
-AVAILABLE_PROJECT_STATUSES = frozenset(
-    {Project.Status.PLANNED, Project.Status.ACTIVE, Project.Status.SUSPENDED}
-)
+AVAILABLE_PROJECT_STATUSES = frozenset({Project.Status.ACTIVE})
 
 MANAGE_MAPPINGS_PERMISSION = "kobo.manage_pastoral_zone_mappings"
 RESOLVE_CONFLICTS_PERMISSION = "kobo.resolve_territorial_conflicts"
@@ -652,6 +652,11 @@ def reconcile_territorial_identity_submissions(*, identity, actor, limit=MAX_REC
                     KoboSubmission.objects.get(pk=submission_id)
                 )
             except Exception:
+                logger.exception(
+                    "Kobo reconciliation auto-import unexpected failure "
+                    "submission_id=%s",
+                    submission_id,
+                )
                 failed += 1
                 incidents += 1
                 continue

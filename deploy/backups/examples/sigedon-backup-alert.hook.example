@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Example local alert hook for SIGEDON backup / restore-drill failures.
+# Platform adapts delivery (email, pager, log shipper). No network calls required
+# by the repository contract; this example only writes a bounded syslog line.
+#
+# Invoked as:
+#   hook <job> <status> <exit_code> <phase> <backup_id>
+# Env (same values): SIGEDON_ALERT_JOB, SIGEDON_ALERT_STATUS, SIGEDON_ALERT_EXIT_CODE,
+# SIGEDON_ALERT_PHASE, SIGEDON_ALERT_BACKUP_ID, SIGEDON_ALERT_FINISHED_AT
+set -Eeuo pipefail
+
+job="${1:-${SIGEDON_ALERT_JOB:-unknown}}"
+status="${2:-${SIGEDON_ALERT_STATUS:-unknown}}"
+exit_code="${3:-${SIGEDON_ALERT_EXIT_CODE:-1}}"
+phase="${4:-${SIGEDON_ALERT_PHASE:-unknown}}"
+backup_id="${5:-${SIGEDON_ALERT_BACKUP_ID:-}}"
+
+# Bounded operational identifiers only — never log paths, dumps, or secrets.
+logger -t sigedon-backup \
+  "job=${job} status=${status} exit=${exit_code} phase=${phase} backup_id=${backup_id}"
+exit 0

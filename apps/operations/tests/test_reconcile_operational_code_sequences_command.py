@@ -38,6 +38,18 @@ class ReconcileOperationalCodeSequencesCommandTests(TestCase):
             next_value=value
         )
 
+    def _canonical_project_maximum(self):
+        maximum = None
+        for code in Project.objects.values_list('code', flat=True):
+            if not code or not code.startswith('PRJ-'):
+                continue
+            suffix = code.removeprefix('PRJ-')
+            if suffix.isdigit() and int(suffix) > 0:
+                value = int(suffix)
+                if maximum is None or value > maximum:
+                    maximum = value
+        return maximum
+
     def _create_canonical_entity(self, namespace, number):
         prefix = OPERATIONAL_CODE_PREFIXES[namespace]
         code = f'{prefix}-{number:06d}'
@@ -117,14 +129,20 @@ class ReconcileOperationalCodeSequencesCommandTests(TestCase):
                 Expense.objects.all().delete()
                 FundAllocation.objects.all().delete()
                 Donation.objects.all().delete()
-                Project.objects.all().delete()
+                # Projects are immutable; keep leftover rows and advance their sequence safely.
+                leftover_project_maximum = self._canonical_project_maximum()
                 for sequence_namespace, prefix in OPERATIONAL_CODE_PREFIXES.items():
+                    next_value = 1
+                    if sequence_namespace == 'project' and leftover_project_maximum is not None:
+                        next_value = leftover_project_maximum + 1
                     OperationalCodeSequence.objects.update_or_create(
                         namespace=sequence_namespace,
-                        defaults={'prefix': prefix, 'next_value': 1},
+                        defaults={'prefix': prefix, 'next_value': next_value},
                     )
                 self._create_canonical_entity(namespace, number)
                 self._set_next_value(namespace, number + 1)
+                if namespace != 'project' and leftover_project_maximum is not None:
+                    self._set_next_value('project', leftover_project_maximum + 1)
 
                 output = self._run_command()
 

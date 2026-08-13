@@ -1,6 +1,5 @@
 from apps.integrations.kobo.services.association import (
     get_project_imported_submissions,
-    get_project_pending_submissions,
     get_project_submission_history,
 )
 from apps.integrations.kobo.services.automation import (
@@ -18,14 +17,11 @@ from apps.integrations.kobo.services.discovery import (
 )
 from apps.integrations.kobo.services.importers import (
     import_kobo_submission,
-    reject_kobo_submission,
-    restore_kobo_submission_to_review,
 )
 from apps.integrations.kobo.services.incremental import sync_asset_submissions
 from apps.integrations.kobo.services.orchestration import sync_supported_assets
 from apps.integrations.kobo.services.processing import (
     process_pending_submissions,
-    review_submission,
 )
 from apps.integrations.kobo.services.submissions import (
     converge_webhook_submission,
@@ -63,17 +59,13 @@ __all__ = (
     "get_asset_readiness",
     "get_kobo_system_actor",
     "get_project_imported_submissions",
-    "get_project_pending_submissions",
     "get_project_submission_history",
     "import_kobo_submission",
     "process_pending_submissions",
     "observe_territorial_identity",
     "receive_webhook_submission",
-    "reject_kobo_submission",
     "reconcile_territorial_identity_submissions",
-    "restore_kobo_submission_to_review",
     "retry_auto_import",
-    "review_submission",
     "route_dependent_territorial_submission",
     "route_ficha_1_submission",
     "route_normalized_submission",

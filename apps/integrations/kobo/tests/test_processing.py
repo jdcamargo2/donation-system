@@ -222,7 +222,11 @@ class KoboSubmissionProcessorTests(TestCase):
 
         self.assertEqual(selected.status, KoboSubmission.Status.READY_FOR_REVIEW)
         self.assertEqual(untouched.status, KoboSubmission.Status.RECEIVED)
-        self.assertIn("selected=1 processed=1 ready=1", output.getvalue())
+        output_text = output.getvalue()
+        self.assertIn("selected=1", output_text)
+        self.assertIn("processed=1", output_text)
+        self.assertIn("ready=1", output_text)
+        self.assertIn("failed=0", output_text)
         sensitive_values = (
             "000000000",
             "PERSONA_PRUEBA",

@@ -6,6 +6,7 @@ import re
 from .models import (
     Donation,
     Expense,
+    ExpenseRequest,
     FundAllocation,
     OPERATIONAL_CODE_PREFIXES,
     OperationalCodeSequence,
@@ -18,6 +19,7 @@ OPERATIONAL_CODE_MODELS = {
     'donation': Donation,
     'fund_allocation': FundAllocation,
     'expense': Expense,
+    'expense_request': ExpenseRequest,
 }
 UNSAFE_SEQUENCE_STATUSES = frozenset(
     {'MISSING_SEQUENCE', 'LAGGING_SEQUENCE', 'INVALID_SEQUENCE'}

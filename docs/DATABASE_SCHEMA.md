@@ -210,14 +210,14 @@ Representa un proyecto institucional.
 | `name`             | `CharField`     | Obligatorio                        |
 | `description`      | `TextField`     | Opcional                           |
 | `objective`        | `TextField`     | Opcional                           |
-| `responsible_unit` | `CharField`     | Opcional                           |
 | `location`         | `CharField`     | Opcional                           |
 | `estimated_budget` | `DecimalField`  | Mayor o igual a cero               |
 | `start_date`       | `DateField`     | Opcional                           |
 | `end_date`         | `DateField`     | Opcional                           |
-| `status`           | `CharField`     | Obligatorio                        |
-| `terminal_reason`  | `TextField`     | Opcional                           |
-| `terminal_at`      | `DateTimeField` | Opcional                           |
+| `status`           | `CharField`     | Obligatorio; por defecto `active`  |
+| `is_public`        | `BooleanField`  | Obligatorio; por defecto `FALSE`   |
+| `terminal_reason`  | `TextField`     | Opcional; metadato terminal        |
+| `terminal_at`      | `DateTimeField` | Opcional; metadato terminal        |
 | `terminal_by_id`   | `ForeignKey`    | Opcional, referencia a `auth_user` |
 | `created_at`       | `DateTimeField` | Automático                         |
 | `updated_at`       | `DateTimeField` | Automático                         |
@@ -233,12 +233,22 @@ estimated_budget >= 0
 #### Estados
 
 ```text
-planned
 active
-suspended
 closed
-annulled
 ```
+
+Valor por defecto de `status`: `active`.
+
+`is_public` es independiente del estado operativo. Valor por defecto: `FALSE`.
+
+Metadatos terminales (`terminal_at`, `terminal_by`, `terminal_reason`) se
+completan al terminar el proyecto (`ACTIVE` → `CLOSED`).
+
+La eliminación de filas de `operations_project` está bloqueada en la capa de
+aplicación/ORM (`Project.delete()`, queryset `delete()`, Admin y UI). No existe
+un trigger de base de datos que impida el `DELETE` SQL directo; administración
+directa de PostgreSQL, `flush`, teardown de pruebas y destrucción de la base
+quedan fuera de esa garantía.
 
 #### Relaciones
 
@@ -353,6 +363,88 @@ El monto ejecutado y el saldo se derivan de los gastos no anulados.
 
 ---
 
+### 5.4a. `operations_expenserequest`
+
+Representa una solicitud de gasto gobernada sobre una asignación.
+
+Campos principales: `code` (único/inmutable, prefijo `SGS`), `fund_allocation_id`,
+`requested_by_id`, `requested_amount`, `purpose`, `requested_date`, `status`,
+metadatos de decisión (`decision_note`, `decided_by_id`, `decided_at`), reserva
+(`reserved_amount`, `reserved_at`), enlace opcional `expense_id` (OneToOne),
+metadatos terminales y timestamps.
+
+#### Estados
+
+```text
+pending_decision
+approved_reserved
+denied
+withdrawn
+fulfilled
+annulled
+```
+
+#### Índices
+
+```text
+ops_expreq_status_idx
+ops_expreq_alloc_status_idx
+ops_expreq_req_by_status_idx
+ops_expreq_req_date_idx
+ops_expreq_decided_at_idx
+ops_expreq_created_at_idx
+```
+
+#### Constraints (migración `0027`)
+
+Constraints nombrados por estado/monto, entre ellos:
+
+```text
+operations_expenserequest_requested_amount_gt_zero
+operations_expenserequest_reserved_amount_gte_zero
+operations_expenserequest_reserved_lte_requested
+operations_expenserequest_fulfilled_requires_expense
+operations_expenserequest_non_fulfilled_no_expense
+operations_expenserequest_approved_fulfilled_meta
+operations_expenserequest_denied_requires_decision
+operations_expenserequest_terminal_requires_meta
+operations_expenserequest_pending_clean_slate
+operations_expenserequest_denied_no_reservation
+operations_expenserequest_withdrawn_no_decision
+operations_expenserequest_approved_no_terminal
+operations_expenserequest_fulfilled_no_terminal
+operations_expenserequest_annulled_no_expense
+```
+
+#### Relaciones
+
+```text
+FundAllocation 1 ──< ExpenseRequest
+ExpenseRequest 0..1 ── 1 Expense   (solo en fulfilled)
+ExpenseRequest 1 ──< ExpenseRequestAttachment
+ExpenseRequest 1 ──< ExpenseRequestEvent
+```
+
+### 5.4b. `operations_expenserequestattachment`
+
+Evidencia opcional de solicitud (`file`, `title`, `uploaded_by_id`, `uploaded_at`,
+`notes`). Mutable solo mientras el padre esté en `pending_decision`.
+
+### 5.4c. `operations_expenserequestevent`
+
+Historial estructurado append-only de la solicitud. Índices:
+
+```text
+ops_expreq_evt_req_created_idx
+ops_expreq_evt_type_crtd_idx
+```
+
+En PostgreSQL, la migración `0029_expense_request_event_append_only` instala el
+trigger `operations_expenserequestevent_append_only` que rechaza `UPDATE`,
+`DELETE` y `TRUNCATE`. Complementa `AuditLog`; no lo sustituye.
+
+---
+
 ### 5.5. `operations_expense`
 
 Representa un gasto registrado contra una asignación.
@@ -459,27 +551,26 @@ Representa un avance de proyecto.
 | `title`               | `CharField`                 | Obligatorio                        |
 | `description`         | `TextField`                 | Obligatorio                        |
 | `update_date`         | `DateField`                 | Obligatorio                        |
-| `progress_percentage` | `PositiveSmallIntegerField` | Entre 0 y 100                      |
 | `status`              | `CharField`                 | Obligatorio                        |
 | `created_at`          | `DateTimeField`             | Automático                         |
 | `updated_at`          | `DateTimeField`             | Automático                         |
 | `created_by_id`       | `ForeignKey`                | Opcional, referencia a `auth_user` |
 | `reported_by_id`      | `ForeignKey`                | Opcional, referencia a `auth_user` |
 
-#### Restricción
-
-```text
-project_update_progress_between_0_and_100
-
-0 <= progress_percentage <= 100
-```
+`ProjectUpdate` no persiste porcentaje de progreso. El progreso operativo del proyecto se deriva de hitos (`ProjectMilestone`), no de esta tabla.
 
 #### Estados
 
 ```text
-draft
+unpublished
 published
 ```
+
+`UNPUBLISHED` / No publicado: registrado internamente; editable por usuarios
+autorizados; admite adjuntos; no aparece en el portal público.
+
+`PUBLISHED` / Publicado: inmutable; elegible para revisión; visible públicamente
+solo si el proyecto está activo y marcado como público.
 
 #### Relaciones
 
@@ -498,6 +589,10 @@ created_by_id
 reported_by_id
 → Persona responsable del contenido del avance
 ```
+
+Para el Operador de campo, al crear un avance ambos apuntan al actor autenticado.
+Administrador SIGEDON y superusuario pueden seleccionar un `reported_by_id`
+distinto entre usuarios elegibles.
 
 ---
 
@@ -616,6 +711,7 @@ Mantiene los próximos números disponibles para los códigos operativos.
 | `project`         | `PRJ`   |
 | `donation`        | `DON`   |
 | `fund_allocation` | `ASG`   |
+| `expense_request` | `SGS`   |
 | `expense`         | `GAS`   |
 
 #### Ejemplos
@@ -624,6 +720,7 @@ Mantiene los próximos números disponibles para los códigos operativos.
 PRJ-000001
 DON-000001
 ASG-000001
+SGS-000001
 GAS-000001
 ```
 
@@ -1108,13 +1205,15 @@ Incluye:
 * correo electrónico;
 * fechas de acceso.
 
-SIGEDON utiliza el modelo estándar de usuario de Django.
+SIGEDON utiliza el modelo estándar de usuario de Django (`auth.User`). No existe
+un modelo propio de rol ni de perfil de rol: los roles funcionales se representan
+mediante grupos Django.
 
 ### 7.2. `auth_group`
 
 Contiene los grupos de permisos.
 
-Grupos operativos sincronizados:
+Exactamente cuatro grupos funcionales canónicos, sincronizados desde código:
 
 ```text
 Administrador SIGEDON
@@ -1122,6 +1221,10 @@ Operador de campo
 Auditor externo
 Comité de proyectos
 ```
+
+También pueden existir grupos técnicos no canónicos. Las matrices de permisos
+de los grupos canónicos se sincronizan desde el código mediante
+`sync_sigedon_roles`; las ediciones manuales a esas matrices no son autoritativas.
 
 ### 7.3. `auth_permission`
 
@@ -1144,6 +1247,14 @@ Tabla intermedia:
 auth_user ↔ auth_group
 ```
 
+The database M2M permits multiple groups structurally, while SIGEDON’s
+administrative invariant permits at most one canonical functional-role group
+per user.
+
+Esa invariante de un solo rol funcional se aplica mediante `SigedonUserAdmin` y
+helpers de rol (`get_user_functional_role`, `set_user_functional_role`). No existe
+una restricción a nivel de base de datos que la imponga.
+
 ### 7.5. `auth_group_permissions`
 
 Tabla intermedia:
@@ -1152,11 +1263,15 @@ Tabla intermedia:
 auth_group ↔ auth_permission
 ```
 
+Para grupos canónicos, el contenido de esta tabla se reemplaza desde código al
+ejecutar `sync_sigedon_roles`.
+
 ### 7.6. `auth_user_user_permissions`
 
 Contiene permisos asignados directamente a usuarios.
 
-Su uso debe reservarse para excepciones controladas.
+Son independientes del rol funcional y de los grupos técnicos. Su uso debe
+reservarse para excepciones controladas (por ejemplo cuentas de servicio).
 
 ## 8. Tablas internas de Django
 

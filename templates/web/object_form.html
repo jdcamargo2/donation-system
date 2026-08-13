@@ -7,7 +7,7 @@
     <div>
         <div class="ops-kicker">Formulario operativo</div>
         <h1>{{ title }}</h1>
-        <p>Complete los datos requeridos. Los campos marcados con asterisco son obligatorios.</p>
+        <p>{% if form_subtitle %}{{ form_subtitle }}{% else %}Complete los datos requeridos. Los campos marcados con asterisco son obligatorios.{% endif %}</p>
     </div>
     <a class="btn btn-outline-secondary" href="{% if cancel_object_pk %}{% url list_url_name cancel_object_pk %}{% else %}{% url list_url_name %}{% endif %}">Cancelar</a>
 </div>
@@ -26,13 +26,8 @@
                     {{ field }}
                 {% else %}
                 <div class="ops-form-field ops-field">
-                    <label class="form-label" for="{{ field.id_for_label }}">
-                        {{ field.label }}
-                        {% if field.field.required %}
-                            <span class="required-mark">*</span>
-                        {% endif %}
-                    </label>
-                    {{ field }}
+                    {% include "web/includes/ops_form_field_label.html" with field=field %}
+                    {% include "web/includes/ops_form_field_control.html" with field=field %}
                     {% if field.help_text %}
                         <div class="form-text">{{ field.help_text }}</div>
                     {% endif %}

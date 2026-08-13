@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group, Permission
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from types import SimpleNamespace
@@ -15,6 +15,12 @@ from apps.integrations.kobo.models import KoboTerritorialIdentityConflict
 from apps.integrations.kobo.presentation import pastoral_zone_label
 from apps.integrations.kobo.tests.test_territorial_administration import (
     TerritorialAdministrationFixtureMixin,
+)
+from apps.operations.role_services import sync_operation_roles
+from apps.operations.roles import (
+    ROLE_EXTERNAL_AUDITOR,
+    ROLE_FIELD_OPERATOR,
+    ROLE_PROJECT_COMMITTEE,
 )
 
 
@@ -82,7 +88,7 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
         self.assertNotContains(response, "Última actualización por ficha")
 
     def test_dashboard_status_polling_is_protected_compact_and_aggregated(self):
-        with self.assertNumQueries(8):
+        with self.assertNumQueries(9):
             response = self.client.get(
                 reverse("kobo:dashboard_status"),
                 HTTP_HX_REQUEST="true",
@@ -556,6 +562,32 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("kobo:hub"))
         self.assertEqual(response.status_code, 403)
+
+    def test_field_operator_cannot_get_or_post_territorial_hub(self):
+        sync_operation_roles()
+        operator = get_user_model().objects.create_user("hub-field-operator")
+        operator.groups.add(Group.objects.get(name=ROLE_FIELD_OPERATOR))
+        mapping_count = KoboPastoralZoneProjectMapping.objects.count()
+        self.client.force_login(operator)
+
+        self.assertEqual(self.client.get(reverse("kobo:hub")).status_code, 403)
+        self.assertEqual(
+            self.client.post(
+                reverse("kobo:configure_mapping"),
+                {"pastoral_zone": "centro", "project": self.project.pk},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(KoboPastoralZoneProjectMapping.objects.count(), mapping_count)
+
+    def test_auditor_and_committee_can_get_territorial_hub(self):
+        sync_operation_roles()
+        for role_name in (ROLE_EXTERNAL_AUDITOR, ROLE_PROJECT_COMMITTEE):
+            with self.subTest(role=role_name):
+                user = get_user_model().objects.create_user(f"hub-reader-{role_name}")
+                user.groups.add(Group.objects.get(name=role_name))
+                self.client.force_login(user)
+                self.assertEqual(self.client.get(reverse("kobo:hub")).status_code, 200)
 
     def test_sync_all_post_fallback_redirects_without_htmx(self):
         url = reverse("kobo:sync_all")

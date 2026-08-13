@@ -1,4 +1,3 @@
-from apps.integrations.kobo.errors import KoboPayloadError
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_VERSION
 from apps.integrations.kobo.mappings.ficha_10 import FICHA_10_FORM_ID
@@ -8,17 +7,14 @@ from apps.integrations.kobo.mappings.ficha_11 import FICHA_11_VERSION
 from apps.integrations.kobo.models import KoboAsset
 from apps.integrations.kobo.models import KoboAttachment
 from apps.integrations.kobo.models import KoboFormDefinition
+from apps.integrations.kobo.models import KoboProcessingEvent
 from apps.integrations.kobo.models import KoboSubmission
 from apps.integrations.kobo.services import get_project_imported_submissions
-from apps.integrations.kobo.services import get_project_pending_submissions
 from apps.integrations.kobo.services import get_project_submission_history
 from apps.integrations.kobo.services import import_kobo_submission
-from apps.integrations.kobo.services import reject_kobo_submission
-from apps.integrations.kobo.services import restore_kobo_submission_to_review
 from apps.integrations.kobo.services.importers import _lock_submission_for_operational_import
 from apps.operations.models import AuditLog
 from apps.operations.models import Project
-from copy import deepcopy
 from datetime import date
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -27,8 +23,10 @@ from django.db import transaction
 from django.test import TestCase
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
+from django.urls import NoReverseMatch
 from django.urls import reverse
 from django.utils import timezone as django_timezone
+
 
 
 @override_settings(KOBO_ENABLED=True)
@@ -248,11 +246,16 @@ class KoboProjectImportedSubmissionsTests(TestCase):
                 "nucleo_code": "NV-001",
                 "communities_covered": "Comunidades visibles",
                 "estimated_households": 300,
-                "access_difficulties": "no",
+                "access_difficulties": "yes",
                 "access_difficulties_notes": None,
                 "initial_priority_perception": "medium",
                 "general_notes": "Nota visible",
-                "location": {"latitude": 10.0, "longitude": -66.0},
+                "location": {
+                    "latitude": 13.125832,
+                    "longitude": -68.515603,
+                    "altitude": None,
+                    "accuracy": None,
+                },
                 "parish_delegate": "Sensitive Delegate",
                 "contact_phone": "+58-sensitive-phone",
                 "main_informant_role": "Sensitive Informant Role",
@@ -300,27 +303,25 @@ class KoboProjectImportedSubmissionsTests(TestCase):
 
         self.assertEqual(submissions, [self.prioritization_imported])
 
-    def test_pending_service_and_project_detail_show_only_reviewable_submissions(self):
-        submissions = list(get_project_pending_submissions(self.project))
-
-        self.assertEqual(submissions, [self.ready])
+    def test_project_detail_removes_obsolete_pending_review_surface(self):
         self.client.force_login(self.viewer)
         response = self.client.get(reverse("project_detail", args=(self.project.pk,)))
-        queue_response = self.client.get(
-            reverse("kobo:project_pending_submission_list", args=(self.project.pk,))
-        )
 
-        self.assertContains(response, "Fichas Kobo pendientes de revisión")
-        self.assertContains(response, "ready-hidden")
-        self.assertNotContains(response, "approved-hidden")
-        self.assertNotContains(response, "validation-failed-hidden")
-        self.assertNotContains(response, "other-project-imported")
-        self.assertNotContains(response, "Revisar")
-        self.assertEqual(queue_response.status_code, 200)
-        self.assertContains(queue_response, "ready-hidden")
-        self.assertNotContains(queue_response, "approved-hidden")
-        self.assertNotContains(queue_response, "validation-failed-hidden")
-        self.assertNotContains(queue_response, "other-project-imported")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "operations/project_detail.html")
+        self.assertNotContains(response, "Fichas Kobo pendientes de revisión")
+        self.assertNotContains(response, "Ver bandeja de revisión")
+        self.assertNotContains(response, "No hay fichas Kobo pendientes de revisión.")
+        self.assertNotContains(response, "Procesamiento automático")
+        self.assertNotContains(response, "ready-hidden")
+        self.assertContains(response, "Ver historial Kobo")
+        self.assertContains(
+            response,
+            reverse("kobo:project_submission_history", args=(self.project.pk,)),
+        )
+        self.assertNotContains(response, "/integrations/kobo/submissions/pending/")
+        with self.assertRaises(NoReverseMatch):
+            reverse("kobo:project_pending_submission_list", args=(self.project.pk,))
 
     def test_project_detail_shows_only_visible_imported_submission(self):
         self.client.force_login(self.viewer)
@@ -330,9 +331,10 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "operations/project_detail.html")
         self.assertContains(response, "Levantamientos de campo")
+        self.assertContains(response, "Ver historial Kobo")
         self.assertContains(response, "visible-parish")
         self.assertNotContains(response, "other-project-imported")
-        self.assertContains(response, "ready-hidden")
+        self.assertNotContains(response, "ready-hidden")
         self.assertNotContains(response, "approved-hidden")
         self.assertNotContains(response, "inactive-asset-hidden")
         self.assertContains(response, "Microproyectos priorizados")
@@ -348,37 +350,30 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         ):
             self.assertNotContains(response, sensitive_value)
 
-    def test_legacy_project_review_route_is_disabled(self):
-        review_url = reverse(
+    def test_legacy_project_review_routes_are_removed(self):
+        for name in (
             "kobo:project_pending_submission_review",
-            args=(self.project.pk, self.ready.pk),
-        )
-        mismatched_url = reverse(
-            "kobo:project_pending_submission_review",
-            args=(self.other_project.pk, self.ready.pk),
-        )
-        self.client.force_login(self.reviewer)
-
-        response = self.client.get(review_url)
-        mismatched_response = self.client.get(mismatched_url)
-
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(mismatched_response.status_code, 404)
-
-        self.client.force_login(self.unprivileged)
-        self.assertEqual(self.client.get(review_url).status_code, 403)
-
-    def test_legacy_rejection_action_is_disabled_without_mutation(self):
-        url = reverse(
             "kobo:project_pending_submission_reject",
-            args=(self.project.pk, self.ready.pk),
-        )
-        self.client.force_login(self.reviewer)
+            "kobo:project_pending_submission_import",
+            "kobo:project_rejected_submission_restore",
+        ):
+            with self.subTest(name=name):
+                with self.assertRaises(NoReverseMatch):
+                    reverse(name, args=(self.project.pk, self.ready.pk))
 
-        invalid_response = self.client.post(url, {"reason": "other", "comment": ""})
-        self.assertEqual(invalid_response.status_code, 404)
+        self.client.force_login(self.reviewer)
+        for path in (
+            f"/integrations/kobo/projects/{self.project.pk}/pending-submissions/{self.ready.pk}/",
+            f"/integrations/kobo/projects/{self.project.pk}/pending-submissions/{self.ready.pk}/reject/",
+            f"/integrations/kobo/projects/{self.project.pk}/pending-submissions/{self.ready.pk}/import/",
+            f"/integrations/kobo/projects/{self.project.pk}/submission-history/{self.ready.pk}/restore/",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 404)
+                self.assertEqual(self.client.post(path).status_code, 404)
         self.ready.refresh_from_db()
         self.assertEqual(self.ready.status, KoboSubmission.Status.READY_FOR_REVIEW)
+        self.assertIsNone(self.ready.imported_at)
 
     def test_ficha_11_handler_never_imports_without_territorial_coherence(self):
         prioritization_pending = KoboSubmission.objects.create(
@@ -419,7 +414,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         )
         self.assertEqual(prioritization_pending.processing_events.count(), 1)
 
-    def test_pending_territorial_submission_is_not_importable_or_in_project_queue(self):
+    def test_pending_territorial_submission_is_not_importable(self):
         pending = KoboSubmission.objects.create(
             form_definition=self.microproject_form_definition,
             asset=self.microproject_asset,
@@ -440,7 +435,6 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertFalse(result.imported)
         self.assertEqual(pending.status, KoboSubmission.Status.PROCESSING_FAILED)
         self.assertEqual(pending.error_code, "IMPORT_ROUTING_PENDING")
-        self.assertNotIn(pending, get_project_pending_submissions(self.project))
 
     def test_operational_import_lock_query_has_no_nullable_join(self):
         with transaction.atomic():
@@ -478,111 +472,15 @@ class KoboProjectImportedSubmissionsTests(TestCase):
             ).exists()
         )
 
-    def test_legacy_import_action_is_disabled_without_mutating_submission(self):
-        url = reverse(
-            "kobo:project_pending_submission_import",
-            args=(self.project.pk, self.ready.pk),
-        )
-        self.client.force_login(self.unprivileged)
-        self.assertEqual(self.client.post(url).status_code, 403)
-
-        self.client.force_login(self.reviewer)
-        response = self.client.post(url)
-        self.ready.refresh_from_db()
-
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(self.ready.status, KoboSubmission.Status.READY_FOR_REVIEW)
-        self.assertIsNone(self.ready.imported_at)
-
-    def test_rejection_is_auditable_idempotent_and_excluded_from_pending(self):
-        original_raw = deepcopy(self.ready.raw_payload)
-        original_normalized = deepcopy(self.ready.normalized_payload)
-
-        result = reject_kobo_submission(
-            self.ready,
-            actor=self.reviewer,
-            reason="duplicate",
-            comment="<b>Repetida</b>",
-        )
-        self.ready.refresh_from_db()
-
-        self.assertTrue(result.rejected)
-        self.assertEqual(self.ready.status, KoboSubmission.Status.REJECTED)
-        self.assertEqual(self.ready.raw_payload, original_raw)
-        self.assertEqual(self.ready.normalized_payload, original_normalized)
-        rejection_event = self.ready.processing_events.get(stage="review", code="duplicate")
-        self.assertEqual(rejection_event.message, "Repetida")
-        self.assertEqual(
-            AuditLog.objects.filter(
-                entity_id=str(self.ready.pk),
-                action=AuditLog.Action.REJECTED,
-                user=self.reviewer,
-                summary="Ficha Kobo rechazada.",
-            ).count(),
-            1,
-        )
-        self.assertNotIn(self.ready, get_project_pending_submissions(self.project))
-        self.assertNotIn(
-            self.ready,
-            get_project_imported_submissions(self.project),
-        )
-
-        repeated = reject_kobo_submission(
-            self.ready,
-            actor=self.reviewer,
-            reason="duplicate",
-        )
-        self.assertTrue(repeated.already_rejected)
-        self.assertEqual(
-            self.ready.processing_events.filter(stage="review", code="duplicate").count(),
-            1,
-        )
-
-    def test_rejection_validates_reason_state_and_restoration(self):
-        with self.assertRaises(KoboPayloadError):
-            reject_kobo_submission(
-                self.ready,
-                actor=self.reviewer,
-                reason="other",
-            )
-        with self.assertRaises(KoboPayloadError):
-            reject_kobo_submission(
-                self.ready,
-                actor=self.reviewer,
-                reason="invalid",
-            )
-        with self.assertRaises(KoboPayloadError):
-            reject_kobo_submission(
-                self.imported,
-                actor=self.reviewer,
-                reason="duplicate",
-            )
-
-        reject_kobo_submission(
-            self.ready,
-            actor=self.reviewer,
-            reason="other",
-            comment="Descartada por revisión.",
-        )
-        restored = restore_kobo_submission_to_review(self.ready, actor=self.reviewer)
-        self.ready.refresh_from_db()
-
-        self.assertTrue(restored.restored)
-        self.assertEqual(self.ready.status, KoboSubmission.Status.READY_FOR_REVIEW)
-        self.assertTrue(
-            self.ready.processing_events.filter(stage="review", code="other").exists()
-        )
-        self.assertTrue(
-            self.ready.processing_events.filter(stage="review", code="restored").exists()
-        )
-        with self.assertRaises(KoboPayloadError):
-            restore_kobo_submission_to_review(self.imported, actor=self.reviewer)
-
     def test_history_shows_only_imported_and_rejected_submissions(self):
-        reject_kobo_submission(
-            self.ready,
-            actor=self.reviewer,
-            reason="test_submission",
+        self.ready.status = KoboSubmission.Status.REJECTED
+        self.ready.save(update_fields=("status",))
+        KoboProcessingEvent.objects.create(
+            submission=self.ready,
+            stage="review",
+            level=KoboProcessingEvent.Level.INFO,
+            code="test_submission",
+            message="Submission de prueba",
         )
         self.client.force_login(self.viewer)
         response = self.client.get(
@@ -624,20 +522,38 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         viewer_response = self.client.get(url)
 
         self.assertContains(viewer_response, "NV-001")
+        self.assertNotContains(viewer_response, "Datos internos y técnicos")
         self.assertNotContains(viewer_response, "Datos internos sensibles")
         self.assertNotContains(viewer_response, "+58-sensitive-phone")
         self.assertNotContains(viewer_response, "Sensitive Delegate")
         self.assertNotContains(viewer_response, "Sensitive Informant Role")
         self.assertNotContains(viewer_response, "Nombre del microproyecto")
+        self.assertNotContains(viewer_response, "parish_delegate")
+        self.assertNotContains(viewer_response, "contact_phone")
+        self.assertNotContains(viewer_response, "main_informant_role")
+        self.assertNotContains(viewer_response, "submitted_by")
+        self.assertNotContains(viewer_response, "device_id")
 
         self.client.force_login(self.reviewer)
         reviewer_response = self.client.get(url)
 
-        self.assertContains(reviewer_response, "Datos internos sensibles")
+        self.assertContains(reviewer_response, "Datos internos y técnicos")
+        self.assertContains(reviewer_response, "<details")
+        self.assertContains(reviewer_response, "Delegado parroquial")
+        self.assertContains(reviewer_response, "Teléfono de contacto")
+        self.assertContains(reviewer_response, "Rol del informante principal")
+        self.assertContains(reviewer_response, "Enviado por")
+        self.assertContains(reviewer_response, "ID del dispositivo")
         self.assertContains(reviewer_response, "+58-sensitive-phone")
         self.assertContains(reviewer_response, "Sensitive Delegate")
         self.assertContains(reviewer_response, "Sensitive Informant Role")
         self.assertContains(reviewer_response, "Sensitive Device")
+        self.assertNotContains(reviewer_response, "border-warning")
+        self.assertNotContains(reviewer_response, "parish_delegate")
+        self.assertNotContains(reviewer_response, "contact_phone")
+        self.assertNotContains(reviewer_response, "main_informant_role")
+        self.assertNotContains(reviewer_response, ">submitted_by<")
+        self.assertNotContains(reviewer_response, ">device_id<")
 
     def test_microproject_detail_uses_human_readable_labels(self):
         self.client.force_login(self.viewer)
@@ -665,7 +581,7 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertContains(response, "Nivel de daño físico")
         self.assertContains(response, "Puntaje total")
         self.assertContains(response, "Semáforo sugerido")
-        self.assertContains(response, "Semáforo final validado")
+        self.assertContains(response, "Semáforo final")
         self.assertNotContains(response, "Nombre del microproyecto")
         self.assertNotContains(response, "Hogares estimados")
         self.assertNotContains(response, "raw_payload")
@@ -693,6 +609,8 @@ class KoboProjectImportedSubmissionsTests(TestCase):
         self.assertNotContains(dashboard_response, "Levantamientos de campo")
 
         self.client.logout()
+        self.project.is_public = True
+        self.project.save(update_fields=["is_public"])
         public_response = self.client.get(
             reverse(
                 "public_portal:public_project_detail",

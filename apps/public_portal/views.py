@@ -1,11 +1,21 @@
 from django.http import JsonResponse
+from django.utils.translation import gettext as _
+from django.views import View
 from django.views.generic import ListView, TemplateView
 
+from apps.operations.private_files import (
+    DISPOSITION_ATTACHMENT,
+    DISPOSITION_INLINE,
+    deliver_public_file,
+)
+
 from .selectors import (
+    get_eligible_public_update_attachment,
     get_public_project_detail,
     get_public_project_update_detail,
     get_public_projects,
     get_public_transparency_summary,
+    get_public_update_documents,
     get_recent_published_updates,
 )
 
@@ -43,7 +53,9 @@ class PublicProjectUpdateDetailView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['update'] = get_public_project_update_detail(self.kwargs['pk'])
+        update = get_public_project_update_detail(self.kwargs['pk'])
+        context['update'] = update
+        context['public_attachments'] = get_public_update_documents(update)
         return context
 
 
@@ -54,6 +66,33 @@ class PublicUpdatesFeedView(ListView):
 
     def get_queryset(self):
         return get_recent_published_updates(limit=200)
+
+
+class PublicProjectUpdateAttachmentDeliveryView(View):
+    """Anonymous delivery of explicitly public project-update attachments."""
+
+    disposition = DISPOSITION_ATTACHMENT
+    missing_message = _('El documento no está disponible.')
+
+    def get(self, request, *args, **kwargs):
+        """
+        PRE: URL nests update_id and attachment_id from the public portal.
+        POST: streams the file only when every public eligibility condition holds;
+              otherwise 404 (never 403) so private existence is not revealed.
+        """
+        attachment = get_eligible_public_update_attachment(
+            update_id=kwargs['update_id'],
+            attachment_id=kwargs['attachment_id'],
+        )
+        return deliver_public_file(
+            attachment.file,
+            disposition=self.disposition,
+            missing_message=self.missing_message,
+        )
+
+
+class PublicProjectUpdateAttachmentPreviewView(PublicProjectUpdateAttachmentDeliveryView):
+    disposition = DISPOSITION_INLINE
 
 
 def public_projects_json(request):

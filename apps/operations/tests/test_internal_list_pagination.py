@@ -213,7 +213,6 @@ class ProjectUpdateListPaginationTests(ListPaginationAssertionsMixin, TestCase):
                 title=f'Avance PAGE {index:03d}',
                 description='Paginación',
                 update_date=TEST_DATE,
-                progress_percentage=0,
                 created_by=cls.user,
                 reported_by=cls.user,
             )

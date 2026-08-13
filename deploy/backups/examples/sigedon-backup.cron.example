@@ -1,0 +1,15 @@
+# Example crontab entries for SIGEDON backup automation.
+# Platform-owned scheduling. Adjust user, paths, and maintenance orchestration.
+# Do NOT schedule production restore. Restore drills use a separate entry.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Daily backup during an operator-defined maintenance window (example: 03:15 UTC).
+# The wrapper/env must export SIGEDON_MAINTENANCE_CONFIRMED=YES only after writers are stopped.
+# The script owns .sigedon-ops.lock on FD 9 — do NOT wrap with an external flock
+# on the same file (a nested reopen would exit 8).
+# 15 3 * * *  /path/to/sigedon/deploy/backups/run_scheduled_backup.sh >>/var/log/sigedon/backup.log 2>&1
+
+# Quarterly restore drill against isolated disposable targets only (example: 1st day of quarter).
+# 30 4 1 1,4,7,10 *  /path/to/sigedon/deploy/backups/run_restore_drill.sh >>/var/log/sigedon/restore-drill.log 2>&1

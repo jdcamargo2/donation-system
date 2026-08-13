@@ -23,18 +23,19 @@ from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404
 
 from django.http import (
-    FileResponse,
-    Http404,
     HttpResponseRedirect,
 )
 
 from django.urls import reverse
 
-from django.utils.text import get_valid_filename
-
 from django.utils.dateparse import parse_date
 
 from django.utils.translation import gettext_lazy as _
+
+from ..file_access import (
+    DISPOSITION_ATTACHMENT,
+    protected_file_response,
+)
 
 from django.views import View
 
@@ -66,7 +67,6 @@ from ..models import (
 from ..services import (
     get_allocation_financial_summary,
     get_donation_financial_summary,
-    get_project_financial_summary,
     log_action,
     log_delete,
 )
@@ -297,6 +297,12 @@ class PaginatedListMixin:
 
 
 class DetailMetricsMixin:
+    """
+    Legacy metrics context for donation/allocation/institution detail views.
+    Project detail no longer uses this mixin; its financial contract is gated
+    separately via user_can_view_project_financials.
+    """
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         metrics = []
@@ -306,14 +312,6 @@ class DetailMetricsMixin:
                 (_('Monto'), summary['total_amount']),
                 (_('Monto asignado'), summary['assigned_amount']),
                 (_('Saldo disponible'), summary['available_amount']),
-                (_('Estado'), self.object.get_status_display()),
-            ]
-        elif isinstance(self.object, Project):
-            summary = get_project_financial_summary(self.object)
-            metrics = [
-                (_('Presupuesto estimado'), summary['estimated_budget']),
-                (_('Monto financiado'), summary['funded_amount']),
-                (_('Monto ejecutado'), summary['executed_amount']),
                 (_('Estado'), self.object.get_status_display()),
             ]
         elif isinstance(self.object, FundAllocation):
@@ -485,18 +483,20 @@ class DeleteAuditMixin:
         return response
 
 
-def _protected_file_response(file_field, *, missing_message):
+def _protected_file_response(
+    file_field,
+    *,
+    missing_message,
+    disposition=DISPOSITION_ATTACHMENT,
+    request=None,
+):
     """
     PRE: file_field belongs to an authorized object and missing_message is safe.
-    POST: streams an existing file as an attachment using only a safe basename;
-    otherwise raises Http404 without exposing its storage path.
+    POST: delivers via protected_file_response (stream or signed_redirect).
     """
-    if not file_field or not file_field.name:
-        raise Http404(missing_message)
-    stored_basename = file_field.name.replace('\\', '/').rsplit('/', 1)[-1]
-    safe_filename = get_valid_filename(stored_basename) or 'documento'
-    try:
-        file_handle = file_field.open('rb')
-    except (FileNotFoundError, OSError) as exc:
-        raise Http404(missing_message) from exc
-    return FileResponse(file_handle, as_attachment=True, filename=safe_filename)
+    return protected_file_response(
+        file_field,
+        disposition=disposition,
+        missing_message=missing_message,
+        request=request,
+    )

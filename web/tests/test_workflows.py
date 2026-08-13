@@ -4,7 +4,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from apps.operations.models import Donation, Institution, Project
-from apps.operations.tests.helpers import create_user
+from apps.operations.tests.helpers import TEST_DATE, create_user
 
 
 class MvpWorkflowRegressionTests(TestCase):
@@ -12,7 +12,7 @@ class MvpWorkflowRegressionTests(TestCase):
         self.user = create_user()
         self.client.force_login(self.user)
 
-    def test_user_can_create_institution_project_donation_and_see_dashboard_update(self):
+    def test_user_can_create_institution_project_donation_receive_and_see_dashboard_update(self):
         institution_form = self.client.get(reverse('institution_create'))
         self.assertEqual(institution_form.status_code, 200)
         self.assertContains(institution_form, 'name="name"')
@@ -59,7 +59,6 @@ class MvpWorkflowRegressionTests(TestCase):
                 'name': 'Workflow Project',
                 'description': '',
                 'objective': '',
-                'responsible_unit': '',
                 'location': 'Caracas',
                 'estimated_budget': '500.00',
                 'start_date': '',
@@ -70,6 +69,9 @@ class MvpWorkflowRegressionTests(TestCase):
         )
         self.assertEqual(project_response.status_code, 200)
         self.assertContains(project_response, 'PRJ-000001')
+        project = Project.objects.get(code='PRJ-000001')
+        self.assertEqual(project.status, Project.Status.ACTIVE)
+        self.assertFalse(project.is_public)
         self.assertTrue(Project.objects.filter(code='PRJ-000001').exists())
 
         donation_form = self.client.get(reverse('donation_create'))
@@ -96,8 +98,15 @@ class MvpWorkflowRegressionTests(TestCase):
         self.assertContains(donation_form, 'Dinero')
         self.assertContains(donation_form, 'Seleccione una opción')
         self.assertNotContains(donation_form, '---------')
+        donation_type_html = str(donation_form.context['form']['donation_type'])
+        self.assertIn('Seleccione una opción', donation_type_html)
+        self.assertIn('value="" selected', donation_type_html)
+        self.assertIn('value="goods"', donation_type_html)
+        self.assertNotIn('value="goods" selected', donation_type_html)
+        self.assertEqual(donation_type_html.count('value=""'), 1)
 
         donation_amount = Decimal('1234.56')
+        # Status is intentionally absent from DonationForm; create always yields REGISTERED.
         donation_response = self.client.post(
             reverse('donation_create'),
             data={
@@ -107,15 +116,29 @@ class MvpWorkflowRegressionTests(TestCase):
                 'objective': 'Workflow donation',
                 'restrictions': '',
                 'commitment_date': '',
-                'received_date': '',
-                'status': Donation.Status.RECEIVED,
+                'received_date': TEST_DATE,
                 'support_reference': '',
             },
             follow=True,
         )
         self.assertEqual(donation_response.status_code, 200)
         self.assertContains(donation_response, 'DON-000001')
-        self.assertTrue(Donation.objects.filter(code='DON-000001', amount=donation_amount).exists())
+        donation = Donation.objects.get(code='DON-000001', amount=donation_amount)
+        self.assertEqual(donation.status, Donation.Status.REGISTERED)
+        self.assertEqual(donation.received_date, TEST_DATE)
+
+        # Fondos recibidos counts only RECEIVED donations.
+        dashboard_registered = self.client.get(reverse('dashboard'))
+        self.assertEqual(dashboard_registered.status_code, 200)
+        self.assertEqual(dashboard_registered.context['total_donations'], Decimal('0.00'))
+
+        receive_response = self.client.post(
+            reverse('donation_status_transition', args=[donation.pk, Donation.Status.RECEIVED]),
+            follow=True,
+        )
+        self.assertEqual(receive_response.status_code, 200)
+        donation.refresh_from_db()
+        self.assertEqual(donation.status, Donation.Status.RECEIVED)
 
         dashboard = self.client.get(reverse('dashboard'))
         self.assertEqual(dashboard.status_code, 200)

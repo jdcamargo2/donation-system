@@ -3,6 +3,9 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
+from .role_services import get_user_functional_roles
+from .roles import ROLE_FIELD_OPERATOR
+
 
 PROJECT_UPDATE_RESPONSIBLE_PERMISSION_CODENAMES = (
     'add_projectupdate',
@@ -41,3 +44,35 @@ def validate_project_update_reporter(reported_by):
             'reported_by': _('La persona responsable debe estar activa y tener permisos operativos sobre avances.')
         })
     return reported_by
+
+
+def actor_must_self_report_project_update(actor) -> bool:
+    """
+    PRE: actor is the authenticated technical creator, or None / anonymous / unsaved.
+    POST: True only when the actor's sole canonical functional role is Operador de campo;
+          False for Admin, superuser, permission-only users, and unsafe/anonymous actors.
+    """
+    if actor is None:
+        return False
+    if not getattr(actor, 'is_authenticated', False):
+        return False
+    if getattr(actor, 'pk', None) is None:
+        return False
+    if getattr(actor, 'is_superuser', False):
+        return False
+    roles = list(get_user_functional_roles(actor))
+    if len(roles) != 1:
+        return False
+    return roles[0].name == ROLE_FIELD_OPERATOR
+
+
+def resolve_project_update_reporter(*, actor, submitted_reporter):
+    """
+    PRE: actor is the technical creator; submitted_reporter is the proposed responsible person.
+    POST: Operador de campo always resolves to actor (validated); other authorized creators
+          keep a validated submitted_reporter. Raises the project's ValidationError style
+          when the resolved reporter is missing or ineligible.
+    """
+    if actor_must_self_report_project_update(actor):
+        return validate_project_update_reporter(actor)
+    return validate_project_update_reporter(submitted_reporter)

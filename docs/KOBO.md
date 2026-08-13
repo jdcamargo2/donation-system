@@ -77,6 +77,7 @@ KOBO_BASE_URL=
 KOBO_API_TOKEN=
 KOBO_WEBHOOK_USERNAME=sigedon-kobo
 KOBO_WEBHOOK_SECRET=
+# KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER=False
 KOBO_HTTP_CONNECT_TIMEOUT=5
 KOBO_HTTP_READ_TIMEOUT=15
 KOBO_HTTP_MAX_ATTEMPTS=3
@@ -94,8 +95,14 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 * `KOBO_ENABLED` activa o desactiva la integración.
 * `KOBO_BASE_URL` define la URL base de la instancia KoboToolbox.
 * `KOBO_API_TOKEN` contiene el token utilizado para acceder a la API.
-* `KOBO_WEBHOOK_USERNAME` define el usuario esperado por el webhook.
-* `KOBO_WEBHOOK_SECRET` contiene el secreto utilizado para autenticar solicitudes entrantes.
+* `KOBO_WEBHOOK_USERNAME` define el usuario esperado por el webhook (Basic auth).
+* `KOBO_WEBHOOK_SECRET` es la contraseña Basic (y, solo si el flag legacy está
+  habilitado, el valor de `X-Kobo-Webhook-Secret`).
+* Basic authentication es el contrato canónico. La cabecera legacy
+  `X-Kobo-Webhook-Secret` está deshabilitada por defecto
+  (`KOBO_WEBHOOK_ALLOW_LEGACY_SECRET_HEADER=False`). Habilitarla solo durante
+  una ventana de migración temporal documentada; el staging canónico la deja
+  en `False`.
 * `KOBO_HTTP_READ_TIMEOUT` define el timeout de `urllib`; el transporte actual no separa conexión y lectura, por lo que `KOBO_HTTP_CONNECT_TIMEOUT` se reserva para un transporte futuro.
 * `KOBO_HTTP_MAX_ATTEMPTS`, `KOBO_HTTP_RETRY_BASE_DELAY`, `KOBO_HTTP_RETRY_MAX_DELAY` y `KOBO_HTTP_RETRY_AFTER_MAX_DELAY` controlan reintentos transitorios con backoff.
 * `KOBO_HTTP_MAX_PAGES` limita la paginación remota para evitar recorridos no acotados.
@@ -104,11 +111,16 @@ KOBO_WEBHOOK_MAX_BYTES=1048576
 Las revisiones remotas se identifican por `_uuid` dentro del asset y hash canónico
 del payload. Una revisión de una submission aprobada, importada o rechazada nunca
 sobrescribe staging ni materialización: queda privada, marcada como pendiente y
-requiere revisión humana posterior. Solo una ejecución completa avanza el cursor;
+requiere inspección técnica posterior en el hub. Solo una ejecución completa avanza el cursor;
 una ejecución parcial conserva el cursor anterior y libera su lease.
-* `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos.
-* `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900).
-* `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging.
+* `KOBO_MAX_ATTACHMENT_BYTES` limita el tamaño permitido para archivos adjuntos
+  (1–104857600). El cliente descarga en streaming con tope duro; un cuerpo
+  demasiado grande falla de forma permanente (sin reintento).
+* Los ajustes numéricos Kobo se validan al arranque con rangos estrictos
+  (ver `.env.example`); valores fuera de rango o no finitos fallan el startup
+  sin eco del valor fuente.
+* `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900; rango 1–86400).
+* `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging (1–10485760).
 
 ## Sincronización remota segura
 
@@ -254,13 +266,14 @@ registra un conflicto; nunca mueve silenciosamente la submission.
 
 ## 8. Webhook
 
-La ruta de recepción se encuentra bajo:
+La ruta externa de recepción del webhook es:
 
 ```text
-/integrations/kobo/
+/integrations/kobo/webhook/
 ```
 
-La URL concreta depende de las rutas configuradas por la aplicación.
+El panel de gestión humana de Kobo vive por separado bajo
+`/panel/integrations/kobo/` (véase §19).
 
 ### Proceso
 
@@ -371,11 +384,23 @@ El comando puede:
 * resolver el proyecto;
 * descargar adjuntos cuando se solicita;
 * registrar eventos técnicos;
-* dejar la submission lista para revisión;
+* dejar la submission en estado interno listo para el pipeline automático;
 * ejecutar el mismo dispatcher territorial utilizado por el webhook;
 * registrar errores de validación o procesamiento.
 
-El procesamiento no debe importar automáticamente información operativa cuando el flujo exige revisión humana.
+El procesamiento ordinario de submissions válidas y con routing resuelto continúa
+hacia auto-aprobación e importación. Las fallas e incidencias se presentan en el
+hub global; no se sostiene una cola humana por Project.
+
+### Código de salida
+
+* `0`: el lote seleccionado terminó sin errores (incluye cero elegibles).
+* distinto de `0`: al menos un fallo por registro o un fallo fatal de init;
+  el resumen se imprime antes del `CommandError`.
+* Los éxitos previos del mismo lote **permanecen comprometidos**; no hay
+  rollback del lote completo.
+* Orquestación: no usar `|| true`. Reejecutar es seguro según idempotencia.
+* Detalle operativo: [OPERATIONS.md §5](OPERATIONS.md#5-procesamiento-y-reconciliación-de-kobo).
 
 ## 11. Reconciliación
 
@@ -408,7 +433,17 @@ La reconciliación permite:
 
 El resumen del comando separa `resolved`, `still_pending`, `errors` y `skipped`.
 
-`--dry-run` permite inspeccionar el resultado sin persistir cambios.
+`--dry-run` permite inspeccionar el resultado sin persistir cambios. Un dry-run
+sin errores sale `0`; un dry-run con errores operativos (p. ej. fallo remoto)
+sale distinto de `0` y no escribe.
+
+### Código de salida
+
+* `errors == 0` → exit `0`.
+* `errors > 0` → resumen final y `CommandError` (exit distinto de `0`).
+* “Sin registros remotos” no es error.
+* Commits parciales exitosos se conservan; inspeccione hub/eventos/logs.
+* Este comando no usa el lease de sync incremental del hub.
 
 La reconciliación no sustituye la validación, normalización, revisión ni importación.
 
@@ -442,30 +477,66 @@ Los adjuntos Kobo:
 
 Las firmas y otros archivos sensibles no pueden marcarse como candidatos públicos.
 
-## 13. Histórico: revisión manual por proyecto
+Las evidencias descargadas se sirven solo mediante endpoints protegidos:
 
-La revisión ordinaria asociada a un proyecto permite:
+* preview (`kobo:project_submission_evidence`) — inline con la lista blanca compartida;
+* download (`kobo:project_submission_evidence_download`) — attachment para todo archivo autorizado.
 
-* consultar información normalizada;
-* revisar evidencia y adjuntos autorizados;
-* importar;
-* rechazar;
-* restaurar;
-* consultar el historial del procesamiento.
+Se reutiliza `apps.operations.file_access.protected_file_response` sin debilitar
+las reglas de `privacy_level`, estado `DOWNLOADED`, submission `IMPORTED` ni
+permisos `kobo.view_kobosubmission` / elevación sensible.
 
-### Permisos
+## 13. Histórico: revisión manual por proyecto (retirada)
 
-La consulta ordinaria requiere:
+> **Histórico / superseded.** La bandeja humana de approve/reject/restore por
+> Project y la consola técnica de decisión humana sobre submissions fueron
+> retiradas del producto. No quedan rutas HTTP registradas ni tombstones
+> `Http404`: las peticiones a las rutas antiguas reciben 404 de resolución de
+> URL y `reverse()` de sus nombres lanza `NoReverseMatch`.
+
+Antes del pipeline automático, la revisión ordinaria asociada a un proyecto
+permitía consultar información normalizada, importar, rechazar, restaurar y
+consultar el historial. El flujo vigente es automático e incident-driven:
+
+* webhook/sync recibe submissions;
+* normalización y routing corren automáticamente;
+* submissions elegibles se importan automáticamente;
+* fallos e incidencias de routing se presentan en el hub territorial;
+* usuarios técnicos autorizados inspeccionan submissions y reintentan
+  procesamiento/importación;
+* registros importados permanecen visibles en detalle de proyecto e historial.
+
+`READY_FOR_REVIEW` es un estado interno/incidencia de automatización, no una
+bandeja de aprobación humana. Los valores históricos del enum y las filas
+existentes se conservan.
+
+El detalle importado en proyecto usa un contrato de presentación compartido
+(`submission_presentation`) para Ficha 1, 10 y 11: valores y etiquetas en
+español, secciones y resumen propios de cada dominio, geolocalización formateada
+sin representación cruda del payload (solo Ficha 1 aporta ubicación
+normalizada y el enlace opt-in a OpenStreetMap), IDs técnicos agrupados bajo
+**Registro Kobo**, y datos de contacto/técnicos colapsados solo con
+`kobo.change_kobosubmission`.
+
+En el detalle importado de Ficha 1, la sección **Ubicación** puede mostrar un
+enlace opt-in **Ver en mapa** hacia OpenStreetMap. OpenStreetMap solo se
+contacta tras una activación explícita del usuario; la URL de destino incluye
+únicamente latitud y longitud (más un zoom fijo), con
+`rel="noopener noreferrer"` para evitar exposición de opener/referrer. No se
+cargan recursos de mapa de terceros embebidos en la página; las coordenadas
+textuales siguen visibles dentro de SIGEDON; coordenadas inválidas o ausentes
+no producen enlace.
+
+### Permisos vigentes (consulta e inspección)
+
+La consulta ordinaria de historial/detalle importado requiere:
 
 ```text
 operations.view_project
 ```
 
-La importación, el rechazo o la restauración requieren:
-
-```text
-operations.change_project
-```
+La inspección técnica y el reintento de importación requieren permisos `kobo.*`
+según la acción (hub territorial / detalle técnico).
 
 El acceso al payload crudo y a la información técnica sensible continúa protegido mediante permisos `kobo.*`.
 
@@ -596,72 +667,47 @@ Antes de este contrato existían dos escritores de `IMPORTED`:
   creaba un evento técnico, pero no `AuditLog` ni entidad materializada.
 
 La bandeja por proyecto invocaba la primera ruta; la consola técnica ejecutaba
-`review_submission()` y después la segunda. Los reintentos sobre `IMPORTED` no
+el retirado `review_submission()` y después la segunda. Los reintentos sobre `IMPORTED` no
 duplicaban eventos, pero tampoco podían responder qué entidad había producido
 la importación. Como el cambio de estado y sus eventos estaban dentro de
 `transaction.atomic()`, una excepción de base de datos posterior al `save()`
 revertía esas escrituras; la deuda era semántica, no un commit parcial conocido.
 Ambas rutas terminan ahora en el servicio materializador común.
 
-## 14. Histórico: rechazo y restauración
+## 14. Histórico: rechazo y restauración (servicios retirados)
 
-### Rechazo
+> **Histórico / superseded.** Las rutas HTTP y los servicios de dominio
+> `reject_kobo_submission()` / `restore_kobo_submission_to_review()` /
+> `review_submission()` fueron eliminados del código productivo. Los estados
+> `REJECTED` y `READY_FOR_REVIEW`, los eventos históricos y las filas
+> existentes se conservan para trazabilidad; no hay endpoints ni formularios
+> para crear nuevos rechazos/restauraciones humanas.
 
-Una submission lista para revisión puede rechazarse cuando:
+Filas históricas con `REJECTED` siguen visibles en el historial del proyecto.
+La recuperación operativa vigente es el reintento técnico de importación /
+procesamiento desde el hub o el detalle técnico, no una restauración a una
+cola humana.
 
-* el usuario posee permisos;
-* se registra un motivo;
-* la transición está permitida.
+## 15. Consola global / hub territorial
 
-La submission pasa a:
+La consola global (hub territorial) es una herramienta de administración técnica.
 
-```text
-REJECTED
-```
-
-El rechazo:
-
-* no elimina el payload original;
-* no importa información operativa;
-* conserva la trazabilidad;
-* puede permitir una restauración posterior.
-
-### Restauración
-
-Una submission rechazada puede restaurarse al estado revisable:
-
-```text
-REJECTED
-→ READY_FOR_REVIEW
-```
-
-La restauración:
-
-* requiere autorización;
-* no implica importación automática;
-* debe registrar un evento técnico;
-* conserva el rechazo anterior en el historial.
-
-## 15. Consola global
-
-La consola global es una herramienta de administración técnica.
-
-Requiere permisos `kobo.*`.
+Requiere permisos `kobo.*` (lectura territorial y, según la acción, cambio).
 
 ### Permite
 
-* revisar submissions;
-* consultar payloads técnicos;
-* asociar proyectos;
-* reintentar procesamiento;
+* inspeccionar incidencias de routing/importación;
+* consultar payloads técnicos (con elevación);
+* reintentar procesamiento e importación;
 * inspeccionar errores;
-* gestionar activos;
-* consultar el historial del flujo histórico de aprobación, ya retirado;
+* gestionar activos y mappings;
+* consultar historial de sync;
 * realizar acciones de soporte y diagnóstico.
 
 ### Restricciones
 
-* No debe confundirse con el flujo operativo ordinario desde un proyecto.
+* No debe confundirse con la revisión de gobernanza de `ProjectUpdate`.
+* No debe confundirse con la retirada bandeja humana de submissions Kobo.
 * No debe estar disponible para usuarios operativos sin autorización técnica.
 * El acceso técnico no implica permiso para modificar información financiera.
 * Los datos sensibles deben mantenerse protegidos.
@@ -755,26 +801,35 @@ python manage.py reconcile_kobo_submissions
 
 ## 19. Panel operativo de KoboToolbox
 
-Con `KOBO_ENABLED=true`, `/integrations/kobo/` es el panel operativo para resumen,
-asignación de zonas, núcleos registrados y casos por revisar. Sus mutaciones usan
-POST, CSRF y los servicios administrativos existentes. Cuando Kobo está
-deshabilitado, el enlace y las rutas del panel no están disponibles.
+Con `KOBO_ENABLED=true`, `/panel/integrations/kobo/` es el panel operativo humano
+para resumen, asignación de zonas, núcleos registrados y casos por revisar. Sus
+mutaciones usan POST, CSRF y los servicios administrativos existentes. Cuando
+Kobo está deshabilitado, el enlace y las rutas del panel no están disponibles.
+
+El webhook externo permanece en `/integrations/kobo/webhook/` y no forma parte
+de esta UI de gestión.
+
+El panel de administración territorial está disponible solo para roles
+autorizados. Operador de campo queda explícitamente excluido. La ingestión por
+webhook y las importaciones en backend no dependen del acceso del Operador al
+panel.
 
 El lenguaje visible del panel prioriza términos operativos:
 
 * Asignación de zonas (configuración zona pastoral → proyecto)
 * Núcleos registrados
 * Casos por revisar
-* Formularios pendientes de revisión / importados
+* Incidencias de importación automática / formularios importados
 
 Los nombres técnicos internos (`mapping`, `routing`, identidades territoriales)
 se conservan en modelos, servicios y documentación de arquitectura.
 
-El criterio compartido de «formularios pendientes de revisión» es
-`status=ready_for_review` (`pending_review_queryset` en el hub). Ese mismo
-queryset alimenta la métrica del resumen, la categoría en Casos por revisar,
-el enlace «Ver listado» y el listado en `/integrations/kobo/submissions/pending/`.
+El listado `/panel/integrations/kobo/submissions/pending/` es el hub global de
+incidencias (`incident_queryset`). `pending_review_queryset` es un alias
+deprecado de ese mismo queryset; no significa `status=READY_FOR_REVIEW` ni una
+cola humana por Project. `READY_FOR_REVIEW` permanece como estado interno
+transitorio del pipeline automático.
 
 La asignación de zonas admite `?zone=<codigo>` para preseleccionar la zona en el
 formulario de configuración sin mutar por GET. El historial completo de
-sincronizaciones vive en `/integrations/kobo/sync/history/`.
+sincronizaciones vive en `/panel/integrations/kobo/sync/history/`.

@@ -63,17 +63,24 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         # PRE: Kobo migrations are applied and command options are valid.
-        # POST: processes the requested scope and prints only aggregate counts.
+        # POST: processes the requested scope independently per record, prints
+        # aggregate counts, and raises CommandError when failed > 0 so shells
+        # receive a non-zero exit without rolling back prior successes.
         default_timezone = timezone.get_current_timezone()
         submission_id = options["submission_id"]
         download_attachments = options["download_attachments"]
+        # Validate fatal option errors before constructing the remote client.
+        if (
+            submission_id is None
+            and download_attachments
+            and options["limit"] <= 0
+        ):
+            raise CommandError("Limit must be positive.")
         client = None
         if download_attachments:
             client = build_kobo_api_client()
         if submission_id is None:
             if download_attachments:
-                if options["limit"] <= 0:
-                    raise CommandError("Limit must be positive.")
                 submissions = list(
                     KoboSubmission.objects.filter(
                         Q(status__in=PROCESSABLE_STATUSES)
@@ -155,10 +162,20 @@ class Command(BaseCommand):
                 )
             result = _aggregate_outcomes([outcome], attachment_results)
 
+        # Operational outcome: per-record failures are persisted independently;
+        # successful records already committed. Non-zero exit when any failed.
+        failed = (
+            result.validation_failed
+            + result.processing_failed
+            + result.attachments_failed
+        )
+        succeeded = result.ready
         self.stdout.write(
-            "selected={selected} processed={processed} ready={ready} "
+            "Kobo processing summary: selected={selected} "
+            "processed={processed} succeeded={succeeded} failed={failed} "
+            "skipped={skipped} ready={ready} "
             "validation_failed={validation_failed} "
-            "processing_failed={processing_failed} skipped={skipped} "
+            "processing_failed={processing_failed} "
             "attachments_selected={attachments_selected} "
             "attachments_downloaded={attachments_downloaded} "
             "attachments_invalid={attachments_invalid} "
@@ -166,10 +183,12 @@ class Command(BaseCommand):
             "attachments_skipped={attachments_skipped}".format(
                 selected=result.selected,
                 processed=result.processed,
+                succeeded=succeeded,
+                failed=failed,
+                skipped=result.skipped,
                 ready=result.ready,
                 validation_failed=result.validation_failed,
                 processing_failed=result.processing_failed,
-                skipped=result.skipped,
                 attachments_selected=result.attachments_selected,
                 attachments_downloaded=result.attachments_downloaded,
                 attachments_invalid=result.attachments_invalid,
@@ -177,3 +196,7 @@ class Command(BaseCommand):
                 attachments_skipped=result.attachments_skipped,
             )
         )
+        if failed > 0:
+            raise CommandError(
+                f"Processing completed with {failed} error(s)."
+            )

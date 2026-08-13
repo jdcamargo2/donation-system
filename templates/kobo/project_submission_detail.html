@@ -1,39 +1,117 @@
 {% extends "base.html" %}
+{% load kobo_presentation %}
 
-{% block title %}Levantamiento Kobo | SIGEDON{% endblock %}
+{% block title %}{{ presentation.page_title }} | SIGEDON{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-3">
-    <a href="{% url 'project_detail' submission.project.pk %}" class="text-decoration-none">← Volver al proyecto</a>
-    <div class="my-3"><div class="text-uppercase text-muted small">Levantamiento de campo importado</div><h1 class="h3">{{ submission.form_definition.title }}</h1></div>
+<p class="mb-3">
+    <a href="{% url 'project_detail' project.pk %}" class="text-decoration-none">← Volver al proyecto</a>
+</p>
 
-    <section class="card card-body mb-3"><h2 class="h5">{{ project_submission_detail_title }}</h2><dl class="row mb-0">
-        <dt class="col-sm-4">Proyecto</dt><dd class="col-sm-8">{{ submission.project }}</dd>
-        <dt class="col-sm-4">Formulario</dt><dd class="col-sm-8">{{ submission.form_definition.form_id }}</dd>
-        <dt class="col-sm-4">Fecha</dt><dd class="col-sm-8">{{ submission.assessment_date|default:"—" }}</dd>
-        {% if project_submission_detail_rows %}
-            {% for label, value in project_submission_detail_rows %}<dt class="col-sm-4">{{ label }}</dt><dd class="col-sm-8">{{ value|default:"—" }}</dd>{% endfor %}
-        {% else %}
-        <dt class="col-sm-4">Zona pastoral</dt><dd class="col-sm-8">{{ submission.pastoral_zone|default:"—" }}</dd>
-        <dt class="col-sm-4">Parroquia</dt><dd class="col-sm-8">{{ submission.parish|default:"—" }}</dd>
-        <dt class="col-sm-4">Comunidad</dt><dd class="col-sm-8">{{ submission.primary_community|default:"—" }}</dd>
-        <dt class="col-sm-4">Código del Núcleo Vital</dt><dd class="col-sm-8">{{ normalized_payload.nucleo_code|default:"—" }}</dd>
-        <dt class="col-sm-4">Comunidades cubiertas</dt><dd class="col-sm-8">{{ normalized_payload.communities_covered|default:"—" }}</dd>
-        <dt class="col-sm-4">Hogares estimados</dt><dd class="col-sm-8">{{ normalized_payload.estimated_households|default_if_none:"—" }}</dd>
-        <dt class="col-sm-4">Dificultades de acceso</dt><dd class="col-sm-8">{{ normalized_payload.access_difficulties|default:"—" }}</dd>
-        <dt class="col-sm-4">Notas de acceso</dt><dd class="col-sm-8">{{ normalized_payload.access_difficulties_notes|default:"—" }}</dd>
-        <dt class="col-sm-4">Percepción inicial de prioridad</dt><dd class="col-sm-8">{{ normalized_payload.initial_priority_perception|default:"—" }}</dd>
-        <dt class="col-sm-4">Notas generales</dt><dd class="col-sm-8">{{ normalized_payload.general_notes|default:"—" }}</dd>
-        <dt class="col-sm-4">Ubicación</dt><dd class="col-sm-8">{{ normalized_payload.location|default:"—" }}</dd>
-        {% endif %}
-        <dt class="col-sm-4">Recibido</dt><dd class="col-sm-8">{{ submission.received_at }}</dd>
-        <dt class="col-sm-4">Importado</dt><dd class="col-sm-8">{{ submission.imported_at|default:"—" }}</dd>
-    </dl></section>
-
-    {% if can_view_sensitive %}<section class="card card-body border-warning mb-3"><h2 class="h5">Datos internos sensibles</h2><dl class="row mb-0">{% for key, value in sensitive_data.items %}<dt class="col-sm-4">{{ key }}</dt><dd class="col-sm-8">{{ value|default_if_none:"—" }}</dd>{% endfor %}</dl></section>{% endif %}
-
-    <section class="card card-body"><h2 class="h5">Evidencias descargadas</h2><div class="list-group list-group-flush">
-        {% for evidence in evidences %}<div class="list-group-item px-0 d-flex justify-content-between align-items-center"><div><strong>{{ evidence.file.name|default:"Evidencia" }}</strong><div class="small text-muted">{{ evidence.content_type }} · {{ evidence.size_bytes|default_if_none:"—" }} bytes · {{ evidence.get_privacy_level_display }}</div></div><a class="btn btn-sm btn-outline-primary" href="{% url 'kobo:project_submission_evidence' submission.pk evidence.pk %}">Ver evidencia</a></div>{% empty %}<div class="text-muted">No hay evidencias descargadas disponibles.</div>{% endfor %}
-    </div></section>
+<div class="ops-page-header ops-page-header-row">
+    <div>
+        <div class="ops-kicker">{{ presentation.page_kicker }}</div>
+        <h1>{{ presentation.page_title }}</h1>
+        <p class="mb-0 text-break">{{ presentation.page_subtitle }}</p>
+    </div>
+    <div class="ops-header-actions">
+        <a class="btn btn-outline-secondary" href="{% url 'project_detail' project.pk %}">Volver al proyecto</a>
+    </div>
 </div>
+
+{% include "kobo/includes/imported_detail_summary.html" with summary_items=presentation.summary_items %}
+
+{% for section in presentation.sections %}
+    {% include "kobo/includes/imported_detail_section.html" with title=section.title fields=section.fields section_id=forloop.counter %}
+{% endfor %}
+
+{% if presentation.location %}
+<section class="card border-0 ops-detail-card mb-4" aria-labelledby="imported-location-title">
+    <div class="card-body">
+        <div class="ops-page-header-row align-items-center mb-3">
+            <h2 id="imported-location-title"
+                class="h5 ops-section-title mb-0">
+                Ubicación
+            </h2>
+
+            {% if presentation.location.map_url %}
+                <a
+                    class="btn btn-sm btn-outline-secondary"
+                    href="{{ presentation.location.map_url }}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Ver ubicación en OpenStreetMap; se abrirá en una pestaña nueva"
+                >
+                    Ver en mapa
+                    <i class="bi bi-box-arrow-up-right ms-1"
+                       aria-hidden="true"></i>
+                </a>
+            {% endif %}
+        </div>
+        <dl class="row mb-0">
+            <dt class="col-sm-4 ops-detail-label">Latitud</dt>
+            <dd class="col-sm-8 text-break">{{ presentation.location.latitude }}</dd>
+            <dt class="col-sm-4 ops-detail-label">Longitud</dt>
+            <dd class="col-sm-8 text-break">{{ presentation.location.longitude }}</dd>
+            <dt class="col-sm-4 ops-detail-label">Precisión</dt>
+            <dd class="col-sm-8 text-break">{{ presentation.location.accuracy }}</dd>
+            <dt class="col-sm-4 ops-detail-label">Altitud</dt>
+            <dd class="col-sm-8 text-break">{{ presentation.location.altitude }}</dd>
+        </dl>
+    </div>
+</section>
+{% endif %}
+
+<section class="card border-0 ops-detail-card mb-4" aria-labelledby="imported-evidence-title">
+    <div class="card-body">
+        <h2 id="imported-evidence-title" class="h5 ops-section-title">Evidencias</h2>
+        {% if evidence_items %}
+            <div class="d-flex flex-column gap-3">
+                {% for evidence in evidence_items %}
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                        <div class="text-break">
+                            <strong>{{ evidence.file.name|default:"Evidencia" }}</strong>
+                            <div class="small text-muted">
+                                {{ evidence.content_type }}
+                                · {{ evidence.size_bytes|default_if_none:"—" }} bytes
+                                · {{ evidence.privacy_level|kobo_label }}
+                            </div>
+                        </div>
+                        {% include "web/includes/protected_file_item.html" with file_actions=evidence.file_actions %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-muted mb-0">No hay evidencias descargadas disponibles.</p>
+        {% endif %}
+    </div>
+</section>
+
+{% if can_view_sensitive and presentation.show_sensitive_block %}
+<details class="card border-0 ops-detail-card mb-4">
+    <summary class="card-body py-3">
+        <span class="h5 ops-section-title mb-0">Datos internos y técnicos</span>
+    </summary>
+    <div class="card-body pt-0">
+        {% if presentation.sensitive_fields %}
+            <dl class="row mb-0">
+                {% for field in presentation.sensitive_fields %}
+                    <dt class="col-sm-4 ops-detail-label">{{ field.label }}</dt>
+                    <dd class="col-sm-8 text-break">{{ field.value }}</dd>
+                {% endfor %}
+            </dl>
+        {% endif %}
+        {% if presentation.technical_fields %}
+            <dl class="row mb-0 {% if presentation.sensitive_fields %}mt-3{% endif %}">
+                {% for field in presentation.technical_fields %}
+                    <dt class="col-sm-4 ops-detail-label">{{ field.label }}</dt>
+                    <dd class="col-sm-8 text-break">{{ field.value }}</dd>
+                {% endfor %}
+            </dl>
+        {% endif %}
+    </div>
+</details>
+{% endif %}
+
+{% include "kobo/includes/imported_detail_section.html" with title="Registro Kobo" fields=presentation.registration_fields section_id="registration" %}
 {% endblock %}

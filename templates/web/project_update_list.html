@@ -39,7 +39,7 @@
                         <td><span class="badge ops-status-badge">{{ update.get_status_display }}</span></td>
                         <td class="text-end">
                             <div class="ops-row-actions ops-project-update-actions">
-                                {% if update.status == 'draft' %}
+                                {% if update.project.status != 'closed' and update.status == 'unpublished' %}
                                     {% if perms.operations.publish_projectupdate %}
                                         <form class="d-inline" method="post" action="{% url 'project_update_publish' update.pk %}">
                                             {% csrf_token %}
@@ -61,10 +61,10 @@
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="project-update-actions-{{ update.pk }}">
                                         <li><a class="dropdown-item" href="{% url detail_url_name update.pk %}">Ver detalle</a></li>
-                                        {% if update.status == 'draft' and perms.operations.change_projectupdate %}
+                                        {% if update.project.status != 'closed' and update.status == 'unpublished' and perms.operations.change_projectupdate %}
                                             <li><a class="dropdown-item" href="{% url update_url_name update.pk %}">Editar</a></li>
                                         {% endif %}
-                                        {% if update.status == 'draft' and perms.operations.delete_projectupdate %}
+                                        {% if update.project.status != 'closed' and update.status == 'unpublished' and perms.operations.delete_projectupdate %}
                                             <li><hr class="dropdown-divider"></li>
                                             <li><a class="dropdown-item text-danger" href="{% url delete_url_name update.pk %}">Eliminar</a></li>
                                         {% endif %}
