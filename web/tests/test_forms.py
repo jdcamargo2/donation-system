@@ -69,6 +69,33 @@ class FormTests(TestCase):
         self.assertEqual(institution.country.code, 'VE')
         self.assertTrue(institution.legal_document.name.startswith('institution_documents/'))
 
+    def test_institution_form_accepts_monteluz_country_code(self):
+        upload = SimpleUploadedFile('registro.pdf', b'documento legal', content_type='application/pdf')
+        form = InstitutionForm(
+            data={
+                'name': 'Aliado Monteluz',
+                'institution_type': 'parish',
+                'role': Institution.Role.ALLY,
+                'country': 'ZZ',
+                'contact_email': 'ally@example.com',
+                'contact_phone': '',
+                'responsible_person': 'Coordinator',
+                'legal_document': '',
+                'status': Institution.Status.ACTIVE,
+            },
+            files={'legal_document': upload},
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        institution = form.save()
+        self.assertEqual(institution.country.code, 'ZZ')
+        self.assertEqual(institution.country.name, 'República de Monteluz')
+
+        empty_choice, first_country, *rest = list(InstitutionForm().fields['country'].choices)
+        self.assertEqual(empty_choice[0], '')
+        self.assertEqual(first_country, ('ZZ', 'República de Monteluz'))
+        self.assertIn(('VE', 'Venezuela'), rest)
+
     def test_institution_form_shows_country_and_not_city(self):
         form = InstitutionForm()
 
