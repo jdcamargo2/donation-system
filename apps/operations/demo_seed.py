@@ -9,6 +9,7 @@ POST: idempotent demo entities under stable DEMO codes / @sigedon.local users;
 
 from __future__ import annotations
 
+import os
 from datetime import date, timedelta
 from decimal import Decimal
 from io import StringIO
@@ -73,12 +74,21 @@ from apps.operations.services import (
 )
 
 
-# Local-development convenience only. handle() refuses when DEBUG=False.
-# Never print this value.
-DEFAULT_DEMO_PASSWORD = '0214'
-
 DEMO_USER_EMAIL_DOMAIN = 'sigedon.local'
+DEMO_INSTITUTION_COUNTRY = 'ZZ'
 DEMO_TINY_PDF = b'%PDF-1.4\n%SIGEDON-DEMO\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n'
+
+# Visible demo copy must stay inside the fictional Monteluz universe.
+DEMO_FORBIDDEN_SUBSTRINGS = (
+    'la guaira',
+    'catia',
+    'caraballeda',
+    'diócesis',
+    'diocesis',
+    'núcleo vital',
+    'nucleo vital',
+    'zona pastoral',
+)
 
 DEMO_ER_PURPOSE = {
     'pending': '[DEMO-ER:pending] Solicitud pendiente de decisión del comité',
@@ -104,32 +114,32 @@ DEMO_USER_DEFINITIONS = {
     'admin': {
         'username': 'admin_demo',
         'email': f'admin.demo@{DEMO_USER_EMAIL_DOMAIN}',
-        'first_name': 'Administrador',
-        'last_name': 'SIGEDON',
+        'first_name': 'Elena',
+        'last_name': 'Vargas',
         'group': ROLE_SIGEDON_ADMIN,
         'is_staff': True,
     },
     'operator': {
         'username': 'operador_demo',
         'email': f'operador.demo@{DEMO_USER_EMAIL_DOMAIN}',
-        'first_name': 'Operador',
-        'last_name': 'de campo',
+        'first_name': 'Mateo',
+        'last_name': 'Solano',
         'group': ROLE_FIELD_OPERATOR,
         'is_staff': False,
     },
     'auditor': {
         'username': 'auditor_demo',
         'email': f'auditor.demo@{DEMO_USER_EMAIL_DOMAIN}',
-        'first_name': 'Auditor',
-        'last_name': 'externo',
+        'first_name': 'Nuria',
+        'last_name': 'Belmonte',
         'group': ROLE_EXTERNAL_AUDITOR,
         'is_staff': False,
     },
     'committee': {
         'username': 'comite_demo',
         'email': f'comite.demo@{DEMO_USER_EMAIL_DOMAIN}',
-        'first_name': 'Comité',
-        'last_name': 'de proyectos',
+        'first_name': 'Paula',
+        'last_name': 'Herrera',
         'group': ROLE_PROJECT_COMMITTEE,
         'is_staff': False,
     },
@@ -185,12 +195,28 @@ def demo_upload(filename: str, content: bytes = DEMO_TINY_PDF) -> SimpleUploaded
 
 def validate_demo_password(password: str) -> str:
     """
-    PRE: password comes from --password or SIGEDON_DEMO_PASSWORD / default.
+    PRE: password is the resolved --password or SIGEDON_DEMO_PASSWORD value.
     POST: returns a non-empty password or raises CommandError; never logs the value.
     """
     if password is None or not str(password).strip():
         raise CommandError('Demo password cannot be empty.')
     return str(password)
+
+
+def resolve_demo_password(*, cli_password: str | None) -> str:
+    """
+    PRE: cli_password is --password when provided, otherwise None.
+    POST: returns --password if present, else SIGEDON_DEMO_PASSWORD;
+          raises CommandError if neither is a non-empty value; never logs it.
+    """
+    if cli_password is not None:
+        return validate_demo_password(cli_password)
+    env_password = os.getenv('SIGEDON_DEMO_PASSWORD')
+    if env_password is None or not str(env_password).strip():
+        raise CommandError(
+            'Falta la contraseña demo. Use --password o defina SIGEDON_DEMO_PASSWORD.'
+        )
+    return validate_demo_password(env_password)
 
 
 def _anchor_date() -> date:
@@ -444,18 +470,72 @@ def verify_sigedon_demo() -> list[str]:
         if ExpenseRequest.objects.filter(purpose=purpose).count() > 1:
             errors.append('Duplicate demo expense request purpose')
 
+    for snippet in _demo_visible_text_snippets():
+        lowered = snippet.casefold()
+        for forbidden in DEMO_FORBIDDEN_SUBSTRINGS:
+            if forbidden in lowered:
+                errors.append('Demo visible text still references the original implementation')
+                return errors
+
     return errors
 
 
 def _institution_names() -> list[str]:
-    return [
-        'Fondo Humanitario Internacional',
-        'Diócesis de La Guaira',
-        'Equipo Territorial SIGEDON',
-        'Red Aliada Comunitaria DEMO',
-        'Ente Supervisor Externo DEMO',
-        'Aliada Territorial Inactiva DEMO',
-    ]
+    return [data['name'] for data in _institution_definitions().values()]
+
+
+def _demo_visible_text_snippets() -> list[str]:
+    """
+    PRE: demo entities may or may not exist.
+    POST: returns concatenated visible fields of demo-scoped records.
+    """
+    snippets: list[str] = []
+    for definition in DEMO_USER_DEFINITIONS.values():
+        snippets.extend(
+            [
+                definition['email'],
+                definition['first_name'],
+                definition['last_name'],
+            ]
+        )
+    for institution in Institution.objects.filter(name__in=_institution_names()):
+        snippets.extend(
+            [
+                institution.name,
+                institution.contact_email,
+                institution.contact_phone,
+                institution.responsible_person,
+            ]
+        )
+    for project in Project.objects.filter(code__in=DEMO_PROJECT_CODES):
+        snippets.extend(
+            [
+                project.name,
+                project.description,
+                project.objective,
+                project.location,
+            ]
+        )
+    for donation in Donation.objects.filter(code__in=DEMO_DONATION_CODES):
+        snippets.extend(
+            [
+                donation.objective,
+                donation.restrictions,
+                donation.support_reference,
+            ]
+        )
+    for allocation in FundAllocation.objects.filter(donation__code__in=DEMO_DONATION_CODES):
+        snippets.extend([allocation.responsible_person, allocation.notes])
+    for expense in Expense.objects.filter(allocation__donation__code__in=DEMO_DONATION_CODES):
+        snippets.extend(
+            [
+                expense.reason,
+                expense.provider_or_recipient,
+                expense.description,
+                expense.observations,
+            ]
+        )
+    return [value for value in snippets if value]
 
 
 def _load_existing_demo_users() -> dict[str, Any]:
@@ -498,73 +578,76 @@ def _create_users(password: str) -> dict[str, Any]:
     return result
 
 
-def _create_institutions(*, admin) -> dict[str, Institution]:
-    institution_type = first_choice_value(
-        Institution._meta.get_field('institution_type').choices
-    )
-    definitions = {
+def _institution_definitions() -> dict[str, dict[str, Any]]:
+    return {
         'donor': {
-            'name': 'Fondo Humanitario Internacional',
+            'name': 'Agencia Humanitaria Delta',
             'role': Institution.Role.DONOR,
-            'country': 'ES',
-            'contact_email': 'cooperacion@fondo-demo.org',
-            'contact_phone': '+34 000 000 000',
-            'responsible_person': 'Coordinación donante DEMO',
+            'country': DEMO_INSTITUTION_COUNTRY,
+            'contact_email': 'cooperacion@delta.example.invalid',
+            'contact_phone': '+000 555 0100',
+            'responsible_person': 'Laura Mendoza',
             'status': Institution.Status.ACTIVE,
             'with_legal': True,
         },
         'receiver': {
-            'name': 'Diócesis de La Guaira',
+            'name': 'Fundación Horizonte',
             'role': Institution.Role.RECEIVER,
-            'country': 'VE',
-            'contact_email': 'proyectos@diocesis-demo.org',
-            'contact_phone': '+58 000 000 0000',
-            'responsible_person': 'Coordinación de proyectos',
+            'country': DEMO_INSTITUTION_COUNTRY,
+            'contact_email': 'proyectos@horizonte.example.invalid',
+            'contact_phone': '+000 555 0101',
+            'responsible_person': 'Andrés Pellicer',
             'status': Institution.Status.ACTIVE,
             'with_legal': False,
         },
         'executor': {
-            'name': 'Equipo Territorial SIGEDON',
+            'name': 'Red Comunitaria Aurora',
             'role': Institution.Role.EXECUTOR,
-            'country': 'VE',
-            'contact_email': 'territorio@sigedon.local',
-            'contact_phone': '+58 000 000 0001',
-            'responsible_person': 'Coordinación territorial',
+            'country': DEMO_INSTITUTION_COUNTRY,
+            'contact_email': 'aurora@sigedon.local',
+            'contact_phone': '+000 555 0102',
+            'responsible_person': 'Sofía Rangel',
             'status': Institution.Status.ACTIVE,
             'with_legal': False,
         },
         'ally': {
-            'name': 'Red Aliada Comunitaria DEMO',
+            'name': 'Asociación Comunitaria Río Claro',
             'role': Institution.Role.ALLY,
-            'country': 'VE',
-            'contact_email': 'aliada@sigedon.local',
-            'contact_phone': '+58 000 000 0002',
-            'responsible_person': 'Enlace aliado DEMO',
+            'country': DEMO_INSTITUTION_COUNTRY,
+            'contact_email': 'rioclaro@sigedon.local',
+            'contact_phone': '+000 555 0103',
+            'responsible_person': 'Héctor Vidal',
             'status': Institution.Status.ACTIVE,
             'with_legal': False,
         },
         'supervisor': {
-            'name': 'Ente Supervisor Externo DEMO',
+            'name': 'Observatorio Cívico Monteluz',
             'role': Institution.Role.SUPERVISOR,
-            'country': 'VE',
-            'contact_email': 'supervisor@sigedon.local',
-            'contact_phone': '+58 000 000 0003',
-            'responsible_person': 'Supervisión DEMO',
+            'country': DEMO_INSTITUTION_COUNTRY,
+            'contact_email': 'observatorio@sigedon.local',
+            'contact_phone': '+000 555 0104',
+            'responsible_person': 'Clara Montes',
             'status': Institution.Status.ACTIVE,
             'with_legal': False,
         },
         'inactive_ally': {
-            'name': 'Aliada Territorial Inactiva DEMO',
+            'name': 'Centro de Innovación Archimango',
             'role': Institution.Role.ALLY,
-            'country': 'VE',
-            'contact_email': 'inactiva@sigedon.local',
-            'contact_phone': '+58 000 000 0004',
-            'responsible_person': 'Registro histórico DEMO',
+            'country': DEMO_INSTITUTION_COUNTRY,
+            'contact_email': 'archimango@sigedon.local',
+            'contact_phone': '+000 555 0105',
+            'responsible_person': 'Ivo Archimango',
             'status': Institution.Status.INACTIVE,
             'with_legal': False,
         },
     }
 
+
+def _create_institutions(*, admin) -> dict[str, Institution]:
+    institution_type = first_choice_value(
+        Institution._meta.get_field('institution_type').choices
+    )
+    definitions = _institution_definitions()
     result = {}
     for key, data in definitions.items():
         institution, _created = Institution.objects.update_or_create(
@@ -590,87 +673,165 @@ def _create_institutions(*, admin) -> dict[str, Institution]:
     return result
 
 
-def _create_projects(*, admin) -> dict[str, Project]:
-    today = _anchor_date()
-    definitions = [
+def _project_definitions() -> list[tuple]:
+    return [
         (
-            'catia_la_mar',
+            'aurora',
             'PRJ-DEMO-001',
-            'Núcleo Vital Catia la Mar',
-            'Zona Pastoral Catia la Mar',
+            'Centro Comunitario Aurora',
+            'Aurora, Valle Sereno, República de Monteluz',
+            (
+                'Construcción y puesta en marcha del centro comunitario de Aurora '
+                'para asambleas, formación y servicios de proximidad.'
+            ),
+            (
+                'Fortalecer la convivencia local y la gestión transparente de '
+                'recursos en Aurora.'
+            ),
             Decimal('50000.00'),
-            False,
         ),
         (
-            'centro',
+            'rio_claro',
             'PRJ-DEMO-002',
-            'Núcleo Vital Centro',
-            'Zona Pastoral Centro',
+            'Sistema de Agua Río Claro',
+            'Río Claro, Valle Sereno, República de Monteluz',
+            (
+                'Captación, almacenamiento y distribución de agua segura para '
+                'hogares y servicios comunitarios de Río Claro.'
+            ),
+            (
+                'Garantizar acceso continuo a agua potable con operación '
+                'comunitaria documentada.'
+            ),
             Decimal('45000.00'),
-            False,
         ),
         (
-            'este',
+            'horizonte',
             'PRJ-DEMO-003',
-            'Núcleo Vital Este',
-            'Zona Pastoral Este',
+            'Rehabilitación Escuela Horizonte',
+            'Monte Azul, Valle Sereno, República de Monteluz',
+            (
+                'Rehabilitación de aulas, sanitarios y espacios comunes de la '
+                'Escuela Horizonte en Monte Azul.'
+            ),
+            (
+                'Restablecer condiciones seguras de aprendizaje para la comunidad '
+                'educativa de Monte Azul.'
+            ),
             Decimal('40000.00'),
-            False,
         ),
         (
-            'montana',
+            'norte',
             'PRJ-DEMO-004',
-            'Núcleo Vital La Montaña',
-            'Zona Pastoral La Montaña',
+            'Red de Atención Comunitaria Norte',
+            'Puerto Norte, Valle Sereno, República de Monteluz',
+            (
+                'Articulación de puntos de atención comunitaria, referencia y '
+                'seguimiento en Puerto Norte.'
+            ),
+            (
+                'Mejorar la cobertura de atención de primera línea con registro '
+                'trazable de actividades.'
+            ),
             Decimal('35000.00'),
-            False,
         ),
         (
-            'insular',
+            'archimango',
             'PRJ-DEMO-005',
-            'Núcleo Vital Insular',
-            'Zona Pastoral Insular',
+            'Laboratorio Archimango',
+            'San Lirio, Valle Sereno, República de Monteluz',
+            (
+                'Laboratorio comunitario de prototipado y formación técnica en '
+                'San Lirio. Incluye un módulo de referencia del apócrifo atlas '
+                'de Mangolandia.'
+            ),
+            (
+                'Dotar a San Lirio de un espacio de innovación aplicada a '
+                'soluciones locales replicables.'
+            ),
             Decimal('30000.00'),
-            False,
         ),
         (
             'empty',
             'PRJ-DEMO-006',
             'Proyecto DEMO sin actividad financiera',
-            'Zona DEMO planificación',
+            'Valle Sereno, República de Monteluz',
+            (
+                'Expediente de planificación comunitaria sin asignaciones ni '
+                'gastos asociados.'
+            ),
+            (
+                'Reservar un caso de proyecto activo sin movimiento financiero '
+                'para pruebas de consulta.'
+            ),
             Decimal('10000.00'),
-            False,
         ),
         (
             'closed',
             'PRJ-DEMO-007',
-            'Proyecto DEMO cerrado',
-            'Zona DEMO cierre',
+            'Programa Comunitario Finalizado',
+            'Valle Sereno, República de Monteluz',
+            (
+                'Programa comunitario de Valle Sereno ya cerrado, conservado '
+                'como expediente histórico de demostración.'
+            ),
+            (
+                'Documentar un ciclo completo de ejecución y cierre sin reabrir '
+                'la operación.'
+            ),
             Decimal('5000.00'),
-            False,
         ),
     ]
 
+
+def _apply_project_visible_fields(
+    project: Project,
+    *,
+    name,
+    description,
+    objective,
+    location,
+    budget,
+    today: date,
+) -> Project:
+    project.name = name
+    project.description = description
+    project.objective = objective
+    project.location = location
+    if project.status != Project.Status.CLOSED:
+        project.estimated_budget = budget
+        project.start_date = today - timedelta(days=30)
+        project.end_date = today + timedelta(days=335)
+    return project
+
+
+def _create_projects(*, admin) -> dict[str, Project]:
+    today = _anchor_date()
+    definitions = _project_definitions()
+
     projects = {}
-    for key, code, name, location, budget, _is_public in definitions:
+    for key, code, name, location, description, objective, budget in definitions:
         project = Project.objects.filter(code=code).first()
         if project is not None and project.status == Project.Status.CLOSED:
-            # Never reopen closed demo projects on rerun.
-            projects[key] = project
+            # Never reopen closed demo projects on rerun; still refresh visible copy.
+            _apply_project_visible_fields(
+                project,
+                name=name,
+                description=description,
+                objective=objective,
+                location=location,
+                budget=budget,
+                today=today,
+            )
+            projects[key] = save_validated(project)
             continue
 
         if project is None:
             project = Project(
                 code=code,
                 name=name,
-                description=(
-                    'Proyecto territorial para diagnóstico, priorización '
-                    'y seguimiento de acciones comunitarias.'
-                ),
-                objective=(
-                    'Fortalecer la respuesta comunitaria y la gestión '
-                    'transparente de recursos.'
-                ),
+                description=description,
+                objective=objective,
                 location=location,
                 estimated_budget=budget,
                 start_date=today - timedelta(days=30),
@@ -679,30 +840,26 @@ def _create_projects(*, admin) -> dict[str, Project]:
                 is_public=False,
             )
         else:
-            project.name = name
-            project.description = (
-                'Proyecto territorial para diagnóstico, priorización '
-                'y seguimiento de acciones comunitarias.'
+            _apply_project_visible_fields(
+                project,
+                name=name,
+                description=description,
+                objective=objective,
+                location=location,
+                budget=budget,
+                today=today,
             )
-            project.objective = (
-                'Fortalecer la respuesta comunitaria y la gestión '
-                'transparente de recursos.'
-            )
-            project.location = location
-            project.estimated_budget = budget
-            project.start_date = today - timedelta(days=30)
-            project.end_date = today + timedelta(days=335)
             # Preserve is_public; publication is applied below via service.
         save_validated(project)
         projects[key] = project
 
-    public_candidate = projects['catia_la_mar']
+    public_candidate = projects['aurora']
     if (
         admin is not None
         and public_candidate.status == Project.Status.ACTIVE
         and not public_candidate.is_public
     ):
-        projects['catia_la_mar'] = publish_project(
+        projects['aurora'] = publish_project(
             project_id=public_candidate.pk,
             actor=admin,
         )
@@ -723,8 +880,8 @@ def _create_donations(*, institutions, admin) -> dict[str, Donation]:
             'code': 'DON-DEMO-001',
             'amount': Decimal('200000.00'),
             'objective': (
-                'Financiar actividades comunitarias de los cinco '
-                'Núcleos Vitales de La Guaira.'
+                'Financiar actividades comunitarias de los cinco proyectos '
+                'activos en Valle Sereno, República de Monteluz.'
             ),
             'restrictions': 'Uso exclusivo en actividades aprobadas y documentadas.',
             'commitment_date': today - timedelta(days=50),
@@ -769,7 +926,7 @@ def _create_donations(*, institutions, admin) -> dict[str, Donation]:
             'key': 'closed_funding',
             'code': 'DON-DEMO-005',
             'amount': Decimal('2000.00'),
-            'objective': 'Donación DEMO para financiar el proyecto cerrado.',
+            'objective': 'Donación DEMO para financiar el programa comunitario finalizado.',
             'restrictions': '',
             'commitment_date': today - timedelta(days=90),
             'received_date': today - timedelta(days=80),
@@ -840,12 +997,12 @@ def _create_allocations(*, donations, projects) -> dict[str, FundAllocation]:
     )
 
     amounts = {
-        'catia_la_mar': (donations['main'], projects['catia_la_mar'], Decimal('40000.00')),
-        'centro': (donations['main'], projects['centro'], Decimal('35000.00')),
-        'este': (donations['main'], projects['este'], Decimal('30000.00')),
-        'montana': (donations['main'], projects['montana'], Decimal('25000.00')),
-        'insular': (donations['main'], projects['insular'], Decimal('20000.00')),
-        'full_only': (donations['full'], projects['insular'], Decimal('8000.00')),
+        'aurora': (donations['main'], projects['aurora'], Decimal('40000.00')),
+        'rio_claro': (donations['main'], projects['rio_claro'], Decimal('35000.00')),
+        'horizonte': (donations['main'], projects['horizonte'], Decimal('30000.00')),
+        'norte': (donations['main'], projects['norte'], Decimal('25000.00')),
+        'archimango': (donations['main'], projects['archimango'], Decimal('20000.00')),
+        'full_only': (donations['full'], projects['archimango'], Decimal('8000.00')),
         'closed_alloc': (
             donations['closed_funding'],
             projects['closed'],
@@ -870,14 +1027,14 @@ def _create_allocations(*, donations, projects) -> dict[str, FundAllocation]:
                 project=project,
                 budget_category=budget_category,
                 amount=amount,
-                responsible_person='Coordinación financiera SIGEDON',
+                responsible_person='Marina Soler',
                 allocation_date=today - timedelta(days=25),
                 status=FundAllocation.Status.ACTIVE,
                 notes='Asignación inicial del escenario demostrativo.',
             )
         else:
             allocation.amount = amount
-            allocation.responsible_person = 'Coordinación financiera SIGEDON'
+            allocation.responsible_person = 'Marina Soler'
             allocation.allocation_date = today - timedelta(days=25)
             allocation.notes = 'Asignación inicial del escenario demostrativo.'
         allocations[key] = save_validated(allocation)
@@ -897,31 +1054,31 @@ def _create_legacy_expenses(*, allocations, admin) -> list[Expense]:
 
     definitions = [
         (
-            allocations['catia_la_mar'],
+            allocations['aurora'],
             'Compra de materiales comunitarios',
             Decimal('3500.00'),
-            'Proveedor comunitario Catia la Mar',
+            'Proveedor comunitario Aurora',
             15,
         ),
         (
-            allocations['centro'],
+            allocations['rio_claro'],
             'Jornada de diagnóstico territorial',
             Decimal('2200.00'),
-            'Equipo técnico territorial',
+            'Brigada técnica Valle Sereno',
             12,
         ),
         (
-            allocations['este'],
+            allocations['horizonte'],
             'Logística para asamblea comunitaria',
             Decimal('1800.00'),
-            'Proveedor logístico local',
+            'Proveedor logístico Monte Azul',
             9,
         ),
         (
-            allocations['montana'],
+            allocations['norte'],
             'Traslado de equipo de campo',
             Decimal('950.00'),
-            'Servicio de transporte',
+            'Servicio de transporte Monte Azul',
             6,
         ),
     ]
@@ -930,9 +1087,18 @@ def _create_legacy_expenses(*, allocations, admin) -> list[Expense]:
     for allocation, reason, amount, recipient, days_ago in definitions:
         existing = Expense.objects.filter(
             allocation=allocation,
-            reason=reason,
+            amount=amount,
         ).exclude(status=Expense.Status.ANNULLED).first()
         if existing is not None:
+            if (
+                existing.reason != reason
+                or existing.provider_or_recipient != recipient
+                or existing.description != 'Registro demostrativo para pruebas operativas.'
+            ):
+                existing.reason = reason
+                existing.provider_or_recipient = recipient
+                existing.description = 'Registro demostrativo para pruebas operativas.'
+                save_validated(existing)
             if not existing.supporting_documents.exists() and admin is not None:
                 # Historical demo rows without support: attach once via service path.
                 from apps.operations.services import create_supporting_document
@@ -991,11 +1157,11 @@ def _create_expense_requests(*, allocations, users) -> dict[str, ExpenseRequest]
     )
 
     # Use allocations with headroom after legacy expenses.
-    pending_alloc = allocations['insular']  # 20000, no legacy expense
-    approved_alloc = allocations['montana']  # 25000 - 950
-    denied_alloc = allocations['este']
-    withdrawn_alloc = allocations['centro']
-    fulfilled_alloc = allocations['catia_la_mar']
+    pending_alloc = allocations['archimango']  # 20000, no legacy expense
+    approved_alloc = allocations['norte']  # 25000 - 950
+    denied_alloc = allocations['horizonte']
+    withdrawn_alloc = allocations['rio_claro']
+    fulfilled_alloc = allocations['aurora']
     annulled_alloc = allocations['full_only']
 
     scenarios = {
@@ -1130,7 +1296,7 @@ def _advance_expense_request(
             expense_date=today - timedelta(days=2),
             amount=request.reserved_amount,
             reason=request.purpose,
-            provider_or_recipient='Proveedor DEMO cumplimiento',
+            provider_or_recipient='Comercial Valle Sereno',
             payment_method=payment_method,
             description='Gasto DEMO generado desde solicitud cumplida.',
             support_file=demo_upload('demo-er-fulfilled-support.pdf'),
@@ -1258,14 +1424,14 @@ def _create_project_updates(*, projects, users) -> dict[str, ProjectUpdate]:
 
     draft = _get_or_register(
         'draft',
-        projects['centro'],
+        projects['rio_claro'],
         'Borrador DEMO editable por el operador de campo.',
     )
     result['draft'] = draft
 
     published = _get_or_register(
         'published_public',
-        projects['catia_la_mar'],
+        projects['aurora'],
         'Avance DEMO publicado visible cuando el proyecto es público.',
     )
     _ensure_demo_published_update_attachments(
@@ -1282,7 +1448,7 @@ def _create_project_updates(*, projects, users) -> dict[str, ProjectUpdate]:
 
     plain = _get_or_register(
         'no_attachment',
-        projects['este'],
+        projects['horizonte'],
         'Avance DEMO publicado sin adjunto.',
     )
     if admin is not None and plain.status == ProjectUpdate.Status.UNPUBLISHED:
@@ -1291,7 +1457,7 @@ def _create_project_updates(*, projects, users) -> dict[str, ProjectUpdate]:
 
     conforming = _get_or_register(
         'reviewed_ok',
-        projects['montana'],
+        projects['norte'],
         'Avance DEMO con decisión conforme del comité.',
     )
     if admin is not None and conforming.status == ProjectUpdate.Status.UNPUBLISHED:
@@ -1315,7 +1481,7 @@ def _create_project_updates(*, projects, users) -> dict[str, ProjectUpdate]:
 
     observed = _get_or_register(
         'observed',
-        projects['insular'],
+        projects['archimango'],
         'Avance DEMO observado que requiere remediación.',
     )
     if admin is not None and observed.status == ProjectUpdate.Status.UNPUBLISHED:
@@ -1362,7 +1528,7 @@ def _attach_private_demo_files(*, institutions, projects, expenses, users) -> No
     if admin is None:
         return
 
-    project = projects['centro']
+    project = projects['rio_claro']
     if not ProjectDocument.objects.filter(
         project=project,
         title='Plan de trabajo DEMO',

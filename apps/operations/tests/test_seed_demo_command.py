@@ -13,11 +13,13 @@ from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
+from django.urls import reverse
 
 from apps.operations.demo_seed import (
     DEMO_ER_PURPOSE,
+    DEMO_FORBIDDEN_SUBSTRINGS,
+    DEMO_INSTITUTION_COUNTRY,
     DEMO_UPDATE_TITLE,
-    DEMO_USER_DEFINITIONS,
     collect_demo_counts,
     verify_sigedon_demo,
 )
@@ -151,13 +153,52 @@ class SeedSigedonDemoCommandTests(TestCase):
         output = self.run_seed(password=secret)
         self.assertIn('Demo credentials configured.', output)
         self.assertNotIn(secret, output)
-        self.assertNotIn('0214', output)
         user = get_user_model().objects.get(username='admin_demo')
         self.assertTrue(user.check_password(secret))
 
+    def test_env_password_is_used_when_cli_password_omitted(self):
+        secret = 'env-only-secret-never-print'
+        stdout = StringIO()
+        with patch.dict('os.environ', {'SIGEDON_DEMO_PASSWORD': secret}):
+            call_command('seed_sigedon_demo', stdout=stdout)
+        output = stdout.getvalue()
+        self.assertIn('Demo credentials configured.', output)
+        self.assertNotIn(secret, output)
+        user = get_user_model().objects.get(username='admin_demo')
+        self.assertTrue(user.check_password(secret))
+
+    def test_cli_password_overrides_env_password(self):
+        cli_secret = 'cli-secret-never-print'
+        env_secret = 'env-secret-never-print'
+        stdout = StringIO()
+        with patch.dict('os.environ', {'SIGEDON_DEMO_PASSWORD': env_secret}):
+            call_command(
+                'seed_sigedon_demo',
+                password=cli_secret,
+                stdout=stdout,
+            )
+        output = stdout.getvalue()
+        self.assertNotIn(cli_secret, output)
+        self.assertNotIn(env_secret, output)
+        user = get_user_model().objects.get(username='admin_demo')
+        self.assertTrue(user.check_password(cli_secret))
+        self.assertFalse(user.check_password(env_secret))
+
+    def test_missing_password_is_refused_before_mutation(self):
+        stdout = StringIO()
+        with patch.dict('os.environ', {'SIGEDON_DEMO_PASSWORD': ''}):
+            with self.assertRaisesMessage(
+                CommandError,
+                'Falta la contraseña demo. Use --password o defina SIGEDON_DEMO_PASSWORD.',
+            ):
+                call_command('seed_sigedon_demo', stdout=stdout)
+        self.assertEqual(stdout.getvalue(), '')
+        self.assertFalse(Project.objects.filter(code='PRJ-DEMO-001').exists())
+
     def test_empty_password_refused(self):
-        with self.assertRaises(CommandError):
-            call_command('seed_sigedon_demo', password='   ', stdout=StringIO())
+        with patch.dict('os.environ', {'SIGEDON_DEMO_PASSWORD': 'env-should-not-be-used'}):
+            with self.assertRaises(CommandError):
+                call_command('seed_sigedon_demo', password='   ', stdout=StringIO())
 
     def test_demo_matrix_covers_institutions_projects_donations(self):
         self.run_seed()
@@ -177,6 +218,48 @@ class SeedSigedonDemoCommandTests(TestCase):
         self.assertTrue(
             Institution.objects.filter(status=Institution.Status.INACTIVE).exists()
         )
+
+        expected_institutions = {
+            'Agencia Humanitaria Delta',
+            'Fundación Horizonte',
+            'Red Comunitaria Aurora',
+            'Observatorio Cívico Monteluz',
+            'Asociación Comunitaria Río Claro',
+            'Centro de Innovación Archimango',
+        }
+        self.assertEqual(
+            set(
+                Institution.objects.filter(name__in=expected_institutions).values_list(
+                    'name', flat=True
+                )
+            ),
+            expected_institutions,
+        )
+        for institution in Institution.objects.filter(name__in=expected_institutions):
+            with self.subTest(institution=institution.name):
+                self.assertEqual(institution.country.code, DEMO_INSTITUTION_COUNTRY)
+                self.assertEqual(institution.country.code, 'ZZ')
+                self.assertEqual(institution.country.name, 'República de Monteluz')
+
+        expected_projects = {
+            'PRJ-DEMO-001': 'Centro Comunitario Aurora',
+            'PRJ-DEMO-002': 'Sistema de Agua Río Claro',
+            'PRJ-DEMO-003': 'Rehabilitación Escuela Horizonte',
+            'PRJ-DEMO-004': 'Red de Atención Comunitaria Norte',
+            'PRJ-DEMO-005': 'Laboratorio Archimango',
+            'PRJ-DEMO-006': 'Proyecto DEMO sin actividad financiera',
+            'PRJ-DEMO-007': 'Programa Comunitario Finalizado',
+        }
+        for code, name in expected_projects.items():
+            with self.subTest(code=code):
+                project = Project.objects.get(code=code)
+                self.assertEqual(project.name, name)
+                self.assertIn('Monteluz', project.location)
+                self.assertNotIn('Guaira', project.location)
+                self.assertNotIn('Catia', project.name)
+
+        public_project = Project.objects.get(code='PRJ-DEMO-001')
+        self.assertEqual(public_project.location, 'Aurora, Valle Sereno, República de Monteluz')
 
         self.assertTrue(
             Project.objects.filter(code='PRJ-DEMO-001', is_public=True, status='active').exists()
@@ -208,6 +291,78 @@ class SeedSigedonDemoCommandTests(TestCase):
             Donation.objects.get(code='DON-DEMO-004').allocation_progress,
             'fully_allocated',
         )
+
+        donation = Donation.objects.get(code='DON-DEMO-001')
+        self.assertIn('Valle Sereno', donation.objective)
+        self.assertIn('República de Monteluz', donation.objective)
+        self.assertNotIn('La Guaira', donation.objective)
+        self.assertNotIn('Núcleo Vital', donation.objective)
+
+    def test_demo_visible_copy_stays_inside_monteluz_universe(self):
+        self.run_seed()
+
+        self.assertEqual(verify_sigedon_demo(), [])
+
+        for institution in Institution.objects.filter(
+            name__in={
+                'Agencia Humanitaria Delta',
+                'Fundación Horizonte',
+                'Red Comunitaria Aurora',
+                'Observatorio Cívico Monteluz',
+                'Asociación Comunitaria Río Claro',
+                'Centro de Innovación Archimango',
+            }
+        ):
+            with self.subTest(institution=institution.name):
+                email = institution.contact_email.lower()
+                self.assertTrue(
+                    email.endswith('@sigedon.local') or email.endswith('.example.invalid')
+                )
+                self.assertTrue(institution.contact_phone.startswith('+000 555 01'))
+                blob = ' '.join(
+                    [
+                        institution.name,
+                        institution.contact_email,
+                        institution.contact_phone,
+                        institution.responsible_person,
+                    ]
+                ).casefold()
+                for forbidden in DEMO_FORBIDDEN_SUBSTRINGS:
+                    self.assertNotIn(forbidden, blob)
+
+        for expense in Expense.objects.filter(allocation__donation__code__startswith='DON-DEMO-'):
+            with self.subTest(expense=expense.code):
+                blob = ' '.join(
+                    [
+                        expense.reason,
+                        expense.provider_or_recipient,
+                        expense.description,
+                    ]
+                ).casefold()
+                for forbidden in DEMO_FORBIDDEN_SUBSTRINGS:
+                    self.assertNotIn(forbidden, blob)
+
+        operator = get_user_model().objects.get(username='operador_demo')
+        self.assertEqual(operator.first_name, 'Mateo')
+        self.assertEqual(operator.last_name, 'Solano')
+        self.assertTrue(operator.email.endswith('@sigedon.local'))
+
+    def test_seed_institution_list_and_detail_render_monteluz_not_venezuela(self):
+        self.run_seed()
+        admin = get_user_model().objects.get(username='admin_demo')
+        self.client.force_login(admin)
+        institution = Institution.objects.get(name='Agencia Humanitaria Delta')
+
+        list_response = self.client.get(reverse('institution_list'))
+        detail_response = self.client.get(
+            reverse('institution_detail', args=[institution.pk])
+        )
+
+        for response in (list_response, detail_response):
+            with self.subTest(path=response.request['PATH_INFO']):
+                self.assertContains(response, 'República de Monteluz')
+                self.assertNotContains(response, 'Venezuela')
+                self.assertNotContains(response, '>ZZ<')
 
     def test_expense_request_scenarios_and_events(self):
         self.run_seed()

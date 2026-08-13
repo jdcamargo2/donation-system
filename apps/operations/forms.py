@@ -43,6 +43,8 @@ CANONICAL_DATE_FORMAT = '%Y-%m-%d'
 DATE_INPUT_FORMATS = ['%Y-%m-%d', '%d/%m/%Y']
 TERMINAL_REASON_MIN_LENGTH = 10
 TERMINAL_REASON_MAX_LENGTH = 500
+# Manual create UX for the public demo. Model.country.default stays 'VE'.
+INSTITUTION_CREATE_COUNTRY_INITIAL = 'ZZ'
 
 
 CANONICAL_MONEY_RE = re.compile(r'^\d+(?:\.\d{1,2})?$')
@@ -294,6 +296,7 @@ class InstitutionForm(BootstrapFormMixin, forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
+        explicit_initial = kwargs.get('initial') or {}
         super().__init__(*args, **kwargs)
         # PrivateClearableFileInput keeps clear controls without storage .url.
         self.fields['legal_document'].widget = PrivateClearableFileInput(
@@ -303,6 +306,8 @@ class InstitutionForm(BootstrapFormMixin, forms.ModelForm):
             }
         )
         attach_private_upload_validator(self.fields['legal_document'])
+        if not self.instance.pk and 'country' not in explicit_initial:
+            self.initial['country'] = INSTITUTION_CREATE_COUNTRY_INITIAL
 
 
 class ProjectForm(BootstrapFormMixin, forms.ModelForm):
