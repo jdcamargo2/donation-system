@@ -269,8 +269,8 @@ Variables opcionales de preflight:
   Ver [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md). Hoy no hay cuenta R2
   provisionada ni sonda real completada.
 * `collectstatic` debe haber poblado `STATIC_ROOT` (por defecto
-  `<BASE_DIR>/staticfiles`) con sentinelas locales: CSS de aplicación,
-  logos ILDE y vendor UI (Bootstrap 5.3.3, Bootstrap Icons 1.11.3,
+  `<BASE_DIR>/staticfiles`) con sentinelas locales: CSS de aplicación
+  y vendor UI (Bootstrap 5.3.3, Bootstrap Icons 1.11.3,
   SweetAlert2 11.26.25). En producción, WhiteNoise sirve esos artefactos
   con nombres hashed (`CompressedManifestStaticFilesStorage`) y compresión
   gzip; no se necesita disco persistente ni Nginx para estáticos.
