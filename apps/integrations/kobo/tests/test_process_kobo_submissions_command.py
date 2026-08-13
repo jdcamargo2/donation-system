@@ -8,12 +8,13 @@ from zoneinfo import ZoneInfo
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.integrations.kobo.mappings.ficha_01 import FICHA_01_FORM_ID, FICHA_01_VERSION
 from apps.integrations.kobo.models import KoboFormDefinition, KoboProcessingEvent, KoboSubmission
 
 
+@override_settings(KOBO_ENABLED=True)
 class ProcessKoboSubmissionsCommandSafetyTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -215,3 +216,15 @@ class ProcessKoboSubmissionsCommandSafetyTests(TestCase):
         self.assertIn("failed=1", stdout.getvalue())
         self.assertNotIn("SECRET", stdout.getvalue())
         self.assertNotIn("+58000", stdout.getvalue())
+
+    def test_disabled_integration_raises_command_error_before_client(self):
+        with override_settings(KOBO_ENABLED=False):
+            with patch(
+                "apps.integrations.kobo.management.commands.process_kobo_submissions.build_kobo_api_client"
+            ) as client_factory:
+                with self.assertRaisesMessage(
+                    CommandError,
+                    "Kobo integration is disabled.",
+                ):
+                    call_command("process_kobo_submissions", stdout=StringIO())
+        client_factory.assert_not_called()

@@ -96,7 +96,7 @@
                         <span class="sigedon-nav-label">Gestión de usuarios</span>
                     </a>
                 {% endif %}
-                {% if kobo_enabled and perms.kobo.view_territorial_administration %}
+                {% if perms.kobo.view_territorial_administration %}
                     <a class="sigedon-nav-link {% if current_url == 'hub' or 'identity' in current_url or 'mapping' in current_url or 'conflict' in current_url %}active{% endif %}" href="{% url 'kobo:hub' %}" title="KoboToolbox">
                         <i class="bi bi-map sigedon-nav-icon" aria-hidden="true"></i>
                         <span class="sigedon-nav-label">KoboToolbox</span>

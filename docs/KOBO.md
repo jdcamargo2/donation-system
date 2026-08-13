@@ -803,8 +803,13 @@ python manage.py reconcile_kobo_submissions
 
 Con `KOBO_ENABLED=true`, `/panel/integrations/kobo/` es el panel operativo humano
 para resumen, asignación de zonas, núcleos registrados y casos por revisar. Sus
-mutaciones usan POST, CSRF y los servicios administrativos existentes. Cuando
-Kobo está deshabilitado, el enlace y las rutas del panel no están disponibles.
+mutaciones usan POST, CSRF y los servicios administrativos existentes.
+
+Con `KOBO_ENABLED=false` (edición demo pública), el mismo URL muestra una
+representación informativa de la capacidad KoboToolbox: integración disponible,
+modo demostración y conexión remota desactivada. No ofrece acciones de
+sincronización ni contacta Kobo. Las rutas operativas (listados, reintentos,
+sincronización, webhook, comandos remotos) permanecen en 404 o `CommandError`.
 
 El webhook externo permanece en `/integrations/kobo/webhook/` y no forma parte
 de esta UI de gestión.

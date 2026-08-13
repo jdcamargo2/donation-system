@@ -277,3 +277,12 @@
         min-width: 0;
     }
 }
+
+.kobo-demo-dl dt {
+    color: var(--ops-muted);
+    font-weight: 600;
+}
+
+.kobo-demo-dl dd {
+    margin-bottom: 0.65rem;
+}

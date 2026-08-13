@@ -451,6 +451,7 @@ def _detail_context(submission, user):
 @login_required
 @permission_required("kobo.view_kobosubmission", raise_exception=True)
 def submission_list(request):
+    _require_kobo_enabled()
     submissions = KoboSubmission.objects.select_related("form_definition").annotate(
         attachment_count=Count("attachments", distinct=True),
         downloaded_attachment_count=Count(
@@ -493,6 +494,7 @@ def submission_list(request):
 @login_required
 @permission_required("kobo.view_kobosubmission", raise_exception=True)
 def submission_detail(request, pk):
+    _require_kobo_enabled()
     submission = get_object_or_404(_submission_queryset(), pk=pk)
     return render(
         request,
@@ -508,6 +510,7 @@ def submission_detail(request, pk):
     raise_exception=True,
 )
 def retry_normalization_action(request, pk):
+    _require_kobo_enabled()
     submission = get_object_or_404(_submission_queryset(), pk=pk)
     outcome = process_submission(
         submission,
@@ -533,6 +536,7 @@ def retry_normalization_action(request, pk):
     raise_exception=True,
 )
 def retry_attachments_action(request, pk):
+    _require_kobo_enabled()
     submission = get_object_or_404(_submission_queryset(), pk=pk)
     client = build_kobo_api_client()
     result = process_submission_attachments(

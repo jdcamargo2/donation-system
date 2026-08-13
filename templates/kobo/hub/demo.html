@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}KoboToolbox | SIGEDON{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'web/css/kobo_hub.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ops-page-header">
+    <div class="ops-kicker">Integración disponible</div>
+    <h1>KoboToolbox</h1>
+    <p>{{ kobo_demo_message }}</p>
+</div>
+
+<div class="alert alert-info kobo-hub-notice kobo-hub-notice-compact" role="status">
+    <strong>Modo demostración.</strong>
+    <span class="kobo-hub-notice-secondary">La conexión remota está desactivada. No hay acciones de sincronización en esta edición.</span>
+</div>
+
+<section class="card border-0 ops-table-card mb-4" aria-labelledby="kobo-demo-capability-title">
+    <div class="card-body">
+        <h2 id="kobo-demo-capability-title" class="h5 ops-section-title">Capacidad técnica</h2>
+        <dl class="row mb-0 kobo-demo-dl">
+            <dt class="col-sm-4">Proveedor</dt>
+            <dd class="col-sm-8">{{ kobo_demo_provider }}</dd>
+            <dt class="col-sm-4">Estado</dt>
+            <dd class="col-sm-8">{{ kobo_demo_status }}</dd>
+            <dt class="col-sm-4">Endpoint</dt>
+            <dd class="col-sm-8"><code>{{ kobo_demo_endpoint }}</code></dd>
+            <dt class="col-sm-4">Organización</dt>
+            <dd class="col-sm-8">{{ kobo_demo_organization }}</dd>
+            <dt class="col-sm-4">Formularios soportados</dt>
+            <dd class="col-sm-8">
+                <ul class="mb-0">
+                    {% for form in kobo_demo_supported_forms %}
+                        <li>{{ form.code }} · {{ form.title }}</li>
+                    {% endfor %}
+                </ul>
+            </dd>
+            <dt class="col-sm-4">Asset de ejemplo</dt>
+            <dd class="col-sm-8"><code>{{ kobo_demo_asset_uid }}</code></dd>
+            <dt class="col-sm-4">Última sincronización</dt>
+            <dd class="col-sm-8">{{ kobo_demo_last_sync }}</dd>
+            <dt class="col-sm-4">Dispositivo de campo (demo)</dt>
+            <dd class="col-sm-8"><code>{{ kobo_demo_device_id }}</code></dd>
+        </dl>
+    </div>
+</section>
+{% endblock %}

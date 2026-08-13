@@ -306,6 +306,16 @@ class RoleBasedUITests(TestCase):
         self.assertContains(response, 'KoboToolbox')
         self.assertContains(response, reverse('kobo:hub'))
 
+    @override_settings(KOBO_ENABLED=False)
+    def test_external_auditor_sees_kobo_toolbox_sidebar_when_disconnected(self):
+        self.client.force_login(self.create_user_for_role('ui-auditor-kobo-demo-nav', ROLE_EXTERNAL_AUDITOR))
+
+        response = self.client.get(reverse('dashboard'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'KoboToolbox')
+        self.assertContains(response, reverse('kobo:hub'))
+
     @override_settings(KOBO_ENABLED=True)
     def test_field_operator_does_not_see_project_kobo_administration_card(self):
         # Administration card (kobo_hub_project_url) is distinct from project-local

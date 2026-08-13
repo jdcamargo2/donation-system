@@ -543,7 +543,7 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
         identity.refresh_from_db()
         self.assertEqual(identity.status, identity.Status.ACTIVE)
 
-    def test_disabled_hub_is_not_available(self):
+    def test_disabled_hub_shows_demo_and_hides_operational_routes(self):
         with self.settings(KOBO_ENABLED=False):
             response = self.client.get(reverse("kobo:hub"))
             history = self.client.get(reverse("kobo:sync_history"))
@@ -552,7 +552,15 @@ class KoboTerritorialHubTests(TerritorialAdministrationFixtureMixin, TestCase):
                 reverse("kobo:mapping_modal"),
                 {"zone": PastoralZone.CENTRO.value},
             )
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "KoboToolbox está soportado por SIGEDON, pero la conexión remota está desactivada en esta edición demo.",
+        )
+        self.assertContains(response, "Modo demostración")
+        self.assertContains(response, "https://kobo-demo.example.invalid")
+        self.assertNotContains(response, "Sincronizar KoboToolbox")
+        self.assertNotContains(response, reverse("kobo:sync_all"))
         self.assertEqual(history.status_code, 404)
         self.assertEqual(sync.status_code, 404)
         self.assertEqual(modal.status_code, 404)
