@@ -421,6 +421,28 @@ exec /usr/bin/date "$@"
         self.assertEqual(second.returncode, 5)
         self.assertIn('no se sobrescribe', second.stderr)
 
+    def test_backup_succeeds_from_clean_checkout_without_repo_media(self):
+        """A clean Git checkout does not need to contain the ignored media/ directory."""
+        clean_repo = self.tmp / "clean_repo"
+        copied_scripts = clean_repo / "deploy" / "backups"
+
+        shutil.copytree(SCRIPTS_DIR, copied_scripts)
+
+        self.assertFalse((clean_repo / "media").exists())
+
+        result = _run(
+            ["bash", str(copied_scripts / "backup_sigedon.sh")],
+            env=self.env,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        published = Path(result.stdout.strip())
+        self.assertTrue(published.is_dir())
+        self.assertTrue((published / "database.dump").is_file())
+        self.assertTrue((published / "media.tar.gz").is_file())
+        self.assertTrue((published / "manifest.json").is_file())
+
     def test_verify_accepts_valid_manifest(self):
         backup_dir = _make_valid_backup_dir(self.tmp / 'verified')
         result = _run(['bash', str(VERIFY_SCRIPT), str(backup_dir)], env=self.env)

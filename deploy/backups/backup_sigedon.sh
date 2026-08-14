@@ -100,7 +100,11 @@ if [[ "${STORAGE_MODE}" == "filesystem" ]]; then
   fi
 
   # Evitar archivar silenciosamente el media/ efimero del repositorio.
-  REPO_MEDIA="$(resolve_abs "${REPO_ROOT}/media" 2>/dev/null || true)"
+  REPO_MEDIA=""
+  if [[ -d "${REPO_ROOT}/media" ]]; then
+    REPO_MEDIA="$(resolve_abs "${REPO_ROOT}/media")"
+  fi
+
   if [[ -n "${REPO_MEDIA}" && "${MEDIA_ROOT}" == "${REPO_MEDIA}" && "${SIGEDON_ALLOW_REPO_MEDIA:-}" != "YES" ]]; then
     die 3 "SIGEDON_MEDIA_ROOT apunta al media/ del repositorio; use un volumen persistente (o SIGEDON_ALLOW_REPO_MEDIA=YES solo para pruebas locales intencionales)"
   fi
