@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import os
-
 from django.conf import settings
 from django.core.management import BaseCommand, CommandError
 
 from apps.operations.demo_seed import (
-    DEFAULT_DEMO_PASSWORD,
     DEMO_USER_DEFINITIONS,
     collect_demo_counts,
+    resolve_demo_password,
     seed_sigedon_demo,
-    validate_demo_password,
     verify_sigedon_demo,
 )
 
@@ -24,8 +21,11 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             '--password',
-            default=os.getenv('SIGEDON_DEMO_PASSWORD', DEFAULT_DEMO_PASSWORD),
-            help='Contraseña para los usuarios demo (solo local; nunca se imprime).',
+            default=None,
+            help=(
+                'Contraseña para los usuarios demo (solo local; nunca se imprime). '
+                'Si se omite, se usa SIGEDON_DEMO_PASSWORD.'
+            ),
         )
         parser.add_argument(
             '--skip-users',
@@ -49,7 +49,8 @@ class Command(BaseCommand):
         - si DEBUG=False: CommandError antes de cualquier escritura;
         - si --verify: cero escrituras; exit distinto de cero si incompleto;
         - si DEBUG=True: conjunto demo coherente e idempotente;
-        - la contraseña demo nunca se imprime.
+        - la contraseña demo nunca se imprime;
+        - sin --password ni SIGEDON_DEMO_PASSWORD: CommandError antes de mutar.
         """
         if not settings.DEBUG:
             raise CommandError(
@@ -60,7 +61,7 @@ class Command(BaseCommand):
             self._verify_only()
             return
 
-        password = validate_demo_password(options['password'])
+        password = resolve_demo_password(cli_password=options.get('password'))
         result = seed_sigedon_demo(
             password=password,
             skip_users=options['skip_users'],

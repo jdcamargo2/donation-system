@@ -1,15 +1,16 @@
 from datetime import date
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
-from apps.operations.models import Donation
+from apps.operations.models import Donation, Institution
 from apps.operations.tests.helpers import create_donation, create_institution
 
 
@@ -122,3 +123,40 @@ class InstitutionDetailTests(TestCase):
         viewer_response = self.client.get(reverse('institution_detail', args=[institution.pk]))
         self.assertNotContains(viewer_response, delete_url)
         self.assertNotContains(viewer_response, '>Más<')
+
+    def test_list_and_detail_render_monteluz_name_not_venezuela_or_code(self):
+        institution = Institution.objects.create(
+            name='Institución Monteluz',
+            role=Institution.Role.DONOR,
+            institution_type='foundation',
+            country='ZZ',
+        )
+
+        list_response = self.client.get(reverse('institution_list'))
+        detail_response = self.client.get(reverse('institution_detail', args=[institution.pk]))
+
+        self.assertEqual(institution.country.name, 'República de Monteluz')
+        for response in (list_response, detail_response):
+            with self.subTest(path=response.request['PATH_INFO']):
+                self.assertContains(response, 'República de Monteluz')
+                self.assertNotContains(response, 'Venezuela')
+                self.assertNotContains(response, '>ZZ<')
+
+
+class InstitutionCountryDisplayAuditTests(SimpleTestCase):
+    def test_operator_templates_use_country_name_not_code(self):
+        templates = (
+            Path('templates/web/institution_list.html'),
+            Path('templates/web/institution_detail.html'),
+        )
+        forbidden = (
+            '{{ institution.country }}',
+            '{{ object.country }}',
+        )
+        for path in templates:
+            source = path.read_text()
+            with self.subTest(template=str(path)):
+                self.assertIn('.country.name', source)
+                for snippet in forbidden:
+                    self.assertNotIn(snippet, source)
+

@@ -8,7 +8,11 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
 from .choices import OPERATING_CURRENCY
-from .forms import SigedonAdminUserCreationForm, SigedonUserChangeForm
+from .forms import (
+    INSTITUTION_CREATE_COUNTRY_INITIAL,
+    SigedonAdminUserCreationForm,
+    SigedonUserChangeForm,
+)
 from .models import (
     AuditLog, Donation, Expense, FundAllocation, Institution, Project,
     ProjectDocument, ProjectUpdate, ProjectUpdateAttachment, ProjectUpdateReview, ProjectUpdateReviewDecision,
@@ -298,9 +302,18 @@ class ProjectUpdateAdminForm(forms.ModelForm):
 
 @admin.register(Institution)
 class InstitutionAdmin(admin.ModelAdmin):
-    list_display = ('name', 'role', 'country', 'status')
+    list_display = ('name', 'role', 'country_name', 'status')
     search_fields = ('name', 'responsible_person', 'contact_email')
     list_filter = ('role', 'status')
+
+    @admin.display(description=_('País'), ordering='country')
+    def country_name(self, obj):
+        return obj.country.name or '-'
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        initial.setdefault('country', INSTITUTION_CREATE_COUNTRY_INITIAL)
+        return initial
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)

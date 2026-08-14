@@ -196,4 +196,4 @@ Síntomas: fallos de upload/download, errores de storage en logs (sin secretos).
 * [ARCHITECTURE.md §5](../ARCHITECTURE.md#5-gestión-de-archivos)
 * [OPERATIONS.md §7](../OPERATIONS.md#7-gestión-de-archivos)
 * [TESTING.md §13.1](../TESTING.md#131-storage-privado-r2-preparación-vs-conectividad-real)
-* `.env.example` (placeholders comentados)
+* `.env.example` (arranque local; knobs R2 en este runbook)

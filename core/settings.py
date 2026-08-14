@@ -259,6 +259,12 @@ INSTALLED_APPS = [
     'web',
 ]
 
+# django-countries: fictional demo country used by seed_sigedon_demo institutions.
+COUNTRIES_OVERRIDE = {
+    'ZZ': 'República de Monteluz',
+}
+COUNTRIES_FIRST = ['ZZ']
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',

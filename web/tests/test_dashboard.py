@@ -572,7 +572,7 @@ class SidebarOverflowContractTests(TestCase):
 
 
 class SidebarBrandingTests(TestCase):
-    """UI-BRAND1: authenticated sidebar uses local ILDE logos; login brand unchanged."""
+    """UI-BRAND1: authenticated sidebar uses textual SIGEDON branding; login brand unchanged."""
 
     def setUp(self):
         self.user = get_user_model().objects.create_user(
@@ -598,7 +598,7 @@ class SidebarBrandingTests(TestCase):
         self.assertIsNotNone(match, 'Expected .sigedon-brand link in sidebar header')
         return match.group(0)
 
-    def test_authenticated_sidebar_uses_local_ilde_logos(self):
+    def test_authenticated_sidebar_uses_textual_sigedon_branding(self):
         self.client.force_login(self.user)
 
         response = self.client.get(reverse('dashboard'))
@@ -607,16 +607,13 @@ class SidebarBrandingTests(TestCase):
         brand = self._brand_link_html(header)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('web/img/logo_ilde.png', brand)
-        self.assertIn('web/img/logo_ilde_short.png', brand)
         self.assertIn(f'href="{reverse("dashboard")}"', brand)
-        self.assertIn('aria-label="ILDE · SIGEDON"', brand)
-        self.assertIn('title="ILDE · SIGEDON"', brand)
-        self.assertIn('class="sigedon-brand-logo sigedon-brand-logo-expanded"', brand)
-        self.assertIn('class="sigedon-brand-logo sigedon-brand-logo-collapsed"', brand)
-        self.assertEqual(brand.count('alt=""'), 2)
-        self.assertNotIn('class="sigedon-brand-mark">S</span>', brand)
-        self.assertNotIn('sigedon-nav-label">SIGEDON', brand)
+        self.assertIn('aria-label="SIGEDON"', brand)
+        self.assertIn('title="SIGEDON"', brand)
+        self.assertIn('class="sigedon-brand-mark">S</span>', brand)
+        self.assertIn('class="sigedon-brand-name">SIGEDON</span>', brand)
+        self.assertNotIn('web/img/logo_ilde.png', brand)
+        self.assertNotIn('web/img/logo_ilde_short.png', brand)
         self.assertIn('data-sidebar-toggle', header)
         self.assertNotIn('http://', brand)
         self.assertNotIn('https://', brand)

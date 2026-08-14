@@ -90,8 +90,12 @@ leave migrator secrets on the long-lived web process.
 ./deploy/start_web.sh
 ```
 
-Uses `deploy/gunicorn.conf.py`. Bind `0.0.0.0:$PORT`. No migrate, no
-collectstatic, no R2 probe.
+Uses `deploy/gunicorn.conf.py`. Bind `0.0.0.0:$PORT`. Overrides:
+`GUNICORN_BIND`, `GUNICORN_WORKERS`, `GUNICORN_THREADS`, `GUNICORN_TIMEOUT`,
+`GUNICORN_GRACEFUL_TIMEOUT`, `GUNICORN_KEEPALIVE`, `GUNICORN_LOG_LEVEL`,
+`GUNICORN_ACCESS_LOG`, `GUNICORN_ERROR_LOG` — ver
+[DEPLOYMENT.md §6](../../docs/DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn).
+No migrate, no collectstatic, no R2 probe.
 
 ## Health check
 

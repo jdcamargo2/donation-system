@@ -24,7 +24,7 @@ has been completed in this checkpoint.
 
 | # | Blocker | Status | Evidence | Operator | Timestamp |
 | --- | --- | --- | --- | --- | --- |
-| B1 | First GitHub Actions run not green | | | | |
+| B1 | GitHub Actions required jobs must be green | | | | |
 | B2 | Pending migrations | | | | |
 | B3 | `check --deploy` unresolved | | | | |
 | B4 | Runtime-role `verify_postgres_security` failed or not run | | | | |

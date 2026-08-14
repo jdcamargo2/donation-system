@@ -179,6 +179,9 @@ ANNULLED
 * Las transiciones terminales de `FundAllocation` usan acciones dedicadas
   (`finish_fund_allocation` / `annul_fund_allocation`). No hay cambio genérico
   de estado para asignaciones.
+* `budget_category` es un catálogo cerrado (migración `0032`):
+  infraestructura y abasto local, salud y apoyo psicosocial, formación y
+  emprendimiento, redes de comunicación, relaciones institucionales.
 
 ## 5a. `ExpenseRequest`
 
@@ -344,7 +347,10 @@ Representa una evidencia o archivo adjunto asociado a un avance de proyecto.
 * Su descarga requiere autorización.
 * No debe exponerse directamente mediante `FileField.url`.
 * Debe conservar la trazabilidad del archivo y de su carga.
-* La publicación del avance no implica automáticamente que todos sus adjuntos sean públicos.
+* `is_public` (migración `0031`) es `False` por defecto. Publicar el avance
+  no publica sus archivos. El portal solo lista/descarga adjuntos con
+  `is_public=True` cuyo avance está `PUBLISHED` y cuyo proyecto está
+  `ACTIVE` + `is_public=True`.
 
 ## 10. `ProjectUpdateReview`
 
@@ -406,6 +412,17 @@ Está prohibido:
 
 `AuditLog` registra acciones funcionales relevantes y no debe confundirse con los eventos técnicos de procesamiento de integraciones.
 
+## 12a. `UserAccessProfile`
+
+Perfil 1:1 de ciclo de vida de cuenta institucional (migración `0033`).
+
+* `must_change_password`: el middleware restringe al cambio de contraseña.
+* `password_reset_at` / `password_reset_by`: metadatos del último reset
+  administrativo; **nunca** almacena la contraseña temporal.
+* Una fila ausente se interpreta de forma segura como
+  `must_change_password=False` (p. ej. superusuario de bootstrap).
+* Flujo: [FLOWS.md §0](FLOWS.md#0-flujo-de-acceso-institucional).
+
 ## 13. `OperationalCodeSequence`
 
 Mantiene secuencias transaccionales para códigos operativos.
@@ -417,6 +434,7 @@ project
 donation
 fund_allocation
 expense
+expense_request
 ```
 
 ### Prefijos
@@ -426,6 +444,7 @@ PRJ
 DON
 ASG
 GAS
+SGS
 ```
 
 ### Reglas

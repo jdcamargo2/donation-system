@@ -11,12 +11,13 @@ from apps.integrations.kobo.tests.helpers import StubAttachmentClient
 from datetime import date
 from django.core.files.storage import InMemoryStorage
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from io import StringIO
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 
+@override_settings(KOBO_ENABLED=True)
 class KoboSubmissionProcessorTests(TestCase):
     @classmethod
     def setUpTestData(cls):

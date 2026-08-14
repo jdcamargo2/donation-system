@@ -18,6 +18,7 @@ from unittest.mock import patch
 import uuid
 
 
+@override_settings(KOBO_ENABLED=True)
 class KoboAttachmentProcessorTests(TestCase):
     JPEG_CONTENT = b"\xff\xd8\xffsafe-jpeg"
     PNG_CONTENT = b"\x89PNG\r\n\x1a\nsafe-png"

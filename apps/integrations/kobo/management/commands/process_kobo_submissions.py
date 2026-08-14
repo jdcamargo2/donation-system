@@ -62,10 +62,12 @@ class Command(BaseCommand):
         parser.add_argument("--download-attachments", action="store_true")
 
     def handle(self, *args, **options):
-        # PRE: Kobo migrations are applied and command options are valid.
+        # PRE: Kobo is enabled, migrations are applied, and command options are valid.
         # POST: processes the requested scope independently per record, prints
         # aggregate counts, and raises CommandError when failed > 0 so shells
         # receive a non-zero exit without rolling back prior successes.
+        if not settings.KOBO_ENABLED:
+            raise CommandError("Kobo integration is disabled.")
         default_timezone = timezone.get_current_timezone()
         submission_id = options["submission_id"]
         download_attachments = options["download_attachments"]

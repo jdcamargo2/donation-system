@@ -18,12 +18,10 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 from django.core.management.base import BaseCommand, CommandError
 
 
-# Application CSS, ILDE brand logos, and vendored core UI libraries expected
-# after collectstatic. Paths are logical static names (not hashed filenames).
+# Application CSS and vendored core UI libraries expected after collectstatic.
+# Paths are logical static names (not hashed filenames).
 REQUIRED_RELATIVE_ASSETS = (
     'web/css/sigedon.css',
-    'web/img/logo_ilde.png',
-    'web/img/logo_ilde_short.png',
     'vendor/bootstrap/5.3.3/css/bootstrap.min.css',
     'vendor/bootstrap/5.3.3/js/bootstrap.bundle.min.js',
     'vendor/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css',
@@ -72,7 +70,7 @@ def asset_is_nonempty(storage_name: str) -> bool:
 class Command(BaseCommand):
     help = (
         'Verifica que STATIC_ROOT exista y contenga activos locales canónicos '
-        'tras collectstatic (CSS de aplicación, logos ILDE y vendor UI: '
+        'tras collectstatic (CSS de aplicación y vendor UI: '
         'Bootstrap, Bootstrap Icons, SweetAlert2). Resuelve rutas lógicas vía '
         'staticfiles storage (compatible con manifest hashed). '
         'No ejecuta collectstatic.'

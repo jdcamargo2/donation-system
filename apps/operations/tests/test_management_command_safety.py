@@ -60,7 +60,6 @@ class SeedSigedonDemoProductionGuardTests(TestCase):
 
         self.assertEqual(self._counts(), before)
         combined = stdout.getvalue() + stderr.getvalue()
-        self.assertNotIn("0214", combined)
         self.assertNotIn("Base demo preparada", combined)
         self.assertNotIn("Sincronizando roles", combined)
 
@@ -111,7 +110,6 @@ class SeedSigedonDemoProductionGuardTests(TestCase):
         output = stdout.getvalue()
         self.assertIn("Demo credentials configured.", output)
         self.assertNotIn(secret, output)
-        self.assertNotIn("0214", output)
         self.assertTrue(Project.objects.filter(code="PRJ-DEMO-001").exists())
         self.assertTrue(
             get_user_model().objects.filter(username="admin_demo").exists()
@@ -119,8 +117,10 @@ class SeedSigedonDemoProductionGuardTests(TestCase):
 
     @override_settings(DEBUG=True)
     def test_debug_true_repeated_invocation_remains_idempotent(self):
-        call_command("seed_sigedon_demo", stdout=StringIO())
-        call_command("seed_sigedon_demo", stdout=StringIO())
+        secret = "demo-local-secret-never-print"
+        with patch.dict("os.environ", {"SIGEDON_DEMO_PASSWORD": secret}):
+            call_command("seed_sigedon_demo", stdout=StringIO())
+            call_command("seed_sigedon_demo", stdout=StringIO())
 
         self.assertEqual(Project.objects.filter(code="PRJ-DEMO-001").count(), 1)
         self.assertEqual(Donation.objects.filter(code="DON-DEMO-001").count(), 1)

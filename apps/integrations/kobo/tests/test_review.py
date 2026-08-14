@@ -2,7 +2,7 @@ from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import NoReverseMatch
 from django.urls import reverse
 
@@ -25,6 +25,7 @@ from apps.operations.models import Project
 from django.utils import timezone
 
 
+@override_settings(KOBO_ENABLED=True)
 class KoboReviewPanelTests(TestCase):
     @classmethod
     def setUpTestData(cls):

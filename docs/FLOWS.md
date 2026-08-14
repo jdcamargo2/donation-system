@@ -2,6 +2,14 @@
 
 Este documento describe los principales flujos operativos de SIGEDON, incluyendo sus precondiciones, pasos, resultados y restricciones.
 
+Cadena operativa (detalle por sección):
+
+```text
+Institution → Donation → Fund Allocation → Project
+→ Expense Request → Approval → Expense → Evidence
+→ Project Update → Audit → Public Transparency
+```
+
 ## 0. Flujo de acceso institucional
 
 No existe autorregistro público: toda cuenta institucional se crea de forma

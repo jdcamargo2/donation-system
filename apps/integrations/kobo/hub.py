@@ -35,6 +35,7 @@ from apps.integrations.kobo.models import (
     KoboTerritorialIdentityConflict,
 )
 from apps.integrations.kobo.client import build_kobo_api_client
+from apps.integrations.kobo.demo import disconnected_demo_context
 from apps.integrations.kobo.presentation import (
     PASTORAL_ZONE_TOTAL,
     pastoral_zone_label,
@@ -97,19 +98,46 @@ RETRYABLE_INCIDENT_KINDS = frozenset(
 pending_review_queryset = incident_queryset
 
 
+def _require_hub_reader(request) -> None:
+    # PRE: request may target an internal Kobo hub surface.
+    # POST: allows only authenticated users with the territorial read permission.
+    if not request.user.is_authenticated or not request.user.has_perm(HUB_READ_PERMISSION):
+        from django.core.exceptions import PermissionDenied
+
+        raise PermissionDenied
+
+
 def territorial_hub_access(view):
     """
-    PRE: view is an internal Kobo territorial HTTP handler.
-    POST: hides the hub when disabled and otherwise requires its explicit read permission.
+    PRE: view is an operational Kobo territorial HTTP handler.
+    POST: hides the operational hub when disabled and otherwise requires
+          its explicit read permission.
     """
     @wraps(view)
     def wrapped(request, *args, **kwargs):
         if not settings.KOBO_ENABLED:
             raise Http404
-        if not request.user.is_authenticated or not request.user.has_perm(HUB_READ_PERMISSION):
-            from django.core.exceptions import PermissionDenied
+        _require_hub_reader(request)
+        return view(request, *args, **kwargs)
 
-            raise PermissionDenied
+    return wrapped
+
+
+def territorial_hub_capability_access(view):
+    """
+    PRE: view is the Kobo hub entry (demo capability or operational dashboard).
+    POST: requires hub read permission; when Kobo is disabled renders the
+          disconnected demo surface without calling the operational view.
+    """
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        _require_hub_reader(request)
+        if not settings.KOBO_ENABLED:
+            return render(
+                request,
+                "kobo/hub/demo.html",
+                disconnected_demo_context(),
+            )
         return view(request, *args, **kwargs)
 
     return wrapped
@@ -369,7 +397,7 @@ def _mapping_row_for_zone(zone):
     }
 
 
-@territorial_hub_access
+@territorial_hub_capability_access
 def hub_dashboard(request):
     # PRE: Kobo is enabled and the caller may read territorial administration.
     # POST: renders the automatic-reception resumen without per-ficha sync controls.
