@@ -154,5 +154,3 @@ Fuente: [TESTING.md](docs/TESTING.md).
 * [Demo local E2E](docs/runbooks/LOCAL_DEMO_E2E.md)
 * [Alcance y límites](docs/MVP_SCOPE.md)
 * [Decisiones técnicas](docs/DECISIONS.md)
-
-Fuente de verdad: código → migraciones → tests → documentación vigente.
