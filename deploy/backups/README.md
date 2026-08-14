@@ -1,5 +1,10 @@
 # Backup, restauración y automatización operativa de SIGEDON
 
+Fuente canónica de variables `SIGEDON_BACKUP_*`, `SIGEDON_RESTORE_*`,
+`SIGEDON_MAINTENANCE_CONFIRMED`, `PGPASSWORD` / `~/.pgpass` y el ejemplo
+`examples/sigedon-backup.env.example`. No viven en el `.env.example` de
+arranque local.
+
 Capa manual verificable **más** automatización operativa (lock, retención,
 markers, hook de alerta, drill aislado y ejemplos de scheduler). Soporta
 `format_version` 1 (filesystem) y 2 (object/r2) sin romper sets existentes.

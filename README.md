@@ -1,325 +1,158 @@
 # SIGEDON
 
-**Sistema Integral de Gestión, Seguimiento y Trazabilidad de Donaciones**
+**Sistema Integral de Gestión, Seguimiento y Trazabilidad de Donaciones.**
 
-SIGEDON es una aplicación web institucional diseñada para registrar, controlar, auditar y transparentar donaciones monetarias destinadas a proyectos sociales, pastorales o humanitarios.
+Aplicación web institucional para registrar, controlar, auditar y transparentar
+donaciones monetarias y su ejecución en proyectos.
 
-El sistema permite seguir la cadena completa de trazabilidad:
+> **Public Demo / Portfolio Edition**
+>
+> - Datos **completamente ficticios** (República de Monteluz / Valle Sereno).
+> - Infraestructura privada (Render, R2, scheduler de backups) **no incluida**.
+> - Algunas capacidades implementadas se presentan **desconectadas**.
+> - Una integración desconectada **no** significa una feature no implementada.
 
-```text
-Institución
-→ Donación
-→ Asignación de fondos
-→ Proyecto
-→ Solicitud de gasto
-→ Gasto
-→ Evidencia
-→ Avance
-→ Revisión institucional
-→ Auditoría
-→ Transparencia pública
-```
+## Highlights
 
-## Estado actual
+- Django 6.0.6, Python 3.12, PostgreSQL
+- RBAC (cuatro roles canónicos)
+- Ciclo de donaciones, asignaciones, solicitudes de gasto, gastos y evidencias
+- Avances de proyecto y transparencia pública
+- Auditoría append-only
+- Integración KoboToolbox opcional (desconectada por defecto)
+- Health/readiness, tooling de backup y despliegue
+- 2,384 automated tests (checkpoint local verificado)
 
-El MVP se encuentra funcional y cubierto por pruebas automatizadas.
+## Demo scope
 
-| Indicador                             | Estado          |
-| ------------------------------------- | --------------- |
-| Pruebas automatizadas                 | 1562            |
-| Estado de la suite                    | OK              |
-| Migraciones pendientes                | `0030` (evento→gasto PROTECT; aplicar en entorno autorizado) |
-| Django system check                   | Sin incidencias |
-| Base de datos soportada en producción | PostgreSQL      |
+| Capability | Status |
+| --- | --- |
+| Core operations | Active |
+| PostgreSQL | Active (recommended) |
+| Public portal | Active |
+| Demo seed | Active |
+| KoboToolbox | Disconnected demo |
+| Filesystem private storage | Active local |
+| Cloudflare R2 | Supported / not provisioned |
+| Render deployment | Tooling included / not provisioned |
+| Backup automation | Tooling included / scheduler not provisioned |
+| GitHub Actions | Workflow defined / remote checkpoint not verified |
 
-La cifra de pruebas representa el estado de referencia actual de esta rama y
-debe actualizarse cuando el total cambie de forma estable.
-
-## Stack tecnológico
-
-* Python 3.12
-* Django 6.0.6
-* PostgreSQL mediante Psycopg 3
-* Gunicorn (WSGI) como servidor de aplicación en producción
-* WhiteNoise para servir estáticos recopilados en producción (`STATIC_ROOT`;
-  sin Nginx dedicado ni disco persistente para estáticos)
-* Logging de runtime a stdout/stderr con correlación `X-Request-ID` (sin SaaS)
-* Sondas de liveness/readiness: `/healthz/` y `/readyz/` (sin auth; ver
-  [Despliegue §6.3](docs/DEPLOYMENT.md#63-sondas-http-healthz-y-readyz)).
-  Media privada: preview inline siempre vía stream + CSP; `signed_redirect`
-  solo para descargas con parámetros de respuesta. Endpoint R2 estricto a
-  Cloudflare por defecto.* SQLite únicamente para desarrollo local con `DEBUG=True`
-* Django Templates
-* Bootstrap 5.3.3, Bootstrap Icons 1.11.3 y SweetAlert2 11.26.25 vendorizados
-  en `static/vendor/` (sin CDN en runtime; ver
-  [`static/vendor/THIRD_PARTY_ASSETS.md`](static/vendor/THIRD_PARTY_ASSETS.md))
-* `django-bootstrap5`
-* HTMX 2.0.10 vendorizado, limitado al componente interno de hitos
-* `django-countries`
-* `python-dotenv`
-* HTML, CSS y JavaScript sin proceso de compilación con Node.js
-* Despliegue inicial: runtime Python nativo en Render (sin Docker). Scripts y
-  runbooks RENDER-3 preparados (`deploy/render/`,
-  [primer deploy](docs/runbooks/RENDER_FIRST_DEPLOY.md)); **ningún** servicio
-  Render/Cloudflare/R2/dominio provisionado aún. Media privada final en Render:
-  R2 tras probe real (ver [runbook R2](docs/runbooks/CLOUDFLARE_R2.md))
-
-## Módulos implementados
-
-### Operación interna
-
-* Instituciones
-* Proyectos
-* Donaciones
-* Asignaciones de fondos
-* Solicitudes de gasto
-* Gastos
-* Documentos de soporte
-* Avances de proyectos
-* Evidencias de avances
-* Revisión institucional
-* Decisiones del Comité
-* Auditoría append-only
-* Exportaciones CSV
-
-### Transparencia pública
-
-* Página pública de proyectos
-* Detalle público de proyectos
-* Avances publicados
-* Métricas agregadas
-* Datos JSON autorizados
-* Exclusión de información privada o anulada
-
-### Integración con KoboToolbox
-
-* Descubrimiento de activos
-* Registro versionado de formularios
-* Configuración y activación de activos
-* Recepción mediante webhook
-* Sincronización y reconciliación
-* Staging del payload original
-* Normalización de las fichas 1, 10 y 11
-* Enrutamiento hacia proyectos
-* Importación automática de submissions resueltas
-* Hub global de incidencias operativas
-* Historial Kobo por proyecto y datos importados
-* Descarga protegida de archivos adjuntos
-* Historial técnico de procesamiento
-
-## Aplicaciones Django activas
+## Core flow
 
 ```text
-apps.operations
-apps.public_portal
-apps.integrations.kobo
-web
+Institution
+→ Donation
+→ Fund Allocation
+→ Project
+→ Expense Request
+→ Approval
+→ Expense
+→ Evidence
+→ Project Update
+→ Audit
+→ Public Transparency
 ```
 
-El paquete `web` se conserva como componente histórico de compatibilidad para las pruebas y la organización de templates. Actualmente, no contiene modelos ni vistas productivas propias.
+## Quick Start
 
-## Roles operativos
-
-Cuatro roles funcionales canónicos:
-
-* Administrador SIGEDON
-* Operador de campo
-* Auditor externo
-* Comité de proyectos
-
-Un usuario ordinario puede tener como máximo un rol funcional SIGEDON (cero o
-uno). Los permisos técnicos de Kobo (`kobo.*`), el superusuario de Django y el
-usuario público no autenticado son controles separados, no roles funcionales
-adicionales.
-
-La matriz completa de roles y permisos se encuentra en:
-
-* [Roles y permisos](docs/ROLES_AND_PERMISSIONS.md)
-
-## Instalación local
-
-### 1. Crear el entorno virtual
+PostgreSQL es el camino principal. Requiere Python 3.12 y un servidor
+PostgreSQL local.
 
 ```bash
 python3.12 -m venv venv
 source venv/bin/activate
-```
-
-### 2. Instalar las dependencias
-
-```bash
 pip install -r requirements.txt
-```
-
-### 3. Crear el archivo de entorno
-
-```bash
 cp .env.example .env
 ```
 
-Configuración mínima para desarrollo:
+Editar `.env`:
 
 ```env
 DJANGO_DEBUG=True
-DJANGO_SECRET_KEY=
-DATABASE_ENGINE=sqlite
+DJANGO_SECRET_KEY=change-me
 ALLOWED_HOSTS=localhost,127.0.0.1
+DATABASE_ENGINE=postgresql
+POSTGRES_DB=db_sigedon
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=<local>
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+SIGEDON_DEMO_PASSWORD=<local-only>
 KOBO_ENABLED=False
 ```
 
-### 4. Aplicar las migraciones
+Crear la base y arrancar:
 
 ```bash
+createdb db_sigedon   # o equivalente en su instancia PostgreSQL
 python manage.py migrate
-```
-
-### 5. Crear un superusuario
-
-```bash
-python manage.py createsuperuser
-```
-
-### 6. Sincronizar los roles
-
-```bash
-python manage.py sync_sigedon_roles
-```
-
-### 7. Ejecutar el servidor
-
-> [!WARNING]
-> `python manage.py runserver` es **solo para desarrollo local**. No es un
-> servidor de aplicación de producción. En producción use Gunicorn; ver
-> [Despliegue](docs/DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn).
-
-```bash
+python manage.py seed_sigedon_demo
 python manage.py runserver
 ```
 
-## Rutas locales
+`runserver` es solo desarrollo. Producción: Gunicorn
+([Despliegue](docs/DEPLOYMENT.md#6-servidor-de-aplicación-gunicorn)).
 
-### Portal público de transparencia (raíz canónica)
+Rutas:
 
-```text
-http://127.0.0.1:8000/
-```
+- Portal público: http://127.0.0.1:8000/
+- Panel interno: http://127.0.0.1:8000/panel/
+- Admin Django: http://127.0.0.1:8000/admin/
 
-### Panel interno
+SQLite (`DATABASE_ENGINE=sqlite` con `DEBUG=True`) existe como alternativa
+ligera de desarrollo; no es este Quick Start y no valida locking/triggers.
 
-```text
-http://127.0.0.1:8000/panel/
-```
+## Demo accounts
 
-### Administración de Django
+| Username | Role |
+| --- | --- |
+| `admin_demo` | Administrador SIGEDON |
+| `operador_demo` | Operador de campo |
+| `auditor_demo` | Auditor externo |
+| `comite_demo` | Comité de proyectos |
 
-```text
-http://127.0.0.1:8000/admin/
-```
+Password: el definido con `SIGEDON_DEMO_PASSWORD` o `--password`.
+El comando nunca lo imprime. Recorrido por roles:
+[LOCAL_DEMO_E2E.md](docs/runbooks/LOCAL_DEMO_E2E.md).
 
-> [!NOTE]
-> `/transparency/**` queda como redirección permanente `301` (`GET`/`HEAD`)
-> hacia las rutas canónicas anteriores; las rutas operativas antiguas fuera
-> de `/panel/` (por ejemplo `/projects/`) devuelven `404` sin redirección.
-> Detalle: [Portal público](docs/PUBLIC_PORTAL.md#2-rutas-públicas).
+## KoboToolbox
 
-## Comandos administrativos
+`KOBO_ENABLED=False`: modo demo desconectado (hub showcase sintético, sin
+credenciales, rutas remotas 404, comandos remotos `CommandError`).
+La integración está implementada; activarla requiere configuración externa.
+Detalle: [KOBO.md](docs/KOBO.md).
 
-```bash
-python manage.py sync_sigedon_roles
-python manage.py seed_sigedon_demo
-python manage.py register_kobo_forms
-python manage.py discover_kobo_assets
-python manage.py process_kobo_submissions
-python manage.py reconcile_kobo_submissions
-python manage.py verify_postgres_security
-python manage.py verify_private_storage
-python manage.py verify_private_storage --probe   # staging/release con infra real
-python manage.py verify_render_configuration      # contrato Render (sin red)
-python manage.py migrate_private_media            # migración filesystem → storage destino
-python manage.py export_private_objects           # export portable de objetos privados
-```
+## Testing
 
-> [!NOTE]
-> `verify_private_storage` valida el contrato del storage privado. Con R2,
-> `--probe` requiere cuenta/bucket reales y **aún no** forma parte del
-> entorno actual (sin Cloudflare provisionado). Ver
-> [runbook R2](docs/runbooks/CLOUDFLARE_R2.md).
-
-> [!NOTE]
-> `verify_postgres_security` exige PostgreSQL y las credenciales del rol
-> runtime final. Verifica append-only de `AuditLog`/`ExpenseRequestEvent`,
-> constraints críticos y postura de privilegios; no repara. Obligatorio antes
-> de aceptar tráfico o un restore. Detalle: `deploy/postgresql/README.md`.
-
-> [!WARNING]
-> `seed_sigedon_demo` es exclusivamente local (`DEBUG=True`): usa ORM directo,
-> ofrece idempotencia parcial y no reproduce toda la trazabilidad ni las reglas
-> del flujo operativo. Cuando `DEBUG=False` el comando se rechaza antes de
-> escribir. Nunca debe ejecutarse sobre una base de producción ni en
-> release/preflight. Consulte
-> [Operación y mantenimiento](docs/OPERATIONS.md#2-datos-de-demostración).
-
-> [!NOTE]
-> `process_kobo_submissions` y `reconcile_kobo_submissions` salen con código
-> distinto de cero si hubo errores de lote; éxitos previos del mismo lote pueden
-> permanecer comprometidos. No usar `|| true`. Ver
-> [OPERATIONS.md §5](docs/OPERATIONS.md#5-procesamiento-y-reconciliación-de-kobo).
-
-## Integración continua
-
-GitHub Actions (`.github/workflows/ci.yml`) es el CI canónico del repositorio.
-
-* Disparadores: `pull_request`, `push` a `main`, `workflow_dispatch`.
-* Runtime: Python 3.12 + PostgreSQL 16 (`TZ=UTC`); sin fallback a SQLite en jobs de integración.
-* Jobs bloqueantes de merge: static/hygiene, migrate-from-zero + artefactos, suite crítica, suite completa.
-  La suite completa espera **ambos** jobs previos (`postgres-migrations` y `critical-tests`) tras `static`.
-* No despliega, no requiere secretos reales, no ejecuta backup/restore/seed ni llamadas Kobo remotas.
-* No declara producción aprobada; gates de staging/runtime (p. ej. `verify_postgres_security` con rol restringido) permanecen fuera de CI.
-* Reproducción local: `./deploy/ci/run_static_checks.sh`, `./deploy/ci/run_critical_tests.sh` (PostgreSQL), `python manage.py test --noinput`.
-* Detalle: [Pruebas](docs/TESTING.md#18-integración-continua-github-actions) y [Despliegue](docs/DEPLOYMENT.md).
-
-## Verificación
-
-Antes de considerar válido un cambio, se recomienda ejecutar:
+Current verified local checkpoint: 2,384 tests passing on PostgreSQL.
 
 ```bash
-python manage.py check
-python manage.py makemigrations --check --dry-run
-python manage.py test
-git diff --check
+python manage.py test --noinput
 ```
 
-## Documentación
+Iteración: `python manage.py test --keepdb --noinput` (no sustituye un
+checkpoint limpio).
 
-* [Alcance del MVP](docs/MVP_SCOPE.md)
+GitHub Actions workflow is included; the current remote CI run has not
+been verified as part of this public-demo checkpoint.
+
+Fuente: [TESTING.md](docs/TESTING.md).
+
+## Documentation
+
 * [Arquitectura](docs/ARCHITECTURE.md)
 * [Modelo de dominio](docs/DOMAIN_MODEL.md)
-* [Flujos funcionales](docs/FLOWS.md)
+* [Flujos](docs/FLOWS.md)
 * [Roles y permisos](docs/ROLES_AND_PERMISSIONS.md)
 * [Seguridad](docs/SECURITY.md)
-* [Integración con KoboToolbox](docs/KOBO.md)
-* [Operación y mantenimiento](docs/OPERATIONS.md)
-* [Pruebas](docs/TESTING.md)
 * [Portal público](docs/PUBLIC_PORTAL.md)
+* [KoboToolbox](docs/KOBO.md)
+* [Operación](docs/OPERATIONS.md)
+* [Pruebas](docs/TESTING.md)
 * [Despliegue](docs/DEPLOYMENT.md)
-* [Primer deploy Render](docs/runbooks/RENDER_FIRST_DEPLOY.md)
-* [Registro de entorno Render](docs/runbooks/RENDER_ENVIRONMENT.md)
-* [Aceptación staging](docs/runbooks/STAGING_ACCEPTANCE.md)
-* [Go/no-go producción](docs/runbooks/PRODUCTION_GO_NO_GO.md)
-* [Runbook Cloudflare R2](docs/runbooks/CLOUDFLARE_R2.md)
+* [Demo local E2E](docs/runbooks/LOCAL_DEMO_E2E.md)
+* [Alcance y límites](docs/MVP_SCOPE.md)
 * [Decisiones técnicas](docs/DECISIONS.md)
-* [Instrucciones para agentes](docs/AGENTS.md)
 
-## Regla de fuente de verdad
-
-En caso de contradicción, debe utilizarse el siguiente orden de prioridad:
-
-```text
-Código productivo
-→ Migraciones
-→ Pruebas automatizadas
-→ Documentación vigente
-→ Documentos históricos
-```
-
-Los documentos ubicados en `docs/audits/` describen estados anteriores del sistema y no sustituyen la documentación vigente.
+Fuente de verdad: código → migraciones → tests → documentación vigente.

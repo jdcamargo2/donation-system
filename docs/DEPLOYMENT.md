@@ -1,6 +1,17 @@
 # Despliegue de SIGEDON
 
-Este documento describe los requisitos mínimos, la configuración y las verificaciones necesarias para desplegar SIGEDON en un entorno de producción.
+Este documento describe cómo **desplegar** una instancia de SIGEDON.
+
+Operación diaria: [OPERATIONS.md](OPERATIONS.md).
+Quick Start local: [README](../README.md).
+Backups: [deploy/backups/README.md](../deploy/backups/README.md).
+Kobo: [KOBO.md](KOBO.md) (desconectado por defecto; no asumir live).
+Variables Render: [RENDER_ENVIRONMENT.md](runbooks/RENDER_ENVIRONMENT.md).
+R2: [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+
+**Estado de esta edición:** tooling Render implementado; **no** existe
+deployment productivo verificado. R2 soportado en código, **no** provisionado.
+Scripts testeados ≠ plataforma real verificada.
 
 ## 1. Requisitos
 
@@ -113,30 +124,11 @@ No debe habilitarse esta opción si clientes externos pueden falsificar directam
 
 ## 4. Configuración de KoboToolbox
 
-Cuando la integración esté habilitada:
+Kobo **no** se asume live en el primer deploy. Default: `KOBO_ENABLED=False`.
 
-```env
-KOBO_ENABLED=True
-KOBO_BASE_URL=
-KOBO_API_TOKEN=
-KOBO_WEBHOOK_USERNAME=
-KOBO_WEBHOOK_SECRET=
-KOBO_HTTP_READ_TIMEOUT=15
-KOBO_MAX_ATTACHMENT_BYTES=10485760
-KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS=900
-KOBO_WEBHOOK_MAX_BYTES=1048576
-```
-
-### Reglas
-
-* `KOBO_API_TOKEN` y `KOBO_WEBHOOK_SECRET` deben mantenerse fuera del repositorio.
-* El webhook debe publicarse únicamente mediante HTTPS.
-* Las credenciales deben rotarse cuando exista sospecha de exposición.
-* El tamaño máximo de adjuntos debe ajustarse a la capacidad del servidor.
-* `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` controla la recuperación de reservas `PROCESSING` atascadas; no requiere una tarea periódica adicional.
-* `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo entrante antes de deserializarlo.
-* Los secretos no deben aparecer en logs.
-* La activación de Kobo requiere activos, definiciones y bindings correctamente configurados.
+Cuando se active la integración operativa, seguir [KOBO.md](KOBO.md).
+Secretos: `KOBO_API_TOKEN`, `KOBO_WEBHOOK_SECRET`. Catálogo de knobs HTTP:
+esa misma fuente, no `.env.example`.
 
 ## 5. Preparación del despliegue
 
@@ -325,8 +317,8 @@ Equivalente con wrapper del repositorio (sin migraciones ni collectstatic):
 ./deploy/start_web.sh
 ```
 
-Configuración: `deploy/gunicorn.conf.py` (overrides por entorno; ver
-`.env.example`). Valores conservadores iniciales:
+Configuración: `deploy/gunicorn.conf.py` (overrides por entorno; ver tabla).
+Valores conservadores iniciales:
 
 | Variable | Default |
 | --- | --- |
@@ -852,122 +844,22 @@ Los smoke tests no deben alterar datos reales de forma irreversible.
 
 ## 13. Logs y monitoreo
 
-Deben revisarse:
-
-* errores HTTP `500`;
-* accesos `403` inesperados;
-* fallos de base de datos;
-* errores de migración;
-* fallos del webhook;
-* submissions detenidas;
-* errores de descarga de archivos;
-* consumo de disco;
-* conexiones PostgreSQL;
-* reinicios del proceso.
-
-Los logs no deben contener:
-
-* contraseñas;
-* tokens;
-* secretos;
-* payloads sensibles completos;
-* datos personales innecesarios.
-
-Debe existir una política de rotación y retención.
+Contrato de logging y troubleshooting: [OPERATIONS.md](OPERATIONS.md).
+La plataforma recolecta stdout/stderr. No registrar secretos ni payloads Kobo.
 
 ## 14. Copias de seguridad
 
-Scripts: `deploy/backups/` (`backup_sigedon.sh`, `verify_backup.sh`,
-`restore_sigedon.sh`, `run_scheduled_backup.sh`, `apply_retention.sh`,
-`run_restore_drill.sh`). Detalle en `deploy/backups/README.md` y
-`docs/OPERATIONS.md`. Ejemplos de cron/systemd/timer/hook:
-`deploy/backups/examples/`.
-
-El repositorio formaliza lock exclusivo, retención canónica, markers de
-éxito/fallo y drills aislados. El **scheduler y la entrega de alertas** los
-posee la plataforma (instalar unidades/crontab fuera del repo).
-
-Política de infraestructura que debe cubrirse:
-
-* frecuencia (ejemplo diario en `examples/*.timer`);
-* cifrado (requisito de infraestructura; no implementado en scripts);
-* retención (`SIGEDON_BACKUP_KEEP_COUNT` / `SIGEDON_BACKUP_KEEP_DAYS`);
-* almacenamiento externo / off-site (requisito de infraestructura);
-* responsables;
-* restauración probada vía `run_restore_drill.sh` (trimestral como mínimo);
-* protección de acceso;
-* eliminación segura (solo sets verificados bajo el backup root).
-
-Los respaldos de aplicación cubren:
-
-* PostgreSQL (`pg_dump --format=custom`);
-* `MEDIA_ROOT` (`media.tar.gz`) cuando el storage privado es filesystem;
-* manifiesto con checksums (`manifest.json`).
-
-Con `SIGEDON_PRIVATE_STORAGE=r2`, `media.tar.gz` del volumen local **no**
-sustituye el backup de objetos del bucket. Usar
-`export_private_objects` / procedimiento del runbook R2 además del dump de
-BD. Ver [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md) y
-`deploy/backups/README.md`.
-
-La configuración crítica y los secretos deben respaldarse mediante un sistema seguro aparte. Preferir `~/.pgpass` para autenticación de cliente.
-
-Consistencia: **ventana de mantenimiento** con `SIGEDON_MAINTENANCE_CONFIRMED=YES`.
-
-Un respaldo no se considera válido hasta pasar `verify_backup.sh` y una restauración aislada de prueba.
-
-RPO/RTO: propuestas no aprobadas / placeholders de decisión de despliegue
-(p. ej. RPO ≤ 24 h, RTO ≤ 4 h). **No son un SLA aprobado.** El RTO debe
-validarse con un restore drill representativo y wall-clock documentado; sin
-drill medido no declarar RTO cumplido. Ver `deploy/backups/README.md`.
+Fuente canónica: [deploy/backups/README.md](../deploy/backups/README.md).
+R2: [CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md).
+Scheduler **no** provisionado en este checkpoint.
 
 ## 15. Restauración
 
-Restaurar solo a entornos aislados (`SIGEDON_RESTORE_DB` con prefijo `test_restore_` o `staging_restore_`), nunca sobre la base activa (`POSTGRES_DB`) ni sobre un `MEDIA_ROOT` no vacío. No modificar `.env`.
-
-Drill periódico automatizable: `deploy/backups/run_restore_drill.sh` (requiere
-`SIGEDON_RESTORE_DRILL_ENABLED=YES`). Los timers de ejemplo **no** invocan
-restore de producción.
-
-Después de restaurar un entorno aislado y aplicar cualquier migración
-requerida, **cambiar a las credenciales del rol runtime** y validar:
-
-```bash
-export POSTGRES_DB=<SIGEDON_RESTORE_DB>
-export SIGEDON_MEDIA_ROOT=<SIGEDON_RESTORE_MEDIA_ROOT>
-python manage.py migrate --check
-python manage.py check --deploy
-python manage.py verify_postgres_security
-python manage.py reconcile_operational_code_sequences
-python manage.py verify_restored_data
-python manage.py sync_sigedon_roles
-```
-
-Fallar la aceptación del restore si `verify_postgres_security` no sale 0.
-Restaurar filas con éxito es insuficiente si faltan triggers append-only,
-constraints críticos o grants del rol runtime.
-
-Provisionar el volumen de media, restaurar el archivo `media.tar.gz`, restaurar
-PostgreSQL, apuntar `SIGEDON_MEDIA_ROOT` al árbol restaurado y solo entonces
-abrir tráfico. `verify_restored_data` valida correspondencia FileField↔blob por
-existencia en storage (no checksums de contenido); **no** sustituye
-`verify_postgres_security`.
-`reconcile_operational_code_sequences` funciona en modo detect-only y es de
-solo lectura: no crea ni ajusta secuencias. El comando falla ante una secuencia
-ausente (`MISSING_SEQUENCE`), atrasada (`LAGGING_SEQUENCE`) o inválida
-(`INVALID_SEQUENCE`). No existe reparación automática; cualquier corrección
-debe revisarse y ejecutarse manualmente.
-
-También debe verificarse:
-
-* consistencia de archivos;
-* secuencias operativas;
-* permisos;
-* usuarios;
-* integridad de auditoría;
-* configuración Kobo;
-* acceso al portal público;
-* descargas privadas.
+Solo entornos aislados (`test_restore_` / `staging_restore_`). Procedimiento:
+[deploy/backups/README.md](../deploy/backups/README.md). Tras restore, validar
+con el **rol runtime**: `verify_postgres_security`,
+`reconcile_operational_code_sequences`, `verify_restored_data`,
+`sync_sigedon_roles`.
 
 ## 16. Actualización de una versión
 
@@ -1023,8 +915,12 @@ El despliegue se considera completado cuando:
 
 ## Integración continua y protección de ramas
 
-El repositorio usa GitHub Actions (`.github/workflows/ci.yml`) como CI canónico.
-No hay workflow de despliegue automático en este checkpoint.
+El repositorio incluye GitHub Actions (`.github/workflows/ci.yml`).
+**No hay evidencia verificada** de una corrida remota verde en este
+checkpoint público. No hay workflow de despliegue automático.
+
+Cuando se proteja `main`, los jobs requeridos **deben** estar verdes
+(`GitHub Actions required jobs must be green`):
 
 ### Runtime CI
 
@@ -1043,8 +939,8 @@ Configurar branch protection manualmente (no vía workflow) con:
 * `CI / Full PostgreSQL suite`
 
 Grafo: `static` → (`postgres-migrations` ∥ `critical-tests`) → `full-suite`.
-La suite completa no puede ponerse verde si falla la verificación de
-migraciones/artefactos o la suite crítica.
+Eso es el contrato del workflow, no un hecho de ejecución remota en este
+checkpoint.
 
 ### Checks que permanecen fuera de CI (deployment-blocking)
 

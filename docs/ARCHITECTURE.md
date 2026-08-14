@@ -349,14 +349,13 @@ Comportamiento:
 
 ### 6.1. Desarrollo
 
-SQLite puede utilizarse únicamente con una configuración explícita de desarrollo:
+PostgreSQL es la ruta principal y recomendada también en local y en la demo
+(`DATABASE_ENGINE=postgresql`). Ver [README](../README.md) y
+[LOCAL_DEMO_E2E.md](runbooks/LOCAL_DEMO_E2E.md).
 
-```env
-DJANGO_DEBUG=True
-DATABASE_ENGINE=sqlite
-```
-
-SQLite se utiliza para desarrollo local y pruebas que no dependan de comportamiento específico de PostgreSQL.
+SQLite existe en código como alternativa ligera **solo** con `DJANGO_DEBUG=True`
+y `DATABASE_ENGINE=sqlite` explícito. No es el Quick Start. No valida locking
+de filas ni triggers append-only.
 
 ### 6.2. Producción
 
@@ -392,7 +391,10 @@ SIGEDON aplica las siguientes medidas:
 * `transaction.atomic()`;
 * `select_for_update()`.
 
-La validación continua del repositorio vive en GitHub Actions (Python 3.12 + PostgreSQL 16): gates estáticos, migración desde cero, artefactos de `collectstatic`, suite crítica y suite completa. El despliegue permanece fuera de CI. Ver [TESTING.md §18](TESTING.md#18-integración-continua-github-actions).
+La validación continua del repositorio está **definida** en GitHub Actions
+(Python 3.12 + PostgreSQL 16). En esta edición pública la corrida remota
+**no está verificada**. El despliegue permanece fuera de CI. Ver
+[TESTING.md §18](TESTING.md#18-integración-continua-github-actions).
 
 Además:
 

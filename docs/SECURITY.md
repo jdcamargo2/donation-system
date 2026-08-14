@@ -380,7 +380,11 @@ También deben mantenerse fuera del repositorio:
 * respaldos con información real;
 * URL firmadas de object storage (nunca en logs).
 
-El archivo `.env.example` puede incluir nombres de variables, pero no valores secretos reales.
+`.env.example` es un arranque local/demo (nombres, sin secretos reales). El
+catálogo de producción, Kobo live, R2 y backups vive en
+[RENDER_ENVIRONMENT.md](runbooks/RENDER_ENVIRONMENT.md), [KOBO.md](KOBO.md),
+[CLOUDFLARE_R2.md](runbooks/CLOUDFLARE_R2.md) y
+[deploy/backups/README.md](../deploy/backups/README.md).
 
 ## 9. Seguridad en producción
 

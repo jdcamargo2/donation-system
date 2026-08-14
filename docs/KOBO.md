@@ -1,6 +1,54 @@
 # Integración con KoboToolbox
 
-Este documento describe la integración entre KoboToolbox y SIGEDON, incluyendo su configuración, automatización, privacidad y trazabilidad. Las secciones marcadas **Histórico** se conservan únicamente para interpretar datos y auditorías antiguas; no describen acciones disponibles en la UI.
+Fuente canónica de la integración KoboToolbox. Las secciones marcadas
+**Histórico** interpretan datos antiguos; no describen acciones de UI.
+
+## Contrato de activación (`KOBO_ENABLED`)
+
+La integración **está implementada**. El default de esta edición pública es
+desconectado. Una integración desconectada no significa una feature ausente.
+
+### `KOBO_ENABLED=False` (default)
+
+* Modo demo desconectado.
+* Hub interno: showcase sintético (capacidad visible, sin acciones remotas).
+* Sin credenciales reales ni llamadas a Kobo.
+* Rutas operativas remotas (listados, reintentos, sync, webhook operativo): `404`.
+* Comandos remotos (`process_kobo_submissions`, `reconcile_kobo_submissions`,
+  `discover_kobo_assets`, …): `CommandError` (`Kobo integration is disabled.`).
+* El portal público no muestra UI Kobo.
+
+Payload de referencia 100 % sintético:
+[ficha_01.sample.json](kobo/samples/ficha_01.sample.json).
+
+### `KOBO_ENABLED=True`
+
+* Integración operativa.
+* Requiere instancia externa, `KOBO_BASE_URL`, `KOBO_API_TOKEN` y secreto de
+  webhook. El resto de knobs HTTP/sync/adjuntos se documenta más abajo.
+
+El cuerpo de este documento describe el comportamiento **cuando la
+integración está activa**, salvo donde se indique el modo demo.
+
+## Arquitectura (pipeline)
+
+```text
+Form registry (register_kobo_forms)
+→ Fichas 1 / 10 / 11
+→ Mappings zona pastoral → proyecto
+→ Webhook (Basic auth) / sync incremental
+→ Staging idempotente (payload original)
+→ Normalización
+→ Routing territorial
+→ Processing / importación automática
+→ Reconciliación
+→ Adjuntos privados
+```
+
+Ficha 1 crea o confirma identidad territorial; Fichas 10 y 11 la requieren.
+El runtime **no** usa `KoboProjectBinding` (tabla histórica).
+
+Operación diaria: [OPERATIONS.md §5](OPERATIONS.md#5-procesamiento-y-reconciliación-de-kobo).
 
 ## 1. Objetivo
 
@@ -85,6 +133,8 @@ KOBO_HTTP_RETRY_BASE_DELAY=0.5
 KOBO_HTTP_RETRY_MAX_DELAY=8
 KOBO_HTTP_RETRY_AFTER_MAX_DELAY=60
 KOBO_HTTP_MAX_PAGES=100
+KOBO_SYNC_OVERLAP_SECONDS=300
+KOBO_SYNC_LEASE_SECONDS=900
 KOBO_MAX_ATTACHMENT_BYTES=10485760
 KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS=900
 KOBO_WEBHOOK_MAX_BYTES=1048576
@@ -117,7 +167,7 @@ una ejecución parcial conserva el cursor anterior y libera su lease.
   (1–104857600). El cliente descarga en streaming con tope duro; un cuerpo
   demasiado grande falla de forma permanente (sin reintento).
 * Los ajustes numéricos Kobo se validan al arranque con rangos estrictos
-  (ver `.env.example`); valores fuera de rango o no finitos fallan el startup
+  (rangos en esta sección); valores fuera de rango o no finitos fallan el startup
   sin eco del valor fuente.
 * `KOBO_ATTACHMENT_PROCESSING_TIMEOUT_SECONDS` define cuánto tiempo una reserva `PROCESSING` permanece vigente antes de poder recuperarse (por defecto 900; rango 1–86400).
 * `KOBO_WEBHOOK_MAX_BYTES` limita el cuerpo JSON aceptado por el webhook antes de staging (1–10485760).
